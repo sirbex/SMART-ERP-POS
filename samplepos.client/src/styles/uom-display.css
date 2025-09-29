@@ -1,0 +1,59 @@
+/* Styles for UoM display in inventory */
+
+.uom-list {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.primary-uom {
+  font-weight: 500;
+}
+
+.uom-details-icon {
+  display: inline-block;
+  background-color: #e9ecef;
+  color: #495057;
+  border-radius: 12px;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: help;
+}
+
+.uom-details-icon:hover {
+  background-color: #dee2e6;
+}
+
+.price-with-uom {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.price-main {
+  font-weight: 500;
+}
+
+.price-uom {
+  color: #6c757d;
+  font-size: 0.8rem;
+}
+
+/* Form section styling */
+.form-section {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 0.25rem;
+}
+
+.form-section-title {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #dee2e6;
+  font-size: 1.1rem;
+  color: #495057;
+}

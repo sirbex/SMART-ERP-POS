@@ -1,0 +1,137 @@
+/* CSS variables for consistent theming across the application */
+
+:root {
+  /* Color palette */
+  --color-primary: #4a86e8;
+  --primary-color: #4a86e8; /* For backward compatibility */
+  --color-primary-light: #77a3ff;
+  --primary-light: #77a3ff; /* For backward compatibility */
+  --color-primary-dark: #3060b5;
+  --primary-dark: #3060b5; /* For backward compatibility */
+  
+  --secondary-color: #6c757d;
+  --secondary-light: #868e96;
+  --secondary-dark: #545b62;
+  
+  --success-color: #28a745;
+  --success-light: #48c664;
+  --success-dark: #1e7e34;
+  
+  --danger-color: #dc3545;
+  --danger-light: #e45c6a;
+  --danger-dark: #bd2130;
+  
+  --warning-color: #ffc107;
+  --warning-light: #ffcd39;
+  --warning-dark: #d39e00;
+  
+  --info-color: #17a2b8;
+  --info-light: #3ab7ce;
+  --info-dark: #138496;
+  
+  /* Grayscale */
+  --white: #ffffff;
+  --gray-100: #f8f9fa;
+  --gray-200: #e9ecef;
+  --gray-300: #dee2e6;
+  --gray-400: #ced4da;
+  --gray-500: #adb5bd;
+  --gray-600: #6c757d;
+  --gray-700: #495057;
+  --gray-800: #343a40;
+  --gray-900: #212529;
+  --black: #000000;
+  
+  /* Text colors */
+  --text-color: var(--gray-800);
+  --color-text: var(--gray-800);
+  --light-text: var(--gray-600);
+  --color-text-light: var(--gray-600);
+  --lighter-text: var(--gray-500);
+  --inverse-text: var(--white);
+  --color-text-inverse: var(--white);
+  
+  /* Background colors */
+  --bg-color: var(--white);
+  --color-background: var(--white);
+  --bg-light: var(--gray-100);
+  --color-background-alt: var(--gray-100);
+  --bg-dark: var(--gray-800);
+  --color-surface: var(--white);
+  
+  /* Border colors */
+  --border-color: var(--gray-300);
+  --color-border: var(--gray-300);
+  --border-light: var(--gray-200);
+  --border-dark: var(--gray-400);
+  
+  /* Spacing */
+  --spacer: 1rem;
+  --space-xs: calc(var(--spacer) * 0.25);
+  --spacer-1: calc(var(--spacer) * 0.25);
+  --space-sm: calc(var(--spacer) * 0.5);
+  --spacer-2: calc(var(--spacer) * 0.5);
+  --space-md: var(--spacer);
+  --spacer-3: var(--spacer);
+  --space-lg: calc(var(--spacer) * 1.5);
+  --spacer-4: calc(var(--spacer) * 1.5);
+  --space-xl: calc(var(--spacer) * 2);
+  --spacer-5: calc(var(--spacer) * 2);
+  --space-xxl: calc(var(--spacer) * 3);
+  --spacer-6: calc(var(--spacer) * 3);
+  
+  /* Border radius */
+  --border-radius-sm: 0.125rem;
+  --border-radius: 0.25rem;
+  --border-radius-md: 0.25rem;
+  --border-radius-lg: 0.5rem;
+  --border-radius-xl: 1rem;
+  --border-radius-pill: 50rem;
+  
+  /* Box shadow */
+  --shadow-sm: 0 .125rem .25rem rgba(0, 0, 0, .075);
+  --shadow: 0 .5rem 1rem rgba(0, 0, 0, .15);
+  --shadow-md: 0 .5rem 1rem rgba(0, 0, 0, .15);
+  --shadow-lg: 0 1rem 3rem rgba(0, 0, 0, .175);
+  --shadow-xl: 0 1rem 3rem rgba(0, 0, 0, .3);
+  
+  /* Z-index */
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-fixed: 1030;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --z-popover: 1060;
+  --z-tooltip: 1070;
+  
+  /* Typography */
+  --font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  
+  --font-size-base: 1rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  
+  --line-height-base: 1.5;
+  --line-height-sm: 1.25;
+  --line-height-lg: 2;
+  
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Transitions */
+  --transition-base: all 0.2s ease-in-out;
+  --transition-fade: opacity 0.15s linear;
+  
+  /* Custom app-specific variables */
+  --header-height: 60px;
+  --sidebar-width: 250px;
+  --footer-height: 50px;
+  
+  /* Additional variables for modals */
+  --overlay-color: rgba(0, 0, 0, 0.5);
+  --color-disabled: #bbb;
+}

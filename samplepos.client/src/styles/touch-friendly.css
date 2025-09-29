@@ -1,0 +1,148 @@
+/* touch-friendly.css - Utilities to improve touch interactions on mobile devices */
+
+/* Base touch-friendly variables */
+:root {
+  --touch-target-min-size: 44px;  /* Minimum recommended touch target size */
+  --touch-spacing: 8px;           /* Minimum spacing between touch targets */
+  --active-state-opacity: 0.7;    /* Opacity for active/pressed states */
+  --touch-feedback-duration: 0.2s;/* Duration for touch feedback animations */
+}
+
+/* Apply touch-friendly size to interactive elements */
+.touch-friendly {
+  min-height: var(--touch-target-min-size);
+  min-width: var(--touch-target-min-size);
+  padding: 0.5rem 0.75rem;
+  margin: var(--touch-spacing);
+  cursor: pointer;
+}
+
+/* Touch feedback for buttons and interactive elements */
+.touch-feedback {
+  position: relative;
+  overflow: hidden;
+  transform: translate3d(0, 0, 0);
+  transition: background-color var(--touch-feedback-duration) ease;
+}
+
+.touch-feedback::after {
+  content: '';
+  display: block;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, #000 10%, transparent 10.01%);
+  background-repeat: no-repeat;
+  background-position: 50%;
+  transform: scale(10, 10);
+  opacity: 0;
+  transition: transform 0.5s, opacity 0.5s;
+}
+
+.touch-feedback:active::after {
+  transform: scale(0, 0);
+  opacity: 0.1;
+  transition: 0s;
+}
+
+/* Apply to interactive elements on mobile devices only */
+@media (max-width: 768px) {
+  button:not(.touch-friendly),
+  [role="button"]:not(.touch-friendly),
+  a.btn:not(.touch-friendly),
+  input[type="submit"]:not(.touch-friendly),
+  input[type="button"]:not(.touch-friendly) {
+    min-height: var(--touch-target-min-size);
+    min-width: var(--touch-target-min-size);
+    padding: 0.5rem 0.75rem;
+  }
+  
+  /* Increase touch area for form controls */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: var(--touch-target-min-size);
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+  
+  /* Improved touch targets for checkboxes and radios */
+  .touch-checkbox,
+  .touch-radio {
+    display: inline-block;
+    position: relative;
+    padding-left: calc(var(--touch-target-min-size) + var(--touch-spacing));
+    cursor: pointer;
+    min-height: var(--touch-target-min-size);
+    line-height: var(--touch-target-min-size);
+  }
+  
+  .touch-checkbox input,
+  .touch-radio input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+  }
+  
+  /* Custom checkbox/radio styles */
+  .touch-checkbox .checkmark,
+  .touch-radio .radiomark {
+    position: absolute;
+    top: 50%;
+    left: var(--touch-spacing);
+    transform: translateY(-50%);
+    height: 24px;
+    width: 24px;
+    background-color: #fff;
+    border: 2px solid #ccc;
+    border-radius: 2px;
+  }
+  
+  .touch-radio .radiomark {
+    border-radius: 50%;
+  }
+  
+  /* Touch feedback for form elements */
+  .touch-form-control {
+    position: relative;
+  }
+  
+  .touch-form-control::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    left: -8px;
+    right: -8px;
+    bottom: -8px;
+    z-index: -1;
+  }
+}
+
+/* Active states for touch elements */
+@media (max-width: 768px) {
+  .touch-active:active {
+    opacity: var(--active-state-opacity);
+  }
+}
+
+/* Fast tap elimination - prevent 300ms tap delay */
+.tap-highlight-none {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Scrolling utilities for mobile */
+.momentum-scroll {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+/* Prevent content selection for UI elements */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+}

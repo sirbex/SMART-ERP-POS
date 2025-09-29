@@ -1,0 +1,482 @@
+/* Responsive utilities */
+
+/* Basic responsive container */
+.responsive-container {
+  width: 100%;
+  padding-right: 1rem;
+  padding-left: 1rem;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+/* Container sizes at different breakpoints */
+@media (min-width: 576px) {
+  .responsive-container {
+    max-width: 540px;
+  }
+}
+
+@media (min-width: 768px) {
+  .responsive-container {
+    max-width: 720px;
+  }
+}
+
+@media (min-width: 992px) {
+  .responsive-container {
+    max-width: 960px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .responsive-container {
+    max-width: 1140px;
+  }
+}
+
+/* Responsive visibility */
+.hide-xs {
+  display: none;
+}
+
+@media (min-width: 576px) {
+  .hide-xs {
+    display: initial;
+  }
+  .show-xs-only {
+    display: none;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .hide-xs-down {
+    display: none;
+  }
+}
+
+@media (min-width: 576px) and (max-width: 767.98px) {
+  .hide-sm {
+    display: none;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .hide-sm-down {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .hide-md {
+    display: none;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .hide-md-down {
+    display: none;
+  }
+}
+
+@media (min-width: 992px) and (max-width: 1199.98px) {
+  .hide-lg {
+    display: none;
+  }
+}
+
+@media (max-width: 1199.98px) {
+  .hide-lg-down {
+    display: none;
+  }
+}
+
+@media (min-width: 1200px) {
+  .hide-xl {
+    display: none;
+  }
+}
+
+/* Responsive flexbox order */
+@media (min-width: 576px) {
+  .order-sm-first { order: -1; }
+  .order-sm-last { order: 999; }
+  .order-sm-0 { order: 0; }
+  .order-sm-1 { order: 1; }
+  .order-sm-2 { order: 2; }
+  .order-sm-3 { order: 3; }
+  .order-sm-4 { order: 4; }
+  .order-sm-5 { order: 5; }
+}
+
+@media (min-width: 768px) {
+  .order-md-first { order: -1; }
+  .order-md-last { order: 999; }
+  .order-md-0 { order: 0; }
+  .order-md-1 { order: 1; }
+  .order-md-2 { order: 2; }
+  .order-md-3 { order: 3; }
+  .order-md-4 { order: 4; }
+  .order-md-5 { order: 5; }
+}
+
+@media (min-width: 992px) {
+  .order-lg-first { order: -1; }
+  .order-lg-last { order: 999; }
+  .order-lg-0 { order: 0; }
+  .order-lg-1 { order: 1; }
+  .order-lg-2 { order: 2; }
+  .order-lg-3 { order: 3; }
+  .order-lg-4 { order: 4; }
+  .order-lg-5 { order: 5; }
+}
+
+/* Responsive text alignment */
+@media (min-width: 576px) {
+  .text-sm-left { text-align: left; }
+  .text-sm-center { text-align: center; }
+  .text-sm-right { text-align: right; }
+}
+
+@media (min-width: 768px) {
+  .text-md-left { text-align: left; }
+  .text-md-center { text-align: center; }
+  .text-md-right { text-align: right; }
+}
+
+@media (min-width: 992px) {
+  .text-lg-left { text-align: left; }
+  .text-lg-center { text-align: center; }
+  .text-lg-right { text-align: right; }
+}
+
+/* Responsive margin and padding */
+@media (min-width: 576px) {
+  .m-sm-0 { margin: 0; }
+  .m-sm-1 { margin: 0.25rem; }
+  .m-sm-2 { margin: 0.5rem; }
+  .m-sm-3 { margin: 1rem; }
+  .m-sm-4 { margin: 1.5rem; }
+  .m-sm-5 { margin: 3rem; }
+  
+  .p-sm-0 { padding: 0; }
+  .p-sm-1 { padding: 0.25rem; }
+  .p-sm-2 { padding: 0.5rem; }
+  .p-sm-3 { padding: 1rem; }
+  .p-sm-4 { padding: 1.5rem; }
+  .p-sm-5 { padding: 3rem; }
+}
+
+@media (min-width: 768px) {
+  .m-md-0 { margin: 0; }
+  .m-md-1 { margin: 0.25rem; }
+  .m-md-2 { margin: 0.5rem; }
+  .m-md-3 { margin: 1rem; }
+  .m-md-4 { margin: 1.5rem; }
+  .m-md-5 { margin: 3rem; }
+  
+  .p-md-0 { padding: 0; }
+  .p-md-1 { padding: 0.25rem; }
+  .p-md-2 { padding: 0.5rem; }
+  .p-md-3 { padding: 1rem; }
+  .p-md-4 { padding: 1.5rem; }
+  .p-md-5 { padding: 3rem; }
+}
+
+@media (min-width: 992px) {
+  .m-lg-0 { margin: 0; }
+  .m-lg-1 { margin: 0.25rem; }
+  .m-lg-2 { margin: 0.5rem; }
+  .m-lg-3 { margin: 1rem; }
+  .m-lg-4 { margin: 1.5rem; }
+  .m-lg-5 { margin: 3rem; }
+  
+  .p-lg-0 { padding: 0; }
+  .p-lg-1 { padding: 0.25rem; }
+  .p-lg-2 { padding: 0.5rem; }
+  .p-lg-3 { padding: 1rem; }
+  .p-lg-4 { padding: 1.5rem; }
+  .p-lg-5 { padding: 3rem; }
+}
+
+/* Responsive display */
+@media (min-width: 576px) {
+  .d-sm-none { display: none; }
+  .d-sm-inline { display: inline; }
+  .d-sm-inline-block { display: inline-block; }
+  .d-sm-block { display: block; }
+  .d-sm-flex { display: flex; }
+  .d-sm-inline-flex { display: inline-flex; }
+}
+
+@media (min-width: 768px) {
+  .d-md-none { display: none; }
+  .d-md-inline { display: inline; }
+  .d-md-inline-block { display: inline-block; }
+  .d-md-block { display: block; }
+  .d-md-flex { display: flex; }
+  .d-md-inline-flex { display: inline-flex; }
+}
+
+@media (min-width: 992px) {
+  .d-lg-none { display: none; }
+  .d-lg-inline { display: inline; }
+  .d-lg-inline-block { display: inline-block; }
+  .d-lg-block { display: block; }
+  .d-lg-flex { display: flex; }
+  .d-lg-inline-flex { display: inline-flex; }
+}
+
+/* Responsive flex direction */
+@media (min-width: 576px) {
+  .flex-sm-row { flex-direction: row; }
+  .flex-sm-column { flex-direction: column; }
+  .flex-sm-row-reverse { flex-direction: row-reverse; }
+  .flex-sm-column-reverse { flex-direction: column-reverse; }
+}
+
+@media (min-width: 768px) {
+  .flex-md-row { flex-direction: row; }
+  .flex-md-column { flex-direction: column; }
+  .flex-md-row-reverse { flex-direction: row-reverse; }
+  .flex-md-column-reverse { flex-direction: column-reverse; }
+}
+
+@media (min-width: 992px) {
+  .flex-lg-row { flex-direction: row; }
+  .flex-lg-column { flex-direction: column; }
+  .flex-lg-row-reverse { flex-direction: row-reverse; }
+  .flex-lg-column-reverse { flex-direction: column-reverse; }
+}
+
+/* Responsive tables */
+.table-responsive {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* Media query for stacked cards on mobile */
+@media (max-width: 767.98px) {
+  .card-stack-sm {
+    display: block;
+  }
+  
+  .card-stack-sm > * {
+    margin-bottom: 1rem;
+  }
+}
+
+/* Responsive images */
+.img-fluid {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Responsive embed (for videos, maps, etc) */
+.embed-responsive {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+.embed-responsive::before {
+  display: block;
+  content: "";
+}
+
+.embed-responsive .embed-responsive-item,
+.embed-responsive iframe,
+.embed-responsive embed,
+.embed-responsive object,
+.embed-responsive video {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.embed-responsive-21by9::before {
+  padding-top: 42.857143%;
+}
+
+.embed-responsive-16by9::before {
+  padding-top: 56.25%;
+}
+
+.embed-responsive-4by3::before {
+  padding-top: 75%;
+}
+
+.embed-responsive-1by1::before {
+  padding-top: 100%;
+}
+
+/* Additional Mobile-First Responsive Enhancements */
+
+/* Touch-friendly interface improvements */
+@media (max-width: 640px) {
+  /* Ensure minimum touch target size for mobile */
+  button, [role="button"], input[type="button"], input[type="submit"], 
+  .btn, .button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
+  }
+  
+  /* Better mobile form layouts */
+  .form-grid, .grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+  }
+  
+  /* Mobile-friendly table scrolling */
+  .table-container, .overflow-x-auto {
+    /* Standard overflow behavior - works in all browsers */
+    overflow-x: auto;
+    
+    /* Enhanced scrolling for iOS Safari where supported - progressive enhancement */
+    /* stylelint-disable-next-line property-no-vendor-prefix */
+    -webkit-overflow-scrolling: touch;
+    
+    /* Webkit scrollbar styling (Chrome, Safari, Edge) */
+    -webkit-scrollbar-width: 6px;
+    /* Modern scrollbar width (Firefox) - progressive enhancement */
+    /* stylelint-disable-next-line property-no-unknown */
+    scrollbar-width: thin;
+  }
+  
+  /* Hide less important table columns on mobile */
+  .hide-mobile {
+    display: none !important;
+  }
+  
+  /* Stack card layouts on mobile */
+  .card-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Better mobile spacing */
+  .space-y-6 > * + * {
+    margin-top: 1rem !important;
+  }
+  
+  .space-y-4 > * + * {
+    margin-top: 0.75rem !important;
+  }
+  
+  /* Mobile typography adjustments */
+  h1 {
+    font-size: 1.5rem !important;
+  }
+  
+  h2 {
+    font-size: 1.25rem !important;
+  }
+  
+  .text-3xl {
+    font-size: 1.5rem !important;
+  }
+  
+  .text-2xl {
+    font-size: 1.25rem !important;
+  }
+  
+  /* Better modal sizing on mobile */
+  .dialog-content, .modal-content {
+    max-width: 95vw !important;
+    max-height: 95vh !important;
+    margin: 0.5rem !important;
+  }
+}
+
+/* Tablet landscape and small desktop adjustments */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .grid-cols-1 {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+  
+  .lg\\:grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  
+  .lg\\:grid-cols-3 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* Landscape mobile specific adjustments */
+@media (max-height: 500px) and (orientation: landscape) {
+  /* Reduce vertical padding and margins */
+  .p-6 {
+    padding: 1rem !important;
+  }
+  
+  .space-y-6 > * + * {
+    margin-top: 0.75rem !important;
+  }
+  
+  .h-80 {
+    height: 12rem !important;
+  }
+  
+  .h-64 {
+    height: 10rem !important;
+  }
+}
+
+/* High contrast mode improvements */
+@media (prefers-contrast: high) {
+  .text-muted-foreground {
+    color: var(--foreground) !important;
+    opacity: 0.8;
+  }
+  
+  .border {
+    border-width: 2px !important;
+  }
+}
+
+/* Reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus management for keyboard users */
+:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Print styles */
+@media print {
+  .no-print, .sidebar, .navigation, .mobile-menu {
+    display: none !important;
+  }
+  
+  .print-full-width {
+    width: 100% !important;
+    max-width: none !important;
+  }
+  
+  body {
+    font-size: 12pt !important;
+    line-height: 1.4 !important;
+  }
+  
+  .card {
+    border: 1px solid #ccc !important;
+    break-inside: avoid;
+  }
+}

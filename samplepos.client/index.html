@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no" />
+    <title>samplepos.client</title>
+    <!-- Emergency fallback styles to ensure basic functionality -->
+    <link rel="stylesheet" href="/src/emergency.css">
+    <!-- Recovery script to diagnose and fix rendering issues -->
+    <script src="/recovery.js"></script>
+    <!-- POS fix to prevent browser freezing -->
+    <script src="/pos-fix.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Monitor for failures after React attempts to load
+      setTimeout(function() {
+        if (window.checkReactLoaded && !window.checkReactLoaded()) {
+          console.warn('React failed to load after timeout');
+          window.recoverFromRenderFailure();
+        }
+      }, 3000);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+/* UoM styling for PaymentBilling component */
+
+.uom-label {
+  color: #6c757d;
+  font-size: 0.85rem;
+  margin-left: 3px;
+}
+
+.uom-price-label {
+  color: #6c757d;
+  font-size: 0.75rem;
+  margin-left: 2px;
+}
+
+.transaction-items .uom-selector {
+  margin-top: 0.5rem;
+}
+
+/* Add highlighting for items with UoM information */
+.transaction-items tr.has-uom {
+  background-color: rgba(240, 249, 255, 0.5); 
+}
+
+/* Update styling for the transaction details */
+.transaction-details-content .uom-info {
+  font-size: 0.8rem;
+  color: #0078d4;
+  margin-top: 0.25rem;
+  font-style: italic;
+}
