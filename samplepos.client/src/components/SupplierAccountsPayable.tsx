@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { formatCurrency } from '../utils/currency';
 import PurchaseManagementService from '../services/PurchaseManagementService';
-import InventoryBatchService from '../services/InventoryBatchService';
+import { usePurchases } from '../services/api/purchasesApi';
+import type { Purchase } from '../types/backend';
 
 // Local type definitions (exported for potential future use)
 export interface Supplier {
@@ -109,28 +110,32 @@ const SupplierAccountsPayable: React.FC = () => {
   });
 
   const purchaseService = PurchaseManagementService.getInstance();
-  const inventoryService = InventoryBatchService.getInstance();
+
+  // Fetch received purchases from backend
+  const { data: receivedPurchasesData } = usePurchases({
+    status: 'RECEIVED',
+  });
 
   useEffect(() => {
     loadSupplierBalances();
     loadPaymentHistory();
-  }, []);
+  }, [receivedPurchasesData]);
 
   const loadSupplierBalances = () => {
     const suppliers = purchaseService.getSuppliers();
     const orders = purchaseService.getPurchaseOrders();
-    const receivings = inventoryService.getPurchases();
+    const receivings = receivedPurchasesData?.data || [];
     const payments = getSupplierPayments();
 
     const balances: SupplierBalance[] = suppliers.map(supplier => {
       // Get orders for this supplier
       const supplierOrders = orders.filter(o => o.supplierId === supplier.id);
-      const supplierReceivings = receivings.filter(r => r.supplierId === supplier.id);
+      const supplierReceivings = receivings.filter((r: Purchase) => String(r.supplierId) === supplier.id);
       const supplierPayments = payments.filter(p => p.supplierId === supplier.id);
 
       // Calculate totals
       const totalOrdered = supplierOrders.reduce((sum, o) => sum + o.totalValue, 0);
-      const totalReceived = supplierReceivings.reduce((sum, r) => sum + r.totalValue, 0);
+      const totalReceived = supplierReceivings.reduce((sum, r) => sum + Number(r.totalAmount), 0);
       const totalPaid = supplierPayments.reduce((sum, p) => sum + p.amount, 0);
       const currentBalance = totalReceived - totalPaid; // What we owe
 

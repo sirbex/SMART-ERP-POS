@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { formatCurrency } from '../utils/currency';
 import './PurchaseReceiving.css';
 import PurchaseManagementService from '../services/PurchaseManagementService';
-import InventoryBatchService from '../services/InventoryBatchService';
-import type { PurchaseOrder, PurchaseReceiving } from '../types';
+import { usePurchases } from '../services/api/purchasesApi';
+import type { PurchaseOrder } from '../types';
+import type { Purchase } from '../types/backend';
 
 // Import Shadcn UI components
 import {
@@ -52,10 +53,9 @@ interface ReceivingItem {
 
 const PurchaseReceiving: React.FC = () => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [receivingHistory, setReceivingHistory] = useState<PurchaseReceiving[]>([]);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
-  const [showReceivingDetails, setShowReceivingDetails] = useState<PurchaseReceiving | null>(null);
+  const [showReceivingDetails, setShowReceivingDetails] = useState<Purchase | null>(null);
   
   // Receiving form state
   const [receivingForm, setReceivingForm] = useState({
@@ -66,7 +66,11 @@ const PurchaseReceiving: React.FC = () => {
   const [receivingItems, setReceivingItems] = useState<ReceivingItem[]>([]);
 
   const purchaseService = PurchaseManagementService.getInstance();
-  const inventoryService = InventoryBatchService.getInstance();
+  
+  // Fetch received purchases (receivings) from backend
+  const { data: receivedPurchasesData } = usePurchases({
+    status: 'RECEIVED',
+  });
 
   useEffect(() => {
     loadData();
@@ -79,9 +83,6 @@ const PurchaseReceiving: React.FC = () => {
       ['confirmed', 'partial'].includes(order.status)
     );
     setPurchaseOrders(readyForReceiving);
-    
-    // Get receiving history
-    setReceivingHistory(inventoryService.getPurchases());
   };
 
   const handleStartReceiving = (order: PurchaseOrder) => {
@@ -89,11 +90,11 @@ const PurchaseReceiving: React.FC = () => {
     
     // Initialize receiving items from order items
     const items: ReceivingItem[] = order.items.map(orderItem => ({
-      productId: orderItem.productId,
-      productName: orderItem.productName,
-      quantityOrdered: orderItem.quantityOrdered,
+      productId: String(orderItem.productId || ''),
+      productName: orderItem.productName || 'Unknown Product',
+      quantityOrdered: orderItem.quantityOrdered || 0,
       quantityReceived: 0,
-      batchNumber: generateBatchNumber(orderItem.productName),
+      batchNumber: generateBatchNumber(orderItem.productName || 'PROD'),
       expiryDate: '',
       manufacturingDate: '',
       supplierBatchRef: '',
@@ -171,7 +172,7 @@ const PurchaseReceiving: React.FC = () => {
     // Filter items that have quantities received
     const itemsToReceive = receivingItems.filter(item => item.quantityReceived > 0);
 
-    const success = purchaseService.receivePurchaseOrder(selectedOrder.id, {
+    const success = purchaseService.receivePurchaseOrder(String(selectedOrder.id), {
       receivedBy: receivingForm.receivedBy,
       receivedDate: receivingForm.receivedDate,
       notes: receivingForm.notes,
@@ -209,7 +210,8 @@ const PurchaseReceiving: React.FC = () => {
 
   const getStatusColor = (status: PurchaseOrder['status']): "default" | "destructive" | "secondary" => {
     switch (status) {
-      case 'confirmed':
+      case 'draft':
+      case 'pending':
         return 'default';
       case 'partial':
         return 'destructive';
@@ -219,14 +221,8 @@ const PurchaseReceiving: React.FC = () => {
   };
 
   const calculateReceivingProgress = (order: PurchaseOrder): { percentage: number; received: number; total: number } => {
-    // This is a simplified calculation - in real implementation, 
-    // you'd track actual received quantities against each order
-    const receivingsForOrder = receivingHistory.filter(r => r.purchaseOrderId === order.id);
-    
-    const totalOrdered = order.items.reduce((sum, item) => sum + item.quantityOrdered, 0);
-    const totalReceived = receivingsForOrder.reduce((sum, receiving) => 
-      sum + receiving.items.reduce((itemSum, item) => itemSum + item.quantityReceived, 0), 0
-    );
+    const totalOrdered = order.items.reduce((sum, item) => sum + (item.quantityOrdered || 0), 0);
+    const totalReceived = order.items.reduce((sum, item) => sum + (item.receivedQuantity || 0), 0);
     
     const percentage = totalOrdered > 0 ? (totalReceived / totalOrdered) * 100 : 0;
     
@@ -319,7 +315,7 @@ const PurchaseReceiving: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {receivingHistory.length === 0 ? (
+          {(!receivedPurchasesData?.data || receivedPurchasesData.data.length === 0) ? (
             <div className="text-center py-8 text-muted-foreground">
               No receiving history found.
             </div>
@@ -328,23 +324,17 @@ const PurchaseReceiving: React.FC = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>PO Number</TableHead>
-                  <TableHead>Supplier</TableHead>
                   <TableHead>Received Date</TableHead>
-                  <TableHead>Received By</TableHead>
                   <TableHead>Total Value</TableHead>
-                  <TableHead>Items</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {receivingHistory.map(receiving => (
+                {receivedPurchasesData.data.map((receiving: Purchase) => (
                   <TableRow key={receiving.id}>
-                    <TableCell>{receiving.purchaseOrderNumber || 'N/A'}</TableCell>
-                    <TableCell>{receiving.supplier}</TableCell>
-                    <TableCell>{new Date(receiving.receivedDate).toLocaleDateString()}</TableCell>
-                    <TableCell>{receiving.receivedBy}</TableCell>
-                    <TableCell>{formatCurrency(receiving.totalValue)}</TableCell>
-                    <TableCell>{receiving.items.length} items</TableCell>
+                    <TableCell>{receiving.purchaseNumber}</TableCell>
+                    <TableCell>{new Date(receiving.receivedDate || receiving.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell>{formatCurrency(Number(receiving.totalAmount))}</TableCell>
                     <TableCell>
                       <Button
                         size="sm"
@@ -505,56 +495,28 @@ const PurchaseReceiving: React.FC = () => {
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto">
             <DialogHeader>
               <DialogTitle>
-                Receiving Details - {showReceivingDetails.purchaseOrderNumber}
+                Receiving Details - {showReceivingDetails.purchaseNumber}
               </DialogTitle>
             </DialogHeader>
             
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Supplier</Label>
-                  <p className="font-medium">{showReceivingDetails.supplier}</p>
+                  <Label>Purchase Number</Label>
+                  <p className="font-medium">{showReceivingDetails.purchaseNumber}</p>
                 </div>
                 <div>
                   <Label>Received Date</Label>
-                  <p>{new Date(showReceivingDetails.receivedDate).toLocaleDateString()}</p>
+                  <p>{new Date(showReceivingDetails.receivedDate || showReceivingDetails.createdAt).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <Label>Received By</Label>
-                  <p>{showReceivingDetails.receivedBy}</p>
+                  <Label>Status</Label>
+                  <p className="font-medium">{showReceivingDetails.status}</p>
                 </div>
                 <div>
                   <Label>Total Value</Label>
-                  <p className="font-medium">{formatCurrency(showReceivingDetails.totalValue)}</p>
+                  <p className="font-medium">{formatCurrency(Number(showReceivingDetails.totalAmount))}</p>
                 </div>
-              </div>
-
-              <div>
-                <Label className="text-lg font-medium">Received Items</Label>
-                <Table className="mt-2">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Batch Number</TableHead>
-                      <TableHead>Expiry Date</TableHead>
-                      <TableHead>Location</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {showReceivingDetails.items.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{item.productName}</TableCell>
-                        <TableCell>{item.quantityReceived}</TableCell>
-                        <TableCell>{item.batchNumber}</TableCell>
-                        <TableCell>
-                          {item.expiryDate ? new Date(item.expiryDate).toLocaleDateString() : 'N/A'}
-                        </TableCell>
-                        <TableCell>{item.location || 'N/A'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
               </div>
 
               {showReceivingDetails.notes && (
