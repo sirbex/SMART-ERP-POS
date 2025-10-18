@@ -12,9 +12,10 @@ interface CustomerBalanceDisplayProps {
 const CustomerBalanceDisplay: React.FC<CustomerBalanceDisplayProps> = ({ customer, className = '' }) => {
   // Calculate if this is a high balance (over 80% of credit limit)
   const creditLimit = customer.creditLimit || 0;
-  const isHighBalance = creditLimit > 0 && customer.balance > creditLimit * 0.8;
-  const isOverLimit = creditLimit > 0 && customer.balance > creditLimit;
-  const usagePercentage = creditLimit > 0 ? Math.min(100, (customer.balance / creditLimit) * 100) : 0;
+  const balance = customer.balance ?? 0; // Use nullish coalescing to provide a default value
+  const isHighBalance = creditLimit > 0 && balance > creditLimit * 0.8;
+  const isOverLimit = creditLimit > 0 && balance > creditLimit;
+  const usagePercentage = creditLimit > 0 ? Math.min(100, (balance / creditLimit) * 100) : 0;
   
   // Determine color based on balance status
   const getBarColor = () => {
@@ -46,7 +47,7 @@ const CustomerBalanceDisplay: React.FC<CustomerBalanceDisplayProps> = ({ custome
             "font-semibold",
             isHighBalance ? "text-amber-600" : isOverLimit ? "text-destructive" : "text-foreground"
           )}>
-            {formatCurrency(customer.balance)}
+            {formatCurrency(balance)}
           </span>
         </div>
         

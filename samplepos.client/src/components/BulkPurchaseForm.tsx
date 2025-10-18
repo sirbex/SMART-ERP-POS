@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { InventoryItem, SalesPricing } from '../models/InventoryItem';
+import type { InventoryItem, SalesPricing } from '../types';
 import { 
   createPurchaseUoM, 
   generateSalesUoMOptions, 
@@ -677,3 +677,4 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
 };
 
 export default BulkPurchaseForm;
+

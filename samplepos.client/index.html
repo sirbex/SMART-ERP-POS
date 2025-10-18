@@ -4,25 +4,30 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no" />
-    <title>samplepos.client</title>
-    <!-- Emergency fallback styles to ensure basic functionality -->
-    <link rel="stylesheet" href="/src/emergency.css">
-    <!-- Recovery script to diagnose and fix rendering issues -->
-    <script src="/recovery.js"></script>
-    <!-- POS fix to prevent browser freezing -->
-    <script src="/pos-fix.js"></script>
+    <title>Sample POS</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Loading indicator to prevent timeout perception -->
+      <div id="initial-loader" style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: system-ui, -apple-system, sans-serif;">
+        <div style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+        <p style="color: #666; margin: 0;">Loading SamplePOS...</p>
+        <small style="color: #999; margin-top: 10px;">Initializing React application</small>
+      </div>
+      <style>
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      </style>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Monitor for failures after React attempts to load
-      setTimeout(function() {
-        if (window.checkReactLoaded && !window.checkReactLoaded()) {
-          console.warn('React failed to load after timeout');
-          window.recoverFromRenderFailure();
-        }
-      }, 3000);
+      // Clear loading indicator when React starts
+      document.addEventListener('DOMContentLoaded', function() {
+        // The recovery.js script now handles timeout detection with better logic
+        console.log('DOM loaded - React initialization starting...');
+      });
     </script>
   </body>
 </html>

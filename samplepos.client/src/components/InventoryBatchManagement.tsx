@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import api from '@/config/api.config';
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -11,11 +12,11 @@ import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AlertTriangle, Package, Plus, Truck, Eye, AlertCircle, TrendingUp, TrendingDown } from "lucide-react";
 
-import InventoryBatchService from '../services/InventoryBatchService';
-import type { Product, PurchaseReceiving, PurchaseReceivingItem, ProductStockSummary } from '../models/BatchInventory';
+import InventoryBatchServiceAPI from '../services/InventoryBatchServiceAPI';
+import type { Product, PurchaseReceiving, PurchaseReceivingItem, ProductStockSummary, InventoryBatch } from '../types';
 
 const InventoryBatchManagement: React.FC = () => {
-  const inventoryService = InventoryBatchService.getInstance();
+  const inventoryService = new InventoryBatchServiceAPI();
 
   // State
   const [products, setProducts] = useState<Product[]>([]);
@@ -29,11 +30,14 @@ const InventoryBatchManagement: React.FC = () => {
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'low_stock' | 'expired' | 'expiring_soon'>('all');
 
+
+
   // Modal states
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [showBatchDetails, setShowBatchDetails] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productBatches, setProductBatches] = useState<InventoryBatch[]>([]);
 
   // Form states
   const [productForm, setProductForm] = useState<Partial<Product>>({
@@ -72,17 +76,51 @@ const InventoryBatchManagement: React.FC = () => {
     loadData();
   }, []);
 
-  const loadData = () => {
+  const loadData = async () => {
     try {
       setLoading(true);
-      const loadedProducts = inventoryService.getProducts();
+      
+      // Fetch products from new backend API
+      const response = await api.get('/products?limit=1000');
+      const productsData = response.data?.data || [];
+      
+      // Transform data to match our component structure
+      const loadedProducts: Product[] = productsData.map((item: any) => ({
+        id: item.id.toString(),
+        name: item.name,
+        sku: item.barcode || item.id,
+        category: item.category || 'Uncategorized',
+        unit: item.baseUnit || 'pcs',
+        hasExpiry: false, // Can be enhanced based on product metadata
+        expiryAlertDays: 30,
+        reorderLevel: Number(item.reorderLevel) || 10,
+        price: Number(item.sellingPrice) || 0,
+        costPrice: Number(item.costPrice) || 0,
+        description: item.description || '',
+        isActive: item.isActive !== false,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt
+      }));
+      
+      // Create stock summaries from products data
+      const summaries: ProductStockSummary[] = productsData.map((item: any) => ({
+        productId: item.id.toString(),
+        productName: item.name,
+        totalQuantity: Number(item.currentStock) || 0,
+        availableQuantity: Number(item.currentStock) || 0,
+        expiredQuantity: 0, // Will be properly calculated from batches if needed
+        expiringSoonQuantity: 0,
+        batchCount: 0, // Can be fetched from /api/inventory/batches if needed
+        earliestExpiry: null,
+        averageCost: Number(item.costPrice) || 0,
+        totalValue: (Number(item.currentStock) || 0) * (Number(item.costPrice) || 0),
+        reorderLevel: Number(item.reorderLevel) || 10,
+        isLowStock: (Number(item.currentStock) || 0) < (Number(item.reorderLevel) || 10),
+        hasExpiredStock: false,
+        hasExpiringSoonStock: false
+      }));
       
       setProducts(loadedProducts);
-
-      // Generate stock summaries
-      const summaries = loadedProducts
-        .map(p => inventoryService.getProductStockSummary(p.id))
-        .filter((summary): summary is ProductStockSummary => summary !== null);
       setStockSummaries(summaries);
 
     } catch (err) {
@@ -94,45 +132,84 @@ const InventoryBatchManagement: React.FC = () => {
   };
 
   // Handlers
-  const handleAddProduct = () => {
+  const handleAddProduct = async () => {
     try {
       if (!productForm.name) {
         setError('Product name is required');
         return;
       }
 
-      const newProduct: Product = {
-        id: `product-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        name: productForm.name,
-        sku: productForm.sku || `SKU-${Date.now()}`,
-        category: productForm.category || 'General',
-        unit: productForm.unit || 'pcs',
-        hasExpiry: productForm.hasExpiry || false,
-        expiryAlertDays: productForm.expiryAlertDays || 30,
-        reorderLevel: productForm.reorderLevel || 10,
-        maxStockLevel: productForm.maxStockLevel,
-        description: productForm.description,
-        supplier: productForm.supplier,
-        location: productForm.location,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      if (productForm.id) {
+        // Update existing product
+        const updatedProduct: Product = {
+          ...products.find(p => p.id === productForm.id)!,
+          name: productForm.name,
+          sku: productForm.sku || `SKU-${Date.now()}`,
+          category: productForm.category || 'General',
+          unit: productForm.unit || 'pcs',
+          hasExpiry: productForm.hasExpiry || false,
+          expiryAlertDays: productForm.expiryAlertDays || 30,
+          reorderLevel: productForm.reorderLevel || 10,
+          price: typeof productForm.price === 'number' ? productForm.price : 0,
+          costPrice: typeof productForm.costPrice === 'number' ? productForm.costPrice : 0,
+          maxStockLevel: productForm.maxStockLevel,
+          description: productForm.description,
+          supplier: productForm.supplier,
+          location: productForm.location,
+          isActive: true,
+          updatedAt: new Date().toISOString()
+        };
 
-      if (inventoryService.saveProduct(newProduct)) {
-        setSuccess('Product added successfully!');
-        setProductForm({
-          name: '', sku: '', category: '', unit: 'pcs', hasExpiry: false,
-          expiryAlertDays: 30, reorderLevel: 10, isActive: true
-        });
-        setShowAddProduct(false);
-        loadData();
+        const updateSuccess = await inventoryService.updateProduct(updatedProduct);
+        if (updateSuccess) {
+          setSuccess('Product updated successfully!');
+          setProductForm({
+            name: '', sku: '', category: '', unit: 'pcs', hasExpiry: false,
+            expiryAlertDays: 30, reorderLevel: 10, isActive: true
+          });
+          setShowAddProduct(false);
+          await loadData();
+        } else {
+          setError('Failed to update product');
+        }
       } else {
-        setError('Failed to save product');
+        // Add new product
+        const newProduct: Product = {
+          id: `product-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          name: productForm.name,
+          sku: productForm.sku || `SKU-${Date.now()}`,
+          category: productForm.category || 'General',
+          unit: productForm.unit || 'pcs',
+          hasExpiry: productForm.hasExpiry || false,
+          expiryAlertDays: productForm.expiryAlertDays || 30,
+          reorderLevel: productForm.reorderLevel || 10,
+          price: typeof productForm.price === 'number' ? productForm.price : 0,
+          costPrice: typeof productForm.costPrice === 'number' ? productForm.costPrice : 0,
+          maxStockLevel: productForm.maxStockLevel,
+          description: productForm.description,
+          supplier: productForm.supplier,
+          location: productForm.location,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        const saveSuccess = await inventoryService.saveProduct(newProduct);
+        if (saveSuccess) {
+          setSuccess('Product added successfully!');
+          setProductForm({
+            name: '', sku: '', category: '', unit: 'pcs', hasExpiry: false,
+            expiryAlertDays: 30, reorderLevel: 10, isActive: true
+          });
+          setShowAddProduct(false);
+          await loadData();
+        } else {
+          setError('Failed to save product');
+        }
       }
     } catch (err) {
-      setError('Error adding product');
-      console.error('Error adding product:', err);
+      setError('Error saving product');
+      console.error('Error saving product:', err);
     }
   };
 
@@ -180,7 +257,7 @@ const InventoryBatchManagement: React.FC = () => {
     }
   };
 
-  const handleReceivePurchase = () => {
+  const handleReceivePurchase = async () => {
     try {
       if (!purchaseForm.supplier || !purchaseForm.items || purchaseForm.items.length === 0) {
         setError('Please add supplier and at least one item');
@@ -200,14 +277,15 @@ const InventoryBatchManagement: React.FC = () => {
         createdAt: new Date().toISOString()
       };
 
-      if (inventoryService.receivePurchase(purchase)) {
+      const purchaseSuccess = await inventoryService.receivePurchase(purchase);
+      if (purchaseSuccess) {
         setSuccess(`Purchase received successfully! ${purchase.items.length} items added to inventory.`);
         setPurchaseForm({
           supplier: '', receivedBy: 'Current User',
           receivedDate: new Date().toISOString().split('T')[0], items: [], notes: ''
         });
         setShowPurchaseModal(false);
-        loadData();
+        await loadData();
       } else {
         setError('Failed to receive purchase');
       }
@@ -266,6 +344,25 @@ const InventoryBatchManagement: React.FC = () => {
     }
   }, [success]);
 
+  // Fetch product batches when selectedProduct changes
+  useEffect(() => {
+    const fetchBatches = async () => {
+      if (selectedProduct?.id) {
+        try {
+          const batches = await inventoryService.getProductBatches(selectedProduct.id, true);
+          setProductBatches(batches);
+        } catch (error) {
+          console.error('Error fetching product batches:', error);
+          setProductBatches([]);
+        }
+      } else {
+        setProductBatches([]);
+      }
+    };
+    
+    fetchBatches();
+  }, [selectedProduct?.id]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background p-6">
@@ -323,61 +420,61 @@ const InventoryBatchManagement: React.FC = () => {
 
           <CardContent>
             {/* Statistics */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
-              <Card className="p-3 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-blue-600" />
-                  <div>
-                    <div className="text-lg sm:text-xl font-bold">{products.length}</div>
-                    <div className="text-xs sm:text-sm text-muted-foreground">Total Products</div>
+            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
+              <Card className="p-2 sm:p-3 lg:p-4">
+                <div className="flex flex-col xs:flex-row items-start xs:items-center gap-1 xs:gap-2">
+                  <Package className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base sm:text-lg lg:text-xl font-bold truncate">{products.length}</div>
+                    <div className="text-xs text-muted-foreground truncate">Total Products</div>
                   </div>
                 </div>
               </Card>
 
-              <Card className="p-3 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <TrendingDown className="h-4 w-4 text-red-600" />
-                  <div>
-                    <div className="text-lg sm:text-xl font-bold text-red-600">
+              <Card className="p-2 sm:p-3 lg:p-4">
+                <div className="flex flex-col xs:flex-row items-start xs:items-center gap-1 xs:gap-2">
+                  <TrendingDown className="h-4 w-4 text-red-600 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base sm:text-lg lg:text-xl font-bold text-red-600 truncate">
                       {stockSummaries.filter(s => s.isLowStock).length}
                     </div>
-                    <div className="text-xs sm:text-sm text-muted-foreground">Low Stock</div>
+                    <div className="text-xs text-muted-foreground truncate">Low Stock</div>
                   </div>
                 </div>
               </Card>
 
-              <Card className="p-3 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-orange-600" />
-                  <div>
-                    <div className="text-lg sm:text-xl font-bold text-orange-600">
+              <Card className="p-2 sm:p-3 lg:p-4">
+                <div className="flex flex-col xs:flex-row items-start xs:items-center gap-1 xs:gap-2">
+                  <AlertTriangle className="h-4 w-4 text-orange-600 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base sm:text-lg lg:text-xl font-bold text-orange-600 truncate">
                       {stockSummaries.filter(s => s.hasExpiringSoonStock).length}
                     </div>
-                    <div className="text-xs sm:text-sm text-muted-foreground">Expiring Soon</div>
+                    <div className="text-xs text-muted-foreground truncate">Expiring Soon</div>
                   </div>
                 </div>
               </Card>
 
-              <Card className="p-3 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                  <div>
-                    <div className="text-lg sm:text-xl font-bold text-red-600">
+              <Card className="p-2 sm:p-3 lg:p-4">
+                <div className="flex flex-col xs:flex-row items-start xs:items-center gap-1 xs:gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base sm:text-lg lg:text-xl font-bold text-red-600 truncate">
                       {stockSummaries.filter(s => s.hasExpiredStock).length}
                     </div>
-                    <div className="text-xs sm:text-sm text-muted-foreground">Expired Stock</div>
+                    <div className="text-xs text-muted-foreground truncate">Expired Stock</div>
                   </div>
                 </div>
               </Card>
 
-              <Card className="p-3 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-green-600" />
-                  <div>
-                    <div className="text-lg sm:text-xl font-bold text-green-600">
+              <Card className="p-2 sm:p-3 lg:p-4">
+                <div className="flex flex-col xs:flex-row items-start xs:items-center gap-1 xs:gap-2">
+                  <TrendingUp className="h-4 w-4 text-green-600 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base sm:text-lg lg:text-xl font-bold text-green-600 truncate">
                       {formatCurrency(stockSummaries.reduce((sum, s) => sum + s.totalValue, 0))}
                     </div>
-                    <div className="text-xs sm:text-sm text-muted-foreground">Total Value</div>
+                    <div className="text-xs text-muted-foreground truncate">Total Value</div>
                   </div>
                 </div>
               </Card>
@@ -405,8 +502,9 @@ const InventoryBatchManagement: React.FC = () => {
           </Card>
         )}
 
-        {/* Search and Filters */}
-        <Card>
+
+                {/* Search and Filters */}
+            <Card>
           <CardContent className="pt-6">
             <div className="flex flex-col sm:flex-row gap-3 mb-4">
               <Input
@@ -445,8 +543,8 @@ const InventoryBatchManagement: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Inventory Table */}
-        <Card>
+            {/* Inventory Table */}
+            <Card>
           <CardHeader>
             <CardTitle className="text-lg sm:text-xl">Product Inventory ({filteredSummaries.length})</CardTitle>
             <CardDescription>Stock levels, batches, and expiry information</CardDescription>
@@ -460,14 +558,17 @@ const InventoryBatchManagement: React.FC = () => {
                 <p className="text-sm">Add products and receive inventory to get started</p>
               </div>
             ) : (
-              <div className="rounded-md border overflow-x-auto">
-                <table className="w-full min-w-[800px]">
+              <>
+                {/* Desktop Table View */}
+                <div className="hidden md:block rounded-md border overflow-x-auto">
+                  <table className="w-full min-w-[800px]">
                   <thead className="border-b bg-muted/50">
                     <tr>
                       <th className="p-3 text-left font-medium">Product</th>
                       <th className="p-3 text-left font-medium">Available Qty</th>
                       <th className="p-3 text-left font-medium">Total Qty</th>
                       <th className="p-3 text-left font-medium">Batches</th>
+                      <th className="p-3 text-left font-medium">Price</th>
                       <th className="p-3 text-left font-medium">Earliest Expiry</th>
                       <th className="p-3 text-left font-medium">Avg Cost</th>
                       <th className="p-3 text-left font-medium">Total Value</th>
@@ -496,6 +597,9 @@ const InventoryBatchManagement: React.FC = () => {
                         </td>
                         <td className="p-3 font-medium">{summary.totalQuantity}</td>
                         <td className="p-3">{summary.batchCount}</td>
+                        <td className="p-3 font-medium">
+                          {formatCurrency(products.find(p => p.id === summary.productId)?.price || 0)}
+                        </td>
                         <td className="p-3">
                           {summary.earliestExpiry ? (
                             <div className={`text-sm ${
@@ -548,6 +652,24 @@ const InventoryBatchManagement: React.FC = () => {
                               <Eye className="h-3 w-3" />
                               <span className="hidden sm:inline">Batches</span>
                             </Button>
+                            <Button 
+                              size="sm" 
+                              variant="secondary"
+                              onClick={() => {
+                                const product = products.find(p => p.id === summary.productId);
+                                if (product) {
+                                  setProductForm({
+                                    ...product,
+                                    price: product.price || 0
+                                  });
+                                  setShowAddProduct(true);
+                                }
+                              }}
+                              className="gap-1"
+                            >
+                              <span className="hidden sm:inline">Edit</span>
+                              <span className="sm:hidden">✏️</span>
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -555,17 +677,119 @@ const InventoryBatchManagement: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              {/* Mobile Card View */}
+              <div className="block md:hidden space-y-3">
+                {filteredSummaries.map((summary) => (
+                  <Card key={summary.productId} className="p-3">
+                    <div className="space-y-3">
+                      {/* Product Header */}
+                      <div className="flex items-start justify-between">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-medium truncate">{summary.productName}</h3>
+                          <p className="text-sm text-muted-foreground truncate">
+                            {products.find(p => p.id === summary.productId)?.sku || 'No SKU'}
+                          </p>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedProduct(products.find(p => p.id === summary.productId) || null);
+                            setShowBatchDetails(true);
+                          }}
+                          className="ml-2 flex-shrink-0"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </Button>
+                      </div>
+
+                      {/* Status Badges */}
+                      <div className="flex flex-wrap gap-1">
+                        {summary.isLowStock && (
+                          <Badge variant="destructive" className="text-xs">
+                            Low Stock
+                          </Badge>
+                        )}
+                        {summary.hasExpiredStock && (
+                          <Badge variant="destructive" className="text-xs">
+                            Expired
+                          </Badge>
+                        )}
+                        {summary.hasExpiringSoonStock && (
+                          <Badge variant="outline" className="text-xs text-orange-600 border-orange-600">
+                            Expiring Soon
+                          </Badge>
+                        )}
+                        {!summary.isLowStock && !summary.hasExpiredStock && !summary.hasExpiringSoonStock && (
+                          <Badge variant="default" className="text-xs">
+                            Good
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <div className="text-muted-foreground">Available</div>
+                          <div className="font-medium">
+                            {summary.availableQuantity}
+                            {summary.expiredQuantity > 0 && (
+                              <span className="text-xs text-red-600 ml-1">
+                                ({summary.expiredQuantity} expired)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Total Qty</div>
+                          <div className="font-medium">{summary.totalQuantity}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Selling Price</div>
+                          <div className="font-medium">{formatCurrency(products.find(p => p.id === summary.productId)?.price || 0)}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Batches</div>
+                          <div className="font-medium">{summary.batchCount}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Avg Cost</div>
+                          <div className="font-medium">{formatCurrency(summary.averageCost)}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Total Value</div>
+                          <div className="font-medium">{formatCurrency(summary.totalValue)}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Earliest Expiry</div>
+                          <div className={`font-medium text-sm ${
+                            summary.hasExpiredStock ? 'text-red-600' :
+                            summary.hasExpiringSoonStock ? 'text-orange-600' : 'text-muted-foreground'
+                          }`}>
+                            {summary.earliestExpiry ? 
+                              new Date(summary.earliestExpiry).toLocaleDateString() : 
+                              'No expiry'
+                            }
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </>
             )}
           </CardContent>
         </Card>
 
-        {/* Add Product Modal */}
-        <Dialog open={showAddProduct} onOpenChange={setShowAddProduct}>
-          <DialogContent className="sm:max-w-md max-h-[80vh] overflow-y-auto">
+            {/* Add/Edit Product Modal */}
+            <Dialog open={showAddProduct} onOpenChange={setShowAddProduct}>
+          <DialogContent className="w-[95vw] max-w-md max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add New Product</DialogTitle>
+              <DialogTitle>{productForm.id ? 'Edit Product' : 'Add New Product'}</DialogTitle>
               <DialogDescription>
-                Create a new product in the inventory system
+                {productForm.id ? 'Update product information' : 'Create a new product in the inventory system'}
               </DialogDescription>
             </DialogHeader>
 
@@ -637,6 +861,34 @@ const InventoryBatchManagement: React.FC = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="product-price">Selling Price</Label>
+                  <Input
+                    id="product-price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={productForm.price !== undefined ? productForm.price : ''}
+                    onChange={(e) => setProductForm(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                    placeholder="0.00"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="product-cost">Cost Price</Label>
+                  <Input
+                    id="product-cost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={productForm.costPrice !== undefined ? productForm.costPrice : ''}
+                    onChange={(e) => setProductForm(prev => ({ ...prev, costPrice: parseFloat(e.target.value) || 0 }))}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -679,15 +931,15 @@ const InventoryBatchManagement: React.FC = () => {
                 Cancel
               </Button>
               <Button onClick={handleAddProduct}>
-                Add Product
+                {productForm.id ? 'Update Product' : 'Add Product'}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Purchase Receiving Modal */}
-        <Dialog open={showPurchaseModal} onOpenChange={setShowPurchaseModal}>
-          <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+            {/* Purchase Receiving Modal */}
+            <Dialog open={showPurchaseModal} onOpenChange={setShowPurchaseModal}>
+          <DialogContent className="w-[95vw] max-w-4xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Truck className="h-5 w-5" />
@@ -912,9 +1164,9 @@ const InventoryBatchManagement: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Batch Details Modal */}
-        <Dialog open={showBatchDetails} onOpenChange={setShowBatchDetails}>
-          <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-y-auto">
+            {/* Batch Details Modal */}
+            <Dialog open={showBatchDetails} onOpenChange={setShowBatchDetails}>
+          <DialogContent className="w-[95vw] max-w-4xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5" />
@@ -947,6 +1199,14 @@ const InventoryBatchManagement: React.FC = () => {
                         <div className="font-medium text-muted-foreground">Reorder Level</div>
                         <div>{selectedProduct.reorderLevel}</div>
                       </div>
+                      <div>
+                        <div className="font-medium text-muted-foreground">Selling Price</div>
+                        <div>{formatCurrency(selectedProduct.price || 0)}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium text-muted-foreground">Cost Price</div>
+                        <div>{formatCurrency(selectedProduct.costPrice || 0)}</div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -957,87 +1217,81 @@ const InventoryBatchManagement: React.FC = () => {
                     <CardTitle className="text-lg">Current Batches</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {(() => {
-                      const productBatches = inventoryService.getProductBatches(selectedProduct.id, true);
-                      
-                      if (productBatches.length === 0) {
-                        return (
-                          <div className="text-center py-8 text-muted-foreground">
-                            <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                            <p>No batches found for this product</p>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div className="rounded-md border overflow-x-auto">
-                          <table className="w-full min-w-[600px]">
-                            <thead className="border-b bg-muted/50">
-                              <tr>
-                                <th className="p-3 text-left font-medium">Batch Number</th>
-                                <th className="p-3 text-left font-medium">Quantity</th>
-                                <th className="p-3 text-left font-medium">Cost Price</th>
-                                <th className="p-3 text-left font-medium">Expiry Date</th>
-                                <th className="p-3 text-left font-medium">Received Date</th>
-                                <th className="p-3 text-left font-medium">Supplier</th>
-                                <th className="p-3 text-left font-medium">Status</th>
+                    {productBatches.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                        <p>No batches found for this product</p>
+                      </div>
+                    ) : (
+                      <div className="rounded-md border overflow-x-auto">
+                        <table className="w-full min-w-[600px]">
+                          <thead className="border-b bg-muted/50">
+                            <tr>
+                              <th className="p-3 text-left font-medium">Batch Number</th>
+                              <th className="p-3 text-left font-medium">Quantity</th>
+                              <th className="p-3 text-left font-medium">Cost Price</th>
+                              <th className="p-3 text-left font-medium">Expiry Date</th>
+                              <th className="p-3 text-left font-medium">Received Date</th>
+                              <th className="p-3 text-left font-medium">Supplier</th>
+                              <th className="p-3 text-left font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {productBatches.map((batch: InventoryBatch) => (
+                              <tr key={batch.id} className="border-b hover:bg-muted/30">
+                                <td className="p-3 font-medium">{batch.batchNumber}</td>
+                                <td className="p-3">{batch.quantity}</td>
+                                <td className="p-3">{formatCurrency(batch.costPrice)}</td>
+                                <td className="p-3">
+                                  {batch.expiryDate ? (
+                                    <div className={`text-sm ${
+                                      inventoryService.isBatchExpired(batch) ? 'text-red-600' :
+                                      inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) ? 'text-orange-600' : 'text-muted-foreground'
+                                    }`}>
+                                      {new Date(batch.expiryDate).toLocaleDateString()}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground text-sm">No expiry</span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-muted-foreground text-sm">
+                                  {new Date(batch.receivedDate).toLocaleDateString()}
+                                </td>
+                                <td className="p-3 text-muted-foreground text-sm">{batch.supplier || 'N/A'}</td>
+                                <td className="p-3">
+                                  <Badge 
+                                    variant={
+                                      batch.status === 'depleted' ? 'secondary' :
+                                      inventoryService.isBatchExpired(batch) ? 'destructive' :
+                                      inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) ? 'outline' : 'default'
+                                    }
+                                    className={
+                                      inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) && !inventoryService.isBatchExpired(batch)
+                                        ? 'text-orange-600 border-orange-600' : ''
+                                    }
+                                  >
+                                    {inventoryService.isBatchExpired(batch) ? 'Expired' :
+                                     inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) ? 'Expiring Soon' :
+                                     batch.status === 'depleted' ? 'Depleted' : 'Active'}
+                                  </Badge>
+                                </td>
                               </tr>
-                            </thead>
-                            <tbody>
-                              {productBatches.map((batch) => (
-                                <tr key={batch.id} className="border-b hover:bg-muted/30">
-                                  <td className="p-3 font-medium">{batch.batchNumber}</td>
-                                  <td className="p-3">{batch.quantity}</td>
-                                  <td className="p-3">{formatCurrency(batch.costPrice)}</td>
-                                  <td className="p-3">
-                                    {batch.expiryDate ? (
-                                      <div className={`text-sm ${
-                                        inventoryService.isBatchExpired(batch) ? 'text-red-600' :
-                                        inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) ? 'text-orange-600' : 'text-muted-foreground'
-                                      }`}>
-                                        {new Date(batch.expiryDate).toLocaleDateString()}
-                                      </div>
-                                    ) : (
-                                      <span className="text-muted-foreground text-sm">No expiry</span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-muted-foreground text-sm">
-                                    {new Date(batch.receivedDate).toLocaleDateString()}
-                                  </td>
-                                  <td className="p-3 text-muted-foreground text-sm">{batch.supplier || 'N/A'}</td>
-                                  <td className="p-3">
-                                    <Badge 
-                                      variant={
-                                        batch.status === 'depleted' ? 'secondary' :
-                                        inventoryService.isBatchExpired(batch) ? 'destructive' :
-                                        inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) ? 'outline' : 'default'
-                                      }
-                                      className={
-                                        inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) && !inventoryService.isBatchExpired(batch)
-                                          ? 'text-orange-600 border-orange-600' : ''
-                                      }
-                                    >
-                                      {inventoryService.isBatchExpired(batch) ? 'Expired' :
-                                       inventoryService.isBatchExpiringSoon(batch, selectedProduct.expiryAlertDays) ? 'Expiring Soon' :
-                                       batch.status === 'depleted' ? 'Depleted' : 'Active'}
-                                    </Badge>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })()}
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
             )}
           </DialogContent>
         </Dialog>
+
       </div>
     </div>
   );
 };
 
 export default InventoryBatchManagement;
+

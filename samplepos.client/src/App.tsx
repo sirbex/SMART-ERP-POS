@@ -1,100 +1,49 @@
 // Pure Shadcn-only architecture - minimal CSS imports
 import './App.css';
 
-// Component imports - Using ONLY Shadcn UI versions
-import InventoryBatchManagement from './components/InventoryBatchManagement';
-import CustomerLedgerForm from './components/CustomerLedgerFormShadcn';
-import ReportsShadcn from './components/ReportsShadcn';
-import Sidebar from './components/SidebarShadcn';
-import POSScreen from './components/POSScreenShadcn';
-import PaymentBillingShadcn from './components/PaymentBillingShadcn';
-import Dashboard from './components/Dashboard';
+// Core components - loaded immediately
+import HeaderBar from './components/layout/HeaderBar';
+import SidebarNav from './components/layout/SidebarNav';
 import ErrorBoundary from './components/ErrorBoundary';
-import { useState, useEffect } from 'react';
+import { ToastContextProvider } from '@/components/ui/toast';
+import { QueryProvider } from '@/config/queryClient';
+import { OfflineIndicator } from '@/components/offline/OfflineIndicator';
+import { SyncStatusBadge } from '@/components/offline/SyncStatusBadge';
+
+// Lazy-loaded components for code splitting
+import { lazy, Suspense, useState, useEffect } from 'react';
+import APIStatus from './components/APIStatus';
+
+// Loading components for better UX
+import { 
+  DashboardLoading, 
+  InventoryLoading, 
+  CustomerLedgerLoading, 
+  POSLoading, 
+  PaymentLoading, 
+  ReportsLoading, 
+  SettingsLoading 
+} from './components/LoadingSpinner';
+
+// API Test Pages
+const BackendTestPage = lazy(() => import('./pages/BackendTestPage'));
+
+// Code-split heavy components
+const InventoryManagement = lazy(() => import('./components/InventoryManagement'));
+const CustomerLedgerForm = lazy(() => import('./components/CustomerLedgerFormShadcn'));
+const ReportsShadcn = lazy(() => import('./components/ReportsShadcn'));
+const POSScreenAPI = lazy(() => import('./components/POSScreenAPI'));
+const PaymentBillingShadcn = lazy(() => import('./components/PaymentBillingRefactored'));
+const DashboardNew = lazy(() => import('./components/DashboardNew'));
+const AdminSettings = lazy(() => import('./components/AdminSettings'));
 import { CustomerLedgerProvider } from './context/CustomerLedgerContext';
+
 function App() {
   const [screen, setScreen] = useState('dashboard');
   
-  // Initialize clean application - complete reset for fresh start
+  // Initialize application
   useEffect(() => {
     document.body.classList.add('app-initialized');
-    
-    console.log('🧹 Preparing clean application...');
-    
-    // COMPLETE APPLICATION RESET - Clear ALL data using actual keys from components
-    const allStorageKeys = [
-      // Dashboard keys
-      'pos_transaction_history_v1',
-      'pos_inventory_v1',
-      
-      // Inventory data
-      'inventory_items',
-      'inventory_movements',
-      'inventory_history',
-      'simple_inventory_items',
-      
-      // Transaction and sales data
-      'transaction_history',
-      'pos_sales',
-      'sale_records',
-      'receipts',
-      'invoices',
-      
-      // Payment data
-      'pos_scheduled_payments',
-      'payment_schedules',
-      'split_payments',
-      'installmentPlans',
-      
-      // Customer data
-      'pos_customers',
-      'pos_ledger',
-      'customer_ledger',
-      'accounts_receivable',
-      'customer_balances',
-      
-      // Reports and other data
-      'pos_reports',
-      'pos_analytics',
-      
-      // Settings and configuration
-      'pos_settings',
-      'app_settings',
-      'user_preferences',
-      'theme',
-      
-      // Sample/mock data
-      'sample_inventory',
-      'demo_transactions',
-      'test_data'
-    ];
-    
-    // Clear all localStorage keys
-    allStorageKeys.forEach(key => {
-      if (localStorage.getItem(key)) {
-        console.log(`Clearing ${key}...`);
-        localStorage.removeItem(key);
-      }
-    });
-    
-    // Also clear any unknown keys that might contain sample data
-    Object.keys(localStorage).forEach(key => {
-      if (key.includes('sample') || key.includes('demo') || key.includes('test') || key.includes('mock')) {
-        console.log(`Removing sample data: ${key}`);
-        localStorage.removeItem(key);
-      }
-    });
-    
-    // Clear session storage for clean state
-    sessionStorage.clear();
-    
-    // Dispatch storage events to notify all components
-    window.dispatchEvent(new Event('storage'));
-    
-    console.log('✅ Clean application ready - all data cleared');
-    console.log('📊 Starting with fresh, empty state');
-    console.log('🎯 Ready for new data entry');
-    
   }, []);
 
   let content;
@@ -113,7 +62,9 @@ function App() {
             </button>
           </div>
         }>
-          <Dashboard />
+          <Suspense fallback={<DashboardLoading />}>
+            <DashboardNew />
+          </Suspense>
         </ErrorBoundary>
       );
       break;
@@ -131,7 +82,9 @@ function App() {
             </button>
           </div>
         }>
-          <POSScreen />
+          <Suspense fallback={<POSLoading />}>
+            <POSScreenAPI />
+          </Suspense>
         </ErrorBoundary>
       );
       break;
@@ -149,7 +102,9 @@ function App() {
             </button>
           </div>
         }>
-          <PaymentBillingShadcn />
+          <Suspense fallback={<PaymentLoading />}>
+            <PaymentBillingShadcn />
+          </Suspense>
         </ErrorBoundary>
       );
       break;
@@ -167,7 +122,9 @@ function App() {
             </button>
           </div>
         }>
-          <InventoryBatchManagement />
+          <Suspense fallback={<InventoryLoading />}>
+            <InventoryManagement />
+          </Suspense>
         </ErrorBoundary>
       );
       break;
@@ -185,7 +142,29 @@ function App() {
             </button>
           </div>
         }>
-          <CustomerLedgerForm />
+          <Suspense fallback={<CustomerLedgerLoading />}>
+            <CustomerLedgerForm />
+          </Suspense>
+        </ErrorBoundary>
+      );
+      break;
+    case 'ledger':
+      content = (
+        <ErrorBoundary fallback={
+          <div className="error-page p-4 max-w-md mx-auto">
+            <h2 className="text-lg font-semibold mb-2">Customer Ledger Error</h2>
+            <p className="text-sm text-muted-foreground mb-4">There was a problem loading the Customer Ledger. Please try again or contact support.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full sm:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+            >
+              Reload App
+            </button>
+          </div>
+        }>
+          <Suspense fallback={<CustomerLedgerLoading />}>
+            <CustomerLedgerForm />
+          </Suspense>
         </ErrorBoundary>
       );
       break;
@@ -203,10 +182,74 @@ function App() {
             </button>
           </div>
         }>
-          <ReportsShadcn />
+          <Suspense fallback={<ReportsLoading />}>
+            <ReportsShadcn />
+          </Suspense>
         </ErrorBoundary>
       );
       break;
+    case 'settings':
+      content = (
+        <ErrorBoundary fallback={
+          <div className="error-page p-4 max-w-md mx-auto">
+            <h2 className="text-lg font-semibold mb-2">Settings Error</h2>
+            <p className="text-sm text-muted-foreground mb-4">There was a problem loading the settings. Please try again or contact support.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full sm:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+            >
+              Reload App
+            </button>
+          </div>
+        }>
+          <Suspense fallback={<SettingsLoading />}>
+            <AdminSettings onBack={() => setScreen('dashboard')} />
+          </Suspense>
+        </ErrorBoundary>
+      );
+      break;
+    case 'api-test':
+      content = (
+        <ErrorBoundary fallback={
+          <div className="error-page p-4 max-w-md mx-auto">
+            <h2 className="text-lg font-semibold mb-2">API Tester Error</h2>
+            <p className="text-sm text-muted-foreground mb-4">There was a problem loading the API Test page. Please try again or contact support.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full sm:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+            >
+              Reload App
+            </button>
+          </div>
+        }>
+          <Suspense fallback={<div className="flex items-center justify-center h-40"><span className="text-muted-foreground">Loading backend test page...</span></div>}>
+            <BackendTestPage />
+          </Suspense>
+        </ErrorBoundary>
+      );
+      break;
+    
+    case 'backend-test':
+      content = (
+        <ErrorBoundary fallback={
+          <div className="error-page p-4 max-w-md mx-auto">
+            <h2 className="text-lg font-semibold mb-2">Backend Test Error</h2>
+            <p className="text-sm text-muted-foreground mb-4">There was a problem loading the Backend Test page. Please try again or contact support.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full sm:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+            >
+              Reload App
+            </button>
+          </div>
+        }>
+          <Suspense fallback={<div className="flex items-center justify-center h-40"><span className="text-muted-foreground">Loading backend test page...</span></div>}>
+            <BackendTestPage />
+          </Suspense>
+        </ErrorBoundary>
+      );
+      break;
+
     default:
       // Default to dashboard for unknown screens
       setScreen('dashboard');
@@ -223,37 +266,61 @@ function App() {
             </button>
           </div>
         }>
-          <Dashboard />
+          <Suspense fallback={<DashboardLoading />}>
+            <DashboardNew />
+          </Suspense>
         </ErrorBoundary>
       );
   }
 
-  // Fully responsive layout with proper mobile handling
+  // Fully responsive layout with proper mobile handling - QuickBooks-inspired
   return (
-    <div className="flex min-h-screen bg-background">
-      <ErrorBoundary fallback={
-        <div className="error-page p-4">
-          <h2 className="text-lg font-semibold mb-2">Navigation Error</h2>
-          <p className="text-sm text-muted-foreground mb-4">There was a problem loading the navigation. Please try again or contact support.</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
-          >
-            Reload App
-          </button>
+    <QueryProvider>
+      <ToastContextProvider>
+        {/* Offline indicator - shows when offline or syncing */}
+        <OfflineIndicator />
+        
+        <div className="min-h-screen bg-qb-gray-50">
+          {/* QuickBooks-style Header */}
+          <HeaderBar onNavigate={setScreen} />
+        
+        {/* QuickBooks-style Sidebar */}
+        <SidebarNav selected={screen} onSelect={setScreen} />
+        
+        {/* Main Content Area */}
+        <main className="pl-64 pt-16">
+          <div className="p-4 md:p-6">
+            <ErrorBoundary fallback={
+              <div className="error-page p-4">
+                <h2 className="text-lg font-semibold mb-2">Application Error</h2>
+                <p className="text-sm text-muted-foreground mb-4">There was a problem loading the requested screen. Please try again or contact support.</p>
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm"
+                >
+                  Reload App
+                </button>
+              </div>
+            }>
+              <div className="flex justify-between items-center mb-4">
+                {/* Sync status badge */}
+                <SyncStatusBadge showDetails={false} />
+                
+                <ErrorBoundary>
+                  <Suspense fallback={<span>Loading API status...</span>}>
+                    <APIStatus />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
+              <CustomerLedgerProvider>
+                {content}
+              </CustomerLedgerProvider>
+            </ErrorBoundary>
+          </div>
+        </main>
         </div>
-      }>
-        <Sidebar onSelect={setScreen} selected={screen} />
-      </ErrorBoundary>
-      
-      <main className="flex-1 min-w-0 p-2 sm:p-4 md:p-6 ml-0 lg:ml-56 transition-all duration-300 overflow-x-hidden">
-        <div className="w-full max-w-full">
-          <CustomerLedgerProvider>
-            {content}
-          </CustomerLedgerProvider>
-        </div>
-      </main>
-    </div>
+      </ToastContextProvider>
+    </QueryProvider>
   );
 }
 

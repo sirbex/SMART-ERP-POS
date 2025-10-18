@@ -47,17 +47,71 @@ export default defineConfig({
             '@': fileURLToPath(new URL('./src', import.meta.url))
         }
     },
+    build: {
+        // Optimize for code-splitting
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    // Vendor chunk for React and core libraries
+                    'vendor': ['react', 'react-dom'],
+                    
+                    // UI components chunk
+                    'ui': [
+                        '@radix-ui/react-dialog',
+                        '@radix-ui/react-select', 
+                        '@radix-ui/react-tabs',
+                        '@radix-ui/react-label',
+                        '@radix-ui/react-slot',
+                        'lucide-react'
+                    ],
+                    
+                    // Business logic chunks
+                    'pos-system': [
+                        './src/components/POSScreenShadcn',
+                        './src/components/PaymentBillingShadcn'
+                    ],
+                    
+                    'customer-management': [
+                        './src/components/CustomerLedgerFormShadcn',
+                        './src/services/CustomerAccountService',
+                        './src/context/CustomerLedgerContext'
+                    ],
+                    
+                    'inventory-reports': [
+                        './src/components/InventoryManagement',
+                        './src/components/ReportsShadcn'
+                    ]
+                }
+            }
+        },
+        // Optimize chunk size
+        chunkSizeWarningLimit: 1000,
+        target: 'esnext',
+        minify: 'esbuild'
+    },
     server: {
         proxy: {
             '^/weatherforecast': {
                 target,
                 secure: false
+            },
+            // Proxy API requests to our backend server
+            '^/api': {
+                target: 'http://localhost:3001',
+                changeOrigin: true,
+                secure: false
             }
         },
-        port: parseInt(env.DEV_SERVER_PORT || '50762'),
-        https: {
-            key: fs.readFileSync(keyFilePath),
-            cert: fs.readFileSync(certFilePath),
+        host: '127.0.0.1',  // Use IPv4 to avoid dual-stack issues
+        port: 5173,  // Use default Vite port since 3000 is taken
+        strictPort: false, // Allow Vite to find an available port
+        // Disable HTTPS for development to avoid WebSocket issues
+        // https: {
+        //     key: fs.readFileSync(keyFilePath),
+        //     cert: fs.readFileSync(certFilePath),
+        // },
+        hmr: {
+            overlay: true
         }
     }
 })

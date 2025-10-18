@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import type { InventoryItem } from '../models/InventoryItem';
-import type { ProductUoM, UnitOfMeasure } from '../models/UnitOfMeasure';
-import { CommonUoMGroups } from '../models/UnitOfMeasure';
+import type { InventoryItem } from '../types';
+import type { ProductUoM, UnitOfMeasure } from '../types';
+import { CommonUoMGroups } from '../types';
 // import UoMSelector from './UoMSelector'; // Removed - was not Shadcn-only
 import { formatCurrency } from '../utils/currency';
 
@@ -84,11 +84,6 @@ const ProductUoMSelectionModal: React.FC<ProductUoMSelectionModalProps> = ({
     }
   }, [selectedUoM, quantity]);
 
-  const handleUoMChange = (uom: ProductUoM, price: number) => {
-    setSelectedUoM(uom);
-    setCalculatedPrice(price);
-  };
-
   const handleAddToCart = () => {
     if (!product || !selectedUoM) return;
 
@@ -120,12 +115,6 @@ const ProductUoMSelectionModal: React.FC<ProductUoMSelectionModalProps> = ({
 
   // Check if product has UoM options
   const hasUoMOptions = product.uomOptions && product.uomOptions.length > 0;
-  const uomOptions = hasUoMOptions ? product.uomOptions! : [{
-    uomId: 'piece',
-    price: typeof product.price === 'number' ? product.price : 0,
-    isDefault: true,
-    conversionFactor: 1
-  }];
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -227,3 +216,4 @@ const ProductUoMSelectionModal: React.FC<ProductUoMSelectionModalProps> = ({
 };
 
 export default ProductUoMSelectionModal;
+

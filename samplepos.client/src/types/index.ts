@@ -195,9 +195,12 @@ export interface Transaction {
   items: SaleItem[];
   subtotal: number;
   tax: number;
+  taxAmount?: number; // Alias for tax
   discount: number;
+  discountAmount?: number; // Alias for discount
   total: number;
   totalAmount?: number; // Alias for total
+  itemCount?: number; // Computed from items.length
   paymentStatus: 'paid' | 'unpaid' | 'partial';
   payment_status?: string; // Backend format
   paymentMethod?: string;
@@ -318,6 +321,7 @@ export interface PurchaseOrder {
   subtotal: number;
   tax: number;
   total: number;
+  totalValue?: number; // Alias for total
   notes?: string;
   createdAt?: string;
   created_at?: string; // Backend format
@@ -338,9 +342,12 @@ export interface PurchaseOrderItem {
   productName?: string;
   product_name?: string; // Backend format
   quantity: number;
+  quantityOrdered?: number; // Alias for quantity
   unitPrice: number;
   unit_price?: number; // Backend format
+  unitCost?: number; // Alias for unitPrice
   total: number;
+  totalCost?: number; // Alias for total
   receivedQuantity?: number;
   received_quantity?: number; // Backend format
   notes?: string;

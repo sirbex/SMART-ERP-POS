@@ -2,7 +2,23 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 // Pure Shadcn-only architecture - removed emergency.css
-import App from './App.tsx'
+import AppWrapper from './AppWrapper.tsx'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+// Initialize PWA (Service Worker, offline support)
+import './lib/pwaService'
+
+// Create React Query client
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30000, // 30 seconds
+      gcTime: 300000, // 5 minutes
+      retry: 2,
+      refetchOnWindowFocus: false,
+    },
+  },
+})
 
 // Simple error handling
 const rootElement = document.getElementById('root');
@@ -14,11 +30,18 @@ if (!rootElement) {
 
 try {
   const root = createRoot(rootElement);
-  console.log('Rendering app...');
+  
+  // Clear the initial loading indicator
+  const loader = document.getElementById('initial-loader');
+  if (loader) {
+    loader.remove();
+  }
   
   root.render(
     <StrictMode>
-      <App />
+      <QueryClientProvider client={queryClient}>
+        <AppWrapper />
+      </QueryClientProvider>
     </StrictMode>
   );
 } catch (error) {

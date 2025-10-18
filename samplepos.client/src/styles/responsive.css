@@ -339,16 +339,6 @@
   .table-container, .overflow-x-auto {
     /* Standard overflow behavior - works in all browsers */
     overflow-x: auto;
-    
-    /* Enhanced scrolling for iOS Safari where supported - progressive enhancement */
-    /* stylelint-disable-next-line property-no-vendor-prefix */
-    -webkit-overflow-scrolling: touch;
-    
-    /* Webkit scrollbar styling (Chrome, Safari, Edge) */
-    -webkit-scrollbar-width: 6px;
-    /* Modern scrollbar width (Firefox) - progressive enhancement */
-    /* stylelint-disable-next-line property-no-unknown */
-    scrollbar-width: thin;
   }
   
   /* Hide less important table columns on mobile */

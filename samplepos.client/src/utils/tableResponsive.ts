@@ -11,19 +11,20 @@
 export function initResponsiveTable(tableSelector: string): void {
   const tables = document.querySelectorAll(tableSelector);
   
-  tables.forEach((table: HTMLTableElement) => {
+  tables.forEach((table) => {
+    const htmlTable = table as HTMLTableElement;
     // Add responsive class
-    table.classList.add('table-responsive-card');
+    htmlTable.classList.add('table-responsive-card');
     
     // Get all headers
-    const headers = Array.from(table.querySelectorAll('thead th')).map((th: HTMLTableCellElement) => 
-      th.textContent?.trim() || ''
+    const headers = Array.from(htmlTable.querySelectorAll('thead th')).map((th) => 
+      (th as HTMLTableCellElement).textContent?.trim() || ''
     );
     
     // Process all table rows
-    const rows = table.querySelectorAll('tbody tr');
+    const rows = htmlTable.querySelectorAll('tbody tr');
     
-    rows.forEach((row: HTMLTableRowElement) => {
+    rows.forEach((row) => {
       // Get title for this row (usually first or second cell)
       const firstCell = row.querySelector('td');
       const titleText = firstCell?.textContent?.trim() || '';
@@ -49,19 +50,20 @@ export function initResponsiveTable(tableSelector: string): void {
  * Adds horizontal scroll indicators to tables
  * @param {string} containerSelector - The CSS selector for table containers
  */
-export function addTableScrollIndicators(containerSelector) {
+export function addTableScrollIndicators(containerSelector: string): void {
   const containers = document.querySelectorAll(containerSelector);
   
-  containers.forEach(container => {
-    container.classList.add('table-scroll-container');
+  containers.forEach((container) => {
+    const htmlContainer = container as HTMLElement;
+    htmlContainer.classList.add('table-scroll-container');
     
     // Create scroll indicator
     const indicator = document.createElement('div');
     indicator.className = 'table-scroll-indicator';
-    container.appendChild(indicator);
+    htmlContainer.appendChild(indicator);
     
     // Handle scroll event
-    container.addEventListener('scroll', () => {
+    htmlContainer.addEventListener('scroll', () => {
       const scrollLeft = container.scrollLeft;
       const maxScroll = container.scrollWidth - container.clientWidth;
       
@@ -83,31 +85,33 @@ export function addTableScrollIndicators(containerSelector) {
  * Makes tables more touch-friendly on mobile
  * @param {string} tableSelector - The CSS selector for tables to enhance
  */
-export function enhanceTableTouchability(tableSelector) {
+export function enhanceTableTouchability(tableSelector: string): void {
   const tables = document.querySelectorAll(tableSelector);
   
-  tables.forEach(table => {
+  tables.forEach((table) => {
+    const htmlTable = table as HTMLElement;
     // Add touch classes
-    table.classList.add('touch-friendly');
+    htmlTable.classList.add('touch-friendly');
     
     // Increase touch target size for interactive elements
-    const interactiveElements = table.querySelectorAll('button, a, input, select');
-    interactiveElements.forEach(el => {
-      el.classList.add('touch-target');
+    const interactiveElements = htmlTable.querySelectorAll('button, a, input, select');
+    interactiveElements.forEach((el) => {
+      (el as HTMLElement).classList.add('touch-target');
     });
     
     // Add ripple effect to rows for touch feedback
-    const rows = table.querySelectorAll('tbody tr');
-    rows.forEach(row => {
-      row.addEventListener('touchstart', function() {
+    const rows = htmlTable.querySelectorAll('tbody tr');
+    rows.forEach((row) => {
+      const htmlRow = row as HTMLElement;
+      htmlRow.addEventListener('touchstart', function(this: HTMLElement) {
         this.classList.add('touch-active');
       });
       
-      row.addEventListener('touchend', function() {
+      htmlRow.addEventListener('touchend', function(this: HTMLElement) {
         this.classList.remove('touch-active');
         // Add a small delay before removing the class completely
         setTimeout(() => {
-          this.classList.remove('touch-active');
+          htmlRow.classList.remove('touch-active');
         }, 300);
       });
     });

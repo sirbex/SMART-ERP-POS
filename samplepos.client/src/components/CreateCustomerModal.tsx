@@ -12,15 +12,16 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '.
 import { Textarea } from './ui/textarea';
 
 interface CreateCustomerModalProps {
-  onSave: (customer: Customer) => void;
-  onCancel: () => void;
+  open: boolean;
+  onClose: () => void;
+  onSave: (customer: Omit<Customer, "id">) => Promise<void>;
 }
 
-const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ onSave, onCancel }) => {
-  const { customers, setCustomers } = useCustomerLedger();
-  const modalRef = useFocusTrap(true, onCancel);
+const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose, onSave }) => {
+  const { customers } = useCustomerLedger();
+  const modalRef = useFocusTrap(open, onClose);
   
-  const [newCustomer, setNewCustomer] = useState<Customer>({
+  const [newCustomer, setNewCustomer] = useState<Omit<Customer, "id">>({
     name: '',
     contact: '',
     email: '',
@@ -91,21 +92,16 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ onSave, onCan
   };
   
   // Handle save button click
-  const handleSave = () => {
+  const handleSave = async () => {
     if (validateForm()) {
-      // Generate a unique ID for the new customer
-      const newId = `customer-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      
-      const customerWithId: Customer = {
-        ...newCustomer,
-        id: newId
-      };
-      
-      // Add to customers list
-      setCustomers([...customers, customerWithId]);
-      
-      // Call the onSave callback with the new customer
-      onSave(customerWithId);
+      try {
+        // Call the onSave callback with the new customer (without ID)
+        await onSave(newCustomer);
+        // Close the modal after successful save
+        onClose();
+      } catch (error) {
+        console.error('Failed to save customer:', error);
+      }
     }
   };
   
@@ -113,7 +109,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ onSave, onCan
   useEffect(() => {
     const handleEscapeKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onCancel();
+        onClose();
       }
     };
     
@@ -121,10 +117,10 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ onSave, onCan
     return () => {
       window.removeEventListener('keydown', handleEscapeKey);
     };
-  }, [onCancel]);
+  }, [onClose]);
   
   return (
-    <Dialog open={true} onOpenChange={() => onCancel()}>
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[525px]" ref={modalRef as React.RefObject<HTMLDivElement>}>
         <DialogHeader>
           <DialogTitle>Create New Customer</DialogTitle>
@@ -238,7 +234,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ onSave, onCan
         </div>
         
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button onClick={handleSave}>
