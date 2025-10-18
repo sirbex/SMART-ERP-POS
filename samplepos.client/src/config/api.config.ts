@@ -27,11 +27,20 @@ api.interceptors.response.use(
   (error) => {
     if (error.response) {
       console.error('API Error Response:', error.response.status, error.response.data);
+      
+      // Handle 401 Unauthorized - token expired or invalid
       if (error.response.status === 401) {
-        console.error('Unauthorized access, please login again');
+        console.error('Unauthorized access - redirecting to login');
+        
+        // Clear auth data
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        
+        // Redirect to login by reloading (AppWrapper will show LoginPage)
+        window.location.reload();
       }
     } else if (error.request) {
-      console.error('No response received:', error.request);
+      console.error('No response received - network error:', error.request);
     } else {
       console.error('Request setup error:', error.message);
     }

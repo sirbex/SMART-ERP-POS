@@ -1,0 +1,233 @@
+/**
+ * POS Service API Client
+ * 
+ * This service interacts with the backend API for POS operations.
+ */
+
+import api from '../config/api.config';
+import type { InventoryItem } from '../models/InventoryItem';
+import type { Transaction, TransactionItem } from '../models/Transaction';
+import type { Customer } from '../models/Customer';
+
+/**
+ * Get inventory items for POS screen
+ */
+export async function getInventory(): Promise<InventoryItem[]> {
+  try {
+    const response = await api.get('/inventory/items');
+    return response.data;
+  } catch (error) {
+    console.error('Error loading inventory items from API:', error);
+    return [];
+  }
+}
+
+/**
+ * Search inventory by name, sku, or barcode
+ */
+export async function searchInventory(term: string): Promise<InventoryItem[]> {
+  try {
+    const response = await api.get(`/inventory/search`, {
+      params: { q: term }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error searching inventory with term "${term}" via API:`, error);
+    return [];
+  }
+}
+
+/**
+ * Create a transaction
+ */
+export async function createTransaction(transaction: {
+  items: TransactionItem[];
+  customerId?: string;
+  paymentMethod: string;
+  paymentAmount: number;
+  changeAmount: number;
+  subtotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+  notes?: string;
+}): Promise<string | null> {
+  try {
+    // Transform the data to match backend expectations
+    const backendTransaction = {
+      customerId: transaction.customerId,
+      subtotal: transaction.subtotal,
+      tax: transaction.taxAmount,
+      discount: transaction.discountAmount,
+      total: transaction.total,
+      paymentMethod: transaction.paymentMethod,
+      paymentStatus: 'completed', // Assuming completed payment for now
+      amountPaid: transaction.paymentAmount,
+      changeAmount: transaction.changeAmount,
+      notes: transaction.notes,
+      createdBy: 'pos-user',
+      items: transaction.items.map(item => ({
+        inventoryItemId: item.productId, // Use productId as inventoryItemId
+        name: item.name,
+        sku: item.originalProduct?.sku || '', // Get SKU from original product
+        price: item.unitPrice,
+        quantity: item.quantity,
+        unit: item.unit || 'piece',
+        uomDisplayName: item.unit || 'piece',
+        conversionFactor: 1, // Default conversion factor
+        discount: item.discount || 0,
+        subtotal: item.subtotal,
+        tax: item.taxes || 0,
+        total: item.subtotal + (item.taxes || 0) - (item.discount || 0),
+        costPrice: item.averageCostPrice || 0,
+        notes: ''
+      }))
+    };
+    
+    const response = await api.post('/transactions', backendTransaction);
+    return response.data.id;
+  } catch (error) {
+    console.error('Error creating transaction via API:', error);
+    return null;
+  }
+}
+
+/**
+ * Get a list of customers for the POS dropdown
+ */
+// Customer API endpoints - Updated 2025-10-17 to handle paginated responses
+export async function getCustomersForPOS(): Promise<Customer[]> {
+  try {
+    const response = await api.get('/customers');
+    console.log('📦 Raw customer API response:', response.data);
+    
+    // API returns { data: [...], pagination: {...} }
+    // Handle both formats for backwards compatibility
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else if (response.data.data && Array.isArray(response.data.data)) {
+      return response.data.data;
+    } else {
+      console.warn('Unexpected customer API response format:', response.data);
+      return [];
+    }
+  } catch (error) {
+    console.error('Error loading customers for POS from API:', error);
+    return [];
+  }
+}
+
+/**
+ * Search customers by name, phone, or email
+ */
+export async function searchCustomers(term: string): Promise<Customer[]> {
+  try {
+    const response = await api.get(`/customers/search/${encodeURIComponent(term)}`);
+    // Search endpoint returns just the data array
+    return response.data;
+  } catch (error) {
+    console.error(`Error searching customers with term "${term}" via API:`, error);
+    return [];
+  }
+}
+
+/**
+ * Get customer by ID
+ */
+export async function getCustomer(id: string): Promise<Customer | null> {
+  try {
+    const response = await api.get(`/customers/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error getting customer ${id} from API:`, error);
+    return null;
+  }
+}
+
+/**
+ * Create a new customer
+ */
+export async function createCustomer(customer: Omit<Customer, 'id'>): Promise<string | null> {
+  try {
+    const response = await api.post('/customers', customer);
+    return response.data.id;
+  } catch (error) {
+    console.error('Error creating customer via API:', error);
+    return null;
+  }
+}
+
+/**
+ * Get a transaction by ID with full details including items
+ */
+export async function getTransactionById(id: string): Promise<Transaction | null> {
+  try {
+    const response = await api.get(`/transactions/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error getting transaction ${id} from API:`, error);
+    return null;
+  }
+}
+
+/**
+ * Check if there is sufficient stock for an item
+ */
+export async function checkStock(itemId: string, quantity: number): Promise<{
+  success: boolean;
+  available: number;
+  message?: string;
+}> {
+  try {
+    const response = await api.get(`/inventory/items/${itemId}/check-stock`, {
+      params: { quantity }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error checking stock for item ${itemId} via API:`, error);
+    return { success: false, available: 0, message: 'Error checking stock' };
+  }
+}
+
+/**
+ * Get recent transactions for the POS screen
+ */
+export async function getRecentTransactions(limit: number = 10): Promise<Transaction[]> {
+  try {
+    const response = await api.get('/transactions/recent', {
+      params: { limit }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error loading recent transactions from API:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all transactions with pagination support
+ */
+export async function getAllTransactions(limit: number = 1000, offset: number = 0): Promise<any[]> {
+  try {
+    const response = await api.get('/transactions', {
+      params: { limit, offset }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error loading all transactions from API:', error);
+    return [];
+  }
+}
+
+/**
+ * Void a transaction
+ */
+export async function voidTransaction(id: string, reason: string): Promise<boolean> {
+  try {
+    const response = await api.post(`/transactions/${id}/void`, { reason });
+    return response.status === 200;
+  } catch (error) {
+    console.error(`Error voiding transaction ${id} via API:`, error);
+    return false;
+  }
+}

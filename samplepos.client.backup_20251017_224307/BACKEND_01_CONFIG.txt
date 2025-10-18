@@ -1,0 +1,181 @@
+/**
+ * ============================================================================
+ * POS BACKEND - CONFIGURATION FILES
+ * ============================================================================
+ * 
+ * This file contains all configuration needed for the backend.
+ * Split into separate files as indicated by the comments.
+ */
+
+// ============================================================================
+// FILE: pos-backend/package.json
+// ============================================================================
+/*
+{
+  "name": "pos-backend",
+  "version": "1.0.0",
+  "description": "POS System Backend - TypeScript + Express + Prisma",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "keywords": ["pos", "inventory", "typescript", "express", "prisma"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "express": "^4.18.3",
+    "cors": "^2.8.5",
+    "helmet": "^7.2.0",
+    "compression": "^1.8.1",
+    "dotenv": "^16.4.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "express-validator": "^7.2.0",
+    "winston": "^3.18.3",
+    "date-fns": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/compression": "^1.7.5",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.6",
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0",
+    "prisma": "^5.18.0"
+  }
+}
+*/
+
+// ============================================================================
+// FILE: pos-backend/tsconfig.json
+// ============================================================================
+/*
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "moduleResolution": "node",
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+*/
+
+// ============================================================================
+// FILE: pos-backend/.env
+// ============================================================================
+/*
+# Database
+DATABASE_URL="postgresql://postgres:password@localhost:5432/pos_system?schema=public"
+
+# JWT Authentication
+JWT_SECRET="your-super-secret-jwt-key-change-this-in-production-must-be-very-long-and-secure"
+JWT_EXPIRES_IN="7d"
+
+# Server Configuration
+PORT=3001
+NODE_ENV=development
+
+# Company Settings
+COMPANY_NAME="Your Company Name"
+COMPANY_ADDRESS="123 Business Street, City, State 12345"
+COMPANY_TAX_ID="TAX-123456789"
+CURRENCY="USD"
+DEFAULT_TAX_RATE="0.15"
+*/
+
+// ============================================================================
+// FILE: pos-backend/.env.example
+// ============================================================================
+/*
+# Copy this file to .env and fill in your values
+
+# Database
+DATABASE_URL="postgresql://username:password@localhost:5432/database_name?schema=public"
+
+# JWT Authentication
+JWT_SECRET="generate-a-secure-random-string-here"
+JWT_EXPIRES_IN="7d"
+
+# Server Configuration
+PORT=3001
+NODE_ENV=development
+
+# Company Settings
+COMPANY_NAME="Your Company Name"
+COMPANY_ADDRESS="Your Address"
+COMPANY_TAX_ID="Your Tax ID"
+CURRENCY="USD"
+DEFAULT_TAX_RATE="0.15"
+*/
+
+// ============================================================================
+// FILE: pos-backend/.gitignore
+// ============================================================================
+/*
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+*/
+
+console.log('✅ Configuration files template created');
+console.log('📝 Copy the content between /* */ markers to respective files');

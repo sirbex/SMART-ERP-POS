@@ -1,0 +1,7 @@
+{
+  "username": "admin",
+  "email": "admin@samplepos.com",
+  "password": "Admin123!",
+  "fullName": "System Administrator",
+  "role": "ADMIN"
+}

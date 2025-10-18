@@ -1,0 +1,158 @@
+/* orientation.css - Utilities for handling device orientation changes */
+
+/* Define orientation-specific styles */
+@media screen and (orientation: portrait) {
+  .orientation-aware {
+    --portrait-display: flex;
+    --landscape-display: none;
+  }
+  
+  .portrait-only {
+    display: var(--portrait-display, flex);
+  }
+  
+  .landscape-only {
+    display: var(--landscape-display, none);
+  }
+  
+  /* Adjust layouts for portrait orientation */
+  .orientation-layout {
+    flex-direction: column;
+  }
+  
+  /* Adjust padding/margins for portrait */
+  .orientation-spacing {
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+  }
+}
+
+@media screen and (orientation: landscape) {
+  .orientation-aware {
+    --portrait-display: none;
+    --landscape-display: flex;
+  }
+  
+  .portrait-only {
+    display: var(--portrait-display, none);
+  }
+  
+  .landscape-only {
+    display: var(--landscape-display, flex);
+  }
+  
+  /* Adjust layouts for landscape orientation */
+  .orientation-layout {
+    flex-direction: row;
+  }
+  
+  /* Adjust padding/margins for landscape */
+  .orientation-spacing {
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* Orientation change animation */
+@media (prefers-reduced-motion: no-preference) {
+  .orientation-transition {
+    transition: all 0.3s ease-in-out;
+  }
+}
+
+/* Helpers for orientation-specific sizes */
+.portrait-compact {
+  --portrait-height: auto;
+  --landscape-height: 100%;
+}
+
+@media screen and (orientation: portrait) {
+  .portrait-compact {
+    height: var(--portrait-height);
+  }
+}
+
+@media screen and (orientation: landscape) {
+  .portrait-compact {
+    height: var(--landscape-height);
+  }
+}
+
+/* Stretch element in portrait mode but maintain size in landscape */
+.portrait-stretch {
+  --portrait-width: 100%;
+  --landscape-width: auto;
+}
+
+@media screen and (orientation: portrait) {
+  .portrait-stretch {
+    width: var(--portrait-width);
+  }
+}
+
+@media screen and (orientation: landscape) {
+  .portrait-stretch {
+    width: var(--landscape-width);
+  }
+}
+
+/* Table responsive orientations */
+@media screen and (orientation: landscape) and (max-width: 1024px) {
+  .table-orientation-responsive {
+    display: table;
+    width: 100%;
+  }
+  
+  .table-orientation-responsive th,
+  .table-orientation-responsive td {
+    display: table-cell;
+  }
+}
+
+@media screen and (orientation: portrait) and (max-width: 768px) {
+  .table-orientation-responsive {
+    display: block;
+  }
+  
+  .table-orientation-responsive thead {
+    display: none;
+  }
+  
+  .table-orientation-responsive tbody,
+  .table-orientation-responsive tr {
+    display: block;
+    width: 100%;
+  }
+  
+  .table-orientation-responsive td {
+    display: flex;
+    padding: 0.5rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+  }
+  
+  .table-orientation-responsive td::before {
+    content: attr(data-label);
+    font-weight: bold;
+    margin-right: auto;
+    text-align: left;
+  }
+}
+
+/* Orientation-specific font adjustments */
+@media screen and (orientation: landscape) and (max-height: 500px) {
+  html {
+    font-size: 14px; /* Slightly smaller fonts for landscape phones */
+  }
+  
+  .orientation-font-adjust {
+    font-size: 0.9em;
+  }
+}
+
+/* Fix for iOS Safari 100vh issue in both orientations */
+.full-height {
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: fill-available;
+}

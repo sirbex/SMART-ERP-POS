@@ -1,0 +1,333 @@
+/* 
+ * Price Check Styles
+ * External CSS file for price-check.html
+ */
+
+:root {
+    --primary-color: #0070f3;
+    --primary-dark: #0051a8;
+    --accent-color: #ff4081;
+    --light-gray: #f5f5f5;
+    --border-color: #ddd;
+    --text-primary: #333;
+    --text-secondary: #666;
+    --error-color: #d32f2f;
+    --success-color: #2e7d32;
+    --warning-color: #ff9800;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: var(--light-gray);
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    background-color: white;
+    padding: 24px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+header {
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+h1 {
+    margin: 0 0 8px;
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.app-version {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+.search-container {
+    display: flex;
+    margin-bottom: 24px;
+    position: relative;
+}
+
+#search-input {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 16px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px 0 0 8px;
+    transition: border-color 0.3s;
+}
+
+#search-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+#search-button {
+    padding: 12px 24px;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: background-color 0.3s;
+}
+
+#search-button:hover {
+    background-color: var(--primary-dark);
+}
+
+.search-options {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.search-option {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#result {
+    margin-top: 24px;
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.result-header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 16px;
+}
+
+.result-content {
+    padding: 20px;
+}
+
+.item-details {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.item-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 16px;
+}
+
+.item-main-info {
+    flex: 1;
+}
+
+.item-price-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.item-name {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 4px;
+}
+
+.item-category {
+    display: inline-block;
+    background-color: var(--primary-color);
+    color: white;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 16px;
+    margin-right: 8px;
+}
+
+.item-price {
+    font-size: 28px;
+    color: var(--primary-color);
+    font-weight: 700;
+    margin: 0;
+}
+
+.price-per-unit {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.item-section {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Item section with color indicator */
+.item-section-with-color {
+    border-left: 4px solid;
+    padding-left: 16px;
+}
+
+.section-title {
+    font-weight: 600;
+    font-size: 18px;
+    margin: 0 0 8px;
+    color: var(--primary-color);
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-value {
+    font-size: 16px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* Source color text */
+.source-text {
+    color: inherit;
+    font-size: 12px;
+}
+
+.uom-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+
+.uom-table th, .uom-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.uom-table th {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.not-found {
+    color: var(--error-color);
+    text-align: center;
+    font-weight: 600;
+    padding: 24px;
+}
+
+.expiry-warning {
+    background-color: rgba(255, 152, 0, 0.1);
+    border-left: 4px solid var(--warning-color);
+    padding: 8px 16px;
+    margin: 8px 0;
+    border-radius: 4px;
+}
+
+.expiry-expired {
+    background-color: rgba(211, 47, 47, 0.1);
+    border-left: 4px solid var(--error-color);
+}
+
+.loader {
+    display: none;
+    border: 3px solid rgba(0, 112, 243, 0.1);
+    border-radius: 50%;
+    border-top: 3px solid var(--primary-color);
+    width: 24px;
+    height: 24px;
+    animation: spin 1s linear infinite;
+    position: absolute;
+    right: 80px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+@keyframes spin {
+    0% { transform: translateY(-50%) rotate(0deg); }
+    100% { transform: translateY(-50%) rotate(360deg); }
+}
+
+.search-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+.search-source {
+    background-color: var(--light-gray);
+    padding: 4px 12px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.source-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+/* Source colors */
+.source-primary {
+    background-color: #0070f3;
+}
+
+.source-product {
+    background-color: #00c853;
+}
+
+.source-legacy {
+    background-color: #ff9800;
+}
+
+/* Detail button styles */
+.btn-details {
+    background: transparent;
+    border: 1px solid;
+    color: inherit;
+    margin-top: 12px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+}
