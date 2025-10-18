@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useCustomerLedger } from '../context/CustomerLedgerContext';
-import type { Customer } from '../context/CustomerLedgerContext';
+import type { Customer } from '../types/backend';
+import type { CreateCustomerData } from '../services/api/customersApi';
+import { useCreateCustomer, useCustomers } from '../services/api/customersApi';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 
 // Import Shadcn UI components
@@ -14,43 +15,62 @@ import { Textarea } from './ui/textarea';
 interface CreateCustomerModalProps {
   open: boolean;
   onClose: () => void;
-  onSave: (customer: Omit<Customer, "id">) => Promise<void>;
+  onSuccess?: () => void;
 }
 
-const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose, onSave }) => {
-  const { customers } = useCustomerLedger();
+const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose, onSuccess }) => {
   const modalRef = useFocusTrap(open, onClose);
   
-  const [newCustomer, setNewCustomer] = useState<Omit<Customer, "id">>({
+  // React Query hooks
+  const { data: customersData } = useCustomers();
+  const createCustomer = useCreateCustomer();
+  
+  const customers = customersData?.data || [];
+  
+  const [formData, setFormData] = useState<CreateCustomerData>({
     name: '',
-    contact: '',
+    phone: '',
     email: '',
     address: '',
-    balance: 0,
-    joinDate: new Date().toISOString().split('T')[0], // Today's date
-    type: 'individual',
+    type: 'INDIVIDUAL',
     creditLimit: 0,
     notes: ''
   });
 
   const [formErrors, setFormErrors] = useState<{
     name?: string;
-    contact?: string;
+    phone?: string;
   }>({});
+  
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!open) {
+      setFormData({
+        name: '',
+        phone: '',
+        email: '',
+        address: '',
+        type: 'INDIVIDUAL',
+        creditLimit: 0,
+        notes: ''
+      });
+      setFormErrors({});
+    }
+  }, [open]);
   
   // Handle form field changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     
     // Special handling for numeric fields
-    if (name === 'creditLimit' || name === 'balance') {
-      setNewCustomer({
-        ...newCustomer,
+    if (name === 'creditLimit') {
+      setFormData({
+        ...formData,
         [name]: parseFloat(value) || 0
       });
     } else {
-      setNewCustomer({
-        ...newCustomer,
+      setFormData({
+        ...formData,
         [name]: value
       });
     }
@@ -68,20 +88,20 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
   const validateForm = (): boolean => {
     const errors: {
       name?: string;
-      contact?: string;
+      phone?: string;
     } = {};
     
     // Required fields
-    if (!newCustomer.name.trim()) {
+    if (!formData.name.trim()) {
       errors.name = 'Name is required';
     }
     
-    if (!newCustomer.contact.trim()) {
-      errors.contact = 'Contact is required';
+    if (!formData.phone?.trim()) {
+      errors.phone = 'Phone is required';
     }
     
     // Check if customer name already exists
-    if (customers.some(c => c.name.toLowerCase() === newCustomer.name.toLowerCase())) {
+    if (customers.some((c: Customer) => c.name.toLowerCase() === formData.name.toLowerCase())) {
       errors.name = 'Customer with this name already exists';
     }
     
@@ -95,12 +115,29 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
   const handleSave = async () => {
     if (validateForm()) {
       try {
-        // Call the onSave callback with the new customer (without ID)
-        await onSave(newCustomer);
+        // Create customer via API
+        await createCustomer.mutateAsync({
+          name: formData.name,
+          phone: formData.phone || undefined,
+          email: formData.email || undefined,
+          address: formData.address || undefined,
+          type: formData.type,
+          creditLimit: formData.creditLimit || undefined,
+          notes: formData.notes || undefined
+        });
+        
+        // Call success callback if provided
+        if (onSuccess) {
+          onSuccess();
+        }
+        
         // Close the modal after successful save
         onClose();
       } catch (error) {
         console.error('Failed to save customer:', error);
+        setFormErrors({
+          name: 'Failed to create customer. Please try again.'
+        });
       }
     }
   };
@@ -134,7 +171,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
             <Input 
               id="name"
               name="name"
-              value={newCustomer.name}
+              value={formData.name}
               onChange={handleChange}
               className={formErrors.name ? "border-destructive" : ""}
               autoFocus
@@ -143,17 +180,17 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
           </div>
           
           <div className="grid items-center gap-1.5">
-            <Label htmlFor="contact">
+            <Label htmlFor="phone">
               Contact Phone*
             </Label>
             <Input 
-              id="contact"
-              name="contact"
-              value={newCustomer.contact}
+              id="phone"
+              name="phone"
+              value={formData.phone || ''}
               onChange={handleChange}
-              className={formErrors.contact ? "border-destructive" : ""}
+              className={formErrors.phone ? "border-destructive" : ""}
             />
-            {formErrors.contact && <p className="text-sm text-destructive">{formErrors.contact}</p>}
+            {formErrors.phone && <p className="text-sm text-destructive">{formErrors.phone}</p>}
           </div>
           
           <div className="grid items-center gap-1.5">
@@ -164,7 +201,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
               type="email"
               id="email"
               name="email"
-              value={newCustomer.email || ''}
+              value={formData.email || ''}
               onChange={handleChange}
             />
           </div>
@@ -174,11 +211,11 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
               Customer Type
             </Label>
             <Select 
-              value={newCustomer.type} 
+              value={formData.type} 
               onValueChange={(value) => {
-                setNewCustomer({
-                  ...newCustomer,
-                  type: value as 'individual' | 'business'
+                setFormData({
+                  ...formData,
+                  type: value as 'INDIVIDUAL' | 'BUSINESS'
                 });
               }}
             >
@@ -186,8 +223,8 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
                 <SelectValue placeholder="Select customer type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="individual">Individual</SelectItem>
-                <SelectItem value="business">Business</SelectItem>
+                <SelectItem value="INDIVIDUAL">Individual</SelectItem>
+                <SelectItem value="BUSINESS">Business</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -199,7 +236,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
             <Input 
               id="address"
               name="address"
-              value={newCustomer.address || ''}
+              value={formData.address || ''}
               onChange={handleChange}
             />
           </div>
@@ -212,7 +249,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
               type="number"
               id="creditLimit"
               name="creditLimit"
-              value={newCustomer.creditLimit || 0}
+              value={formData.creditLimit || 0}
               onChange={handleChange}
               min={0}
               step={1}
@@ -226,7 +263,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
             <Textarea
               id="notes"
               name="notes"
-              value={newCustomer.notes || ''}
+              value={formData.notes || ''}
               onChange={handleChange}
               rows={3}
             />
@@ -234,11 +271,11 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
         </div>
         
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={createCustomer.isPending}>
             Cancel
           </Button>
-          <Button onClick={handleSave}>
-            Save Customer
+          <Button onClick={handleSave} disabled={createCustomer.isPending}>
+            {createCustomer.isPending ? 'Saving...' : 'Save Customer'}
           </Button>
         </DialogFooter>
       </DialogContent>
