@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/config/api.config';
-import SettingsService from '../services/SettingsService';
+import { formatCurrency } from '../utils/currency';
 import { 
   usePurchases, 
   useCreatePurchase, 
@@ -426,7 +426,7 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
                     <TableCell className="font-medium">PO-{order.id}</TableCell>
                     <TableCell>Supplier ID: {order.supplierId}</TableCell>
                     <TableCell>{new Date(order.orderDate || order.createdAt).toLocaleDateString()}</TableCell>
-                    <TableCell>{SettingsService.getInstance().formatCurrency(Number(order.totalAmount))}</TableCell>
+                    <TableCell>{formatCurrency(Number(order.totalAmount))}</TableCell>
                     <TableCell>
                       <Badge variant={getStatusColor(order.status)}>
                         {order.status}
@@ -563,7 +563,7 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
                               onChange={(e) => updateOrderItem(index, 'unitCost', parseFloat(e.target.value) || 0)}
                             />
                           </TableCell>
-                          <TableCell>{SettingsService.getInstance().formatCurrency(item.totalCost)}</TableCell>
+                          <TableCell>{formatCurrency(item.totalCost)}</TableCell>
                           <TableCell>
                             <Button
                               size="sm"
@@ -613,19 +613,19 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
                       <div className="space-y-2">
                         <div className="flex justify-between">
                           <span>Subtotal:</span>
-                          <span>{SettingsService.getInstance().formatCurrency(totals.subtotal)}</span>
+                          <span>{formatCurrency(totals.subtotal)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Tax:</span>
-                          <span>{SettingsService.getInstance().formatCurrency(totals.tax)}</span>
+                          <span>{formatCurrency(totals.tax)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Shipping:</span>
-                          <span>{SettingsService.getInstance().formatCurrency(totals.shipping)}</span>
+                          <span>{formatCurrency(totals.shipping)}</span>
                         </div>
                         <div className="flex justify-between font-bold text-lg border-t pt-2">
                           <span>Total:</span>
-                          <span>{SettingsService.getInstance().formatCurrency(totals.total)}</span>
+                          <span>{formatCurrency(totals.total)}</span>
                         </div>
                       </div>
                     </div>
@@ -710,7 +710,7 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
                   <div className="space-y-2">
                     <div className="flex justify-between font-bold text-lg border-t pt-2">
                       <span>Total Amount:</span>
-                      <span>{SettingsService.getInstance().formatCurrency(Number(selectedOrder.totalAmount))}</span>
+                      <span>{formatCurrency(Number(selectedOrder.totalAmount))}</span>
                     </div>
                   </div>
                 </CardContent>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import SettingsService from '../services/SettingsService';
+import { formatCurrency } from '../utils/currency';
 import PurchaseManagementService, { type PurchaseOrderSummary, type SupplierPerformance } from '../services/PurchaseManagementService';
 import InventoryBatchService from '../services/InventoryBatchService';
 import type { PurchaseOrder, PurchaseReceiving } from '../types';
@@ -216,21 +216,21 @@ const PurchaseAnalytics: React.FC = () => {
       ['Period:', `${dateFilter.startDate} to ${dateFilter.endDate}`],
       [''],
       ['Summary'],
-      ['Total Purchase Value', SettingsService.getInstance().formatCurrency(analytics.totalPurchaseValue)],
+      ['Total Purchase Value', formatCurrency(analytics.totalPurchaseValue)],
       ['Total Orders', analytics.totalOrders.toString()],
-      ['Average Order Value', SettingsService.getInstance().formatCurrency(analytics.averageOrderValue)],
+      ['Average Order Value', formatCurrency(analytics.averageOrderValue)],
       [''],
       ['Top Suppliers'],
       ['Supplier Name', 'Total Value', 'Order Count'],
-      ...analytics.topSuppliers.map(s => [s.supplierName, SettingsService.getInstance().formatCurrency(s.totalValue), s.orderCount.toString()]),
+      ...analytics.topSuppliers.map(s => [s.supplierName, formatCurrency(s.totalValue), s.orderCount.toString()]),
       [''],
       ['Cost Analysis'],
       ['Product Name', 'Total Quantity', 'Total Cost', 'Average Cost', 'Last Purchase'],
       ...analytics.costAnalysis.map(p => [
         p.productName,
         p.totalQuantity.toString(),
-        SettingsService.getInstance().formatCurrency(p.totalCost),
-        SettingsService.getInstance().formatCurrency(p.averageCost),
+        formatCurrency(p.totalCost),
+        formatCurrency(p.averageCost),
         new Date(p.lastPurchaseDate).toLocaleDateString()
       ])
     ];
@@ -316,7 +316,7 @@ const PurchaseAnalytics: React.FC = () => {
               <CardTitle className="text-sm font-medium">Total Purchase Value</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{SettingsService.getInstance().formatCurrency(analytics.totalPurchaseValue)}</div>
+              <div className="text-2xl font-bold">{formatCurrency(analytics.totalPurchaseValue)}</div>
               <p className="text-xs text-muted-foreground">Filtered period</p>
             </CardContent>
           </Card>
@@ -336,7 +336,7 @@ const PurchaseAnalytics: React.FC = () => {
               <CardTitle className="text-sm font-medium">Average Order Value</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{SettingsService.getInstance().formatCurrency(analytics.averageOrderValue)}</div>
+              <div className="text-2xl font-bold">{formatCurrency(analytics.averageOrderValue)}</div>
               <p className="text-xs text-muted-foreground">Per order</p>
             </CardContent>
           </Card>
@@ -348,7 +348,7 @@ const PurchaseAnalytics: React.FC = () => {
             <CardContent>
               <div className="text-2xl font-bold">{summary.pendingOrders}</div>
               <div className="text-xs text-muted-foreground">
-                Value: {SettingsService.getInstance().formatCurrency(summary.pendingValue)}
+                Value: {formatCurrency(summary.pendingValue)}
               </div>
             </CardContent>
           </Card>
@@ -377,10 +377,10 @@ const PurchaseAnalytics: React.FC = () => {
                 {analytics.topSuppliers.map(supplier => (
                   <TableRow key={supplier.supplierId}>
                     <TableCell className="font-medium">{supplier.supplierName}</TableCell>
-                    <TableCell>{SettingsService.getInstance().formatCurrency(supplier.totalValue)}</TableCell>
+                    <TableCell>{formatCurrency(supplier.totalValue)}</TableCell>
                     <TableCell>{supplier.orderCount}</TableCell>
                     <TableCell>
-                      {SettingsService.getInstance().formatCurrency(supplier.orderCount > 0 ? supplier.totalValue / supplier.orderCount : 0)}
+                      {formatCurrency(supplier.orderCount > 0 ? supplier.totalValue / supplier.orderCount : 0)}
                     </TableCell>
                     <TableCell>
                       {analytics.totalPurchaseValue > 0 ? 
@@ -416,9 +416,9 @@ const PurchaseAnalytics: React.FC = () => {
                   <TableRow key={trend.month}>
                     <TableCell>{new Date(trend.month + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}</TableCell>
                     <TableCell>{trend.orderCount}</TableCell>
-                    <TableCell>{SettingsService.getInstance().formatCurrency(trend.totalValue)}</TableCell>
+                    <TableCell>{formatCurrency(trend.totalValue)}</TableCell>
                     <TableCell>
-                      {SettingsService.getInstance().formatCurrency(trend.orderCount > 0 ? trend.totalValue / trend.orderCount : 0)}
+                      {formatCurrency(trend.orderCount > 0 ? trend.totalValue / trend.orderCount : 0)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -451,8 +451,8 @@ const PurchaseAnalytics: React.FC = () => {
                   <TableRow key={product.productId}>
                     <TableCell className="font-medium">{product.productName}</TableCell>
                     <TableCell>{product.totalQuantity}</TableCell>
-                    <TableCell>{SettingsService.getInstance().formatCurrency(product.totalCost)}</TableCell>
-                    <TableCell>{SettingsService.getInstance().formatCurrency(product.averageCost)}</TableCell>
+                    <TableCell>{formatCurrency(product.totalCost)}</TableCell>
+                    <TableCell>{formatCurrency(product.averageCost)}</TableCell>
                     <TableCell>{new Date(product.lastPurchaseDate).toLocaleDateString()}</TableCell>
                   </TableRow>
                 ))}
