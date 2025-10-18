@@ -6,9 +6,9 @@ import { Package } from "lucide-react";
 // Import all components
 import InventoryBatchManagement from './InventoryBatchManagement';
 import PurchaseOrderManagement from './PurchaseOrderManagement';
-import EnhancedSupplierManagement from './EnhancedSupplierManagement';
 // Temporarily disabled - these components use old localStorage services
-// TODO: Rewrite with backend API
+// TODO: Rewrite with backend API when backend adds supplier catalog support
+// import EnhancedSupplierManagement from './EnhancedSupplierManagement'; // DELETED - no backend support
 // import PurchaseAnalytics from './PurchaseAnalytics';
 // import SupplierAccountsPayable from './SupplierAccountsPayable';
 // const PurchaseReceiving = React.lazy(() => import('./PurchaseReceiving'));
@@ -110,7 +110,16 @@ const InventoryManagement: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="suppliers">
-            <EnhancedSupplierManagement />
+            <Card>
+              <CardHeader>
+                <CardTitle>Supplier Catalog Management</CardTitle>
+                <CardDescription>
+                  This feature requires backend support for supplier catalogs, price lists, and price history tracking.
+                  Use the basic Supplier CRUD via the backend API (suppliersApi) for now.
+                  Enhanced supplier catalog features will be available when backend support is added.
+                </CardDescription>
+              </CardHeader>
+            </Card>
           </TabsContent>
 
           <TabsContent value="payments">
