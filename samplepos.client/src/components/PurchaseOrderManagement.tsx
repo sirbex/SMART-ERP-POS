@@ -1,13 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/config/api.config';
 import SettingsService from '../services/SettingsService';
-import PurchaseManagementService from '../services/PurchaseManagementService';
-import type { 
-  PurchaseOrder, 
-  PurchaseOrderItem, 
-  Supplier, 
-  Product 
-} from '../types';
+import { 
+  usePurchases, 
+  useCreatePurchase, 
+  useUpdatePurchase 
+} from '../services/api/purchasesApi';
+import { useActiveSuppliers } from '../services/api/suppliersApi';
+import type { Purchase } from '../types/backend';
+import type { Product } from '../types';
+
+// Local types for component state (frontend-specific)
+interface PurchaseOrderItem {
+  productId: string;
+  productName: string;
+  quantityOrdered: number;
+  unitCost: number;
+  totalCost: number;
+  notes?: string;
+}
 
 // Import Shadcn UI components
 import {
@@ -58,7 +69,7 @@ interface ProductSelectionModalProps {
 }
 
 interface PurchaseOrderManagementProps {
-  onNavigateToReceiving?: (order: PurchaseOrder) => void;
+  onNavigateToReceiving?: (order: Purchase) => void;
 }
 
 const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({
@@ -109,7 +120,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({
     loadProducts();
   }, [isOpen]);  const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(search.toLowerCase()) &&
-    !selectedProducts.includes(product.id)
+    !selectedProducts.includes(String(product.id))
   );
 
   return (
@@ -189,11 +200,19 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({
 };
 
 const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNavigateToReceiving }) => {
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // React Query hooks
+  const { data: purchasesData, isLoading: isLoadingPurchases } = usePurchases();
+  const { data: suppliers } = useActiveSuppliers();
+  const createPurchaseMutation = useCreatePurchase();
+  const updatePurchaseMutation = useUpdatePurchase();
+
+  // Derived data
+  const purchaseOrders = purchasesData?.data || [];
+  const suppliersList = suppliers || [];
+
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Purchase | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   
   // Form state
@@ -207,25 +226,12 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
   });
   const [orderItems, setOrderItems] = useState<PurchaseOrderItem[]>([]);
 
-  const purchaseService = PurchaseManagementService.getInstance();
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = () => {
-    setPurchaseOrders(purchaseService.getPurchaseOrders());
-    setSuppliers(purchaseService.getSuppliers());
-  };
-
-  const getStatusColor = (status: PurchaseOrder['status']) => {
+  const getStatusColor = (status: Purchase['status']) => {
     const colors = {
-      draft: 'secondary',
-      sent: 'outline',
-      confirmed: 'default',
-      partial: 'destructive',
-      received: 'destructive', // Green-like color for completed
-      cancelled: 'secondary'
+      PENDING: 'secondary',
+      RECEIVED: 'default',
+      PARTIAL: 'destructive',
+      CANCELLED: 'outline'
     } as const;
     return colors[status] || 'secondary';
   };
@@ -249,7 +255,7 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
 
   const handleAddProduct = (product: Product) => {
     const newItem: PurchaseOrderItem = {
-      productId: product.id,
+      productId: String(product.id),
       productName: product.name,
       quantityOrdered: 1,
       unitCost: 0,
@@ -286,83 +292,82 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
     return { subtotal, tax, shipping, total };
   };
 
-  const handleSaveOrder = () => {
+  const handleSaveOrder = async () => {
     if (!formData.supplierId || orderItems.length === 0) {
       alert('Please select a supplier and add at least one product');
       return;
     }
 
-    const supplier = suppliers.find(s => s.id === formData.supplierId);
+    const supplier = suppliersList.find(s => String(s.id) === formData.supplierId);
     if (!supplier) return;
 
-    const totals = calculateOrderTotals();
-    const orderNumber = purchaseService.generateOrderNumber();
+    try {
+      await createPurchaseMutation.mutateAsync({
+        supplierId: formData.supplierId,
+        items: orderItems.map(item => ({
+          productId: item.productId,
+          quantity: item.quantityOrdered,
+          unitCost: item.unitCost
+        })),
+        orderDate: new Date().toISOString(),
+        expectedDeliveryDate: formData.expectedDeliveryDate || undefined,
+        notes: formData.notes || undefined,
+        reference: formData.paymentTerms || undefined
+      });
 
-    const newOrder: Omit<PurchaseOrder, 'id' | 'createdAt' | 'updatedAt'> = {
-      orderNumber,
-      supplierId: formData.supplierId,
-      supplierName: supplier.name,
-      orderDate: new Date().toISOString(),
-      expectedDeliveryDate: formData.expectedDeliveryDate || undefined,
-      items: orderItems,
-      subtotal: totals.subtotal,
-      tax: totals.tax,
-      shippingCost: totals.shipping,
-      totalValue: totals.total,
-      status: 'draft',
-      paymentTerms: formData.paymentTerms,
-      notes: formData.notes,
-      createdBy: 'system' // In real app, use current user
-    };
-
-    const orderId = purchaseService.createPurchaseOrder(newOrder);
-    
-    if (orderId) {
       alert('Purchase order created successfully!');
       setShowCreateOrder(false);
-      loadData();
-    } else {
+      resetForm();
+    } catch (error) {
+      console.error('Error creating purchase order:', error);
       alert('Failed to create purchase order');
     }
   };
 
-  const handleUpdateOrderStatus = (orderId: string, newStatus: PurchaseOrder['status']) => {
-    const success = purchaseService.updatePurchaseOrder(orderId, { status: newStatus });
-    if (success) {
-      loadData();
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: Purchase['status']) => {
+    try {
+      await updatePurchaseMutation.mutateAsync({
+        id: orderId,
+        request: { status: newStatus }
+      });
+    } catch (error) {
+      console.error('Error updating purchase order:', error);
+      alert('Failed to update purchase order status');
     }
   };
 
-  const handleDeleteOrder = (orderId: string) => {
-    const success = purchaseService.deletePurchaseOrder(orderId);
-    if (success) {
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      // Backend doesn't have DELETE, so we CANCEL instead
+      await updatePurchaseMutation.mutateAsync({
+        id: orderId,
+        request: { status: 'CANCELLED' }
+      });
       setShowDeleteConfirm(null);
-      loadData();
-    } else {
-      alert('Cannot delete this purchase order');
+    } catch (error) {
+      console.error('Error cancelling purchase order:', error);
+      alert('Cannot cancel this purchase order');
     }
   };
 
-  const handleConfirmOrder = (order: PurchaseOrder) => {
+  const handleConfirmOrder = (order: Purchase) => {
     const confirmed = window.confirm(
-      `Confirm order ${order.orderNumber}?\n\n` +
-      `Supplier: ${order.supplierName}\n` +
-      `Items: ${order.items.length}\n` +
-      `Total: ${order.totalValue.toLocaleString()} UGX\n\n` +
-      `This will change the status from SENT to CONFIRMED.`
+      `Confirm order ${order.id}?\n\n` +
+      `Supplier ID: ${order.supplierId}\n` +
+      `Total: ${Number(order.totalAmount).toLocaleString()} UGX\n\n` +
+      `This will change the status to RECEIVED.`
     );
     
     if (confirmed) {
-      handleUpdateOrderStatus(order.id, 'confirmed');
+      handleUpdateOrderStatus(String(order.id), 'RECEIVED');
     }
   };
 
-  const handleReceiveOrder = (order: PurchaseOrder) => {
+  const handleReceiveOrder = (order: Purchase) => {
     const switchToReceiving = window.confirm(
-      `Navigate to Receiving page for order ${order.orderNumber}?\n\n` +
-      `Supplier: ${order.supplierName}\n` +
-      `Items: ${order.items.length}\n` +
-      `Total: ${order.totalValue.toLocaleString()} UGX\n\n` +
+      `Navigate to Receiving page for order ${order.id}?\n\n` +
+      `Supplier ID: ${order.supplierId}\n` +
+      `Total: ${Number(order.totalAmount).toLocaleString()} UGX\n\n` +
       `This will take you to the Receiving tab where you can process the delivery.`
     );
     
@@ -395,7 +400,11 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {purchaseOrders.length === 0 ? (
+          {isLoadingPurchases ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Loading purchase orders...
+            </div>
+          ) : purchaseOrders.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No purchase orders found. Create your first purchase order to get started.
             </div>
@@ -414,13 +423,13 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
               <TableBody>
                 {purchaseOrders.map(order => (
                   <TableRow key={order.id}>
-                    <TableCell className="font-medium">{order.orderNumber}</TableCell>
-                    <TableCell>{order.supplierName}</TableCell>
-                    <TableCell>{new Date(order.orderDate).toLocaleDateString()}</TableCell>
-                    <TableCell>{SettingsService.getInstance().formatCurrency(order.totalValue)}</TableCell>
+                    <TableCell className="font-medium">PO-{order.id}</TableCell>
+                    <TableCell>Supplier ID: {order.supplierId}</TableCell>
+                    <TableCell>{new Date(order.orderDate || order.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell>{SettingsService.getInstance().formatCurrency(Number(order.totalAmount))}</TableCell>
                     <TableCell>
                       <Badge variant={getStatusColor(order.status)}>
-                        {order.status.toUpperCase()}
+                        {order.status}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -432,37 +441,29 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
                         >
                           View
                         </Button>
-                        {order.status === 'draft' && (
+                        {order.status === 'PENDING' && (
                           <>
                             <Button
                               size="sm"
-                              onClick={() => handleUpdateOrderStatus(order.id, 'sent')}
+                              onClick={() => handleConfirmOrder(order)}
                             >
-                              Send
+                              Confirm
                             </Button>
                             <Button
                               size="sm"
                               variant="destructive"
-                              onClick={() => setShowDeleteConfirm(order.id)}
+                              onClick={() => setShowDeleteConfirm(String(order.id))}
                             >
-                              Delete
+                              Cancel
                             </Button>
                           </>
                         )}
-                        {order.status === 'sent' && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleConfirmOrder(order)}
-                          >
-                            ✅ Confirm
-                          </Button>
-                        )}
-                        {order.status === 'confirmed' && (
+                        {order.status === 'PARTIAL' && (
                           <Button
                             size="sm"
                             onClick={() => handleReceiveOrder(order)}
                           >
-                            📦 Receive
+                            📦 Receive More
                           </Button>
                         )}
                       </div>
@@ -496,8 +497,8 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
                       <SelectValue placeholder="Select supplier" />
                     </SelectTrigger>
                     <SelectContent>
-                      {suppliers.filter(s => s.isActive).map(supplier => (
-                        <SelectItem key={supplier.id} value={supplier.id}>
+                      {suppliersList.map(supplier => (
+                        <SelectItem key={supplier.id} value={String(supplier.id)}>
                           {supplier.name}
                         </SelectItem>
                       ))}
@@ -679,74 +680,37 @@ const PurchaseOrderManagement: React.FC<PurchaseOrderManagementProps> = ({ onNav
         <Dialog open={true} onOpenChange={() => setSelectedOrder(null)}>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto">
             <DialogHeader>
-              <DialogTitle>Purchase Order Details - {selectedOrder.orderNumber}</DialogTitle>
+              <DialogTitle>Purchase Order Details - PO-{selectedOrder.id}</DialogTitle>
             </DialogHeader>
             
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Supplier</Label>
-                  <p className="font-medium">{selectedOrder.supplierName}</p>
+                  <Label>Supplier ID</Label>
+                  <p className="font-medium">{selectedOrder.supplierId}</p>
                 </div>
                 <div>
                   <Label>Status</Label>
                   <Badge variant={getStatusColor(selectedOrder.status)}>
-                    {selectedOrder.status.toUpperCase()}
+                    {selectedOrder.status}
                   </Badge>
                 </div>
                 <div>
                   <Label>Order Date</Label>
-                  <p>{new Date(selectedOrder.orderDate).toLocaleDateString()}</p>
+                  <p>{new Date(selectedOrder.orderDate || selectedOrder.createdAt).toLocaleDateString()}</p>
                 </div>
                 <div>
                   <Label>Expected Delivery</Label>
-                  <p>{selectedOrder.expectedDeliveryDate ? 
-                      new Date(selectedOrder.expectedDeliveryDate).toLocaleDateString() : 'Not specified'}</p>
+                  <p>Not available in API yet</p>
                 </div>
-              </div>
-
-              <div>
-                <Label className="text-lg font-medium">Order Items</Label>
-                <Table className="mt-2">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Unit Cost</TableHead>
-                      <TableHead>Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedOrder.items.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{item.productName}</TableCell>
-                        <TableCell>{item.quantityOrdered}</TableCell>
-                        <TableCell>{SettingsService.getInstance().formatCurrency(item.unitCost)}</TableCell>
-                        <TableCell>{SettingsService.getInstance().formatCurrency(item.totalCost)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
               </div>
 
               <Card>
                 <CardContent className="pt-6">
                   <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>Subtotal:</span>
-                      <span>{SettingsService.getInstance().formatCurrency(selectedOrder.subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Tax:</span>
-                      <span>{SettingsService.getInstance().formatCurrency(selectedOrder.tax)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Shipping:</span>
-                      <span>{SettingsService.getInstance().formatCurrency(selectedOrder.shippingCost)}</span>
-                    </div>
                     <div className="flex justify-between font-bold text-lg border-t pt-2">
-                      <span>Total:</span>
-                      <span>{SettingsService.getInstance().formatCurrency(selectedOrder.totalValue)}</span>
+                      <span>Total Amount:</span>
+                      <span>{SettingsService.getInstance().formatCurrency(Number(selectedOrder.totalAmount))}</span>
                     </div>
                   </div>
                 </CardContent>
