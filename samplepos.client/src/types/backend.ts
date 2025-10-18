@@ -654,6 +654,83 @@ export interface CreditAdjustmentRequest {
 }
 
 // ============================================================
+// PURCHASES & SUPPLIERS
+// ============================================================
+
+/**
+ * Purchase status enum
+ */
+export type PurchaseStatus = 'PENDING' | 'RECEIVED' | 'PARTIAL' | 'CANCELLED';
+
+/**
+ * Purchase (matches Prisma schema)
+ */
+export interface Purchase {
+  id: number;
+  purchaseNumber: string;
+  supplierId: number;
+  orderDate: Date;
+  receivedDate?: Date | null;
+  status: PurchaseStatus;
+  subtotal: Decimal;
+  taxAmount: Decimal;
+  totalAmount: Decimal;
+  amountPaid: Decimal;
+  paymentMethod?: PaymentMethod | null;
+  notes?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  createdById: number;
+}
+
+/**
+ * Purchase Item (matches Prisma schema)
+ */
+export interface PurchaseItem {
+  id: number;
+  purchaseId: number;
+  productId: number;
+  quantity: Decimal;
+  unit: string;
+  quantityInBase: Decimal;
+  unitCost: Decimal;
+  totalCost: Decimal;
+  receivedQuantity: Decimal;
+}
+
+/**
+ * Supplier (matches Prisma schema)
+ */
+export interface Supplier {
+  id: number;
+  name: string;
+  contactPerson?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  taxId?: string | null;
+  paymentTerms?: string | null;
+  creditLimit?: Decimal | null;
+  currentBalance: Decimal;
+  isActive: boolean;
+  notes?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Supplier statistics
+ */
+export interface SupplierStats {
+  totalSuppliers: number;
+  activeSuppliers: number;
+  totalPurchases: Decimal;
+  totalBalance: Decimal;
+}
+
+// ============================================================
 // TYPE GUARDS
 // ============================================================
 
