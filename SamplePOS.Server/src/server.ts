@@ -52,8 +52,13 @@ app.use((req, res, next) => {
 // ROUTES
 // ============================================================================
 
+// Health check endpoints (both paths for compatibility)
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Mount all module routers
