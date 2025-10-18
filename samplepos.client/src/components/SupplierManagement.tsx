@@ -1,7 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { formatCurrency } from '../utils/currency';
-import PurchaseManagementService, { type SupplierPerformance } from '../services/PurchaseManagementService';
-import type { Supplier } from '../types';
+import { 
+  useSuppliers, 
+  useCreateSupplier, 
+  useUpdateSupplier, 
+  useDeleteSupplier 
+} from '../services/api/suppliersApi';
+import { usePurchases } from '../services/api/purchasesApi';
+import { 
+  calculateSupplierPerformance, 
+  type SupplierPerformance 
+} from '../utils/supplierPerformanceCalculator';
+import type { Supplier } from '../types/backend';
 
 // Import Shadcn UI components
 import {
@@ -37,8 +47,18 @@ import {
 } from "./ui/alert-dialog";
 
 const SupplierManagement: React.FC = () => {
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierPerformance, setSupplierPerformance] = useState<SupplierPerformance[]>([]);
+  // React Query hooks
+  const { data: suppliersData, isLoading: isLoadingSuppliers } = useSuppliers();
+  const { data: purchasesData, isLoading: isLoadingPurchases } = usePurchases();
+  const createSupplierMutation = useCreateSupplier();
+  const updateSupplierMutation = useUpdateSupplier();
+  const deleteSupplierMutation = useDeleteSupplier();
+
+  // Derived data
+  const suppliers = suppliersData?.data || [];
+  const purchases = purchasesData?.data || [];
+  const supplierPerformance = calculateSupplierPerformance(suppliers, purchases);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -56,17 +76,6 @@ const SupplierManagement: React.FC = () => {
   });
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-
-  const purchaseService = PurchaseManagementService.getInstance();
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = () => {
-    setSuppliers(purchaseService.getSuppliers());
-    setSupplierPerformance(purchaseService.getSupplierPerformance());
-  };
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -120,55 +129,71 @@ const SupplierManagement: React.FC = () => {
     setShowCreateModal(true);
   };
 
-  const handleSaveSupplier = () => {
+  const handleSaveSupplier = async () => {
     if (!validateForm()) {
       return;
     }
 
-    const supplierData: Supplier = {
-      id: editingSupplier?.id || `supplier-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: formData.name.trim(),
-      contactPerson: formData.contactPerson.trim() || undefined,
-      email: formData.email.trim() || undefined,
-      phone: formData.phone.trim() || undefined,
-      address: formData.address.trim() || undefined,
-      paymentTerms: formData.paymentTerms.trim() || undefined,
-      notes: formData.notes.trim() || undefined,
-      isActive: true,
-      createdAt: editingSupplier?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    const success = purchaseService.saveSupplier(supplierData);
-
-    if (success) {
-      alert(editingSupplier ? 'Supplier updated successfully!' : 'Supplier created successfully!');
+    try {
+      if (editingSupplier) {
+        // Update existing supplier
+        await updateSupplierMutation.mutateAsync({
+          id: String(editingSupplier.id),
+          request: {
+            name: formData.name.trim(),
+            contactPerson: formData.contactPerson.trim() || undefined,
+            email: formData.email.trim() || undefined,
+            phone: formData.phone.trim() || undefined,
+            address: formData.address.trim() || undefined,
+            paymentTerms: formData.paymentTerms.trim() || undefined,
+            notes: formData.notes.trim() || undefined,
+            isActive: true
+          }
+        });
+        alert('Supplier updated successfully!');
+      } else {
+        // Create new supplier
+        await createSupplierMutation.mutateAsync({
+          name: formData.name.trim(),
+          contactPerson: formData.contactPerson.trim() || undefined,
+          email: formData.email.trim() || undefined,
+          phone: formData.phone.trim() || undefined,
+          address: formData.address.trim() || undefined,
+          paymentTerms: formData.paymentTerms.trim() || undefined,
+          notes: formData.notes.trim() || undefined,
+          isActive: true
+        });
+        alert('Supplier created successfully!');
+      }
+      
       setShowCreateModal(false);
       resetForm();
       setEditingSupplier(null);
-      loadData();
-    } else {
+    } catch (error) {
+      console.error('Error saving supplier:', error);
       alert('Failed to save supplier');
     }
   };
 
-  const handleDeleteSupplier = (supplierId: string) => {
-    const success = purchaseService.deleteSupplier(supplierId);
-    
-    if (success) {
+  const handleDeleteSupplier = async (supplierId: string) => {
+    try {
+      await deleteSupplierMutation.mutateAsync(supplierId);
       setShowDeleteConfirm(null);
-      loadData();
-    } else {
+    } catch (error) {
+      console.error('Error deleting supplier:', error);
       alert('Cannot delete supplier. There may be active purchase orders.');
     }
   };
 
-  const handleToggleSupplierStatus = (supplier: Supplier) => {
-    const updatedSupplier = { ...supplier, isActive: !supplier.isActive };
-    const success = purchaseService.saveSupplier(updatedSupplier);
-    
-    if (success) {
-      loadData();
+  const handleToggleSupplierStatus = async (supplier: Supplier) => {
+    try {
+      await updateSupplierMutation.mutateAsync({
+        id: String(supplier.id),
+        request: { isActive: !supplier.isActive }
+      });
+    } catch (error) {
+      console.error('Error toggling supplier status:', error);
+      alert('Failed to update supplier status');
     }
   };
 
@@ -213,7 +238,11 @@ const SupplierManagement: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {suppliers.length === 0 ? (
+          {isLoadingSuppliers ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Loading suppliers...
+            </div>
+          ) : suppliers.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No suppliers found. Add your first supplier to get started.
             </div>
@@ -262,7 +291,7 @@ const SupplierManagement: React.FC = () => {
                         <Button
                           size="sm"
                           variant="destructive"
-                          onClick={() => setShowDeleteConfirm(supplier.id)}
+                          onClick={() => setShowDeleteConfirm(String(supplier.id))}
                         >
                           Delete
                         </Button>
@@ -285,7 +314,11 @@ const SupplierManagement: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {supplierPerformance.length === 0 ? (
+          {isLoadingSuppliers || isLoadingPurchases ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Loading performance data...
+            </div>
+          ) : supplierPerformance.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No performance data available. Performance will show after placing purchase orders.
             </div>
