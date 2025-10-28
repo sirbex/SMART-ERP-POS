@@ -1,10 +1,9 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { body } from 'express-validator';
+import jwt, { SignOptions } from 'jsonwebtoken';
+import { LoginSchema, RegisterSchema, ChangePasswordSchema } from '../validation/auth.js';
 import prisma from '../config/database.js';
 import { asyncHandler, createError } from '../middleware/errorHandler.js';
-import { validate } from '../middleware/validation.js';
 import logger from '../utils/logger.js';
 
 const router = Router();
@@ -13,15 +12,9 @@ const router = Router();
 // REGISTER
 // ============================================================================
 
-router.post('/register',
-  validate([
-    body('username').trim().isLength({ min: 3, max: 50 }).withMessage('Username must be 3-50 characters'),
-    body('email').isEmail().normalizeEmail().withMessage('Invalid email'),
-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-    body('fullName').trim().notEmpty().withMessage('Full name is required'),
-    body('role').optional().isIn(['ADMIN', 'MANAGER', 'CASHIER']).withMessage('Invalid role')
-  ]),
-  asyncHandler(async (req, res) => {
+router.post('/register', asyncHandler(async (req: Request, res: Response) => {
+    // Validate request body with Zod
+    const validatedData = RegisterSchema.parse(req.body);
     const { username, email, password, fullName, role = 'CASHIER' } = req.body;
 
     // Check if user exists
@@ -71,13 +64,10 @@ router.post('/register',
 // LOGIN
 // ============================================================================
 
-router.post('/login',
-  validate([
-    body('username').trim().notEmpty().withMessage('Username is required'),
-    body('password').notEmpty().withMessage('Password is required')
-  ]),
-  asyncHandler(async (req, res) => {
-    const { username, password } = req.body;
+router.post('/login', asyncHandler(async (req: Request, res: Response) => {
+    // Validate request body with Zod
+    const validatedData = LoginSchema.parse(req.body);
+    const { username, password } = validatedData;
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -106,7 +96,7 @@ router.post('/login',
         role: user.role
       },
       process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' } as any
     );
 
     logger.info(`User logged in: ${username}`);
@@ -130,7 +120,7 @@ router.post('/login',
 // ============================================================================
 
 router.get('/verify',
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
 
     if (!token) {
@@ -171,16 +161,18 @@ router.get('/verify',
 // CHANGE PASSWORD
 // ============================================================================
 
-router.post('/change-password',
-  validate([
-    body('username').trim().notEmpty(),
-    body('currentPassword').notEmpty(),
-    body('newPassword').isLength({ min: 6 })
-  ]),
-  asyncHandler(async (req, res) => {
-    const { username, currentPassword, newPassword } = req.body;
+router.post('/change-password', asyncHandler(async (req: Request, res: Response) => {
+    // Validate request body with Zod
+    const validatedData = ChangePasswordSchema.parse(req.body);
+    const { currentPassword, newPassword } = validatedData;
 
-    const user = await prisma.user.findUnique({ where: { username } });
+    // Get user from JWT token (assuming middleware sets req.user)
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw createError('Authentication required', 401);
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw createError('User not found', 404);
     }
@@ -197,10 +189,15 @@ router.post('/change-password',
       data: { passwordHash: newPasswordHash }
     });
 
-    logger.info(`Password changed for user: ${username}`);
+    logger.info(`Password changed for user: ${user.username}`);
 
     res.json({ message: 'Password changed successfully' });
   })
 );
 
 export default router;
+
+
+
+
+

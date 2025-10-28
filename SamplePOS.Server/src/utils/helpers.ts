@@ -150,3 +150,28 @@ export function parseDateRange(startDate?: string, endDate?: string): DateRange 
 
   return range;
 }
+
+/**
+ * Build search filter for Prisma queries
+ * Creates an OR clause for case-insensitive contains search across multiple fields
+ * 
+ * @param searchTerm - The search term to filter by
+ * @param fields - Array of field names to search in
+ * @param mode - Search mode, defaults to 'insensitive'
+ * @returns Array of filter conditions for Prisma OR clause
+ * 
+ * @example
+ * const where: any = {};
+ * if (search) {
+ *   where.OR = buildSearchFilter(search, ['name', 'phone', 'email']);
+ * }
+ */
+export function buildSearchFilter(
+  searchTerm: string,
+  fields: string[],
+  mode: 'insensitive' | 'default' = 'insensitive'
+): Array<Record<string, any>> {
+  return fields.map(field => ({
+    [field]: { contains: searchTerm, mode }
+  }));
+}

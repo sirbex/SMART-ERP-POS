@@ -1,9 +1,10 @@
-import { Router, Request, Response } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
+import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 import { Decimal } from '@prisma/client/runtime/library';
+import { CreateInstallmentPlanSchema, UpdateInstallmentSchema } from '../validation/installment.js';
+import { InstallmentPaymentSchema } from '../validation/payment.js';
 
 const router = Router();
 
@@ -14,31 +15,6 @@ router.use(authenticate);
 // VALIDATION SCHEMAS
 // ============================================================================
 
-const createInstallmentPlanValidation = [
-  body('customerId').isInt({ min: 1 }).withMessage('Valid customer ID required'),
-  body('saleId').isInt({ min: 1 }).withMessage('Valid sale ID required'),
-  body('totalAmount').isFloat({ min: 0.01 }).withMessage('Total amount must be positive'),
-  body('numberOfInstallments').isInt({ min: 2, max: 60 }).withMessage('Number of installments must be between 2 and 60'),
-  body('frequency').isIn(['WEEKLY', 'BIWEEKLY', 'MONTHLY']).withMessage('Frequency must be WEEKLY, BIWEEKLY, or MONTHLY'),
-  body('interestRate').optional().isFloat({ min: 0, max: 100 }).withMessage('Interest rate must be between 0 and 100'),
-  body('startDate').isISO8601().withMessage('Valid start date required'),
-  body('downPayment').optional().isFloat({ min: 0 }).withMessage('Down payment must be non-negative')
-];
-
-const recordPaymentValidation = [
-  param('planId').isInt({ min: 1 }).withMessage('Valid plan ID required'),
-  body('amount').isFloat({ min: 0.01 }).withMessage('Payment amount must be positive'),
-  body('paymentMethod').isIn(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'MOBILE_MONEY']).withMessage('Invalid payment method'),
-  body('paymentDate').optional().isISO8601().withMessage('Invalid payment date'),
-  body('reference').optional().isString().trim().notEmpty().withMessage('Reference must be non-empty string')
-];
-
-const updateStatusValidation = [
-  param('planId').isInt({ min: 1 }).withMessage('Valid plan ID required'),
-  body('status').isIn(['ACTIVE', 'COMPLETED', 'DEFAULTED', 'CANCELLED']).withMessage('Invalid status'),
-  body('reason').optional().isString().trim().notEmpty().withMessage('Reason must be non-empty string')
-];
-
 // ============================================================================
 // ENDPOINT 1: CREATE INSTALLMENT PLAN
 // POST /api/installments/create
@@ -46,28 +22,22 @@ const updateStatusValidation = [
 
 router.post(
   '/create',
-  createInstallmentPlanValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const {
-      customerId,
-      saleId,
-      totalAmount,
-      numberOfInstallments,
-      frequency,
-      interestRate = 0,
-      startDate,
-      downPayment = 0
-    } = req.body;
-
-    const userId = (req as any).user.userId;
-
     try {
+      // Validate request body with Zod
+      const validatedData = CreateInstallmentPlanSchema.parse(req.body);
+      const {
+        customerId,
+        saleId,
+        totalAmount,
+        numberOfInstallments,
+        frequency,
+        interestRate = 0,
+        startDate,
+        downPayment = 0
+      } = validatedData;
+
+      const userId = (req as any).user.userId;
       // Verify customer exists
       const customer = await prisma.customer.findUnique({
         where: { id: customerId }
@@ -104,7 +74,7 @@ router.post(
       const installmentAmount = totalWithInterest / numberOfInstallments;
 
       // Calculate end date based on frequency
-      const start = new Date(startDate);
+      const start = startDate ? new Date(startDate) : new Date();
       let endDate = new Date(start);
       
       switch (frequency) {
@@ -138,8 +108,9 @@ router.post(
         // Create the installment plan
         const plan = await tx.installmentPlan.create({
           data: {
-            customerId,
-            saleId,
+            planName: `Plan-${Date.now()}`,
+            customer: { connect: { id: customerId } },
+            sale: saleId ? { connect: { id: saleId } } : undefined,
             totalAmount: new Decimal(totalAmount),
             paidAmount: new Decimal(downPayment),
             outstandingAmount: new Decimal(totalWithInterest - downPayment),
@@ -152,7 +123,7 @@ router.post(
             status: downPayment >= totalAmount ? 'COMPLETED' : 'ACTIVE',
             interestRate: new Decimal(interestRate),
             lateFeesAccrued: new Decimal(0),
-            createdById: userId
+            createdBy: { connect: { id: userId } }
           }
         });
 
@@ -201,8 +172,8 @@ router.post(
               amount: new Decimal(downPayment),
               balance: customer.currentBalance ? new Decimal(customer.currentBalance).minus(downPayment) : new Decimal(0).minus(downPayment),
               description: `Down payment for installment plan #${plan.id}`,
-              reference: `INSTALLMENT-DOWN-${plan.id}`,
-              createdById: userId
+              referenceId: `INSTALLMENT-DOWN-${plan.id}`,
+              createdBy: userId
             }
           });
         }
@@ -258,18 +229,11 @@ router.post(
 
 router.get(
   '/customer/:id',
-  param('id').isInt({ min: 1 }).withMessage('Valid customer ID required'),
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const customerId = parseInt(req.params.id);
-    const status = req.query.status as string | undefined;
-
     try {
+      const customerId = req.params.id;
+      const status = req.query.status as string | undefined;
+
       const whereClause: any = { customerId };
       
       if (status) {
@@ -286,9 +250,9 @@ router.get(
           sale: {
             select: {
               id: true,
-              total: true,
-              date: true,
-              referenceNumber: true
+              totalAmount: true,
+              saleDate: true,
+              saleNumber: true
             }
           },
           payments: {
@@ -298,8 +262,7 @@ router.get(
             select: {
               id: true,
               username: true,
-              firstName: true,
-              lastName: true
+              fullName: true
             }
           }
         },
@@ -308,14 +271,14 @@ router.get(
 
       // Calculate summary for each plan
       const plansWithSummary = plans.map(plan => {
-        const totalPaid = plan.payments.reduce((sum, p) => sum + parseFloat(p.paidAmount.toString()), 0);
-        const totalPending = plan.payments.filter(p => p.status === 'PENDING').length;
-        const totalOverdue = plan.payments.filter(p => p.status === 'OVERDUE').length;
+        const totalPaid = (plan as any).payments.reduce((sum: number, p: any) => sum + parseFloat(p.paidAmount.toString()), 0);
+        const totalPending = (plan as any).payments.filter((p: any) => p.status === 'PENDING').length;
+        const totalOverdue = (plan as any).payments.filter((p: any) => p.status === 'OVERDUE').length;
 
         return {
           id: plan.id,
           saleId: plan.saleId,
-          saleReference: plan.sale.referenceNumber,
+          saleReference: (plan as any).sale.saleNumber,
           totalAmount: plan.totalAmount.toString(),
           paidAmount: plan.paidAmount.toString(),
           outstandingAmount: plan.outstandingAmount.toString(),
@@ -329,7 +292,7 @@ router.get(
           interestRate: plan.interestRate.toString(),
           lateFeesAccrued: plan.lateFeesAccrued.toString(),
           createdAt: plan.createdAt,
-          createdBy: plan.createdBy,
+          createdBy: (plan as any).createdBy,
           summary: {
             totalPaid,
             totalPending,
@@ -358,17 +321,9 @@ router.get(
 
 router.get(
   '/:planId',
-  param('planId').isInt({ min: 1 }).withMessage('Valid plan ID required'),
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const planId = parseInt(req.params.planId);
-
     try {
+      const planId = req.params.planId;
       const plan = await prisma.installmentPlan.findUnique({
         where: { id: planId },
         include: {
@@ -383,9 +338,9 @@ router.get(
           sale: {
             select: {
               id: true,
-              total: true,
-              date: true,
-              referenceNumber: true
+              totalAmount: true,
+              saleDate: true,
+              saleNumber: true
             }
           },
           payments: {
@@ -395,7 +350,7 @@ router.get(
                   id: true,
                   type: true,
                   amount: true,
-                  reference: true,
+                  referenceId: true,
                   createdAt: true
                 }
               },
@@ -403,8 +358,7 @@ router.get(
                 select: {
                   id: true,
                   username: true,
-                  firstName: true,
-                  lastName: true
+                  fullName: true
                 }
               }
             },
@@ -414,8 +368,7 @@ router.get(
             select: {
               id: true,
               username: true,
-              firstName: true,
-              lastName: true
+              fullName: true
             }
           }
         }
@@ -427,17 +380,17 @@ router.get(
       }
 
       // Calculate summary
-      const paidPayments = plan.payments.filter(p => p.status === 'PAID' || p.status === 'PARTIAL');
-      const pendingPayments = plan.payments.filter(p => p.status === 'PENDING');
-      const overduePayments = plan.payments.filter(p => p.status === 'OVERDUE');
-      const totalPaid = paidPayments.reduce((sum, p) => sum + parseFloat(p.paidAmount.toString()), 0);
-      const totalLateFeesAccrued = plan.payments.reduce((sum, p) => sum + parseFloat(p.lateFee?.toString() || '0'), 0);
+      const paidPayments = (plan as any).payments.filter((p: any) => p.status === 'PAID' || p.status === 'PARTIAL');
+      const pendingPayments = (plan as any).payments.filter((p: any) => p.status === 'PENDING');
+      const overduePayments = (plan as any).payments.filter((p: any) => p.status === 'OVERDUE');
+      const totalPaid = paidPayments.reduce((sum: number, p: any) => sum + parseFloat(p.paidAmount.toString()), 0);
+      const totalLateFeesAccrued = (plan as any).payments.reduce((sum: number, p: any) => sum + parseFloat(p.lateFee?.toString() || '0'), 0);
 
       res.json({
         plan: {
           id: plan.id,
-          customer: plan.customer,
-          sale: plan.sale,
+          customer: (plan as any).customer,
+          sale: (plan as any).sale,
           totalAmount: plan.totalAmount.toString(),
           paidAmount: plan.paidAmount.toString(),
           outstandingAmount: plan.outstandingAmount.toString(),
@@ -451,9 +404,9 @@ router.get(
           interestRate: plan.interestRate.toString(),
           lateFeesAccrued: plan.lateFeesAccrued.toString(),
           createdAt: plan.createdAt,
-          createdBy: plan.createdBy
+          createdBy: (plan as any).createdBy
         },
-        payments: plan.payments.map(p => ({
+        payments: (plan as any).payments.map((p: any) => ({
           id: p.id,
           installmentNumber: p.installmentNumber,
           dueDate: p.dueDate,
@@ -490,19 +443,21 @@ router.get(
 
 router.post(
   '/:planId/payment',
-  recordPaymentValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const planId = parseInt(req.params.planId);
-    const { amount, paymentMethod, paymentDate, reference } = req.body;
-    const userId = (req as any).user.userId;
-
     try {
+      // Validate request body with Zod
+      const validatedData = InstallmentPaymentSchema.parse(req.body);
+
+      const planId = req.params.planId;
+      const { amount, paymentMethod: rawPaymentMethod, reference } = validatedData;
+      
+      // Map payment methods to Prisma enum values
+      const paymentMethod = rawPaymentMethod === 'MOBILE_MONEY' || rawPaymentMethod === 'CHEQUE' || rawPaymentMethod === 'OTHER' 
+        ? 'BANK_TRANSFER' as const
+        : rawPaymentMethod;
+      
+      const paymentDate = new Date(); // Use current date
+      const userId = (req as any).user.userId;
       const plan = await prisma.installmentPlan.findUnique({
         where: { id: planId },
         include: {
@@ -530,7 +485,7 @@ router.post(
 
       const paidDate = paymentDate ? new Date(paymentDate) : new Date();
       let remainingAmount = amount;
-      const updatedPayments = [];
+      const updatedPayments: any[] = [];
 
       // Process payment in a transaction
       const result = await prisma.$transaction(async (tx) => {
@@ -618,8 +573,8 @@ router.post(
               ? new Decimal(plan.customer.currentBalance).minus(amount)
               : new Decimal(0).minus(amount),
             description: `Installment payment for plan #${planId}`,
-            reference: reference || `INSTALLMENT-${planId}-${Date.now()}`,
-            createdById: userId
+            referenceId: reference || `INSTALLMENT-${planId}-${Date.now()}`,
+            createdBy: userId
           }
         });
 
@@ -632,14 +587,16 @@ router.post(
         }
 
         // Update sale payment tracking
-        await tx.sale.update({
-          where: { id: plan.saleId },
-          data: {
-            amountPaid: { increment: amount },
-            amountOutstanding: { decrement: amount },
-            paymentStatus: allPaid ? 'PAID' : 'INSTALLMENT'
-          }
-        });
+        if (plan.saleId) {
+          await tx.sale.update({
+            where: { id: plan.saleId },
+            data: {
+              amountPaid: { increment: amount },
+              amountOutstanding: { decrement: amount },
+              paymentStatus: allPaid ? 'PAID' : 'INSTALLMENT'
+            }
+          });
+        }
 
         return { updatedPlan, transaction, updatedPayments };
       });
@@ -676,19 +633,14 @@ router.post(
 
 router.put(
   '/:planId/status',
-  updateStatusValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const planId = parseInt(req.params.planId);
-    const { status, reason } = req.body;
-    const userId = (req as any).user.userId;
-
     try {
+      // Validate request body with Zod  
+      const validatedData = UpdateInstallmentSchema.parse(req.body);
+      
+      const planId = req.params.planId;
+      const { status, notes: reason } = validatedData;
+      const userId = (req as any).user.userId;
       const plan = await prisma.installmentPlan.findUnique({
         where: { id: planId },
         include: {
@@ -703,12 +655,12 @@ router.put(
       }
 
       // Validate status transitions
-      if (plan.status === 'COMPLETED' && status !== 'COMPLETED') {
+      if (plan.status === 'COMPLETED' && status && (status as string) !== 'COMPLETED') {
         res.status(400).json({ error: 'Cannot change status of completed plan' });
         return;
       }
 
-      if (status === 'COMPLETED' && parseFloat(plan.outstandingAmount.toString()) > 0) {
+      if (status && status === 'PAID' && parseFloat(plan.outstandingAmount.toString()) > 0) {
         res.status(400).json({ error: 'Cannot mark plan as completed with outstanding balance' });
         return;
       }
@@ -736,16 +688,18 @@ router.put(
           });
 
           // Update sale status
-          await tx.sale.update({
-            where: { id: plan.saleId },
-            data: {
-              paymentStatus: 'CANCELLED'
-            }
-          });
+          if (plan.saleId) {
+            await tx.sale.update({
+              where: { id: plan.saleId },
+              data: {
+                paymentStatus: 'CANCELLED'
+              }
+            });
+          }
         }
 
         // If defaulted, mark overdue payments
-        if (status === 'DEFAULTED') {
+        if (status && (status as string) === 'DEFAULTED') {
           await tx.installmentPayment.updateMany({
             where: {
               installmentPlanId: planId,
@@ -766,8 +720,8 @@ router.put(
             amount: new Decimal(0),
             balance: plan.customer.currentBalance || new Decimal(0),
             description: `Installment plan #${planId} status changed to ${status}${reason ? `: ${reason}` : ''}`,
-            reference: `STATUS-CHANGE-${planId}-${Date.now()}`,
-            createdById: userId
+            referenceId: `STATUS-CHANGE-${planId}-${Date.now()}`,
+            createdBy: userId
           }
         });
 
@@ -800,3 +754,15 @@ router.put(
 );
 
 export default router;
+
+
+
+
+
+
+
+
+
+
+
+

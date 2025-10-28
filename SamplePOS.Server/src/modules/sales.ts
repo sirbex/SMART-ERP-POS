@@ -1,43 +1,22 @@
-import { Router } from 'express';
-import prisma from '@prisma/client';
+import { Router, Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
 import { authenticate, authorize } from '../middleware/auth.js';
-import { validate } from '../middleware/validation.js';
-import { body, query } from 'express-validator';
 import logger from '../utils/logger.js';
-import { parsePagination, buildPaginationResponse, generateDocumentNumber, parseFilters } from '../utils/helpers.js';
+import { parsePagination, buildPaginationResponse, generateDocumentNumber } from '../utils/helpers.js';
 import { calculateFIFO, createBatchUpdates } from '../utils/fifoCalculator.js';
-import { convertToBaseUnit } from '../utils/uomConverter.js';
+import { convertToBaseUnit as legacyConvertToBaseUnit } from '../utils/uomConverter.js';
+import { convertToBaseUnit, calculatePriceForUoM, validateUoMForProduct } from '../utils/uomService.js';
+import { CreateSaleSchema, RefundSaleSchema } from '../validation/sale.js';
 
 const router = Router();
 
 // Validation schemas
-const createSaleValidation = [
-  body('customerId').optional().isString(),
-  body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
-  body('items.*.productId').isString().withMessage('Product ID is required'),
-  body('items.*.quantity').isDecimal({ decimal_digits: '0,4' }).withMessage('Valid quantity required'),
-  body('items.*.unit').optional().isString(),
-  body('items.*.unitPrice').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('items.*.discount').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('payments').isArray({ min: 1 }).withMessage('At least one payment is required'),
-  body('payments.*.method').isIn(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'BANK_TRANSFER']),
-  body('payments.*.amount').isDecimal({ decimal_digits: '0,2' }).withMessage('Valid amount required'),
-  body('payments.*.reference').optional().isString(),
-  body('discount').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('notes').optional().isString(),
-];
-
-const updateSaleValidation = [
-  body('status').optional().isIn(['PENDING', 'COMPLETED', 'CANCELLED', 'REFUNDED']),
-  body('notes').optional().isString(),
-];
-
 // GET /api/sales - List all sales with pagination and filters
 router.get(
   '/',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
       const { search, customerId, status, startDate, endDate, cashierId } = req.query;
@@ -104,9 +83,9 @@ router.get(
         prisma.sale.count({ where }),
       ]);
 
-      logger.info(`Listed ${sales.length} sales`, { userId: req.user?.id });
+      logger.info(`Listed ${sales.length} sales`, { userId: (req as any).user?.id });
 
-      res.json(buildPaginationResponse(sales, total, page, limit));
+      res.json(buildPaginationResponse(sales, total, { page, limit, skip }));
     } catch (error) {
       next(error);
     }
@@ -117,7 +96,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
 
@@ -125,7 +104,7 @@ router.get(
         where: { id },
         include: {
           customer: true,
-          cashier: {
+          createdBy: {
             select: { id: true, username: true, fullName: true, role: true },
           },
           items: {
@@ -134,10 +113,10 @@ router.get(
                 select: {
                   id: true,
                   name: true,
-                  sku: true,
                   barcode: true,
                   baseUnit: true,
-                  alternateUnits: true,
+                  alternateUnit: true,
+                  conversionFactor: true,
                 },
               },
             },
@@ -150,7 +129,7 @@ router.get(
         return res.status(404).json({ error: 'Sale not found' });
       }
 
-      logger.info(`Retrieved sale: ${sale.invoiceNumber}`, { userId: req.user?.id });
+      logger.info(`Retrieved sale: ${sale.saleNumber}`, { userId: (req as any).user?.id });
 
       res.json(sale);
     } catch (error) {
@@ -163,12 +142,12 @@ router.get(
 router.post(
   '/',
   authenticate,
-  createSaleValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Validate request body with Zod
+      const validatedData = CreateSaleSchema.parse(req.body);
       const { customerId, items, payments, discount, notes } = req.body;
-      const cashierId = req.user!.id;
+      const cashierId = (req as any).user!.id;
 
       // Validate customer if provided
       if (customerId) {
@@ -179,16 +158,22 @@ router.post(
       }
 
       // Process sale items and calculate totals
-      const processedItems = [];
+      const processedItems: any[] = [];
       let subtotal = new Prisma.Decimal(0);
 
       for (const item of items) {
         const product = await prisma.product.findUnique({
           where: { id: item.productId },
           include: {
-            batches: {
-              where: { quantity: { gt: 0 } },
-              orderBy: { purchaseDate: 'asc' }, // FIFO
+            stockBatches: {
+              where: { quantityRemaining: { gt: 0 } },
+              orderBy: { receivedDate: 'asc' }, // FIFO
+            },
+            productUoMs: {
+              where: { isSaleAllowed: true },
+              include: {
+                uom: true,
+              },
             },
           },
         });
@@ -198,60 +183,100 @@ router.post(
         }
 
         if (!product.isActive) {
-          return res.status(400).json({ error: `Product is inactive: ${product.name}` });
+          return res.status(400).json({ 
+            error: `Product "${product.name}" is inactive and cannot be sold. Please activate the product first or remove it from the sale.` 
+          });
         }
 
-        // Convert quantity to base unit
-        const unit = item.unit || product.baseUnit;
-        const quantityInBaseUnit = convertToBaseUnit(
-          parseFloat(item.quantity),
-          unit,
-          product.baseUnit,
-          product.alternateUnits as any[]
-        );
+        // Handle UoM conversion
+        let quantityInBaseUnit: Prisma.Decimal;
+        let unitPrice: Prisma.Decimal;
+        let actualUnit: string;
+        let uomId: string | null = item.uomId || null;
+
+        if (item.uomId && product.productUoMs && product.productUoMs.length > 0) {
+          // New UoM system: validate and convert using UoM service
+          try {
+            await validateUoMForProduct(product.id, item.uomId, 'SALE');
+            
+            const conversionResult = await convertToBaseUnit(
+              product as any,
+              new Prisma.Decimal(item.quantity),
+              item.uomId
+            );
+            
+            quantityInBaseUnit = conversionResult.quantityInBaseUnit;
+            actualUnit = conversionResult.unit;
+
+            // Calculate price for this UoM using product's base selling price
+            // The calculatePriceForUoM function will use manual unitPrice if set in ProductUoM
+            const priceCalc = await calculatePriceForUoM(
+              product.sellingPrice,
+              new Prisma.Decimal(item.quantity),
+              item.uomId,
+              product as any
+            );
+            
+            // Use calculated price (which may be manual override from ProductUoM)
+            unitPrice = priceCalc.unitPrice;
+          } catch (error: any) {
+            return res.status(400).json({ 
+              error: `UoM validation failed for ${product.name}: ${error.message}` 
+            });
+          }
+        } else {
+          // Legacy system: use old converter for backward compatibility
+          const unit = item.unit || product.baseUnit;
+          quantityInBaseUnit = new Prisma.Decimal(
+            legacyConvertToBaseUnit(
+              product as any,
+              parseFloat(item.quantity),
+              unit
+            )
+          );
+          actualUnit = unit;
+          unitPrice = item.unitPrice
+            ? new Prisma.Decimal(item.unitPrice)
+            : product.sellingPrice;
+        }
 
         // Check stock availability
         const totalStock = await prisma.stockBatch.aggregate({
-          where: { productId: product.id, quantity: { gt: 0 } },
-          _sum: { quantity: true },
+          where: { productId: product.id, quantityRemaining: { gt: 0 } },
+          _sum: { quantityRemaining: true },
         });
 
-        const availableStock = totalStock._sum.quantity || new Prisma.Decimal(0);
+        const availableStock = totalStock._sum?.quantityRemaining || new Prisma.Decimal(0);
 
-        if (product.trackInventory && !product.allowNegativeStock) {
-          if (availableStock.lt(quantityInBaseUnit)) {
-            return res.status(400).json({
-              error: `Insufficient stock for ${product.name}. Available: ${availableStock}, Required: ${quantityInBaseUnit}`,
-            });
-          }
+        // Check stock availability
+        if (availableStock.lt(quantityInBaseUnit)) {
+          return res.status(400).json({
+            error: `Insufficient stock for ${product.name}. Available: ${availableStock}, Required: ${quantityInBaseUnit}`,
+          });
         }
 
         // Calculate FIFO cost
-        const fifoResult = calculateFIFO(product.batches, new Prisma.Decimal(quantityInBaseUnit));
+        const fifoResult = calculateFIFO(product.stockBatches, quantityInBaseUnit);
         const unitCost = fifoResult.totalCost.div(quantityInBaseUnit);
 
-        // Use provided unit price or default to product selling price
-        const unitPrice = item.unitPrice
-          ? new Prisma.Decimal(item.unitPrice)
-          : product.sellingPrice;
-
         const itemDiscount = item.discount ? new Prisma.Decimal(item.discount) : new Prisma.Decimal(0);
-        const lineTotal = unitPrice.mul(item.quantity).minus(itemDiscount);
+        const total = unitPrice.mul(item.quantity).minus(itemDiscount);
 
         processedItems.push({
           product,
           productId: product.id,
           quantity: new Prisma.Decimal(item.quantity),
-          unit,
-          quantityInBaseUnit: new Prisma.Decimal(quantityInBaseUnit),
+          unit: actualUnit,
+          uomId,
+          quantityInBaseUnit,
           unitPrice,
           unitCost,
           discount: itemDiscount,
-          lineTotal,
+          total,
           fifoResult,
         });
 
-        subtotal = subtotal.add(lineTotal);
+        subtotal = subtotal.add(total);
       }
 
       // Calculate totals
@@ -261,8 +286,8 @@ router.post(
       // Calculate tax (using weighted average of product tax rates)
       let totalTax = new Prisma.Decimal(0);
       for (const item of processedItems) {
-        const taxableAmount = item.lineTotal;
-        const tax = taxableAmount.mul(item.product.taxRate).div(100);
+        const taxableAmount = item.total;
+        const tax = taxableAmount.mul(item.product.taxRate || 0).div(100);
         totalTax = totalTax.add(tax);
       }
 
@@ -292,30 +317,80 @@ router.post(
       const invoiceNumber = await generateDocumentNumber('INV');
 
       // Create sale transaction
-      const sale = await prisma.$transaction(async (tx) => {
+      const sale = await prisma.$transaction(async (tx: any) => {
+        // Generate sale number with database-aware sequence
+        const today = new Date();
+        const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+        
+        // Find the last sale with the correct format (SALE-YYYYMMDD-NNNNNN)
+        const prefix = `SALE-${dateStr}-`;
+        const allSales = await tx.sale.findMany({
+          where: { saleNumber: { startsWith: prefix } },
+          select: { saleNumber: true },
+          orderBy: { createdAt: 'desc' }
+        });
+        
+        // Find the highest sequence number from correctly formatted sale numbers
+        let maxSequence = 0;
+        for (const sale of allSales) {
+          const parts = sale.saleNumber.split('-');
+          // Only accept format: SALE-YYYYMMDD-NNNNNN (exactly 3 parts)
+          if (parts.length === 3 && parts[0] === 'SALE' && parts[1] === dateStr) {
+            const seqNum = parseInt(parts[2], 10);
+            if (!isNaN(seqNum) && seqNum > maxSequence) {
+              maxSequence = seqNum;
+            }
+          }
+        }
+        
+        const sequence = maxSequence + 1;
+        const saleNumber = `SALE-${dateStr}-${sequence.toString().padStart(6, '0')}`;
+
         // Create sale
         const newSale = await tx.sale.create({
           data: {
-            invoiceNumber,
-            customerId: customerId || null,
-            cashierId,
+            saleNumber,
+            customer: customerId ? { connect: { id: customerId } } : undefined,
+            createdBy: { connect: { id: cashierId } },
             saleDate: new Date(),
             subtotal,
             discount: saleDiscount,
-            tax: totalTax,
+            taxAmount: totalTax,
             totalAmount,
             status: 'COMPLETED',
             notes,
             items: {
-              create: processedItems.map((item) => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                unit: item.unit,
-                unitPrice: item.unitPrice,
-                unitCost: item.unitCost,
-                discount: item.discount,
-                lineTotal: item.lineTotal,
-              })),
+              create: processedItems.map((item) => {
+                // Calculate costs and profit
+                const itemTax = item.total.mul(item.product.taxRate || 0).div(100);
+                const itemCostTotal = item.fifoResult.totalCost;
+                const itemProfit = item.total.sub(itemCostTotal);
+                const profitMargin = item.total.gt(0) 
+                  ? itemProfit.div(item.total) // Store as decimal (0.25 = 25%), not percentage
+                  : new Prisma.Decimal(0);
+
+                return {
+                  product: { connect: { id: item.productId } },
+                  quantity: item.quantity,
+                  quantityInBase: item.quantityInBaseUnit,
+                  unit: item.unit,
+                  unitPrice: item.unitPrice,
+                  unitCost: item.unitCost,
+                  discount: item.discount,
+                  subtotal: item.total,
+                  taxRate: item.product.taxRate || new Prisma.Decimal(0),
+                  taxAmount: itemTax,
+                  total: item.total.add(itemTax),
+                  costTotal: itemCostTotal,
+                  lineCost: itemCostTotal,
+                  profit: itemProfit,
+                  lineProfit: itemProfit,
+                  profitMargin: profitMargin,
+                  ...(item.fifoResult.allocations[0]?.batchId && {
+                    batch: { connect: { id: item.fifoResult.allocations[0].batchId } }
+                  }), // Connect to primary batch used
+                };
+              }),
             },
             payments: {
               create: payments.map((p: any) => ({
@@ -331,21 +406,56 @@ router.post(
           },
         });
 
-        // Update stock batches (FIFO)
+        // Update stock batches (FIFO) and create stock movements
         for (const item of processedItems) {
-          if (item.product.trackInventory) {
-            const batchUpdates = createBatchUpdates(
-              item.fifoResult.batches,
-              item.quantityInBaseUnit
-            );
+          // Get product's current stock before update
+          const productBefore = await tx.product.findUnique({
+            where: { id: item.productId },
+            select: { currentStock: true }
+          });
+          const beforeQty = productBefore?.currentStock || new Prisma.Decimal(0);
+          const afterQty = beforeQty.sub(item.quantityInBaseUnit);
 
-            for (const update of batchUpdates) {
-              await tx.stockBatch.update({
-                where: { id: update.batchId },
-                data: { quantity: update.newQuantity },
-              });
-            }
+          // Use the correct property: allocations, not batches
+          const batchUpdates = createBatchUpdates(
+            item.fifoResult.allocations
+          );
+
+          // Apply batch updates and create stock movements for each batch
+          for (let i = 0; i < batchUpdates.length; i++) {
+            const update = batchUpdates[i];
+            const allocation = item.fifoResult.allocations[i];
+            
+            await tx.stockBatch.update(update);
+
+            // Create stock movement record for audit trail (without batchId since it references InventoryBatch, not StockBatch)
+            const movementNumber = `SM-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now()}-${i}`;
+            await tx.stockMovement.create({
+              data: {
+                movementNumber,
+                productId: item.productId,
+                batchId: null, // StockMovement.batchId references InventoryBatch, not StockBatch
+                movementType: 'OUT',
+                quantity: allocation.quantity,
+                beforeQuantity: beforeQty,
+                afterQuantity: afterQty,
+                performedById: cashierId,
+                reference: newSale.saleNumber,
+                reason: 'SALE',
+                notes: `Product sold via POS transaction (StockBatch: ${allocation.batchId})`,
+              }
+            });
           }
+
+          // Update product's current stock
+          await tx.product.update({
+            where: { id: item.productId },
+            data: {
+              currentStock: {
+                decrement: item.quantityInBaseUnit,
+              },
+            },
+          });
         }
 
         // Handle credit payment - update customer balance
@@ -368,7 +478,7 @@ router.post(
           await tx.customer.update({
             where: { id: customerId },
             data: {
-              creditBalance: { increment: creditAmount },
+              currentBalance: { increment: creditAmount },
             },
           });
         }
@@ -376,27 +486,68 @@ router.post(
         return newSale;
       });
 
-      logger.info(`Created sale: ${sale.invoiceNumber}`, {
+      logger.info(`Created sale: ${sale.saleNumber}`, {
         userId: cashierId,
         totalAmount: sale.totalAmount.toString(),
       });
 
-      // Return full sale details
+      // Fetch full sale details with all relations for the response
       const fullSale = await prisma.sale.findUnique({
         where: { id: sale.id },
         include: {
           customer: true,
-          cashier: { select: { id: true, username: true, fullName: true } },
+          createdBy: { select: { id: true, username: true, fullName: true } },
           items: {
             include: {
-              product: { select: { id: true, name: true, sku: true, baseUnit: true } },
+              product: { select: { id: true, name: true, barcode: true, baseUnit: true } },
             },
           },
           payments: true,
         },
       });
 
-      res.status(201).json(fullSale);
+      // Transform to match frontend Transaction interface
+      const response = {
+        ...fullSale,
+        id: fullSale!.id,
+        invoiceNumber: fullSale!.saleNumber,
+        customerId: fullSale!.customerId,
+        customerName: fullSale!.customer?.name,
+        items: fullSale!.items.map((item: any) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product.name,
+          name: item.product.name,
+          quantity: Number(item.quantity),
+          unit: item.unit,
+          unitPrice: Number(item.unitPrice),
+          price: Number(item.unitPrice),
+          discount: Number(item.discount),
+          subtotal: Number(item.subtotal),
+          tax: Number(item.taxAmount),
+          total: Number(item.total),
+          lineTotal: Number(item.total),
+        })),
+        subtotal: Number(fullSale!.subtotal),
+        tax: Number(fullSale!.taxAmount),
+        taxAmount: Number(fullSale!.taxAmount),
+        discount: Number(fullSale!.discount),
+        discountAmount: Number(fullSale!.discount),
+        total: Number(fullSale!.totalAmount),
+        totalAmount: Number(fullSale!.totalAmount),
+        paymentStatus: 'paid',
+        paymentMethod: fullSale!.payments[0]?.method || 'CASH',
+        amountPaid: Number(fullSale!.payments[0]?.amount || fullSale!.totalAmount),
+        saleDate: fullSale!.saleDate.toISOString(),
+        date: fullSale!.saleDate.toISOString(),
+        timestamp: fullSale!.saleDate.toISOString(),
+        status: fullSale!.status,
+        notes: fullSale!.notes,
+        createdAt: fullSale!.createdAt.toISOString(),
+      };
+
+      // Return transformed sale object matching frontend Transaction interface
+      res.status(201).json(response);
     } catch (error) {
       next(error);
     }
@@ -408,10 +559,10 @@ router.put(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  updateSaleValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Validate request body with Zod
+      const validatedData = CreateSaleSchema.parse(req.body);
       const { id } = req.params;
       const { status, notes } = req.body;
 
@@ -440,17 +591,17 @@ router.put(
         data: updateData,
         include: {
           customer: true,
-          cashier: { select: { id: true, username: true, fullName: true } },
+          createdBy: { select: { id: true, username: true, fullName: true } },
           items: {
             include: {
-              product: { select: { id: true, name: true, sku: true, baseUnit: true } },
+              product: { select: { id: true, name: true, barcode: true, baseUnit: true } },
             },
           },
           payments: true,
         },
       });
 
-      logger.info(`Updated sale: ${sale.invoiceNumber}`, { userId: req.user?.id });
+      logger.info(`Updated sale: ${sale.saleNumber}`, { userId: (req as any).user?.id });
 
       res.json(sale);
     } catch (error) {
@@ -464,8 +615,10 @@ router.post(
   '/:id/cancel',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Validate request body with Zod
+      const validatedData = CreateSaleSchema.parse(req.body);
       const { id } = req.params;
       const { reason } = req.body;
 
@@ -489,7 +642,7 @@ router.post(
       }
 
       // Cancel sale and restore stock
-      const cancelledSale = await prisma.$transaction(async (tx) => {
+      const cancelledSale = await prisma.$transaction(async (tx: any) => {
         // Update sale status
         const updated = await tx.sale.update({
           where: { id },
@@ -499,26 +652,24 @@ router.post(
           },
         });
 
-        // Restore stock for tracked products
+        // Restore stock for returned products
         for (const item of sale.items) {
-          if (item.product.trackInventory) {
-            // Create a new batch for the returned stock
-            await tx.stockBatch.create({
-              data: {
-                productId: item.productId,
-                quantity: item.quantity,
-                unitCost: item.unitCost,
-                purchaseDate: new Date(),
-                expiryDate: null,
-                batchNumber: `RETURN-${sale.invoiceNumber}`,
-                purchaseId: null,
-              },
-            });
-          }
+          // Create a new batch for the returned stock
+          await tx.stockBatch.create({
+            data: {
+              product: { connect: { id: item.productId } },
+              quantityReceived: item.quantity,
+              quantityRemaining: item.quantity,
+              unitCost: item.unitCost,
+              receivedDate: new Date(),
+              expiryDate: null,
+              batchNumber: `RETURN-${sale.saleNumber}`,
+            },
+          });
         }
 
         // Reverse customer credit if applicable
-        const creditPayment = sale.payments.find((p) => p.method === 'CREDIT');
+        const creditPayment = sale.payments.find((p: any) => p.method === 'CREDIT');
         if (creditPayment && sale.customerId) {
           await tx.customerTransaction.create({
             data: {
@@ -526,7 +677,7 @@ router.post(
               type: 'PAYMENT',
               amount: creditPayment.amount.neg(),
               balance: new Prisma.Decimal(0),
-              description: `Sale cancellation - ${sale.invoiceNumber}`,
+              description: `Sale cancellation - ${sale.saleNumber}`,
               referenceId: sale.id,
             },
           });
@@ -534,7 +685,7 @@ router.post(
           await tx.customer.update({
             where: { id: sale.customerId },
             data: {
-              creditBalance: { decrement: creditPayment.amount },
+              currentBalance: { decrement: creditPayment.amount },
             },
           });
         }
@@ -542,8 +693,8 @@ router.post(
         return updated;
       });
 
-      logger.info(`Cancelled sale: ${sale.invoiceNumber}`, {
-        userId: req.user?.id,
+      logger.info(`Cancelled sale: ${sale.saleNumber}`, {
+        userId: (req as any).user?.id,
         reason,
       });
 
@@ -559,8 +710,10 @@ router.get(
   '/stats/daily',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Validate request body with Zod
+      const validatedData = CreateSaleSchema.parse(req.body);
       const { date } = req.query;
       const targetDate = date ? new Date(date as string) : new Date();
       
@@ -580,7 +733,7 @@ router.get(
           _sum: {
             subtotal: true,
             discount: true,
-            tax: true,
+            taxAmount: true,
             totalAmount: true,
           },
         }),
@@ -594,10 +747,10 @@ router.get(
           },
           _sum: {
             quantity: true,
-            lineTotal: true,
+            total: true,
           },
           orderBy: {
-            _sum: { lineTotal: 'desc' },
+            _sum: { total: 'desc' },
           },
           take: 10,
         }),
@@ -605,28 +758,28 @@ router.get(
 
       // Get product details for top products
       const topProductsWithDetails = await Promise.all(
-        topProducts.map(async (item) => {
+        topProducts.map(async (item: any) => {
           const product = await prisma.product.findUnique({
             where: { id: item.productId },
-            select: { id: true, name: true, sku: true },
+            select: { id: true, name: true, barcode: true },
           });
           return {
             product,
-            quantitySold: item._sum.quantity,
-            totalSales: item._sum.lineTotal,
+            quantitySold: item._sum?.quantity,
+            totalSales: item._sum?.total,
           };
         })
       );
 
-      logger.info('Retrieved daily sales stats', { userId: req.user?.id });
+      logger.info('Retrieved daily sales stats', { userId: (req as any).user?.id });
 
       res.json({
         date: targetDate,
         totalSales: salesStats._count,
-        subtotal: salesStats._sum.subtotal || new Prisma.Decimal(0),
-        discount: salesStats._sum.discount || new Prisma.Decimal(0),
-        tax: salesStats._sum.tax || new Prisma.Decimal(0),
-        totalAmount: salesStats._sum.totalAmount || new Prisma.Decimal(0),
+        subtotal: salesStats._sum?.subtotal || new Prisma.Decimal(0),
+        discount: salesStats._sum?.discount || new Prisma.Decimal(0),
+        tax: salesStats._sum?.taxAmount || new Prisma.Decimal(0),
+        totalAmount: salesStats._sum?.totalAmount || new Prisma.Decimal(0),
         topProducts: topProductsWithDetails,
       });
     } catch (error) {
@@ -640,8 +793,10 @@ router.get(
   '/stats/summary',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Validate request body with Zod
+      const validatedData = CreateSaleSchema.parse(req.body);
       const { startDate, endDate } = req.query;
       
       const where: any = { status: 'COMPLETED' };
@@ -663,7 +818,7 @@ router.get(
           _sum: {
             subtotal: true,
             discount: true,
-            tax: true,
+            taxAmount: true,
             totalAmount: true,
           },
           _avg: { totalAmount: true },
@@ -678,16 +833,16 @@ router.get(
         }),
       ]);
 
-      logger.info('Retrieved sales summary', { userId: req.user?.id });
+      logger.info('Retrieved sales summary', { userId: (req as any).user?.id });
 
       res.json({
         period: { startDate, endDate },
         totalSales: salesStats._count,
-        subtotal: salesStats._sum.subtotal || new Prisma.Decimal(0),
-        discount: salesStats._sum.discount || new Prisma.Decimal(0),
-        tax: salesStats._sum.tax || new Prisma.Decimal(0),
-        totalAmount: salesStats._sum.totalAmount || new Prisma.Decimal(0),
-        averageSale: salesStats._avg.totalAmount || new Prisma.Decimal(0),
+        subtotal: salesStats._sum?.subtotal || new Prisma.Decimal(0),
+        discount: salesStats._sum?.discount || new Prisma.Decimal(0),
+        tax: salesStats._sum?.taxAmount || new Prisma.Decimal(0),
+        totalAmount: salesStats._sum?.totalAmount || new Prisma.Decimal(0),
+        averageSale: salesStats._avg?.totalAmount || new Prisma.Decimal(0),
         paymentMethods: paymentStats,
       });
     } catch (error) {
@@ -697,3 +852,12 @@ router.get(
 );
 
 export default router;
+
+
+
+
+
+
+
+
+

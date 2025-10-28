@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { query, param, validationResult } from 'express-validator';
 import prisma from '../config/database.js';
 import logger from '../utils/logger.js';
 import { authenticate } from '../middleware/auth.js';
@@ -43,13 +42,8 @@ function getDateRange(startDate?: string, endDate?: string) {
 }
 
 // Endpoint 1: GET /api/reports/aging - Accounts Receivable Aging Report
-router.get('/aging', [
-  query('groupBy').optional().isIn(['customer', 'sale'])
-], async (req: Request, res: Response, next: NextFunction) => {
+router.get('/aging', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
     const { groupBy = 'customer' } = req.query;
     const user = (req as any).user;
 
@@ -200,14 +194,8 @@ router.get('/aging', [
 });
 
 // Endpoint 2: GET /api/reports/customer-statement/:id - Customer Account Statement
-router.get('/customer-statement/:id', [
-  param('id').isString().trim().notEmpty(),
-  query('startDate').optional().isISO8601(),
-  query('endDate').optional().isISO8601()
-], async (req: Request, res: Response, next: NextFunction) => {
+router.get('/customer-statement/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const customerId = req.params.id;
     const { startDate, endDate } = req.query;
@@ -306,15 +294,8 @@ router.get('/customer-statement/:id', [
 });
 
 // Endpoint 3: GET /api/reports/profitability - Profitability Analysis Report
-router.get('/profitability', [
-  query('startDate').optional().isISO8601(),
-  query('endDate').optional().isISO8601(),
-  query('groupBy').optional().isIn(['product', 'category', 'overall'])
-], async (req: Request, res: Response, next: NextFunction) => {
+router.get('/profitability', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
     const { startDate, endDate, groupBy = 'overall' } = req.query;
     const user = (req as any).user;
     const dateFilter = getDateRange(startDate as string, endDate as string);
@@ -425,13 +406,8 @@ router.get('/profitability', [
 });
 
 // Endpoint 4: GET /api/reports/cash-flow - Cash Flow Report
-router.get('/cash-flow', [
-  query('startDate').optional().isISO8601(),
-  query('endDate').optional().isISO8601()
-], async (req: Request, res: Response, next: NextFunction) => {
+router.get('/cash-flow', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { startDate, endDate } = req.query;
     const user = (req as any).user;
@@ -605,3 +581,4 @@ router.get('/ar-summary', async (req: Request, res: Response, next: NextFunction
 });
 
 export default router;
+

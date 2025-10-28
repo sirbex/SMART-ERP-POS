@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
 import prisma from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 import { Decimal } from '@prisma/client/runtime/library';
+import { CreatePaymentSchema, UpdatePaymentSchema, RefundPaymentSchema } from '../validation/payment.js';
 
 const router = Router();
 
@@ -29,46 +29,6 @@ interface SplitPaymentItem {
 // ============================================================================
 // VALIDATION SCHEMAS
 // ============================================================================
-
-const recordPaymentValidation = [
-  body('customerId').isString().trim().notEmpty().withMessage('Valid customer ID required'),
-  body('amount').isFloat({ min: 0.01 }).withMessage('Payment amount must be positive'),
-  body('paymentMethod').isIn(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'MOBILE_MONEY']).withMessage('Invalid payment method'),
-  body('paymentDate').optional().isISO8601().withMessage('Invalid payment date'),
-  body('reference').optional().isString().trim().notEmpty().withMessage('Reference must be non-empty string'),
-  body('notes').optional().isString().trim().withMessage('Notes must be a string'),
-  body('applyToDeposit').optional().isBoolean().withMessage('applyToDeposit must be boolean')
-];
-
-const splitPaymentValidation = [
-  body('customerId').isString().trim().notEmpty().withMessage('Valid customer ID required'),
-  body('totalAmount').isFloat({ min: 0.01 }).withMessage('Total amount must be positive'),
-  body('payments').isArray({ min: 1 }).withMessage('At least one payment method required'),
-  body('payments.*.method').isIn(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'MOBILE_MONEY']).withMessage('Invalid payment method'),
-  body('payments.*.amount').isFloat({ min: 0.01 }).withMessage('Each payment amount must be positive'),
-  body('payments.*.reference').optional().isString().trim().notEmpty().withMessage('Reference must be non-empty string'),
-  body('paymentDate').optional().isISO8601().withMessage('Invalid payment date'),
-  body('notes').optional().isString().trim().withMessage('Notes must be a string')
-];
-
-const refundPaymentValidation = [
-  param('id').isString().trim().notEmpty().withMessage('Valid transaction ID required'),
-  body('amount').optional().isFloat({ min: 0.01 }).withMessage('Refund amount must be positive'),
-  body('reason').isString().trim().notEmpty().withMessage('Refund reason is required'),
-  body('refundMethod').optional().isIn(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'MOBILE_MONEY']).withMessage('Invalid refund method')
-];
-
-const allocatePaymentValidation = [
-  body('customerId').isString().trim().notEmpty().withMessage('Valid customer ID required'),
-  body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
-  body('allocations').isArray({ min: 1 }).withMessage('At least one allocation required'),
-  body('allocations.*.saleId').isString().trim().notEmpty().withMessage('Valid sale ID required'),
-  body('allocations.*.amount').isFloat({ min: 0.01 }).withMessage('Allocation amount must be positive'),
-  body('allocations.*.description').optional().isString().trim().withMessage('Description must be a string'),
-  body('paymentMethod').isIn(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'MOBILE_MONEY']).withMessage('Invalid payment method'),
-  body('paymentDate').optional().isISO8601().withMessage('Invalid payment date'),
-  body('reference').optional().isString().trim().notEmpty().withMessage('Reference must be non-empty string')
-];
 
 // ============================================================================
 // HELPER FUNCTIONS (Reusable logic to avoid duplication)
@@ -221,27 +181,29 @@ async function updateCustomerStats(
 
 router.post(
   '/record',
-  recordPaymentValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const {
-      customerId,
-      amount,
-      paymentMethod,
-      paymentDate,
-      reference,
-      notes,
-      applyToDeposit = false
-    } = req.body;
-
-    const userId = (req as any).user.userId;
-
     try {
+      // Validate request body with Zod
+      const validatedData = CreatePaymentSchema.parse(req.body);
+
+      const {
+        customerId,
+        amount,
+        paymentMethod,
+        paymentDate,
+        reference,
+        notes
+      } = validatedData;
+      
+      // Validate customerId is provided
+      if (!customerId) {
+        res.status(400).json({ error: 'Customer ID is required' });
+        return;
+      }
+      
+      const applyToDeposit = req.body.applyToDeposit || false;
+      const userId = (req as any).user.userId;
+      
       // Verify customer exists
       const customer = await prisma.customer.findUnique({
         where: { id: customerId },
@@ -365,25 +327,17 @@ router.post(
 
 router.post(
   '/split',
-  splitPaymentValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const {
-      customerId,
-      totalAmount,
-      payments,
-      paymentDate,
-      notes
-    } = req.body;
-
-    const userId = (req as any).user.userId;
-
     try {
+      const {
+        customerId,
+        totalAmount,
+        payments,
+        paymentDate,
+        notes
+      } = req.body;
+
+      const userId = (req as any).user.userId;
       // Validate: Sum of split payments must equal total amount
       const paymentSum = payments.reduce(
         (sum: number, p: SplitPaymentItem) => sum + p.amount, 
@@ -503,22 +457,14 @@ router.post(
 
 router.get(
   '/customer/:id/history',
-  param('id').isString().trim().notEmpty().withMessage('Valid customer ID required'),
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const customerId = req.params.id;
-    const startDate = req.query.startDate as string | undefined;
-    const endDate = req.query.endDate as string | undefined;
-    const type = req.query.type as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = parseInt(req.query.offset as string) || 0;
-
     try {
+      const customerId = req.params.id;
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      const type = req.query.type as string | undefined;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
       // Build where clause
       const whereClause: any = { customerId };
 
@@ -592,19 +538,14 @@ router.get(
 
 router.post(
   '/:id/refund',
-  refundPaymentValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const transactionId = req.params.id;
-    const { amount, reason, refundMethod } = req.body;
-    const userId = (req as any).user.userId;
-
     try {
+      // Validate request body with Zod
+      const validatedData = RefundPaymentSchema.parse(req.body);
+      
+      const transactionId = req.params.id;
+      const { amount, reason, refundMethod } = validatedData;
+      const userId = (req as any).user.userId;
       // Get original transaction
       const originalTransaction = await prisma.customerTransaction.findUnique({
         where: { id: transactionId }
@@ -737,17 +678,9 @@ router.post(
 
 router.get(
   '/:id',
-  param('id').isString().trim().notEmpty().withMessage('Valid transaction ID required'),
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const transactionId = req.params.id;
-
     try {
+      const transactionId = req.params.id;
       const transaction = await prisma.customerTransaction.findUnique({
         where: { id: transactionId }
       });
@@ -826,14 +759,7 @@ router.get(
 
 router.post(
   '/allocate',
-  allocatePaymentValidation,
   async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
     const {
       customerId,
       amount,
@@ -974,3 +900,7 @@ router.post(
 );
 
 export default router;
+
+
+
+

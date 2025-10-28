@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { body, param, validationResult } from 'express-validator';
 import prisma from '../config/database.js';
 import logger from '../utils/logger.js';
 import { authenticate } from '../middleware/auth.js';
@@ -57,12 +56,8 @@ async function createDocTransaction(data: any, tx: any) {
 
 // Endpoint 1: Generate Invoice
 router.post('/invoice', [
-  body('saleId').isString().trim().notEmpty(),
-  body('notes').optional().isString().trim()
 ], async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { saleId, notes } = req.body;
     const user = (req as any).user;
@@ -123,13 +118,8 @@ router.post('/invoice', [
 
 // Endpoint 2: Generate Receipt
 router.post('/receipt', [
-  body('transactionId').isString().trim().notEmpty(),
-  body('saleId').optional().isString().trim(),
-  body('notes').optional().isString().trim()
 ], async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { transactionId, saleId, notes } = req.body;
     const user = (req as any).user;
@@ -211,18 +201,8 @@ router.post('/receipt', [
 
 // Endpoint 3: Generate Credit Note
 router.post('/credit-note', [
-  body('saleId').isString().trim().notEmpty(),
-  body('reason').isString().trim().notEmpty(),
-  body('items').isArray({ min: 1 }),
-  body('items.*.description').isString().trim().notEmpty(),
-  body('items.*.quantity').isFloat({ min: 0.01 }),
-  body('items.*.unitPrice').isFloat({ min: 0 }),
-  body('refundMethod').optional().isString().trim(),
-  body('notes').optional().isString().trim()
 ], async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { saleId, reason, items, refundMethod, notes } = req.body;
     const user = (req as any).user;
@@ -312,11 +292,8 @@ router.post('/credit-note', [
 
 // Endpoint 4: Get PDF Document
 router.get('/:id/pdf', [
-  param('id').isString().trim().notEmpty()
 ], async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const documentId = req.params.id;
     const transaction = await prisma.customerTransaction.findUnique({ where: { id: documentId } });

@@ -1,7 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import pkg from '@prisma/client';
+const { PrismaClient } = pkg as any;
 import logger from '../utils/logger.js';
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const globalForPrisma = global as any;
 
 const prisma = globalForPrisma.prisma || new PrismaClient({
   log: [
@@ -34,7 +35,7 @@ prisma.$on('warn' as never, (e: any) => {
 // Test database connection
 prisma.$connect()
   .then(() => logger.info('✅ Database connected successfully'))
-  .catch((error) => {
+  .catch((error: unknown) => {
     logger.error('❌ Database connection failed:', error);
     process.exit(1);
   });

@@ -1,50 +1,19 @@
-import { Router } from 'express';
-import prisma from '@prisma/client';
+import { Router, Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
 import { authenticate, authorize } from '../middleware/auth.js';
-import { validate } from '../middleware/validation.js';
-import { body } from 'express-validator';
+import { CreatePurchaseSchema, UpdatePurchaseSchema } from '../validation/purchase.js';
 import logger from '../utils/logger.js';
 import { parsePagination, buildPaginationResponse, generateDocumentNumber } from '../utils/helpers.js';
 
 const router = Router();
 
 // Validation schemas
-const createPurchaseValidation = [
-  body('supplierId').isString().withMessage('Supplier ID is required'),
-  body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
-  body('items.*.productId').isString().withMessage('Product ID is required'),
-  body('items.*.quantity').isDecimal({ decimal_digits: '0,4' }).withMessage('Valid quantity required'),
-  body('items.*.unitCost').isDecimal({ decimal_digits: '0,2' }).withMessage('Valid unit cost required'),
-  body('items.*.expiryDate').optional().isISO8601(),
-  body('items.*.batchNumber').optional().isString(),
-  body('orderDate').optional().isISO8601(),
-  body('expectedDate').optional().isISO8601(),
-  body('discount').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('shippingCost').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('notes').optional().isString(),
-];
-
-const updatePurchaseValidation = [
-  body('status').optional().isIn(['PENDING', 'ORDERED', 'RECEIVED', 'CANCELLED']),
-  body('expectedDate').optional().isISO8601(),
-  body('receivedDate').optional().isISO8601(),
-  body('notes').optional().isString(),
-];
-
-const receivePurchaseValidation = [
-  body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
-  body('items.*.id').isString().withMessage('Item ID is required'),
-  body('items.*.receivedQuantity').isDecimal({ decimal_digits: '0,4' }).withMessage('Valid quantity required'),
-  body('receivedDate').optional().isISO8601(),
-  body('notes').optional().isString(),
-];
-
 // GET /api/purchases - List all purchases
 router.get(
   '/',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
       const { search, supplierId, status, startDate, endDate } = req.query;
@@ -88,7 +57,7 @@ router.get(
             items: {
               include: {
                 product: {
-                  select: { id: true, name: true, sku: true, baseUnit: true },
+                  select: { id: true, name: true, barcode: true, baseUnit: true },
                 },
               },
             },
@@ -103,9 +72,9 @@ router.get(
         prisma.purchase.count({ where }),
       ]);
 
-      logger.info(`Listed ${purchases.length} purchases`, { userId: req.user?.id });
+      logger.info(`Listed ${purchases.length} purchases`, { userId: (req as any).user?.id });
 
-      res.json(buildPaginationResponse(purchases, total, page, limit));
+      res.json(buildPaginationResponse(purchases, total, { page, limit, skip }));
     } catch (error) {
       next(error);
     }
@@ -116,7 +85,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
 
@@ -130,7 +99,6 @@ router.get(
                 select: {
                   id: true,
                   name: true,
-                  sku: true,
                   barcode: true,
                   baseUnit: true,
                 },
@@ -144,7 +112,7 @@ router.get(
         return res.status(404).json({ error: 'Purchase not found' });
       }
 
-      logger.info(`Retrieved purchase: ${purchase.orderNumber}`, { userId: req.user?.id });
+      logger.info(`Retrieved purchase: ${purchase.purchaseNumber}`, { userId: (req as any).user?.id });
 
       res.json(purchase);
     } catch (error) {
@@ -158,11 +126,12 @@ router.post(
   '/',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  createPurchaseValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { supplierId, items, orderDate, expectedDate, discount, shippingCost, notes } = req.body;
+      // Validate request body with Zod
+      const validatedData = CreatePurchaseSchema.parse(req.body);
+      const { supplierId, items, orderDate, receivedDate, discount, shippingCost, notes } = req.body;
+      const userId = (req as any).user!.id;
 
       // Validate supplier
       const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
@@ -185,12 +154,15 @@ router.post(
         const lineTotal = quantity.mul(unitCost);
 
         processedItems.push({
-          productId: product.id,
+          product: { connect: { id: product.id } },
           quantity,
+          unit: product.baseUnit,
+          quantityInBase: quantity,
           unitCost,
-          lineTotal,
-          expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
-          batchNumber: item.batchNumber || null,
+          subtotal: lineTotal,
+          taxRate: new Prisma.Decimal(0),
+          taxAmount: new Prisma.Decimal(0),
+          total: lineTotal,
         });
 
         subtotal = subtotal.add(lineTotal);
@@ -201,19 +173,18 @@ router.post(
       const shipping = shippingCost ? new Prisma.Decimal(shippingCost) : new Prisma.Decimal(0);
       const totalAmount = subtotal.minus(purchaseDiscount).add(shipping);
 
-      // Generate order number
-      const orderNumber = await generateDocumentNumber('PO');
+      // Generate purchase number
+      const purchaseNumber = await generateDocumentNumber('PO');
 
       // Create purchase order
       const purchase = await prisma.purchase.create({
         data: {
-          orderNumber,
-          supplierId,
+          purchaseNumber,
+          supplier: { connect: { id: supplierId } },
+          createdBy: { connect: { id: userId } },
           orderDate: orderDate ? new Date(orderDate) : new Date(),
-          expectedDate: expectedDate ? new Date(expectedDate) : null,
+          receivedDate: receivedDate ? new Date(receivedDate) : null,
           subtotal,
-          discount: purchaseDiscount,
-          shippingCost: shipping,
           totalAmount,
           status: 'PENDING',
           notes,
@@ -225,13 +196,13 @@ router.post(
           supplier: true,
           items: {
             include: {
-              product: { select: { id: true, name: true, sku: true, baseUnit: true } },
+              product: { select: { id: true, name: true, baseUnit: true } },
             },
           },
         },
       });
 
-      logger.info(`Created purchase order: ${purchase.orderNumber}`, { userId: req.user?.id });
+      logger.info(`Created purchase order: ${purchase.purchaseNumber}`, { userId: (req as any).user?.id });
 
       res.status(201).json(purchase);
     } catch (error) {
@@ -245,12 +216,10 @@ router.put(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  updatePurchaseValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
-      const { status, expectedDate, receivedDate, notes } = req.body;
+      const { status, receivedDate, notes } = req.body;
 
       const existingPurchase = await prisma.purchase.findUnique({ where: { id } });
       if (!existingPurchase) {
@@ -266,7 +235,7 @@ router.put(
 
       const updateData: any = {};
       if (status) updateData.status = status;
-      if (expectedDate) updateData.expectedDate = new Date(expectedDate);
+      if (receivedDate) updateData.receivedDate = new Date(receivedDate);
       if (receivedDate) updateData.receivedDate = new Date(receivedDate);
       if (notes !== undefined) updateData.notes = notes;
 
@@ -277,13 +246,13 @@ router.put(
           supplier: true,
           items: {
             include: {
-              product: { select: { id: true, name: true, sku: true, baseUnit: true } },
+              product: { select: { id: true, name: true, baseUnit: true } },
             },
           },
         },
       });
 
-      logger.info(`Updated purchase order: ${purchase.orderNumber}`, { userId: req.user?.id });
+      logger.info(`Updated purchase order: ${purchase.purchaseNumber}`, { userId: (req as any).user?.id });
 
       res.json(purchase);
     } catch (error) {
@@ -297,9 +266,7 @@ router.post(
   '/:id/receive',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  receivePurchaseValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const { items, receivedDate, notes } = req.body;
@@ -357,13 +324,14 @@ router.post(
           if (receivedQty && receivedQty.gt(0)) {
             await tx.stockBatch.create({
               data: {
-                productId: purchaseItem.productId,
-                purchaseId: purchase.id,
-                quantity: receivedQty,
+                product: { connect: { id: purchaseItem.productId } },
+                purchase: { connect: { id: purchase.id } },
+                quantityReceived: receivedQty,
+                quantityRemaining: receivedQty,
                 unitCost: purchaseItem.unitCost,
-                purchaseDate: updated.receivedDate!,
-                expiryDate: purchaseItem.expiryDate,
-                batchNumber: purchaseItem.batchNumber,
+                receivedDate: updated.receivedDate!,
+                expiryDate: null,
+                batchNumber: `BATCH-${Date.now()}`,
               },
             });
 
@@ -378,8 +346,8 @@ router.post(
         return updated;
       });
 
-      logger.info(`Received purchase order: ${purchase.orderNumber}`, {
-        userId: req.user?.id,
+      logger.info(`Received purchase order: ${purchase.purchaseNumber}`, {
+        userId: (req as any).user?.id,
         totalItems: items.length,
       });
 
@@ -390,7 +358,7 @@ router.post(
           supplier: true,
           items: {
             include: {
-              product: { select: { id: true, name: true, sku: true, baseUnit: true } },
+              product: { select: { id: true, name: true, baseUnit: true } },
             },
           },
         },
@@ -408,7 +376,7 @@ router.post(
   '/:id/cancel',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const { reason } = req.body;
@@ -436,14 +404,14 @@ router.post(
           supplier: true,
           items: {
             include: {
-              product: { select: { id: true, name: true, sku: true, baseUnit: true } },
+              product: { select: { id: true, name: true, baseUnit: true } },
             },
           },
         },
       });
 
-      logger.info(`Cancelled purchase order: ${purchase.orderNumber}`, {
-        userId: req.user?.id,
+      logger.info(`Cancelled purchase order: ${purchase.purchaseNumber}`, {
+        userId: (req as any).user?.id,
         reason,
       });
 
@@ -459,7 +427,7 @@ router.get(
   '/stats/summary',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { startDate, endDate } = req.query;
 
@@ -497,7 +465,7 @@ router.get(
         totalValue: totalValue._sum.totalAmount || new Prisma.Decimal(0),
       };
 
-      logger.info('Retrieved purchase statistics', { userId: req.user?.id });
+      logger.info('Retrieved purchase statistics', { userId: (req as any).user?.id });
 
       res.json(stats);
     } catch (error) {
@@ -511,11 +479,11 @@ router.get(
   '/reports/pending',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const pendingPurchases = await prisma.purchase.findMany({
         where: {
-          status: { in: ['PENDING', 'ORDERED'] },
+          status: 'PENDING',
         },
         include: {
           supplier: {
@@ -524,16 +492,16 @@ router.get(
           items: {
             include: {
               product: {
-                select: { id: true, name: true, sku: true },
+                select: { id: true, name: true },
               },
             },
           },
         },
-        orderBy: { expectedDate: 'asc' },
+        orderBy: { receivedDate: 'asc' },
       });
 
       logger.info(`Retrieved ${pendingPurchases.length} pending purchases`, {
-        userId: req.user?.id,
+        userId: (req as any).user?.id,
       });
 
       res.json(pendingPurchases);
@@ -544,3 +512,6 @@ router.get(
 );
 
 export default router;
+
+
+

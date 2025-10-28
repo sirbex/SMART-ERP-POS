@@ -1,47 +1,19 @@
-import { Router } from 'express';
-import prisma from '@prisma/client';
+import { Router, Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
 import { authenticate, authorize } from '../middleware/auth.js';
-import { validate } from '../middleware/validation.js';
-import { body, query } from 'express-validator';
 import logger from '../utils/logger.js';
-import { parsePagination, buildPaginationResponse } from '../utils/helpers.js';
+import { parsePagination, buildPaginationResponse, buildSearchFilter } from '../utils/helpers.js';
+import { CreateCustomerSchema, UpdateCustomerSchema } from '../validation/customer.js';
+import { CreatePaymentSchema } from '../validation/payment.js';
 
 const router = Router();
-
-// Validation schemas
-const createCustomerValidation = [
-  body('name').trim().isLength({ min: 1, max: 200 }).withMessage('Customer name is required'),
-  body('phone').optional().trim().isLength({ max: 50 }),
-  body('email').optional().isEmail().normalizeEmail(),
-  body('address').optional().trim(),
-  body('taxId').optional().trim().isLength({ max: 100 }),
-  body('creditLimit').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('notes').optional().trim(),
-];
-
-const updateCustomerValidation = [
-  body('name').optional().trim().isLength({ min: 1, max: 200 }),
-  body('phone').optional().trim().isLength({ max: 50 }),
-  body('email').optional().isEmail().normalizeEmail(),
-  body('address').optional().trim(),
-  body('taxId').optional().trim().isLength({ max: 100 }),
-  body('creditLimit').optional().isDecimal({ decimal_digits: '0,2' }),
-  body('notes').optional().trim(),
-];
-
-const paymentValidation = [
-  body('amount').isDecimal({ decimal_digits: '0,2' }).withMessage('Valid amount required'),
-  body('paymentMethod').isIn(['CASH', 'CARD', 'MOBILE_MONEY', 'BANK_TRANSFER']).withMessage('Invalid payment method'),
-  body('reference').optional().trim(),
-  body('notes').optional().trim(),
-];
 
 // GET /api/customers - List all customers
 router.get(
   '/',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
       const { search, hasCredit } = req.query;
@@ -50,16 +22,11 @@ router.get(
       const where: any = {};
 
       if (search) {
-        where.OR = [
-          { name: { contains: search as string, mode: 'insensitive' } },
-          { phone: { contains: search as string, mode: 'insensitive' } },
-          { email: { contains: search as string, mode: 'insensitive' } },
-          { taxId: { contains: search as string, mode: 'insensitive' } },
-        ];
+        where.OR = buildSearchFilter(search as string, ['name', 'phone', 'email', 'taxId']);
       }
 
       if (hasCredit === 'true') {
-        where.creditBalance = { gt: 0 };
+        where.currentBalance = { gt: 0 };
       }
 
       // Get customers and total count
@@ -78,9 +45,9 @@ router.get(
         prisma.customer.count({ where }),
       ]);
 
-      logger.info(`Listed ${customers.length} customers`, { userId: req.user?.id });
+      logger.info(`Listed ${customers.length} customers`, { userId: (req as any).user?.id });
 
-      res.json(buildPaginationResponse(customers, total, page, limit));
+      res.json(buildPaginationResponse(customers, total, { page, limit, skip }));
     } catch (error) {
       next(error);
     }
@@ -91,7 +58,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
 
@@ -100,15 +67,10 @@ router.get(
         include: {
           sales: {
             orderBy: { saleDate: 'desc' },
-            take: 10,
-            include: {
-              cashier: {
-                select: { username: true, fullName: true },
-              },
-            },
+            take: 10
           },
           transactions: {
-            orderBy: { transactionDate: 'desc' },
+            orderBy: { createdAt: 'desc' },
             take: 20,
           },
           _count: {
@@ -127,7 +89,7 @@ router.get(
         _sum: { amount: true },
       });
 
-      logger.info(`Retrieved customer: ${customer.name}`, { userId: req.user?.id });
+      logger.info(`Retrieved customer: ${customer.name}`, { userId: (req as any).user?.id });
 
       res.json({
         ...customer,
@@ -144,11 +106,11 @@ router.post(
   '/',
   authenticate,
   authorize(['ADMIN', 'MANAGER', 'CASHIER']),
-  createCustomerValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { name, phone, email, address, taxId, creditLimit, notes } = req.body;
+      // Validate request body with Zod
+      const validatedData = CreateCustomerSchema.parse(req.body);
+      const { name, phone, email, address, taxId, creditLimit = 0 } = validatedData;
 
       // Check for duplicate phone or email
       if (phone || email) {
@@ -178,13 +140,12 @@ router.post(
           email,
           address,
           taxId,
-          creditLimit: creditLimit ? new Prisma.Decimal(creditLimit) : new Prisma.Decimal(0),
-          creditBalance: new Prisma.Decimal(0),
-          notes,
+          creditLimit: new Prisma.Decimal(creditLimit),
+          currentBalance: new Prisma.Decimal(0),
         },
       });
 
-      logger.info(`Created customer: ${customer.name}`, { userId: req.user?.id });
+      logger.info(`Created customer: ${customer.name}`, { userId: (req as any).user?.id });
 
       res.status(201).json(customer);
     } catch (error) {
@@ -198,12 +159,12 @@ router.put(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  updateCustomerValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
-      const updateData = req.body;
+      
+      // Validate request body with Zod
+      const validatedData = UpdateCustomerSchema.parse(req.body);
 
       // Check if customer exists
       const existingCustomer = await prisma.customer.findUnique({ where: { id } });
@@ -212,15 +173,15 @@ router.put(
       }
 
       // Check for duplicate phone or email
-      if (updateData.phone || updateData.email) {
+      if (validatedData.phone || validatedData.email) {
         const duplicate = await prisma.customer.findFirst({
           where: {
             AND: [
               { id: { not: id } },
               {
                 OR: [
-                  ...(updateData.phone ? [{ phone: updateData.phone }] : []),
-                  ...(updateData.email ? [{ email: updateData.email }] : []),
+                  ...(validatedData.phone ? [{ phone: validatedData.phone }] : []),
+                  ...(validatedData.email ? [{ email: validatedData.email }] : []),
                 ],
               },
             ],
@@ -229,16 +190,17 @@ router.put(
 
         if (duplicate) {
           return res.status(400).json({
-            error: duplicate.phone === updateData.phone
+            error: duplicate.phone === validatedData.phone
               ? 'Phone number already exists'
               : 'Email already exists',
           });
         }
       }
 
-      // Convert decimal fields
-      if (updateData.creditLimit) {
-        updateData.creditLimit = new Prisma.Decimal(updateData.creditLimit);
+      // Build update data with decimal conversion for creditLimit
+      const updateData: any = { ...validatedData };
+      if (validatedData.creditLimit !== undefined) {
+        updateData.creditLimit = new Prisma.Decimal(validatedData.creditLimit);
       }
 
       // Update customer
@@ -247,7 +209,7 @@ router.put(
         data: updateData,
       });
 
-      logger.info(`Updated customer: ${customer.name}`, { userId: req.user?.id });
+      logger.info(`Updated customer: ${customer.name}`, { userId: (req as any).user?.id });
 
       res.json(customer);
     } catch (error) {
@@ -261,7 +223,7 @@ router.delete(
   '/:id',
   authenticate,
   authorize(['ADMIN']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
 
@@ -284,15 +246,15 @@ router.delete(
       }
 
       // Cannot delete customer with credit balance
-      if (customer.creditBalance.gt(0)) {
+      if (customer.currentBalance.gt(0)) {
         return res.status(400).json({
-          error: `Cannot delete customer with outstanding credit balance: ${customer.creditBalance}`,
+          error: `Cannot delete customer with outstanding credit balance: ${customer.currentBalance}`,
         });
       }
 
       await prisma.customer.delete({ where: { id } });
 
-      logger.info(`Deleted customer: ${customer.name}`, { userId: req.user?.id });
+      logger.info(`Deleted customer: ${customer.name}`, { userId: (req as any).user?.id });
 
       res.json({ message: 'Customer deleted successfully' });
     } catch (error) {
@@ -306,12 +268,13 @@ router.post(
   '/:id/payment',
   authenticate,
   authorize(['ADMIN', 'MANAGER', 'CASHIER']),
-  paymentValidation,
-  validate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
-      const { amount, paymentMethod, reference, notes } = req.body;
+      
+      // Validate request body with Zod
+      const validatedData = CreatePaymentSchema.parse(req.body);
+      const { amount, paymentMethod, reference, notes } = validatedData;
 
       const customer = await prisma.customer.findUnique({ where: { id } });
       if (!customer) {
@@ -321,23 +284,22 @@ router.post(
       const paymentAmount = new Prisma.Decimal(amount);
 
       // Cannot pay more than credit balance
-      if (paymentAmount.gt(customer.creditBalance)) {
+      if (paymentAmount.gt(customer.currentBalance)) {
         return res.status(400).json({
-          error: `Payment amount (${paymentAmount}) exceeds credit balance (${customer.creditBalance})`,
+          error: `Payment amount (${paymentAmount}) exceeds credit balance (${customer.currentBalance})`,
         });
       }
 
       // Record payment transaction
-      const transaction = await prisma.$transaction(async (tx) => {
+  const transaction = await prisma.$transaction(async (tx: any) => {
         // Create payment transaction
         const newTransaction = await tx.customerTransaction.create({
           data: {
             customerId: id,
             type: 'PAYMENT',
             amount: paymentAmount.neg(), // Negative for payment
-            balance: customer.creditBalance.minus(paymentAmount),
-            description: `Payment received - ${paymentMethod}${reference ? ` (Ref: ${reference})` : ''}`,
-            notes,
+            balance: customer.currentBalance.minus(paymentAmount),
+            description: `Payment received - ${paymentMethod}${reference ? ` (Ref: ${reference})` : ''}${notes ? `\nNotes: ${notes}` : ''}`,
           },
         });
 
@@ -345,7 +307,7 @@ router.post(
         await tx.customer.update({
           where: { id },
           data: {
-            creditBalance: { decrement: paymentAmount },
+            currentBalance: { decrement: paymentAmount },
           },
         });
 
@@ -353,7 +315,7 @@ router.post(
       });
 
       logger.info(`Recorded payment for customer: ${customer.name}, amount: ${paymentAmount}`, {
-        userId: req.user?.id,
+        userId: (req as any).user?.id,
       });
 
       res.status(201).json(transaction);
@@ -367,7 +329,7 @@ router.post(
 router.get(
   '/:id/transactions',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const { page, limit, skip } = parsePagination(req.query);
@@ -385,19 +347,19 @@ router.get(
       }
 
       if (startDate || endDate) {
-        where.transactionDate = {};
-        if (startDate) where.transactionDate.gte = new Date(startDate as string);
+        where.createdAt = {};
+        if (startDate) where.createdAt.gte = new Date(startDate as string);
         if (endDate) {
           const end = new Date(endDate as string);
           end.setHours(23, 59, 59, 999);
-          where.transactionDate.lte = end;
+          where.createdAt.lte = end;
         }
       }
 
       const [transactions, total] = await Promise.all([
         prisma.customerTransaction.findMany({
           where,
-          orderBy: { transactionDate: 'desc' },
+          orderBy: { createdAt: 'desc' },
           skip,
           take: limit,
         }),
@@ -405,10 +367,10 @@ router.get(
       ]);
 
       logger.info(`Retrieved ${transactions.length} transactions for customer: ${customer.name}`, {
-        userId: req.user?.id,
+        userId: (req as any).user?.id,
       });
 
-      res.json(buildPaginationResponse(transactions, total, page, limit));
+      res.json(buildPaginationResponse(transactions, total, { page, limit, skip }));
     } catch (error) {
       next(error);
     }
@@ -419,7 +381,7 @@ router.get(
 router.get(
   '/:id/statement',
   authenticate,
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const { startDate, endDate } = req.query;
@@ -432,19 +394,19 @@ router.get(
       const where: any = { customerId: id };
 
       if (startDate || endDate) {
-        where.transactionDate = {};
-        if (startDate) where.transactionDate.gte = new Date(startDate as string);
+        where.createdAt = {};
+        if (startDate) where.createdAt.gte = new Date(startDate as string);
         if (endDate) {
           const end = new Date(endDate as string);
           end.setHours(23, 59, 59, 999);
-          where.transactionDate.lte = end;
+          where.createdAt.lte = end;
         }
       }
 
       const [transactions, summary] = await Promise.all([
         prisma.customerTransaction.findMany({
           where,
-          orderBy: { transactionDate: 'asc' },
+          orderBy: { createdAt: 'asc' },
         }),
         prisma.customerTransaction.aggregate({
           where,
@@ -454,16 +416,16 @@ router.get(
 
       // Calculate running balance
       let runningBalance = new Prisma.Decimal(0);
-      const transactionsWithBalance = transactions.map((tx) => {
-        runningBalance = runningBalance.add(tx.amount);
+      const transactionsWithBalance = transactions.map((t: any) => {
+        runningBalance = runningBalance.add(t.amount);
         return {
-          ...tx,
+          ...t,
           runningBalance: runningBalance.toFixed(2),
         };
       });
 
       logger.info(`Generated statement for customer: ${customer.name}`, {
-        userId: req.user?.id,
+        userId: (req as any).user?.id,
       });
 
       res.json({
@@ -477,7 +439,7 @@ router.get(
           startDate: startDate || null,
           endDate: endDate || null,
         },
-        currentBalance: customer.creditBalance,
+        currentBalance: customer.currentBalance,
         periodActivity: summary._sum.amount || new Prisma.Decimal(0),
         transactions: transactionsWithBalance,
       });
@@ -492,36 +454,36 @@ router.get(
   '/reports/with-credit',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const customers = await prisma.customer.findMany({
         where: {
-          creditBalance: { gt: 0 },
+          currentBalance: { gt: 0 },
         },
         orderBy: {
-          creditBalance: 'desc',
+          currentBalance: 'desc',
         },
         include: {
           transactions: {
-            orderBy: { transactionDate: 'desc' },
+            orderBy: { createdAt: 'desc' },
             take: 1,
           },
         },
       });
 
       const totalCredit = await prisma.customer.aggregate({
-        where: { creditBalance: { gt: 0 } },
-        _sum: { creditBalance: true },
+        where: { currentBalance: { gt: 0 } },
+        _sum: { currentBalance: true },
         _count: true,
       });
 
-      logger.info('Retrieved customers with credit', { userId: req.user?.id });
+      logger.info('Retrieved customers with credit', { userId: (req as any).user?.id });
 
       res.json({
         customers,
         summary: {
           totalCustomers: totalCredit._count,
-          totalCreditBalance: totalCredit._sum.creditBalance || new Prisma.Decimal(0),
+          totalcurrentBalance: totalCredit._sum.currentBalance || new Prisma.Decimal(0),
         },
       });
     } catch (error) {
@@ -535,14 +497,14 @@ router.get(
   '/stats/overview',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
-  async (req, res, next) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const [totalCustomers, customersWithCredit, totalCredit, recentCustomers] = await Promise.all([
         prisma.customer.count(),
-        prisma.customer.count({ where: { creditBalance: { gt: 0 } } }),
+        prisma.customer.count({ where: { currentBalance: { gt: 0 } } }),
         prisma.customer.aggregate({
-          where: { creditBalance: { gt: 0 } },
-          _sum: { creditBalance: true },
+          where: { currentBalance: { gt: 0 } },
+          _sum: { currentBalance: true },
         }),
         prisma.customer.count({
           where: {
@@ -556,11 +518,11 @@ router.get(
       const stats = {
         totalCustomers,
         customersWithCredit,
-        totalCreditBalance: totalCredit._sum.creditBalance || new Prisma.Decimal(0),
+        totalcurrentBalance: totalCredit._sum.currentBalance || new Prisma.Decimal(0),
         newCustomersLast30Days: recentCustomers,
       };
 
-      logger.info('Retrieved customer statistics', { userId: req.user?.id });
+      logger.info('Retrieved customer statistics', { userId: (req as any).user?.id });
 
       res.json(stats);
     } catch (error) {
@@ -570,3 +532,9 @@ router.get(
 );
 
 export default router;
+
+
+
+
+
+
