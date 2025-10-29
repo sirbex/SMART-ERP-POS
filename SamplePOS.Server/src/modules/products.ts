@@ -6,6 +6,8 @@ import logger from '../utils/logger.js';
 import { parsePagination, buildPaginationResponse } from '../utils/helpers.js';
 import { CreateProductSchema, UpdateProductSchema } from '../validation/product.js';
 import { ProductHistoryService } from '../services/productHistoryService.js';
+import cacheMiddleware, { invalidateCache } from '../middleware/cache.js';
+import { CacheTTL } from '../services/cacheService.js';
 
 const router = Router();
 
@@ -13,6 +15,7 @@ const router = Router();
 router.get(
   '/',
   authenticate,
+  cacheMiddleware({ ttl: CacheTTL.MEDIUM, keyPrefix: 'products' }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
@@ -160,6 +163,7 @@ router.post(
   '/',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
+  invalidateCache.products,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Validate request body with Zod
@@ -198,6 +202,7 @@ router.put(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
+  invalidateCache.products,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -246,6 +251,7 @@ router.delete(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
+  invalidateCache.products,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
