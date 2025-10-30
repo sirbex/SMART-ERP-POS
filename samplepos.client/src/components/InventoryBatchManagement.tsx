@@ -307,7 +307,7 @@ const InventoryBatchManagement: React.FC = () => {
   // Filtered and sorted data
   const filteredSummaries = stockSummaries.filter(summary => {
     const matchesSearch = summary.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         summary.productId.toLowerCase().includes(searchTerm.toLowerCase());
+                         String(summary.productId).toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesCategory = filterCategory === 'all' || 
       products.find(p => p.id === summary.productId)?.category === filterCategory;

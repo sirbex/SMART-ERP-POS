@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
-import { Search, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Download, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import type { Transaction } from '../../models/Transaction';
 
@@ -175,7 +175,7 @@ export const TransactionHistoryTable: React.FC<TransactionHistoryTableProps> = (
       <CardContent>
         {paginatedTransactions.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
-            <Receipt className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p>No transactions found</p>
           </div>
         ) : (
@@ -203,7 +203,7 @@ export const TransactionHistoryTable: React.FC<TransactionHistoryTableProps> = (
                           {formatDate(transaction.createdAt || '')}
                         </td>
                         <td className="p-3 text-sm font-mono">
-                          {transaction.transactionNumber || transaction.id.slice(0, 8)}
+                          {transaction.transactionNumber || String(transaction.id).slice(0, 8)}
                         </td>
                         <td className="p-3 text-sm">
                           {transaction.customer?.name || 'Walk-in Customer'}

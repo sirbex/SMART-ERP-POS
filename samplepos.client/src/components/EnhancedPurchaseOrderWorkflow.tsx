@@ -94,7 +94,7 @@ const EnhancedPurchaseOrderWorkflow: React.FC = () => {
 
     setLoading(true);
     try {
-      const result = await workflowService.sendOrderInternally(selectedOrder.id, sendOptions);
+      const result = await workflowService.sendOrderInternally(String(selectedOrder.id), sendOptions);
       
       if (result.success) {
         setMessage({
@@ -122,7 +122,7 @@ const EnhancedPurchaseOrderWorkflow: React.FC = () => {
 
   const handleViewTracking = async (order: EnhancedPurchaseOrder) => {
     setSelectedOrder(order);
-    const trackingData = await workflowService.getOrderTracking(order.id);
+    const trackingData = await workflowService.getOrderTracking(String(order.id));
     setTracking(trackingData);
     setShowTrackingModal(true);
   };
@@ -133,7 +133,7 @@ const EnhancedPurchaseOrderWorkflow: React.FC = () => {
     setLoading(true);
     try {
       const result = await workflowService.confirmOrderManually(
-        selectedOrder.id, 
+        String(selectedOrder.id), 
         confirmationData.confirmedBy, 
         confirmationData.notes
       );
@@ -159,7 +159,7 @@ const EnhancedPurchaseOrderWorkflow: React.FC = () => {
     setLoading(true);
     try {
       const result = await workflowService.updateDeliveryStatus(
-        selectedOrder.id,
+        String(selectedOrder.id),
         deliveryData.status,
         deliveryData.location,
         deliveryData.description,

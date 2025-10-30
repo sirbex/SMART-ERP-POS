@@ -111,7 +111,10 @@ export interface Product {
   // Purchase-related info
   purchaseInfo?: {
     purchaseUnitId?: string;
+    purchaseUnitName?: string;
     packSize?: number;
+    quantityPerPurchaseUnit?: number;
+    costPerPurchaseUnit?: number;
     lastPurchasePrice?: number;
     preferredSupplierId?: string | number;
     minimumOrderQuantity?: number;
@@ -121,6 +124,8 @@ export interface Product {
     baseUnitPrice?: number;
     uomPrices?: Record<string, number>;
     marginPercentage?: number;
+    markupPercentage?: number;
+    minimumSellingPrice?: number;
   };
   supplierId?: number;
   supplier_id?: number; // Backend format
@@ -681,6 +686,8 @@ export interface SalesPricing {
   baseUnitPrice: number;
   uomPrices?: Record<string, number>;
   marginPercentage?: number;
+  markupPercentage?: number;
+  minimumSellingPrice?: number;
 }
 
 /**

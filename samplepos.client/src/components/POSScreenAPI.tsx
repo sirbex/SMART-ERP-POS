@@ -1091,7 +1091,7 @@ const POSScreenAPI: React.FC = () => {
                   <p className="text-sm text-muted-foreground">
                     {new Date(currentTransaction.createdAt).toLocaleString()}
                   </p>
-                  <p className="text-sm">Transaction #{currentTransaction.id.slice(0, 8)}</p>
+                  <p className="text-sm">Transaction #{String(currentTransaction.id).slice(0, 8)}</p>
                 </div>
                 
                 <div className="space-y-2">
@@ -1099,7 +1099,7 @@ const POSScreenAPI: React.FC = () => {
                     currentTransaction.items.map((item) => (
                       <div key={item.id} className="flex justify-between text-sm">
                         <span>{item.quantity}x {item.name}</span>
-                        <span>{formatCurrency(item.price * item.quantity)}</span>
+                        <span>{formatCurrency((item.price || 0) * item.quantity)}</span>
                       </div>
                     ))
                   ) : (

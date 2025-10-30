@@ -87,22 +87,22 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
       setSupplier(editingItem.supplier || '');
       setLocation(editingItem.location || '');
       setSku(editingItem.sku || '');
-      setHasExpiry(editingItem.hasExpiry);
+      if (editingItem.hasExpiry !== undefined) setHasExpiry(editingItem.hasExpiry);
       setExpiry(editingItem.expiry || '');
       setExpiryAlertDays(editingItem.expiryAlertDays || 30);
       
       // Load purchase info if available
       if (editingItem.purchaseInfo) {
-        setPurchaseUnitId(editingItem.purchaseInfo.purchaseUnitId);
-        setPurchaseUnitName(editingItem.purchaseInfo.purchaseUnitName);
-        setQuantityPerPurchaseUnit(editingItem.purchaseInfo.quantityPerPurchaseUnit);
-        setCostPerPurchaseUnit(editingItem.purchaseInfo.costPerPurchaseUnit);
+        if (editingItem.purchaseInfo.purchaseUnitId) setPurchaseUnitId(String(editingItem.purchaseInfo.purchaseUnitId));
+        if (editingItem.purchaseInfo.purchaseUnitName) setPurchaseUnitName(editingItem.purchaseInfo.purchaseUnitName);
+        if (editingItem.purchaseInfo.quantityPerPurchaseUnit) setQuantityPerPurchaseUnit(editingItem.purchaseInfo.quantityPerPurchaseUnit);
+        if (editingItem.purchaseInfo.costPerPurchaseUnit) setCostPerPurchaseUnit(editingItem.purchaseInfo.costPerPurchaseUnit);
       }
       
       // Load sales pricing if available
       if (editingItem.salesPricing) {
-        setMarkupPercentage(editingItem.salesPricing.markupPercentage);
-        setMinimumSellingPrice(editingItem.salesPricing.minimumSellingPrice || '');
+        if (editingItem.salesPricing.markupPercentage) setMarkupPercentage(editingItem.salesPricing.markupPercentage);
+        if (editingItem.salesPricing.minimumSellingPrice) setMinimumSellingPrice(String(editingItem.salesPricing.minimumSellingPrice));
       }
     }
   }, [editingItem]);
