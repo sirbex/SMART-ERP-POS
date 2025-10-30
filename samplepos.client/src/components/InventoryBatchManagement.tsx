@@ -355,7 +355,7 @@ const InventoryBatchManagement: React.FC = () => {
     const fetchBatches = async () => {
       if (selectedProduct?.id) {
         try {
-          const batches = await inventoryService.getProductBatches(selectedProduct.id, true);
+          const batches = await inventoryService.getProductBatches(String(selectedProduct.id), true);
           setProductBatches(batches);
         } catch (error) {
           console.error('Error fetching product batches:', error);
@@ -1127,8 +1127,8 @@ const InventoryBatchManagement: React.FC = () => {
                               <div className="font-medium">{item.productName}</div>
                               <div className="text-sm text-muted-foreground">
                                 Batch: {item.batchNumber} • Qty: {item.quantityReceived} • 
-                                Cost: {formatCurrency(item.unitCost)} • 
-                                Total: {formatCurrency(item.totalCost)}
+                                Cost: {formatCurrency(item.unitCost || 0)} • 
+                                Total: {formatCurrency(item.totalCost || 0)}
                                 {item.expiryDate && ` • Expires: ${new Date(item.expiryDate).toLocaleDateString()}`}
                               </div>
                             </div>

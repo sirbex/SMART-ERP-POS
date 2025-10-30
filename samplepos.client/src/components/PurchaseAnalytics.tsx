@@ -98,7 +98,7 @@ const PurchaseAnalytics: React.FC = () => {
 
     // Apply supplier filter to orders
     if (selectedSupplier !== 'all') {
-      orders = orders.filter(order => order.supplierId === selectedSupplier);
+      orders = orders.filter(order => String(order.supplierId) === String(selectedSupplier));
     }
 
     // Get received purchases (receivings) from backend

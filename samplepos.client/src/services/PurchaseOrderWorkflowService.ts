@@ -175,7 +175,11 @@ class PurchaseOrderWorkflowService {
     color: 'default' | 'destructive' | 'secondary' | 'outline';
     description: string;
   } {
-    const statusMap = {
+    const statusMap: Record<string, {
+      display: string;
+      color: 'default' | 'destructive' | 'secondary' | 'outline';
+      description: string;
+    }> = {
       draft: {
         display: 'DRAFT',
         color: 'secondary' as const,
@@ -205,6 +209,11 @@ class PurchaseOrderWorkflowService {
         display: 'CANCELLED',
         color: 'secondary' as const,
         description: 'Order was cancelled'
+      },
+      pending: {
+        display: 'PENDING',
+        color: 'outline' as const,
+        description: 'Order pending processing'
       }
     };
 

@@ -21,10 +21,10 @@ export * from './backend';
 export interface Customer {
   id: number | string;
   name: string;
-  email?: string;
-  phone?: string;
-  contact?: string; // Alias for phone (for backwards compatibility)
-  address?: string;
+  email?: string | null;
+  phone?: string | null;
+  contact?: string | null; // Alias for phone (for backwards compatibility)
+  address?: string | null;
   accountBalance?: number;
   balance?: number; // Alias for accountBalance (for backwards compatibility)
   creditLimit?: number;
@@ -32,7 +32,7 @@ export interface Customer {
   loyaltyDiscount?: number;
   isActive?: boolean;
   is_active?: boolean; // Backend format
-  notes?: string;
+  notes?: string | null;
   joinDate?: string;
   createdAt?: string;
   created_at?: string; // Backend format
@@ -771,6 +771,7 @@ export interface UnitOfMeasure {
 export interface ProductUoM extends UnitOfMeasure {
   uomId?: string; // selection id used by UI
   price?: number;
+  barcode?: string;
 }
 
 export const CommonUoMGroups: { group: string; units: UnitOfMeasure[] }[] = [

@@ -196,7 +196,7 @@ const SupplierAccountsPayable: React.FC = () => {
 
     const newPayment: SupplierPayment = {
       id: `payment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      supplierId: selectedSupplier.supplierId,
+      supplierId: String(selectedSupplier.supplierId),
       supplierName: selectedSupplier.supplierName,
       amount: paymentForm.amount,
       paymentDate: new Date().toISOString(),
@@ -379,7 +379,7 @@ const SupplierAccountsPayable: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setShowPaymentHistory(supplier.supplierId)}
+                            onClick={() => setShowPaymentHistory(String(supplier.supplierId))}
                           >
                             History
                           </Button>

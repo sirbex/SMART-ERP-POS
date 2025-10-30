@@ -148,19 +148,19 @@ class PurchaseManagementService {
     return orders.find(o => String(o.id) === String(id)) || null;
   }
 
-  createPurchaseOrder(orderData: Omit<PurchaseOrder, 'id' | 'createdAt' | 'updatedAt'>): string {
+  createPurchaseOrder(orderData: Omit<PurchaseOrder, 'id' | 'createdAt' | 'updatedAt'>): number {
     const newOrder: PurchaseOrder = {
       ...orderData,
-      id: `po-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: Date.now(), // Bank-grade: Use number ID
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     const orders = this.getPurchaseOrders();
     orders.push(newOrder);
-    this.savePurchaseOrders(orders);
+    localStorage.setItem('purchaseOrders', JSON.stringify(orders));
     
-    return String(newOrder.id);
+    return Number(newOrder.id);
   }
 
   updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>): boolean {
@@ -261,13 +261,15 @@ class PurchaseManagementService {
             notes: item.notes
           };
         }),
-        totalValue: 0, // Will be calculated
+        totalValue: 0, // Will be calculated below
+        totalQuantity: 0, // Will be calculated below
+        totalCost: 0, // Will be calculated below
         status: 'complete',
         notes: receivingData.notes,
         createdAt: new Date().toISOString()
       };
 
-      // Calculate total value
+      // Calculate total values
       receiving.totalValue = receiving.items.reduce((sum: number, item: any) => sum + (item.totalCost || 0), 0);
       receiving.totalQuantity = receiving.items.reduce((sum: number, item: any) => sum + (item.quantity || item.quantityReceived || 0), 0);
       receiving.totalCost = receiving.totalValue;
@@ -306,11 +308,11 @@ class PurchaseManagementService {
 
     return {
       totalOrders: orders.length,
-      totalValue: orders.reduce((sum, o) => sum + o.totalValue, 0),
+      totalValue: orders.reduce((sum, o) => sum + (o.totalValue || 0), 0),
       pendingOrders: pending.length,
-      pendingValue: pending.reduce((sum, o) => sum + o.totalValue, 0),
+      pendingValue: pending.reduce((sum, o) => sum + (o.totalValue || 0), 0),
       receivedOrders: received.length,
-      receivedValue: received.reduce((sum, o) => sum + o.totalValue, 0)
+      receivedValue: received.reduce((sum, o) => sum + (o.totalValue || 0), 0)
     };
   }
 
@@ -319,8 +321,8 @@ class PurchaseManagementService {
     const suppliers = this.getSuppliers();
 
     return suppliers.map(supplier => {
-      const supplierOrders = orders.filter(o => o.supplierId === supplier.id);
-      const totalValue = supplierOrders.reduce((sum, o) => sum + o.totalValue, 0);
+      const supplierOrders = orders.filter(o => String(o.supplierId) === String(supplier.id));
+      const totalValue = supplierOrders.reduce((sum, o) => sum + (o.totalValue || 0), 0);
       
       // Calculate on-time delivery rate (simplified)
       const completedOrders = supplierOrders.filter(o => o.status === 'received');
@@ -329,10 +331,10 @@ class PurchaseManagementService {
       const onTimeDeliveries = completedOrders;
 
       const lastOrder = supplierOrders
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+        .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())[0];
 
       return {
-        supplierId: supplier.id,
+        supplierId: String(supplier.id),
         supplierName: supplier.name,
         totalOrders: supplierOrders.length,
         totalValue,
@@ -362,7 +364,7 @@ class PurchaseManagementService {
   }
 
   calculateOrderTotal(items: PurchaseOrderItem[]): { subtotal: number; tax: number; total: number } {
-    const subtotal = items.reduce((sum, item) => sum + item.totalCost, 0);
+    const subtotal = items.reduce((sum, item) => sum + (item.totalCost || 0), 0);
     const tax = subtotal * 0.18; // 18% VAT (configurable)
     const total = subtotal + tax;
 
@@ -371,12 +373,12 @@ class PurchaseManagementService {
 
   // Get products that need restocking (low stock)
   getRestockSuggestions(): Array<{
-    productId: string;
+    productId: string | number;
     productName: string;
     currentStock: number;
     reorderLevel: number;
     suggestedOrderQuantity: number;
-    preferredSupplier?: string;
+    preferredSupplier?: string | number;
   }> {
     const products = this.inventoryService.getProducts();
     const suggestions = [];
@@ -385,8 +387,9 @@ class PurchaseManagementService {
       const stockSummary = this.inventoryService.getProductStockSummary(product.id);
       
       if (stockSummary && stockSummary.isLowStock) {
+        const reorderLevel = product.reorderLevel || 0;
         const suggestedQuantity = Math.max(
-          product.reorderLevel * 2, // Reorder to double the reorder level
+          reorderLevel * 2, // Reorder to double the reorder level
           stockSummary.availableQuantity * 3 // Or triple current stock
         );
 
@@ -394,7 +397,7 @@ class PurchaseManagementService {
           productId: product.id,
           productName: product.name,
           currentStock: stockSummary.availableQuantity,
-          reorderLevel: product.reorderLevel,
+          reorderLevel: reorderLevel,
           suggestedOrderQuantity: suggestedQuantity,
           preferredSupplier: product.supplier
         });

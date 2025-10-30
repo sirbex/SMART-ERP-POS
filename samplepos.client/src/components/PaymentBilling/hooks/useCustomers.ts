@@ -23,8 +23,8 @@ const fetchCustomers = async (): Promise<Customer[]> => {
     return customers.map(c => ({
       id: c.id || '',
       name: c.name,
-      email: c.email,
-      phone: c.contact,
+      email: c.email || undefined,
+      phone: c.contact || undefined,
       balance: c.balance || 0,
       creditLimit: 0,
     }));

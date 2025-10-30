@@ -3,12 +3,22 @@ export type { InventoryItem, Product as InventoryProduct, ProductUoM } from '../
 
 // Additional purchasing-related types expected by utils
 export interface PurchaseUoM {
-  uomId: string;
-  conversionFactor: number;
-  unitCost: number;
+  purchaseUnitId: string;
+  purchaseUnitName: string;
+  quantityPerPurchaseUnit: number;
+  costPerPurchaseUnit: number;
+  costPerBaseUnit?: number;
+  supplierInfo?: string;
+  // Legacy compatibility
+  uomId?: string;
+  conversionFactor?: number;
+  unitCost?: number;
 }
 
 export interface SalesPricing {
   baseUnitPrice: number;
   uomPrices?: Record<string, number>;
+  marginPercentage?: number;
+  markupPercentage?: number;
+  minimumSellingPrice?: number;
 }

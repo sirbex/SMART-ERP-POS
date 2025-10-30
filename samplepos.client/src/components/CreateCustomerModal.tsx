@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { Customer } from '../types/backend';
+import type { Customer } from '../types';
 import type { CreateCustomerData } from '../services/api/customersApi';
 import { useCreateCustomer, useCustomers } from '../services/api/customersApi';
 import { useFocusTrap } from '../hooks/useFocusTrap';
@@ -16,6 +16,7 @@ interface CreateCustomerModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  onSave?: (customer: Omit<Customer, "id">) => Promise<void>;
 }
 
 const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose, onSuccess }) => {
@@ -101,7 +102,7 @@ const CreateCustomerModal: React.FC<CreateCustomerModalProps> = ({ open, onClose
     }
     
     // Check if customer name already exists
-    if (customers.some((c: Customer) => c.name.toLowerCase() === formData.name.toLowerCase())) {
+    if (customers.some((c) => c.name.toLowerCase() === formData.name.toLowerCase())) {
       errors.name = 'Customer with this name already exists';
     }
     

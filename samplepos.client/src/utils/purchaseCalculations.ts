@@ -78,13 +78,13 @@ export function generateSalesUoMOptions(
   baseUnitId: string
 ): ProductUoM[] {
   const baseUnitPrice = calculateSellingPrice(
-    purchaseInfo.costPerBaseUnit, 
-    salesPricing.markupPercentage
+    purchaseInfo.costPerBaseUnit || 0, 
+    salesPricing.markupPercentage || 0
   );
   
   const bulkUnitPrice = calculateSellingPrice(
     purchaseInfo.costPerPurchaseUnit, 
-    salesPricing.markupPercentage
+    salesPricing.markupPercentage || 0
   );
   
   // Ensure minimum selling price if specified
@@ -99,6 +99,8 @@ export function generateSalesUoMOptions(
   return [
     {
       uomId: baseUnitId,
+      code: 'BASE',
+      name: 'Base Unit',
       price: finalBaseUnitPrice,
       isDefault: true,
       conversionFactor: 1,
@@ -106,6 +108,8 @@ export function generateSalesUoMOptions(
     },
     {
       uomId: purchaseInfo.purchaseUnitId,
+      code: 'BULK',
+      name: purchaseInfo.purchaseUnitName,
       price: finalBulkUnitPrice,
       isDefault: false,
       conversionFactor: purchaseInfo.quantityPerPurchaseUnit,
@@ -165,7 +169,8 @@ export function validatePurchaseInfo(purchaseInfo: PurchaseUoM): void {
     throw new Error('Cost per purchase unit cannot be negative');
   }
   
-  if (purchaseInfo.costPerBaseUnit < 0) {
+  const costPerBaseUnit = purchaseInfo.costPerBaseUnit || 0;
+  if (costPerBaseUnit < 0) {
     throw new Error('Cost per base unit cannot be negative');
   }
   
@@ -173,7 +178,7 @@ export function validatePurchaseInfo(purchaseInfo: PurchaseUoM): void {
   const calculatedCostPerBase = purchaseInfo.costPerPurchaseUnit / purchaseInfo.quantityPerPurchaseUnit;
   const tolerance = 0.001; // Allow for floating point precision
   
-  if (Math.abs(purchaseInfo.costPerBaseUnit - calculatedCostPerBase) > tolerance) {
+  if (Math.abs(costPerBaseUnit - calculatedCostPerBase) > tolerance) {
     throw new Error('Cost per base unit calculation is inconsistent');
   }
 }
@@ -184,8 +189,9 @@ export function validatePurchaseInfo(purchaseInfo: PurchaseUoM): void {
  * @returns Formatted string showing cost breakdown
  */
 export function formatCostBreakdown(purchaseInfo: PurchaseUoM): string {
+  const costPerBaseUnit = purchaseInfo.costPerBaseUnit || 0;
   return `${purchaseInfo.purchaseUnitName}: $${purchaseInfo.costPerPurchaseUnit.toFixed(2)} ` +
-         `(${purchaseInfo.quantityPerPurchaseUnit} units @ $${purchaseInfo.costPerBaseUnit.toFixed(2)} each)`;
+         `(${purchaseInfo.quantityPerPurchaseUnit} units @ $${costPerBaseUnit.toFixed(2)} each)`;
 }
 
 /**

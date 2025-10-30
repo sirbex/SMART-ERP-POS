@@ -82,11 +82,11 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
   useEffect(() => {
     if (editingItem) {
       setProductName(editingItem.name);
-      setBatch(editingItem.batch);
-      setCategory(editingItem.category || '');
-      setSupplier(editingItem.supplier || '');
-      setLocation(editingItem.location || '');
-      setSku(editingItem.sku || '');
+      setBatch(editingItem.batch ? String(editingItem.batch) : '');
+      setCategory(editingItem.category ? String(editingItem.category) : '');
+      setSupplier(editingItem.supplier ? String(editingItem.supplier) : '');
+      setLocation(editingItem.location ? String(editingItem.location) : '');
+      setSku(editingItem.sku ? String(editingItem.sku) : '');
       if (editingItem.hasExpiry !== undefined) setHasExpiry(editingItem.hasExpiry);
       setExpiry(editingItem.expiry || '');
       setExpiryAlertDays(editingItem.expiryAlertDays || 30);
@@ -213,8 +213,6 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
         
         // UoM options for sales
         uomOptions,
-        baseUomId: baseUnitId,
-        defaultUomId: baseUnitId,
         
         // Basic pricing (using base unit price)
         price: sellingPricePerUnit,

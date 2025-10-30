@@ -120,8 +120,8 @@ const fetchBillingData = async (customerId?: string | number): Promise<BillingDa
       customer: {
         id: customer.id || customerId,
         name: customer.name,
-        email: customer.email,
-        phone: customer.phone,
+        email: customer.email || undefined,
+        phone: customer.phone || undefined,
         balance: customer.balance || pendingAmount,
       },
       summary: {
