@@ -28,6 +28,7 @@ import heldSalesRouter from './routes/heldSales.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
 import prisma from './config/database.js';
+import apiLimiter, { authLimiter } from './middleware/rateLimit.js';
 
 dotenv.config();
 
@@ -46,6 +47,10 @@ app.use(cors({
 app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Rate limiting (apply before routes)
+app.use('/api', apiLimiter);
+app.use('/api/auth', authLimiter);
 
 // Request logging
 app.use((req, res, next) => {

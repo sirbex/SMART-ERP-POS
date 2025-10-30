@@ -5,6 +5,8 @@ import { authenticate, authorize } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 import { parsePagination, buildPaginationResponse, buildSearchFilter } from '../utils/helpers.js';
 import { CreateCustomerSchema, UpdateCustomerSchema } from '../validation/customer.js';
+import cacheMiddleware, { invalidateCache } from '../middleware/cache.js';
+import { CacheTTL } from '../services/cacheService.js';
 import { CreatePaymentSchema } from '../validation/payment.js';
 
 const router = Router();
@@ -13,6 +15,7 @@ const router = Router();
 router.get(
   '/',
   authenticate,
+  cacheMiddleware({ ttl: CacheTTL.MEDIUM, keyPrefix: 'customers' }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
@@ -58,6 +61,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
+  cacheMiddleware({ ttl: CacheTTL.MEDIUM, keyPrefix: 'customers' }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -106,6 +110,7 @@ router.post(
   '/',
   authenticate,
   authorize(['ADMIN', 'MANAGER', 'CASHIER']),
+  invalidateCache.customers,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Validate request body with Zod
@@ -159,6 +164,7 @@ router.put(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
+  invalidateCache.customers,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -223,6 +229,7 @@ router.delete(
   '/:id',
   authenticate,
   authorize(['ADMIN']),
+  invalidateCache.customers,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -268,6 +275,7 @@ router.post(
   '/:id/payment',
   authenticate,
   authorize(['ADMIN', 'MANAGER', 'CASHIER']),
+  invalidateCache.customers,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

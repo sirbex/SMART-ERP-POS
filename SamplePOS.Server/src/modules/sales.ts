@@ -8,6 +8,8 @@ import { calculateFIFO, createBatchUpdates } from '../utils/fifoCalculator.js';
 import { convertToBaseUnit as legacyConvertToBaseUnit } from '../utils/uomConverter.js';
 import { convertToBaseUnit, calculatePriceForUoM, validateUoMForProduct } from '../utils/uomService.js';
 import { CreateSaleSchema, RefundSaleSchema } from '../validation/sale.js';
+import cacheMiddleware, { invalidateCache } from '../middleware/cache.js';
+import { CacheTTL } from '../services/cacheService.js';
 
 const router = Router();
 
@@ -16,6 +18,7 @@ const router = Router();
 router.get(
   '/',
   authenticate,
+  cacheMiddleware({ ttl: CacheTTL.SHORT, keyPrefix: 'sales' }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
@@ -96,6 +99,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
+  cacheMiddleware({ ttl: CacheTTL.SHORT, keyPrefix: 'sales' }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -142,6 +146,7 @@ router.get(
 router.post(
   '/',
   authenticate,
+  invalidateCache.sales,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Validate request body with Zod
@@ -559,6 +564,7 @@ router.put(
   '/:id',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
+  invalidateCache.sales,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Validate request body with Zod
@@ -615,6 +621,7 @@ router.post(
   '/:id/cancel',
   authenticate,
   authorize(['ADMIN', 'MANAGER']),
+  invalidateCache.sales,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Validate request body with Zod
