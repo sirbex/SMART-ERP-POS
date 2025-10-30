@@ -668,13 +668,16 @@ export type PurchaseStatus = 'PENDING' | 'RECEIVED' | 'PARTIAL' | 'CANCELLED';
 export interface Purchase {
   id: number;
   purchaseNumber: string;
+  orderNumber?: string; // Alias
   supplierId: number;
+  supplierName?: string; // Denormalized for UI
   orderDate: Date;
   receivedDate?: Date | null;
   status: PurchaseStatus;
   subtotal: Decimal;
   taxAmount: Decimal;
   totalAmount: Decimal;
+  totalValue?: Decimal; // Alias for totalAmount
   amountPaid: Decimal;
   paymentMethod?: PaymentMethod | null;
   notes?: string | null;

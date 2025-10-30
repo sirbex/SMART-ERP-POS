@@ -99,6 +99,7 @@ export interface Product {
   is_active?: boolean; // Backend format
   hasExpiry?: boolean;
   expiryDate?: string;
+  expiry?: string; // Alias for expiryDate
   // Additional optional fields used by UI components
   expiryAlertDays?: number;
   maxStockLevel?: number;
@@ -107,6 +108,20 @@ export interface Product {
   batch?: string;
   // UoM options for multi-unit products
   uomOptions?: any[];
+  // Purchase-related info
+  purchaseInfo?: {
+    purchaseUnitId?: string;
+    packSize?: number;
+    lastPurchasePrice?: number;
+    preferredSupplierId?: string | number;
+    minimumOrderQuantity?: number;
+  };
+  // Sales pricing info
+  salesPricing?: {
+    baseUnitPrice?: number;
+    uomPrices?: Record<string, number>;
+    marginPercentage?: number;
+  };
   supplierId?: number;
   supplier_id?: number; // Backend format
   createdAt?: string;
@@ -660,6 +675,15 @@ export type InventoryItem = Product;
 export type TransactionItem = SaleItem;
 
 /**
+ * SalesPricing interface for purchase calculations
+ */
+export interface SalesPricing {
+  baseUnitPrice: number;
+  uomPrices?: Record<string, number>;
+  marginPercentage?: number;
+}
+
+/**
  * Purchase Receiving interface
  */
 export interface PurchaseReceiving {
@@ -677,6 +701,7 @@ export interface PurchaseReceiving {
   supplier?: string;
   totalValue?: number;
   purchaseOrderNumber?: string;
+  status?: 'complete' | 'partial' | 'pending';
 }
 
 /**
@@ -694,6 +719,7 @@ export interface PurchaseReceivingItem {
   total: number;
   // Additional optional fields used in UI
   quantityReceived?: number;
+  quantityOrdered?: number;
   manufacturingDate?: string;
   supplierBatchRef?: string;
   location?: string;

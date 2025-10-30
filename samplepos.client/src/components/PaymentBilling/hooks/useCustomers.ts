@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as POSServiceAPI from '../../../services/POSServiceAPI';
 
 export interface Customer {
-  id: string;
+  id: string | number;
   name: string;
   email?: string;
   phone?: string;
