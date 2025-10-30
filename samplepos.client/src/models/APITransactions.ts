@@ -24,9 +24,12 @@ export interface POSTransaction {
 
 export interface CustomerPayment {
   id?: string;
+  customerId?: string | number;
   amount: number;
-  method: _PaymentMethod | string;
+  method?: _PaymentMethod | string;
+  paymentMethod?: _PaymentMethod | string;
   reference?: string;
+  notes?: string;
   status?: string;
   invoiceNumber?: string;
 }

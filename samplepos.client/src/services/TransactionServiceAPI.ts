@@ -116,7 +116,7 @@ class TransactionServiceAPI {
       
       const response = await api.post(`/customers/${payment.customerId}/payment`, {
         amount: payment.amount,
-        method: payment.paymentMethod.toUpperCase(), // Backend expects CASH, CARD, etc.
+        method: (payment.paymentMethod || payment.method || 'CASH').toUpperCase(), // Backend expects CASH, CARD, etc.
         reference: payment.reference,
         notes: payment.notes
       });

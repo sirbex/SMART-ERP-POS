@@ -13,7 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../ui/textarea';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import * as TransactionServiceAPI from '../../services/TransactionServiceAPI';
+import TransactionServiceAPI from '../../services/TransactionServiceAPI';
+
+const transactionService = new TransactionServiceAPI();
 
 interface PaymentFormRefactoredProps {
   customerId?: string;
@@ -46,13 +48,12 @@ export const PaymentFormRefactored: React.FC<PaymentFormRefactoredProps> = ({
       const payment = {
         customerId: customerId || 'walk-in',
         amount: parseFloat(data.amount),
-        method: data.method,
+        paymentMethod: data.method,
         reference: data.reference || undefined,
         notes: data.notes || undefined,
-        timestamp: new Date().toISOString(),
       };
 
-      return TransactionServiceAPI.recordPayment(payment);
+      return transactionService.recordPayment(payment);
     },
     onSuccess: () => {
       // Invalidate queries to refresh data

@@ -272,6 +272,15 @@ const POSScreenAPI: React.FC = () => {
     
     // Check if we have enough stock
     try {
+      if (!item.productId) {
+        toast({
+          title: "Error",
+          description: "Invalid product ID",
+          variant: "destructive",
+        });
+        return;
+      }
+      
       const stockCheck = await POSServiceAPI.checkStock(item.productId, newQuantity);
       
       if (!stockCheck.success) {
@@ -815,7 +824,7 @@ const POSScreenAPI: React.FC = () => {
                         <div 
                           key={customer.id}
                           className="flex items-center justify-between p-3 hover:bg-qb-gray-50 cursor-pointer border-b last:border-b-0"
-                          onClick={() => selectCustomer(customer.id)}
+                          onClick={() => selectCustomer(String(customer.id))}
                         >
                           <div>
                             <p className="font-medium text-qb-gray-900">{customer.name}</p>
@@ -853,7 +862,7 @@ const POSScreenAPI: React.FC = () => {
                     <div className="flex-1 mr-3">
                       <p className="font-medium text-qb-gray-900 text-sm">{item.name}</p>
                       <p className="text-xs text-qb-gray-500">
-                        {formatCurrency(item.price)} per {item.unit}
+                        {formatCurrency(item.price || 0)} per {item.unit}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1207,7 +1216,7 @@ const POSScreenAPI: React.FC = () => {
                     <div className="flex justify-between">
                       <div>
                         <p className="text-sm font-medium">
-                          Transaction #{transaction.id.slice(0, 8)}
+                          Transaction #{String(transaction.id).slice(0, 8)}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {new Date(transaction.createdAt).toLocaleString()}
@@ -1234,7 +1243,7 @@ const POSScreenAPI: React.FC = () => {
                       <Button 
                         variant="destructive" 
                         size="sm"
-                        onClick={() => voidTransaction(transaction.id)}
+                        onClick={() => voidTransaction(String(transaction.id))}
                       >
                         <X className="mr-1 h-3 w-3" /> Void
                       </Button>
