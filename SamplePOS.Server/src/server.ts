@@ -52,12 +52,26 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 
-// Request logging
+// Request logging with timing
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
+  const start = Date.now();
+  
+  // Log request start
+  logger.info(`→ ${req.method} ${req.path}`, {
     ip: req.ip,
     userAgent: req.get('user-agent')
   });
+  
+  // Log response on finish
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info(`← ${req.method} ${req.path} ${res.statusCode} ${duration}ms`, {
+      status: res.statusCode,
+      duration,
+      ip: req.ip
+    });
+  });
+  
   next();
 });
 
