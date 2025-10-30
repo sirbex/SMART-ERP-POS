@@ -393,6 +393,7 @@ router.get('/export/pdf', authenticate, async (req: Request, res: Response) => {
 /**
  * GET /api/purchase-orders/pending
  * Get pending purchase orders for receiving screen
+ * Limited to 100 most recent orders for performance
  */
 router.get('/pending', authenticate, async (req: Request, res: Response) => {
   try {
@@ -403,6 +404,7 @@ router.get('/pending', authenticate, async (req: Request, res: Response) => {
         }
       },
       orderBy: { expectedDeliveryDate: 'asc' },
+      take: 100, // Limit for performance
       include: {
         supplier: true,
         items: {

@@ -329,20 +329,20 @@ router.post(
         
         // Find the last sale with the correct format (SALE-YYYYMMDD-NNNNNN)
         const prefix = `SALE-${dateStr}-`;
-        const allSales = await tx.sale.findMany({
+        const lastSale = await tx.sale.findFirst({
           where: { saleNumber: { startsWith: prefix } },
           select: { saleNumber: true },
           orderBy: { createdAt: 'desc' }
         });
         
-        // Find the highest sequence number from correctly formatted sale numbers
+        // Parse sequence from last sale number
         let maxSequence = 0;
-        for (const sale of allSales) {
-          const parts = sale.saleNumber.split('-');
+        if (lastSale) {
+          const parts = lastSale.saleNumber.split('-');
           // Only accept format: SALE-YYYYMMDD-NNNNNN (exactly 3 parts)
           if (parts.length === 3 && parts[0] === 'SALE' && parts[1] === dateStr) {
             const seqNum = parseInt(parts[2], 10);
-            if (!isNaN(seqNum) && seqNum > maxSequence) {
+            if (!isNaN(seqNum)) {
               maxSequence = seqNum;
             }
           }

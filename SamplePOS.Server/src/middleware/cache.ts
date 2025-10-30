@@ -114,6 +114,7 @@ export const invalidateCache = {
   customers: invalidateCacheMiddleware(['api:/api/customers']),
   suppliers: invalidateCacheMiddleware(['api:/api/suppliers']),
   inventory: invalidateCacheMiddleware(['api:/api/inventory']),
+  sales: invalidateCacheMiddleware(['api:/api/sales']),
   all: invalidateCacheMiddleware(['api:']),
 };
 

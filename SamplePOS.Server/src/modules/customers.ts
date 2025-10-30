@@ -464,20 +464,29 @@ router.get(
   authorize(['ADMIN', 'MANAGER']),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const customers = await prisma.customer.findMany({
-        where: {
-          currentBalance: { gt: 0 },
-        },
-        orderBy: {
-          currentBalance: 'desc',
-        },
-        include: {
-          transactions: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
+      const { page, limit, skip } = parsePagination(req.query);
+      
+      const [customers, totalCount] = await Promise.all([
+        prisma.customer.findMany({
+          where: {
+            currentBalance: { gt: 0 },
           },
-        },
-      });
+          orderBy: {
+            currentBalance: 'desc',
+          },
+          include: {
+            transactions: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+          skip,
+          take: limit,
+        }),
+        prisma.customer.count({
+          where: { currentBalance: { gt: 0 } },
+        }),
+      ]);
 
       const totalCredit = await prisma.customer.aggregate({
         where: { currentBalance: { gt: 0 } },
@@ -488,10 +497,10 @@ router.get(
       logger.info('Retrieved customers with credit', { userId: (req as any).user?.id });
 
       res.json({
-        customers,
+        ...buildPaginationResponse(customers, totalCount, { page, limit, skip }),
         summary: {
+          totalCredit: totalCredit._sum.currentBalance || new Prisma.Decimal(0),
           totalCustomers: totalCredit._count,
-          totalcurrentBalance: totalCredit._sum.currentBalance || new Prisma.Decimal(0),
         },
       });
     } catch (error) {
