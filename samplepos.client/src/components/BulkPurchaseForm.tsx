@@ -95,14 +95,18 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
       if (editingItem.purchaseInfo) {
         if (editingItem.purchaseInfo.purchaseUnitId) setPurchaseUnitId(String(editingItem.purchaseInfo.purchaseUnitId));
         if (editingItem.purchaseInfo.purchaseUnitName) setPurchaseUnitName(editingItem.purchaseInfo.purchaseUnitName);
-        if (editingItem.purchaseInfo.quantityPerPurchaseUnit) setQuantityPerPurchaseUnit(editingItem.purchaseInfo.quantityPerPurchaseUnit);
-        if (editingItem.purchaseInfo.costPerPurchaseUnit) setCostPerPurchaseUnit(editingItem.purchaseInfo.costPerPurchaseUnit);
+        if (editingItem.purchaseInfo.quantityPerPurchaseUnit !== undefined) setQuantityPerPurchaseUnit(editingItem.purchaseInfo.quantityPerPurchaseUnit);
+        if (editingItem.purchaseInfo.costPerPurchaseUnit !== undefined) setCostPerPurchaseUnit(editingItem.purchaseInfo.costPerPurchaseUnit);
       }
       
       // Load sales pricing if available
       if (editingItem.salesPricing) {
-        if (editingItem.salesPricing.markupPercentage) setMarkupPercentage(editingItem.salesPricing.markupPercentage);
-        if (editingItem.salesPricing.minimumSellingPrice) setMinimumSellingPrice(String(editingItem.salesPricing.minimumSellingPrice));
+        if (editingItem.salesPricing.markupPercentage !== undefined) setMarkupPercentage(editingItem.salesPricing.markupPercentage);
+        if (editingItem.salesPricing.minimumSellingPrice !== undefined) {
+          setMinimumSellingPrice(typeof editingItem.salesPricing.minimumSellingPrice === 'number' 
+            ? editingItem.salesPricing.minimumSellingPrice 
+            : parseFloat(String(editingItem.salesPricing.minimumSellingPrice)) || '');
+        }
       }
     }
   }, [editingItem]);
@@ -177,9 +181,9 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
 
       // Create sales pricing
       const salesPricing: SalesPricing = {
+        baseUnitPrice: sellingPricePerUnit,
         markupPercentage,
-        minimumSellingPrice: typeof minimumSellingPrice === 'number' ? minimumSellingPrice : undefined,
-        maxDiscountPercentage: 10 // Default 10% max discount
+        minimumSellingPrice: typeof minimumSellingPrice === 'number' ? minimumSellingPrice : undefined
       };
 
       // Generate UoM options for sales
@@ -197,10 +201,15 @@ const BulkPurchaseForm: React.FC<BulkPurchaseFormProps> = ({
         unit: baseUnitId,
         
         // Enhanced purchase & cost management
-        purchaseInfo,
+        purchaseInfo: {
+          purchaseUnitId: purchaseInfo.purchaseUnitId,
+          purchaseUnitName: purchaseInfo.purchaseUnitName,
+          quantityPerPurchaseUnit: purchaseInfo.quantityPerPurchaseUnit,
+          costPerPurchaseUnit: purchaseInfo.costPerPurchaseUnit,
+          lastPurchasePrice: costPerPurchaseUnit,
+          packSize: purchaseInfo.quantityPerPurchaseUnit
+        },
         salesPricing,
-        lastPurchaseDate: new Date().toISOString(),
-        lastPurchaseCost: costPerPurchaseUnit,
         
         // UoM options for sales
         uomOptions,

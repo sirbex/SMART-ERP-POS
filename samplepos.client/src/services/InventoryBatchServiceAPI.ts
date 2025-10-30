@@ -163,9 +163,8 @@ class InventoryBatchServiceAPI {
     const defaultResult: FIFOReleaseResult = {
       success: false,
       message: 'Failed to release inventory',
-      releasedBatches: [],
-      totalReleased: 0,
-      remainingRequested: quantity
+      batchesUsed: [],
+      releasedQuantity: 0
     };
 
     try {

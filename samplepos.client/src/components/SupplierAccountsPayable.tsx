@@ -67,7 +67,7 @@ import {
 
 // Types for Supplier Accounts
 interface SupplierBalance {
-  supplierId: string;
+  supplierId: string | number;
   supplierName: string;
   totalOrdered: number;      // Total amount ordered
   totalReceived: number;     // Total amount received
@@ -134,16 +134,16 @@ const SupplierAccountsPayable: React.FC = () => {
       const supplierPayments = payments.filter(p => p.supplierId === supplier.id);
 
       // Calculate totals
-      const totalOrdered = supplierOrders.reduce((sum, o) => sum + o.totalValue, 0);
+      const totalOrdered = supplierOrders.reduce((sum, o) => sum + (o.totalValue || 0), 0);
       const totalReceived = supplierReceivings.reduce((sum, r) => sum + Number(r.totalAmount), 0);
       const totalPaid = supplierPayments.reduce((sum, p) => sum + p.amount, 0);
       const currentBalance = totalReceived - totalPaid; // What we owe
 
       // Get last dates
       const lastOrder = supplierOrders
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+        .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())[0];
       const lastPayment = supplierPayments
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+        .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())[0];
 
       return {
         supplierId: supplier.id,

@@ -65,6 +65,8 @@ const ProductUoMSelectionModal: React.FC<ProductUoMSelectionModalProps> = ({
         // Create a basic UoM for products without UoM configuration
         const baseUoM: ProductUoM = {
           uomId: 'piece',
+          code: 'PCS',
+          name: 'Piece',
           price: typeof product.price === 'number' ? product.price : 0,
           isDefault: true,
           conversionFactor: 1

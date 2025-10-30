@@ -76,9 +76,9 @@ export async function createTransaction(transaction: {
         uomDisplayName: item.unit || 'piece',
         conversionFactor: 1, // Default conversion factor
         discount: item.discount || 0,
-        subtotal: item.subtotal,
+        subtotal: item.subtotal || 0,
         tax: item.taxes || 0,
-        total: item.subtotal + (item.taxes || 0) - (item.discount || 0),
+        total: (item.subtotal || 0) + (item.taxes || 0) - (item.discount || 0),
         costPrice: item.averageCostPrice || 0,
         notes: ''
       }))

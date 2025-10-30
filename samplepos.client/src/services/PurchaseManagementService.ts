@@ -115,14 +115,14 @@ class PurchaseManagementService {
       // Check if supplier has pending orders
       const orders = this.getPurchaseOrders();
       const hasActiveOrders = orders.some(order => 
-        order.supplierId === id && ['draft', 'sent', 'confirmed', 'partial'].includes(order.status)
+        String(order.supplierId) === String(id) && ['draft', 'sent', 'confirmed', 'partial'].includes(order.status)
       );
 
       if (hasActiveOrders) {
         throw new Error('Cannot delete supplier with active purchase orders');
       }
 
-      const suppliers = this.getSuppliers().filter(s => s.id !== id);
+      const suppliers = this.getSuppliers().filter(s => String(s.id) !== String(id));
       this.saveSuppliers(suppliers);
       return true;
     } catch (error) {
@@ -145,7 +145,7 @@ class PurchaseManagementService {
 
   getPurchaseOrder(id: string): PurchaseOrder | null {
     const orders = this.getPurchaseOrders();
-    return orders.find(o => o.id === id) || null;
+    return orders.find(o => String(o.id) === String(id)) || null;
   }
 
   createPurchaseOrder(orderData: Omit<PurchaseOrder, 'id' | 'createdAt' | 'updatedAt'>): string {
@@ -160,13 +160,13 @@ class PurchaseManagementService {
     orders.push(newOrder);
     this.savePurchaseOrders(orders);
     
-    return newOrder.id;
+    return String(newOrder.id);
   }
 
   updatePurchaseOrder(id: string, updates: Partial<PurchaseOrder>): boolean {
     try {
       const orders = this.getPurchaseOrders();
-      const orderIndex = orders.findIndex(o => o.id === id);
+      const orderIndex = orders.findIndex(o => String(o.id) === String(id));
       
       if (orderIndex === -1) {
         throw new Error('Purchase order not found');
@@ -201,7 +201,7 @@ class PurchaseManagementService {
         throw new Error('Can only delete draft or cancelled orders');
       }
 
-      const orders = this.getPurchaseOrders().filter(o => o.id !== id);
+      const orders = this.getPurchaseOrders().filter(o => String(o.id) !== String(id));
       this.savePurchaseOrders(orders);
       return true;
     } catch (error) {
@@ -243,14 +243,16 @@ class PurchaseManagementService {
         receivedBy: receivingData.receivedBy,
         receivedDate: receivingData.receivedDate,
         items: receivingData.items.map(item => {
-          const orderItem = purchaseOrder.items.find(oi => oi.productId === item.productId);
+          const orderItem = purchaseOrder.items.find((oi: any) => oi.productId === item.productId);
           return {
             productId: item.productId,
             productName: orderItem?.productName || 'Unknown Product',
             batchNumber: item.batchNumber,
+            quantity: item.quantityReceived,
             quantityOrdered: orderItem?.quantityOrdered || 0,
             quantityReceived: item.quantityReceived,
             unitCost: orderItem?.unitCost || 0,
+            total: (orderItem?.unitCost || 0) * item.quantityReceived,
             totalCost: (orderItem?.unitCost || 0) * item.quantityReceived,
             expiryDate: item.expiryDate,
             manufacturingDate: item.manufacturingDate,
@@ -266,17 +268,19 @@ class PurchaseManagementService {
       };
 
       // Calculate total value
-      receiving.totalValue = receiving.items.reduce((sum, item) => sum + item.totalCost, 0);
+      receiving.totalValue = receiving.items.reduce((sum: number, item: any) => sum + (item.totalCost || 0), 0);
+      receiving.totalQuantity = receiving.items.reduce((sum: number, item: any) => sum + (item.quantity || item.quantityReceived || 0), 0);
+      receiving.totalCost = receiving.totalValue;
 
       // Process through inventory batch service
       const success = this.inventoryService.receivePurchase(receiving);
       
       if (success) {
         // Update purchase order status
-        const fullyReceived = purchaseOrder.items.every(orderItem => {
+        const fullyReceived = purchaseOrder.items.every((orderItem: any) => {
           const receivedQty = receiving.items
-            .filter(ri => ri.productId === orderItem.productId)
-            .reduce((sum, ri) => sum + ri.quantityReceived, 0);
+            .filter((ri: any) => ri.productId === orderItem.productId)
+            .reduce((sum: number, ri: any) => sum + ri.quantityReceived, 0);
           return receivedQty >= orderItem.quantityOrdered;
         });
 
