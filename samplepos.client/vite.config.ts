@@ -51,43 +51,51 @@ export default defineConfig({
         // Optimize for code-splitting
         rollupOptions: {
             output: {
-                manualChunks: {
-                    // Vendor chunk for React and core libraries
-                    'vendor': ['react', 'react-dom'],
-                    
-                    // UI components chunk
-                    'ui': [
-                        '@radix-ui/react-dialog',
-                        '@radix-ui/react-select', 
-                        '@radix-ui/react-tabs',
-                        '@radix-ui/react-label',
-                        '@radix-ui/react-slot',
-                        'lucide-react'
-                    ],
-                    
-                    // Business logic chunks
-                    'pos-system': [
-                        './src/components/POSScreenShadcn',
-                        './src/components/PaymentBillingShadcn'
-                    ],
-                    
-                    'customer-management': [
-                        './src/components/CustomerLedgerFormShadcn',
-                        './src/services/CustomerAccountService',
-                        './src/context/CustomerLedgerContext'
-                    ],
-                    
-                    'inventory-reports': [
-                        './src/components/InventoryManagement',
-                        './src/components/ReportsShadcn'
-                    ]
+                manualChunks(id) {
+                    // Vendor chunks - React ecosystem
+                    if (id.includes('node_modules')) {
+                        // React core
+                        if (id.includes('react') || id.includes('react-dom')) {
+                            return 'vendor-react';
+                        }
+                        
+                        // Radix UI components
+                        if (id.includes('@radix-ui')) {
+                            return 'vendor-radix';
+                        }
+                        
+                        // Data fetching and forms
+                        if (id.includes('@tanstack/react-query') || id.includes('axios')) {
+                            return 'vendor-data';
+                        }
+                        
+                        // Charts
+                        if (id.includes('chart.js') || id.includes('react-chartjs-2')) {
+                            return 'vendor-charts';
+                        }
+                        
+                        // Icons and UI utilities
+                        if (id.includes('lucide-react') || id.includes('framer-motion')) {
+                            return 'vendor-ui';
+                        }
+                        
+                        // Date utilities
+                        if (id.includes('date-fns') || id.includes('react-day-picker')) {
+                            return 'vendor-date';
+                        }
+                        
+                        // Other dependencies
+                        return 'vendor-misc';
+                    }
                 }
             }
         },
         // Optimize chunk size
         chunkSizeWarningLimit: 1000,
         target: 'esnext',
-        minify: 'esbuild'
+        minify: 'esbuild',
+        // Enable source maps for production debugging
+        sourcemap: false,
     },
     server: {
         proxy: {
