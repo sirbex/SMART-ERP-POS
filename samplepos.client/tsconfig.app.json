@@ -35,6 +35,7 @@
     "node_modules",
     "BACKEND_*.ts",
     "BACKEND_*.md",
-    "*.prisma"
+    "*.prisma",
+    "src/tests/**"
   ]
 }

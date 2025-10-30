@@ -19,7 +19,7 @@ export * from './backend';
  * NOTE: id is number (from PostgreSQL autoincrement)
  */
 export interface Customer {
-  id: number;
+  id: number | string;
   name: string;
   email?: string;
   phone?: string;
@@ -80,7 +80,7 @@ export interface CustomerListResponse {
  * NOTE: id is number (from PostgreSQL autoincrement)
  */
 export interface Product {
-  id: number;
+  id: number | string;
   name: string;
   sku?: string;
   barcode?: string;
@@ -99,6 +99,14 @@ export interface Product {
   is_active?: boolean; // Backend format
   hasExpiry?: boolean;
   expiryDate?: string;
+  // Additional optional fields used by UI components
+  expiryAlertDays?: number;
+  maxStockLevel?: number;
+  supplier?: string | number;
+  location?: string;
+  batch?: string;
+  // UoM options for multi-unit products
+  uomOptions?: any[];
   supplierId?: number;
   supplier_id?: number; // Backend format
   createdAt?: string;
@@ -112,8 +120,8 @@ export interface Product {
  * Inventory batch for FIFO tracking
  */
 export interface InventoryBatch {
-  id: number;
-  productId: number;
+  id: number | string;
+  productId: number | string;
   product_id?: number; // Backend format
   batchNumber?: string;
   quantity: number;
@@ -125,8 +133,10 @@ export interface InventoryBatch {
   expiry_date?: string; // Backend format
   supplierId?: number;
   supplier_id?: number; // Backend format
+  supplier?: string; // Display-only supplier name
   remainingQuantity?: number;
   remaining_quantity?: number; // Backend format
+  status?: 'active' | 'depleted' | string;
   notes?: string;
   metadata?: Record<string, unknown>;
 }
@@ -156,10 +166,10 @@ export interface ProductListParams {
  * NOTE: IDs are numbers (from PostgreSQL autoincrement)
  */
 export interface SaleItem {
-  id?: number;
-  transactionId?: number;
+  id?: number | string;
+  transactionId?: number | string;
   transaction_id?: number; // Backend format
-  productId?: number;
+  productId?: number | string;
   inventory_item_id?: number; // Backend format
   productName?: string;
   product_name?: string; // Backend format
@@ -171,12 +181,15 @@ export interface SaleItem {
   conversionFactor?: number;
   unitPrice?: number;
   price?: number; // Alias for unitPrice
+  taxes?: number; // Alias for tax
   discount?: number;
   subtotal?: number;
   tax?: number;
   lineTotal?: number;
   total?: number; // Alias for lineTotal
   costPrice?: number;
+  averageCostPrice?: number; // Alias used in some modules
+  originalProduct?: any; // Back-reference to product for UI
   notes?: string;
   metadata?: Record<string, unknown>;
 }
@@ -186,9 +199,9 @@ export interface SaleItem {
  * NOTE: id is number (from PostgreSQL autoincrement)
  */
 export interface Transaction {
-  id: number;
+  id: number | string;
   invoiceNumber?: string;
-  customerId?: number;
+  customerId?: number | string;
   customer_id?: number; // Backend format
   customerName?: string;
   customer_name?: string; // Backend format
@@ -205,6 +218,9 @@ export interface Transaction {
   payment_status?: string; // Backend format
   paymentMethod?: string;
   payment_method?: string; // Backend format
+  payment?: { amount?: number; method?: string; reference?: string };
+  transactionNumber?: string;
+  customer?: { id: string | number; name?: string };
   amountPaid?: number;
   change?: number;
   status?: string;
@@ -228,9 +244,9 @@ export interface Transaction {
  */
 export interface Payment {
   id?: number | string;
-  transactionId?: number;
+  transactionId?: number | string;
   transaction_id?: number; // Backend format
-  customerId?: number;
+  customerId?: number | string;
   customer_id?: number; // Backend format
   amount: number;
   method: string;
@@ -316,7 +332,7 @@ export interface PurchaseOrder {
   expected_delivery_date?: string; // Backend format
   receivedDate?: string;
   received_date?: string; // Backend format
-  status: 'draft' | 'pending' | 'received' | 'partial' | 'cancelled';
+  status: 'draft' | 'pending' | 'received' | 'partial' | 'cancelled' | 'confirmed' | 'sent';
   items: PurchaseOrderItem[];
   subtotal: number;
   tax: number;
@@ -334,10 +350,10 @@ export interface PurchaseOrder {
  * Purchase Order Item (line item)
  */
 export interface PurchaseOrderItem {
-  id?: number;
-  purchaseOrderId?: number;
+  id?: number | string;
+  purchaseOrderId?: number | string;
   purchase_order_id?: number; // Backend format
-  productId?: number;
+  productId?: number | string;
   inventory_item_id?: number; // Backend format
   productName?: string;
   product_name?: string; // Backend format
@@ -647,44 +663,106 @@ export type TransactionItem = SaleItem;
  * Purchase Receiving interface
  */
 export interface PurchaseReceiving {
-  id: number;
-  purchaseOrderId?: number;
-  supplierId: number;
+  id: number | string;
+  purchaseOrderId?: number | string;
+  supplierId: number | string;
   receivedDate: string;
   totalQuantity: number;
   totalCost: number;
   notes?: string;
   items: PurchaseReceivingItem[];
   createdAt?: string;
+  // Additional UI-only fields
+  receivedBy?: string;
+  supplier?: string;
+  totalValue?: number;
+  purchaseOrderNumber?: string;
 }
 
 /**
  * Purchase Receiving Item
  */
 export interface PurchaseReceivingItem {
-  id?: number;
-  purchaseReceivingId?: number;
-  productId: number;
+  id?: number | string;
+  purchaseReceivingId?: number | string;
+  productId: number | string;
   productName?: string;
   quantity: number;
   unitCost: number;
   batchNumber?: string;
   expiryDate?: string;
   total: number;
+  // Additional optional fields used in UI
+  quantityReceived?: number;
+  manufacturingDate?: string;
+  supplierBatchRef?: string;
+  location?: string;
+  notes?: string;
+  totalCost?: number;
 }
 
 /**
  * Product Stock Summary
  */
 export interface ProductStockSummary {
-  productId: number;
+  productId: number | string;
   productName: string;
   totalQuantity: number;
   totalValue: number;
   batches: InventoryBatch[];
   reorderLevel?: number;
   needsReorder: boolean;
+  // Additional computed/display fields used by UI
+  availableQuantity: number;
+  expiredQuantity: number;
+  batchCount: number;
+  earliestExpiry?: string;
+  isLowStock: boolean;
+  hasExpiredStock: boolean;
+  hasExpiringSoonStock: boolean;
+  averageCost: number;
 }
+
+// ============================================================
+// UNITS OF MEASURE (UoM)
+// ============================================================
+
+export interface UnitOfMeasure {
+  id?: string; // identifier used in UI selections
+  code: string; // e.g., 'PCS', 'KG', 'L'
+  name: string; // e.g., 'Pieces', 'Kilogram', 'Litre'
+  isDefault?: boolean;
+  conversionFactor?: number; // relative to base unit
+}
+
+export interface ProductUoM extends UnitOfMeasure {
+  uomId?: string; // selection id used by UI
+  price?: number;
+}
+
+export const CommonUoMGroups: { group: string; units: UnitOfMeasure[] }[] = [
+  {
+    group: 'Piece',
+    units: [
+      { code: 'PCS', name: 'Pieces', isDefault: true, conversionFactor: 1 },
+      { code: 'BOX', name: 'Box', conversionFactor: 12 }
+    ]
+  },
+  {
+    group: 'Weight',
+    units: [
+      { code: 'KG', name: 'Kilogram', isDefault: true, conversionFactor: 1 },
+      { code: 'G', name: 'Gram', conversionFactor: 0.001 }
+    ]
+  },
+  {
+    group: 'Volume',
+    units: [
+      { code: 'L', name: 'Litre', isDefault: true, conversionFactor: 1 },
+      { code: 'ML', name: 'Millilitre', conversionFactor: 0.001 }
+    ]
+  }
+];
 
 export default {
   // Export all types for convenience

@@ -9,7 +9,7 @@ import type { Transaction } from '../../../models/Transaction';
 
 // Type definitions
 export interface BillingCustomer {
-  id: string;
+  id: string | number;
   name: string;
   email?: string;
   phone?: string;
@@ -28,12 +28,12 @@ export interface BillingSummary {
 }
 
 export interface PaymentHistory {
-  id: string;
+  id: string | number;
   date: string;
   amount: number;
   method: string;
   status: string;
-  invoiceNumber?: string;
+  invoiceNumber?: string | number;
   reference?: string;
   notes?: string;
 }
@@ -43,8 +43,8 @@ export interface BillingData {
   summary: BillingSummary;
   history: PaymentHistory[];
   recentInvoices: {
-    id: string;
-    invoiceNumber: string;
+    id: string | number;
+    invoiceNumber: string | number;
     date: string;
     amount: number;
     paid: number;
@@ -56,7 +56,7 @@ export interface BillingData {
 /**
  * Fetch billing data for a specific customer
  */
-const fetchBillingData = async (customerId?: string): Promise<BillingData> => {
+const fetchBillingData = async (customerId?: string | number): Promise<BillingData> => {
   try {
     // If no customer ID provided, get all recent transactions
     if (!customerId) {
@@ -102,7 +102,7 @@ const fetchBillingData = async (customerId?: string): Promise<BillingData> => {
     }
 
     // Fetch customer-specific data
-    const customer = await POSServiceAPI.getCustomer(customerId);
+    const customer = await POSServiceAPI.getCustomer(String(customerId));
     if (!customer) {
       throw new Error(`Customer with ID ${customerId} not found`);
     }
