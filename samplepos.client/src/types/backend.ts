@@ -200,8 +200,12 @@ export interface CustomerTransaction {
 
 /**
  * Payment Method (from Prisma enum)
+ * Also supports lowercase variants for frontend compatibility
  */
-export type PaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'MOBILE_MONEY' | 'CHEQUE' | 'OTHER';
+export type PaymentMethod = 
+  | 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'MOBILE_MONEY' | 'CHEQUE' | 'OTHER'
+  | 'cash' | 'card' | 'bank_transfer' | 'mobile_money' | 'mobile' | 'cheque' | 'other'
+  | 'credit' | 'bank';
 
 /**
  * Payment Status (from Prisma enum)

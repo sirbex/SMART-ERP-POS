@@ -42,7 +42,7 @@ export async function searchInventory(term: string): Promise<InventoryItem[]> {
  */
 export async function createTransaction(transaction: {
   items: TransactionItem[];
-  customerId?: string;
+  customerId?: string | number;
   paymentMethod: string;
   paymentAmount: number;
   changeAmount: number;
@@ -55,7 +55,7 @@ export async function createTransaction(transaction: {
   try {
     // Transform the data to match backend expectations
     const backendTransaction = {
-      customerId: transaction.customerId,
+      customerId: transaction.customerId ? String(transaction.customerId) : undefined,
       subtotal: transaction.subtotal,
       tax: transaction.taxAmount,
       discount: transaction.discountAmount,
@@ -134,9 +134,9 @@ export async function searchCustomers(term: string): Promise<Customer[]> {
 /**
  * Get customer by ID
  */
-export async function getCustomer(id: string): Promise<Customer | null> {
+export async function getCustomer(id: string | number): Promise<Customer | null> {
   try {
-    const response = await api.get(`/customers/${id}`);
+    const response = await api.get(`/customers/${String(id)}`);
     return response.data;
   } catch (error) {
     console.error(`Error getting customer ${id} from API:`, error);
@@ -173,19 +173,19 @@ export async function getTransactionById(id: string): Promise<Transaction | null
 /**
  * Check if there is sufficient stock for an item
  */
-export async function checkStock(itemId: string, quantity: number): Promise<{
+export async function checkStock(itemId: string | number, quantity: number): Promise<{
   success: boolean;
   available: number;
   message?: string;
 }> {
   try {
-    const response = await api.get(`/inventory/items/${itemId}/check-stock`, {
+    const response = await api.get(`/inventory/stock/${String(itemId)}`, {
       params: { quantity }
     });
     return response.data;
   } catch (error) {
-    console.error(`Error checking stock for item ${itemId} via API:`, error);
-    return { success: false, available: 0, message: 'Error checking stock' };
+    console.error(`Error checking stock for item ${itemId}:`, error);
+    return { success: false, available: 0, message: 'Stock check failed' };
   }
 }
 
@@ -227,12 +227,12 @@ export async function getAllTransactions(limit: number = 1000, offset: number = 
 /**
  * Void a transaction
  */
-export async function voidTransaction(id: string, reason: string): Promise<boolean> {
+export async function voidTransaction(id: string | number, reason: string): Promise<boolean> {
   try {
-    const response = await api.post(`/transactions/${id}/void`, { reason });
-    return response.status === 200;
+    await api.post(`/transactions/${String(id)}/void`, { reason });
+    return true;
   } catch (error) {
-    console.error(`Error voiding transaction ${id} via API:`, error);
+    console.error(`Error voiding transaction ${id}:`, error);
     return false;
   }
 }

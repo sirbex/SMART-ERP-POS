@@ -61,7 +61,7 @@ const POSScreenAPI: React.FC = () => {
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
 
   // Calculate totals
-  const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const subtotal = cartItems.reduce((sum, item) => sum + ((item.price || 0) * item.quantity), 0);
   const taxRate = 0.10; // 10% tax rate
   const taxAmount = subtotal * taxRate;
   const discountAmount = selectedCustomer?.loyaltyDiscount || 0;
@@ -285,7 +285,7 @@ const POSScreenAPI: React.FC = () => {
       
       const updatedCart = [...cartItems];
       updatedCart[index].quantity = newQuantity;
-      updatedCart[index].subtotal = newQuantity * updatedCart[index].price;
+      updatedCart[index].subtotal = newQuantity * (updatedCart[index].price || 0);
       setCartItems(updatedCart);
     } catch (error) {
       console.error("Error updating quantity:", error);
@@ -881,7 +881,7 @@ const POSScreenAPI: React.FC = () => {
                         </Button>
                       </div>
                       <div className="w-20 text-right font-semibold text-qb-gray-900 text-sm">
-                        {formatCurrency(item.price * item.quantity)}
+                        {formatCurrency((item.price || 0) * item.quantity)}
                       </div>
                       <Button 
                         size="icon" 

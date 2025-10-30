@@ -14,6 +14,7 @@ import { AlertTriangle, Package, Plus, Truck, Eye, AlertCircle, TrendingUp, Tren
 
 import InventoryBatchServiceAPI from '../services/InventoryBatchServiceAPI';
 import type { Product, PurchaseReceiving, PurchaseReceivingItem, ProductStockSummary, InventoryBatch } from '../types';
+import { toSelectValue } from '../utils/selectHelpers';
 
 const InventoryBatchManagement: React.FC = () => {
   const inventoryService = new InventoryBatchServiceAPI();
@@ -271,7 +272,7 @@ const InventoryBatchManagement: React.FC = () => {
         receivedBy: purchaseForm.receivedBy || 'Current User',
         receivedDate: purchaseForm.receivedDate || new Date().toISOString().split('T')[0],
         items: purchaseForm.items,
-        totalValue: purchaseForm.items.reduce((sum, item) => sum + item.totalCost, 0),
+        totalValue: purchaseForm.items.reduce((sum, item) => sum + (item.totalCost || 0), 0),
         status: 'complete',
         notes: purchaseForm.notes,
         createdAt: new Date().toISOString()
@@ -1013,7 +1014,7 @@ const InventoryBatchManagement: React.FC = () => {
                       <div className="space-y-2">
                         <Label htmlFor="item-product">Product *</Label>
                         <Select 
-                          value={purchaseItem.productId || ''} 
+                          value={toSelectValue(purchaseItem.productId)} 
                           onValueChange={(value) => {
                             const product = products.find(p => p.id === value);
                             setPurchaseItem(prev => ({ 
@@ -1028,7 +1029,7 @@ const InventoryBatchManagement: React.FC = () => {
                           </SelectTrigger>
                           <SelectContent>
                             {products.map(product => (
-                              <SelectItem key={product.id} value={product.id}>
+                              <SelectItem key={product.id} value={toSelectValue(product.id)}>
                                 {product.name} ({product.sku})
                               </SelectItem>
                             ))}
@@ -1139,7 +1140,7 @@ const InventoryBatchManagement: React.FC = () => {
                         <div className="border-t pt-3">
                           <div className="text-right font-medium">
                             Total Value: {formatCurrency(
-                              purchaseForm.items.reduce((sum, item) => sum + item.totalCost, 0)
+                              purchaseForm.items.reduce((sum, item) => sum + (item.totalCost || 0), 0)
                             )}
                           </div>
                         </div>

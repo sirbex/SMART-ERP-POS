@@ -310,7 +310,7 @@ export interface TransactionListResponse {
  * Standard Supplier interface
  */
 export interface Supplier {
-  id: number;
+  id: string | number;
   name: string;
   contactPerson?: string;
   contact_person?: string; // Backend format

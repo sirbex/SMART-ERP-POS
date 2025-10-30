@@ -20,6 +20,7 @@ import { PaymentFormRefactored } from './PaymentBilling/PaymentFormRefactored';
 // Custom hooks
 import { useCustomers } from './PaymentBilling/hooks/useCustomers';
 import { useTransactions, useTransactionStats } from './PaymentBilling/hooks/useTransactions';
+import { toSelectValue } from '../utils/selectHelpers';
 
 export const PaymentBillingRefactored: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>(undefined);
@@ -101,7 +102,7 @@ export const PaymentBillingRefactored: React.FC = () => {
               <SelectContent>
                 <SelectItem value="all">All Customers</SelectItem>
                 {customers.map((customer) => (
-                  <SelectItem key={customer.id} value={customer.id}>
+                  <SelectItem key={customer.id} value={toSelectValue(customer.id)}>
                     {customer.name}
                   </SelectItem>
                 ))}
