@@ -44,11 +44,13 @@ export function cacheMiddleware(options: CacheOptions = {}) {
     if (cachedResponse) {
       // Cache hit - return cached response
       logger.debug('Cache middleware HIT', { cacheKey, path: req.path });
+      res.setHeader('X-Cache-Hit', 'true');
       return res.json(cachedResponse);
     }
 
     // Cache miss - continue to route handler
     logger.debug('Cache middleware MISS', { cacheKey, path: req.path });
+    res.setHeader('X-Cache-Hit', 'false');
 
     // Store original res.json function
     const originalJson = res.json.bind(res);
@@ -112,7 +114,6 @@ export const invalidateCache = {
   customers: invalidateCacheMiddleware(['api:/api/customers']),
   suppliers: invalidateCacheMiddleware(['api:/api/suppliers']),
   inventory: invalidateCacheMiddleware(['api:/api/inventory']),
-  sales: invalidateCacheMiddleware(['api:/api/sales']),
   all: invalidateCacheMiddleware(['api:']),
 };
 
