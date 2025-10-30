@@ -25,6 +25,7 @@ import priceQuotesRouter from './modules/priceQuotes.js';
 import batchPricingRouter from './modules/batchPricing.js';
 import uomRouter from './modules/uom.js';
 import heldSalesRouter from './routes/heldSales.js';
+import adminRouter from './modules/admin.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
 import prisma from './config/database.js';
@@ -119,6 +120,9 @@ app.use('/api/uoms', uomRouter);
 
 // POS Features (Held Sales)
 app.use('/api/pos', heldSalesRouter);
+
+// Admin Dashboard (Bull Board for job monitoring)
+app.use('/admin', adminRouter);
 
 // 404 handler
 app.use((req, res) => {
