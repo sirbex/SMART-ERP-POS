@@ -72,6 +72,7 @@ model Product {
   @@index([barcode])
   @@index([name])
   @@index([category])
+  @@index([category, isActive]) // Composite for filtering active products by category
   @@map("products")
 }
 
@@ -92,6 +93,7 @@ model StockBatch {
   @@index([productId])
   @@index([batchNumber])
   @@index([receivedDate])
+  @@index([productId, receivedDate]) // Composite for FIFO costing
   @@map("stock_batches")
 }
 
@@ -130,6 +132,7 @@ model Customer {
   @@index([name])
   @@index([phone])
   @@index([customerGroupId])
+  @@index([isActive, customerGroupId]) // Composite for active customer segments
   @@map("customers")
 }
 
@@ -212,6 +215,8 @@ model Sale {
   @@index([customerId])
   @@index([saleNumber])
   @@index([saleDate])
+  @@index([customerId, saleDate]) // Composite for customer purchase history
+  @@index([status, saleDate]) // Composite for status-based reports
   @@map("sales")
 }
 
@@ -313,6 +318,7 @@ model InstallmentPlan {
   @@index([saleId])
   @@index([status])
   @@index([nextDueDate])
+  @@index([customerId, status]) // Composite for customer's active plans
   @@map("installment_plans")
 }
 
@@ -341,6 +347,7 @@ model InstallmentPayment {
   @@index([transactionId])
   @@index([dueDate])
   @@index([status])
+  @@index([status, dueDate]) // Composite for overdue payment reports
   @@map("installment_payments")
 }
 
@@ -509,6 +516,7 @@ model PurchaseOrder {
   @@index([supplierId])
   @@index([status])
   @@index([orderDate])
+  @@index([supplierId, status]) // Composite for pending orders by supplier
   @@map("purchase_orders")
 }
 
@@ -551,6 +559,7 @@ model GoodsReceipt {
   @@index([purchaseOrderId])
   @@index([status])
   @@index([receivedDate])
+  @@index([purchaseOrderId, status]) // Composite for receipt tracking
   @@map("goods_receipts")
 }
 
@@ -601,6 +610,7 @@ model InventoryBatch {
   @@index([productId])
   @@index([status])
   @@index([expiryDate])
+  @@index([productId, status]) // Composite for available stock queries
   @@map("inventory_batches")
 }
 
