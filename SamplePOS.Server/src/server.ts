@@ -27,6 +27,8 @@ import uomRouter from './modules/uom.js';
 import heldSalesRouter from './routes/heldSales.js';
 import adminRouter from './modules/admin.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { getHealthStatus, getLiveness, getReadiness } from './services/healthService.js';
+import { closeQueues } from './config/queue.js';
 import logger from './utils/logger.js';
 import prisma from './config/database.js';
 import apiLimiter, { authLimiter } from './middleware/rateLimit.js';
@@ -123,6 +125,32 @@ app.use('/api/pos', heldSalesRouter);
 
 // Admin Dashboard (Bull Board for job monitoring)
 app.use('/admin', adminRouter);
+// ============================================================================
+// HEALTH CHECKS
+// ============================================================================
+
+// Kubernetes/Docker liveness probe (is process running?)
+app.get('/health/live', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Kubernetes/Docker readiness probe (ready to serve traffic?)
+app.get('/health/ready', async (req, res) => {
+  const ready = await getReadiness();
+  if (ready) {
+    res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
+  } else {
+    res.status(503).json({ status: 'not ready', timestamp: new Date().toISOString() });
+  }
+});
+
+// Detailed health check (for monitoring dashboards)
+app.get('/health', async (req, res) => {
+  const health = await getHealthStatus();
+  const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+  res.status(statusCode).json(health);
+});
+
 
 // 404 handler
 app.use((req, res) => {
@@ -141,22 +169,45 @@ const server = app.listen(PORT, () => {
   logger.info(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, closing server gracefully...');
-  server.close(async () => {
-    await prisma.$disconnect();
-    process.exit(0);
-  });
-});
+// ============================================================================
+// GRACEFUL SHUTDOWN
+// ============================================================================
 
-process.on('SIGINT', async () => {
-  logger.info('SIGINT received, closing server gracefully...');
+async function gracefulShutdown(signal: string) {
+  logger.info(`${signal} received, starting graceful shutdown...`);
+  
+  // Stop accepting new requests
   server.close(async () => {
-    await prisma.$disconnect();
-    process.exit(0);
+    logger.info('HTTP server closed');
+    
+    try {
+      // Close job queues
+      logger.info('Closing job queues...');
+      await closeQueues();
+      logger.info('Job queues closed');
+      
+      // Disconnect from database
+      logger.info('Disconnecting from database...');
+      await prisma.$disconnect();
+      logger.info('Database disconnected');
+      
+      logger.info('Graceful shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      logger.error('Error during shutdown', { error });
+      process.exit(1);
+    }
   });
-});
+  
+  // Force shutdown after 30 seconds
+  setTimeout(() => {
+    logger.error('Graceful shutdown timeout, forcing exit');
+    process.exit(1);
+  }, 30000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 
 
