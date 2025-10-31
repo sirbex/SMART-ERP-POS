@@ -1,3 +1,0 @@
-@echo off
-echo Starting API server...
-npx nodemon --exec npx tsx src\server.ts
