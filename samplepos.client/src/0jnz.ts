@@ -1,0 +1,86 @@
+import { PrismaClient } from '@prisma/client';
+import Decimal from 'decimal.js';
+import type { TransactionInput } from './models';
+import { TransactionSchema, LedgerEntrySchema } from './models';
+
+const prisma = new PrismaClient();
+
+/**
+ * Atomic double-entry ledger posting
+ * @param transaction TransactionInput
+ * @returns Array of created LedgerEntry records
+ */
+export async function postLedger(transaction: TransactionInput): Promise<any[]> {
+  // Validate input
+  const parsed = TransactionSchema.safeParse(transaction);
+  if (!parsed.success) {
+    throw new Error('Invalid transaction input: ' + JSON.stringify(parsed.error.issues));
+  }
+  const tx = parsed.data;
+
+  // Double-entry enforcement: sum of debits == sum of credits
+  const debitTotal = tx.entries
+    .filter(e => e.type === 'debit')
+    .reduce((sum, e) => sum.plus(e.amount), new Decimal(0));
+  const creditTotal = tx.entries
+    .filter(e => e.type === 'credit')
+    .reduce((sum, e) => sum.plus(e.amount), new Decimal(0));
+  if (!debitTotal.equals(creditTotal)) {
+    throw new Error(`Double-entry violation: debits (${debitTotal}) != credits (${creditTotal})`);
+  }
+
+  // Check for insufficient balances (basic example, extend as needed)
+  for (const entry of tx.entries) {
+    if (entry.type === 'credit') {
+      // Query current account balance (replace with real logic)
+      const account = await prisma.account.findUnique({ where: { id: entry.accountId } });
+      if (!account) {
+        throw new Error(`Account not found: ${entry.accountId}`);
+      }
+      // Assume account.balance is a string representing Decimal
+      const currentBalance = new Decimal(account.balance || '0');
+      if (currentBalance.lessThan(entry.amount)) {
+        throw new Error(`Insufficient balance in account ${entry.accountId}: required ${entry.amount}, available ${currentBalance}`);
+      }
+    }
+  }
+
+  // Atomic DB transaction
+  return await prisma.$transaction(async (db: PrismaClient) => {
+    // Create Transaction record
+    const transactionRecord = await db.transaction.create({
+      data: {
+        date: tx.date,
+        description: tx.description,
+        refType: tx.refType,
+        refId: tx.refId,
+      },
+    });
+
+    // Create LedgerEntry records
+    const entries = await Promise.all(
+      tx.entries.map(async (entry) => {
+        // Validate each entry
+        const entryParsed = LedgerEntrySchema.safeParse(entry);
+        if (!entryParsed.success) {
+          throw new Error('Invalid ledger entry: ' + JSON.stringify(entryParsed.error.issues));
+        }
+        const e = entryParsed.data;
+        return db.ledgerEntry.create({
+          data: {
+            transactionId: transactionRecord.id,
+            accountId: e.accountId,
+            amount: e.amount.toString(), // Store as string for Decimal
+            type: e.type,
+            currency: e.currency,
+            exchangeRate: e.exchangeRate?.toString(),
+            refType: e.refType,
+            refId: e.refId,
+            createdAt: new Date(),
+          },
+        });
+      })
+    );
+    return entries;
+  });
+}
