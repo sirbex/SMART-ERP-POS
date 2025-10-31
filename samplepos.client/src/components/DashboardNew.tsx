@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react';
 import api from '@/config/api.config';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Users, Package, ShoppingCart, DollarSign, TrendingUp, AlertCircle } from 'lucide-react';
+import {
+  Loader2,
+  Users,
+  Package,
+  ShoppingCart,
+  DollarSign,
+  TrendingUp,
+  AlertCircle,
+  RefreshCw,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface DashboardStats {
@@ -20,21 +29,21 @@ export default function DashboardNew() {
   const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       // Fetch data from new backend endpoints
       const [usersRes, productsRes, customersRes, salesRes] = await Promise.allSettled([
         api.get('/users'),
         api.get('/products'),
         api.get('/customers'),
-        api.get('/sales')
+        api.get('/sales'),
       ]);
 
       console.log('Dashboard API responses:', {
         users: usersRes,
         products: productsRes,
         customers: customersRes,
-        sales: salesRes
+        sales: salesRes,
       });
 
       // Process results
@@ -43,24 +52,39 @@ export default function DashboardNew() {
       const customersData = customersRes.status === 'fulfilled' ? customersRes.value.data : null;
       const salesData = salesRes.status === 'fulfilled' ? salesRes.value.data : null;
 
+      // Calculate date ranges for sales filtering
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      // Extract sales array from response
+      const salesArray = salesData?.data || salesData || [];
+
+      // Filter sales by date ranges
+      const todaySales = salesArray.filter((s: any) => new Date(s.saleDate || s.createdAt) >= todayStart);
+      const weekSales = salesArray.filter((s: any) => new Date(s.saleDate || s.createdAt) >= weekStart);
+      const monthSales = salesArray.filter((s: any) => new Date(s.saleDate || s.createdAt) >= monthStart);
+
       setStats({
         users: {
           total: usersData?.data?.length || usersData?.length || 0,
-          active: usersData?.data?.filter((u: any) => u.isActive).length || 0
+          active: usersData?.data?.filter((u: any) => u.isActive).length || 0,
         },
         products: {
           total: productsData?.data?.length || productsData?.length || 0,
-          lowStock: productsData?.data?.filter((p: any) => p.currentStock < p.reorderLevel).length || 0
+          lowStock:
+            productsData?.data?.filter((p: any) => p.currentStock < p.reorderLevel).length || 0,
         },
         customers: {
           total: customersData?.data?.length || customersData?.length || 0,
-          withCredit: customersData?.data?.filter((c: any) => c.outstandingBalance > 0).length || 0
+          withCredit: customersData?.data?.filter((c: any) => c.outstandingBalance > 0).length || 0,
         },
         sales: {
-          today: salesData?.data?.length || salesData?.length || 0,
-          thisWeek: salesData?.data?.length || salesData?.length || 0,
-          thisMonth: salesData?.data?.length || salesData?.length || 0
-        }
+          today: todaySales.length,
+          thisWeek: weekSales.length,
+          thisMonth: monthSales.length,
+        },
       });
     } catch (err: any) {
       console.error('Dashboard fetch error:', err);
@@ -72,6 +96,13 @@ export default function DashboardNew() {
 
   useEffect(() => {
     fetchDashboardData();
+    
+    // Auto-refresh dashboard every 30 seconds
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) {
@@ -92,12 +123,7 @@ export default function DashboardNew() {
         <AlertTitle>Error</AlertTitle>
         <AlertDescription>
           {error}
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={fetchDashboardData}
-            className="ml-4"
-          >
+          <Button variant="outline" size="sm" onClick={fetchDashboardData} className="ml-4">
             Retry
           </Button>
         </AlertDescription>
@@ -112,8 +138,12 @@ export default function DashboardNew() {
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground">Welcome to Sample POS - Overview of your business</p>
         </div>
-        <Button onClick={fetchDashboardData} variant="outline">
-          <TrendingUp className="w-4 h-4 mr-2" />
+        <Button onClick={fetchDashboardData} variant="outline" disabled={loading}>
+          {loading ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <RefreshCw className="w-4 h-4 mr-2" />
+          )}
           Refresh
         </Button>
       </div>
@@ -128,9 +158,7 @@ export default function DashboardNew() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats?.users.total || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.users.active || 0} active users
-            </p>
+            <p className="text-xs text-muted-foreground">{stats?.users.active || 0} active users</p>
           </CardContent>
         </Card>
 

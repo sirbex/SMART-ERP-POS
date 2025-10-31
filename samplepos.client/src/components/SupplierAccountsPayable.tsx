@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { formatCurrency } from '../utils/currency';
-import PurchaseManagementService from '../services/PurchaseManagementService';
+import { useSuppliers } from '../services/api/suppliersApi';
 import { usePurchases } from '../services/api/purchasesApi';
+import { useCreateSupplierPayment, useSupplierPayments, useSupplierPaymentSummary } from '@/services/api/supplierPaymentsApi';
 import type { Purchase } from '../types/backend';
 
 // Local type definitions (exported for potential future use)
@@ -36,43 +37,24 @@ export interface PurchaseReceiving {
 }
 
 // Import Shadcn UI components
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "./ui/dialog";
-import { Button } from "./ui/button";
-import { Label } from "./ui/label";
-import { Input } from "./ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Badge } from "./ui/badge";
-import { Textarea } from "./ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "./ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
+import { Button } from './ui/button';
+import { Label } from './ui/label';
+import { Input } from './ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Textarea } from './ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 
 // Types for Supplier Accounts
 interface SupplierBalance {
-  supplierId: string | number;
+  supplierId: string;
   supplierName: string;
-  totalOrdered: number;      // Total amount ordered
-  totalReceived: number;     // Total amount received
-  totalPaid: number;         // Total amount paid
-  currentBalance: number;    // Amount owed (received - paid)
+  totalOrdered: number; // Total amount ordered
+  totalReceived: number; // Total amount received
+  totalPaid: number; // Total amount paid
+  currentBalance: number; // Amount owed (received - paid)
   lastOrderDate?: string;
   lastPaymentDate?: string;
   paymentTerms?: string;
@@ -81,22 +63,11 @@ interface SupplierBalance {
   paymentCount: number;
 }
 
-interface SupplierPayment {
-  id: string;
-  supplierId: string;
-  supplierName: string;
-  amount: number;
-  paymentDate: string;
-  paymentMethod: 'cash' | 'bank_transfer' | 'check' | 'mobile_money';
-  reference?: string;
-  notes?: string;
-  appliedToOrders: string[];  // Purchase order IDs this payment applies to
-  createdAt: string;
-}
+// Payment history now fetched from backend
 
 const SupplierAccountsPayable: React.FC = () => {
   const [supplierBalances, setSupplierBalances] = useState<SupplierBalance[]>([]);
-  const [supplierPayments, setSupplierPayments] = useState<SupplierPayment[]>([]);
+  // Backend-backed payment history will be queried per supplier when needed
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierBalance | null>(null);
   const [showPaymentHistory, setShowPaymentHistory] = useState<string | null>(null);
@@ -106,10 +77,16 @@ const SupplierAccountsPayable: React.FC = () => {
     amount: 0,
     paymentMethod: 'cash' as const,
     reference: '',
-    notes: ''
+    notes: '',
   });
 
-  const purchaseService = PurchaseManagementService.getInstance();
+  // Fetch suppliers from backend
+  const { data: suppliersData } = useSuppliers();
+  const suppliers = suppliersData?.data || [];
+
+  // Fetch all purchases from backend
+  const { data: allPurchasesData } = usePurchases();
+  const allPurchases = allPurchasesData?.data || [];
 
   // Fetch received purchases from backend
   const { data: receivedPurchasesData } = usePurchases({
@@ -119,111 +96,84 @@ const SupplierAccountsPayable: React.FC = () => {
   useEffect(() => {
     loadSupplierBalances();
     loadPaymentHistory();
-  }, [receivedPurchasesData]);
+  }, [receivedPurchasesData, suppliersData, allPurchasesData]);
 
   const loadSupplierBalances = () => {
-    const suppliers = purchaseService.getSuppliers();
-    const orders = purchaseService.getPurchaseOrders();
     const receivings = receivedPurchasesData?.data || [];
-    const payments = getSupplierPayments();
+    const balances = suppliers.map((supplier: any): SupplierBalance => {
+      // Use backend-provided totals when available
+      const totalReceived = Number(supplier.totalPurchases ?? 0); // assume includes received value
+      const currentBalance = Number(supplier.currentBalance ?? 0);
+      const totalPaid = Math.max(0, totalReceived - currentBalance);
 
-    const balances: SupplierBalance[] = suppliers.map(supplier => {
-      // Get orders for this supplier
-      const supplierOrders = orders.filter(o => o.supplierId === supplier.id);
-      const supplierReceivings = receivings.filter((r: Purchase) => String(r.supplierId) === supplier.id);
-      const supplierPayments = payments.filter(p => p.supplierId === supplier.id);
+      // Get orders for counts and last order date for display
+      const supplierOrders = allPurchases.filter((p: Purchase) => p.supplierId === supplier.id);
+      const supplierReceivings = receivings.filter((r: Purchase) => r.supplierId === supplier.id);
 
-      // Calculate totals
-      const totalOrdered = supplierOrders.reduce((sum, o) => sum + (o.totalValue || 0), 0);
-      const totalReceived = supplierReceivings.reduce((sum, r) => sum + Number(r.totalAmount), 0);
-      const totalPaid = supplierPayments.reduce((sum, p) => sum + p.amount, 0);
-      const currentBalance = totalReceived - totalPaid; // What we owe
-
-      // Get last dates
-      const lastOrder = supplierOrders
-        .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())[0];
-      const lastPayment = supplierPayments
-        .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())[0];
+      const lastOrder = supplierOrders.sort(
+        (a: Purchase, b: Purchase) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )[0];
 
       return {
-        supplierId: supplier.id,
+        supplierId: String(supplier.id),
         supplierName: supplier.name,
-        totalOrdered,
+        totalOrdered: supplierOrders.reduce((sum: number, o: any) => sum + Number(o.totalAmount), 0),
         totalReceived,
         totalPaid,
         currentBalance,
-        lastOrderDate: lastOrder?.createdAt,
-        lastPaymentDate: lastPayment?.createdAt,
+        lastOrderDate: lastOrder?.createdAt
+          ? new Date(lastOrder.createdAt).toISOString()
+          : undefined,
+        lastPaymentDate: supplier.lastPaymentDate
+          ? new Date(supplier.lastPaymentDate).toISOString()
+          : undefined,
         paymentTerms: supplier.paymentTerms,
         orderCount: supplierOrders.length,
         receivingCount: supplierReceivings.length,
-        paymentCount: supplierPayments.length
-      };
+        paymentCount: undefined as any, // not tracked here; can be derived per supplier view
+      } as SupplierBalance;
     });
 
-    // Sort by current balance (highest owed first)
     balances.sort((a, b) => b.currentBalance - a.currentBalance);
     setSupplierBalances(balances);
   };
 
-  const getSupplierPayments = (): SupplierPayment[] => {
-    try {
-      const stored = localStorage.getItem('supplier_payments');
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      console.error('Error loading supplier payments:', error);
-      return [];
-    }
-  };
-
-  const saveSupplierPayments = (payments: SupplierPayment[]) => {
-    try {
-      localStorage.setItem('supplier_payments', JSON.stringify(payments));
-    } catch (error) {
-      console.error('Error saving supplier payments:', error);
-    }
-  };
-
   const loadPaymentHistory = () => {
-    setSupplierPayments(getSupplierPayments());
+    // No-op now; history fetched on demand via hook
   };
 
-  const handleMakePayment = () => {
+  const createPayment = useCreateSupplierPayment();
+
+  const handleMakePayment = async () => {
     if (!selectedSupplier || paymentForm.amount <= 0) {
       alert('Please enter a valid payment amount');
       return;
     }
 
-    const newPayment: SupplierPayment = {
-      id: `payment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      supplierId: String(selectedSupplier.supplierId),
-      supplierName: selectedSupplier.supplierName,
-      amount: paymentForm.amount,
-      paymentDate: new Date().toISOString(),
-      paymentMethod: paymentForm.paymentMethod,
-      reference: paymentForm.reference,
-      notes: paymentForm.notes,
-      appliedToOrders: [], // In advanced implementation, link to specific orders
-      createdAt: new Date().toISOString()
+    const methodMap: Record<string, any> = {
+      cash: 'CASH',
+      bank_transfer: 'BANK_TRANSFER',
+      check: 'CHECK',
+      mobile_money: 'MOBILE_MONEY',
     };
 
-    const payments = getSupplierPayments();
-    payments.push(newPayment);
-    saveSupplierPayments(payments);
-
-    alert(`Payment of ${formatCurrency(paymentForm.amount)} recorded for ${selectedSupplier.supplierName}`);
-    
-    // Reset form and reload data
-    setPaymentForm({
-      amount: 0,
-      paymentMethod: 'cash',
-      reference: '',
-      notes: ''
+    await createPayment.mutateAsync({
+      supplierId: selectedSupplier.supplierId,
+      amount: paymentForm.amount,
+      paymentMethod: methodMap[paymentForm.paymentMethod] ?? 'CASH',
+      referenceNumber: paymentForm.reference || undefined,
+      notes: paymentForm.notes || undefined,
     });
+
+    alert(
+      `Payment of ${formatCurrency(paymentForm.amount)} recorded for ${selectedSupplier.supplierName}`
+    );
+
+    setPaymentForm({ amount: 0, paymentMethod: 'cash', reference: '', notes: '' });
     setShowPaymentModal(false);
     setSelectedSupplier(null);
     loadSupplierBalances();
-    loadPaymentHistory();
   };
 
   const handlePaymentClick = (supplier: SupplierBalance) => {
@@ -232,7 +182,7 @@ const SupplierAccountsPayable: React.FC = () => {
       amount: supplier.currentBalance > 0 ? supplier.currentBalance : 0,
       paymentMethod: 'cash',
       reference: '',
-      notes: ''
+      notes: '',
     });
     setShowPaymentModal(true);
   };
@@ -251,8 +201,11 @@ const SupplierAccountsPayable: React.FC = () => {
 
   // Calculate summary statistics
   const totalPayable = supplierBalances.reduce((sum, s) => sum + Math.max(0, s.currentBalance), 0);
-  const totalCredit = supplierBalances.reduce((sum, s) => sum + Math.abs(Math.min(0, s.currentBalance)), 0);
-  const activeSuppliers = supplierBalances.filter(s => s.currentBalance !== 0).length;
+  const totalCredit = supplierBalances.reduce(
+    (sum, s) => sum + Math.abs(Math.min(0, s.currentBalance)),
+    0
+  );
+  const activeSuppliers = supplierBalances.filter((s) => s.currentBalance !== 0).length;
   const totalPaid = supplierBalances.reduce((sum, s) => sum + s.totalPaid, 0);
 
   return (
@@ -270,9 +223,7 @@ const SupplierAccountsPayable: React.FC = () => {
             <CardTitle className="text-sm font-medium">Total Payable</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">
-              {formatCurrency(totalPayable)}
-            </div>
+            <div className="text-2xl font-bold text-red-600">{formatCurrency(totalPayable)}</div>
             <p className="text-xs text-muted-foreground">Amount owed to suppliers</p>
           </CardContent>
         </Card>
@@ -282,9 +233,7 @@ const SupplierAccountsPayable: React.FC = () => {
             <CardTitle className="text-sm font-medium">Total Paid</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {formatCurrency(totalPaid)}
-            </div>
+            <div className="text-2xl font-bold text-green-600">{formatCurrency(totalPaid)}</div>
             <p className="text-xs text-muted-foreground">Total payments made</p>
           </CardContent>
         </Card>
@@ -294,9 +243,7 @@ const SupplierAccountsPayable: React.FC = () => {
             <CardTitle className="text-sm font-medium">Credit Balance</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">
-              {formatCurrency(totalCredit)}
-            </div>
+            <div className="text-2xl font-bold text-blue-600">{formatCurrency(totalCredit)}</div>
             <p className="text-xs text-muted-foreground">Suppliers owe us</p>
           </CardContent>
         </Card>
@@ -316,9 +263,7 @@ const SupplierAccountsPayable: React.FC = () => {
       <Card>
         <CardHeader>
           <CardTitle>Supplier Account Balances</CardTitle>
-          <CardDescription>
-            Current balances and payment status for all suppliers
-          </CardDescription>
+          <CardDescription>Current balances and payment status for all suppliers</CardDescription>
         </CardHeader>
         <CardContent>
           {supplierBalances.length === 0 ? (
@@ -340,7 +285,7 @@ const SupplierAccountsPayable: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {supplierBalances.map(supplier => {
+                {supplierBalances.map((supplier) => {
                   const status = getBalanceStatus(supplier.currentBalance);
                   return (
                     <TableRow key={supplier.supplierId}>
@@ -357,29 +302,26 @@ const SupplierAccountsPayable: React.FC = () => {
                       <TableCell className="text-green-600">
                         {formatCurrency(supplier.totalPaid)}
                       </TableCell>
-                      <TableCell className={`font-bold ${getBalanceColor(supplier.currentBalance)}`}>
+                      <TableCell
+                        className={`font-bold ${getBalanceColor(supplier.currentBalance)}`}
+                      >
                         {formatCurrency(Math.abs(supplier.currentBalance))}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={status.variant}>
-                          {status.text}
-                        </Badge>
+                        <Badge variant={status.variant}>{status.text}</Badge>
                       </TableCell>
                       <TableCell>{supplier.paymentTerms || 'Not specified'}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           {supplier.currentBalance > 0 && (
-                            <Button
-                              size="sm"
-                              onClick={() => handlePaymentClick(supplier)}
-                            >
+                            <Button size="sm" onClick={() => handlePaymentClick(supplier)}>
                               Pay
                             </Button>
                           )}
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setShowPaymentHistory(String(supplier.supplierId))}
+                            onClick={() => setShowPaymentHistory(supplier.supplierId)}
                           >
                             History
                           </Button>
@@ -401,7 +343,7 @@ const SupplierAccountsPayable: React.FC = () => {
             <DialogHeader>
               <DialogTitle>Record Payment - {selectedSupplier.supplierName}</DialogTitle>
             </DialogHeader>
-            
+
             <div className="space-y-4">
               <div className="p-4 bg-muted rounded-lg">
                 <div className="text-sm text-muted-foreground">Current Balance</div>
@@ -417,7 +359,9 @@ const SupplierAccountsPayable: React.FC = () => {
                   step="0.01"
                   min={0}
                   value={paymentForm.amount}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: parseFloat(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setPaymentForm({ ...paymentForm, amount: parseFloat(e.target.value) || 0 })
+                  }
                 />
               </div>
 
@@ -425,7 +369,9 @@ const SupplierAccountsPayable: React.FC = () => {
                 <Label>Payment Method *</Label>
                 <Select
                   value={paymentForm.paymentMethod}
-                  onValueChange={(value: any) => setPaymentForm({ ...paymentForm, paymentMethod: value })}
+                  onValueChange={(value: any) =>
+                    setPaymentForm({ ...paymentForm, paymentMethod: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -457,14 +403,12 @@ const SupplierAccountsPayable: React.FC = () => {
                 />
               </div>
             </div>
-            
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowPaymentModal(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleMakePayment}>
-                Record Payment
-              </Button>
+              <Button onClick={handleMakePayment}>Record Payment</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -476,40 +420,13 @@ const SupplierAccountsPayable: React.FC = () => {
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
             <DialogHeader>
               <DialogTitle>
-                Payment History - {supplierBalances.find(s => s.supplierId === showPaymentHistory)?.supplierName}
+                Payment History -{' '}
+                {supplierBalances.find((s) => s.supplierId === showPaymentHistory)?.supplierName}
               </DialogTitle>
             </DialogHeader>
-            
-            <div className="space-y-4">
-              {supplierPayments
-                .filter(p => p.supplierId === showPaymentHistory)
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                .map(payment => (
-                  <div key={payment.id} className="p-4 border rounded-lg">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-bold">{formatCurrency(payment.amount)}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {new Date(payment.paymentDate).toLocaleDateString()} • {payment.paymentMethod.replace('_', ' ').toUpperCase()}
-                        </div>
-                        {payment.reference && (
-                          <div className="text-sm">Reference: {payment.reference}</div>
-                        )}
-                        {payment.notes && (
-                          <div className="text-sm text-muted-foreground mt-1">{payment.notes}</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              
-              {supplierPayments.filter(p => p.supplierId === showPaymentHistory).length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  No payment history found for this supplier.
-                </div>
-              )}
-            </div>
-            
+
+            <PaymentHistory supplierId={showPaymentHistory} />
+
             <DialogFooter>
               <Button onClick={() => setShowPaymentHistory(null)}>Close</Button>
             </DialogFooter>
@@ -521,3 +438,110 @@ const SupplierAccountsPayable: React.FC = () => {
 };
 
 export default SupplierAccountsPayable;
+
+// Extracted backend-backed history list component
+const PaymentHistory: React.FC<{ supplierId: string }> = ({ supplierId }) => {
+  const [page, setPage] = React.useState(1);
+  const [limit, setLimit] = React.useState(20);
+  const { data, isLoading } = useSupplierPayments({ supplierId, page, limit });
+  const summary = useSupplierPaymentSummary(supplierId);
+  if (isLoading) {
+    return <div className="text-sm text-muted-foreground">Loading…</div>;
+  }
+  const items = data?.payments ?? [];
+  return (
+    <div className="space-y-4">
+      {/* Summary from backend */}
+      <div className="p-3 rounded-md border bg-muted/30">
+        {summary.isLoading ? (
+          <div className="text-sm text-muted-foreground">Loading summary…</div>
+        ) : summary.data ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <div>
+              <div className="text-muted-foreground">Current Balance</div>
+              <div className="font-medium">{formatCurrency(Number(summary.data.supplier.currentBalance))}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Total Paid</div>
+              <div className="font-medium">{formatCurrency(Number(summary.data.supplier.totalPaid))}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Total Purchased</div>
+              <div className="font-medium">{formatCurrency(Number(summary.data.supplier.totalPurchased))}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Payments</div>
+              <div className="font-medium">{summary.data.summary.totalPayments}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Total Amount</div>
+              <div className="font-medium">{formatCurrency(Number(summary.data.summary.totalAmount))}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Average Payment</div>
+              <div className="font-medium">{formatCurrency(Number(summary.data.summary.averagePayment))}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">No summary available.</div>
+        )}
+      </div>
+
+      {items.map((p) => (
+        <div key={p.id} className="p-4 border rounded-lg">
+          <div className="flex justify-between items-start">
+            <div>
+              <div className="font-bold">{formatCurrency(Number(p.amount))}</div>
+              <div className="text-sm text-muted-foreground">
+                {new Date(p.paymentDate).toLocaleDateString()} • {p.paymentMethod.replace('_', ' ')}
+              </div>
+              {p.referenceNumber && <div className="text-sm">Reference: {p.referenceNumber}</div>}
+              {p.notes && <div className="text-sm text-muted-foreground mt-1">{p.notes}</div>}
+            </div>
+          </div>
+        </div>
+      ))}
+      {items.length === 0 && (
+        <div className="text-center py-8 text-muted-foreground">No payment history found for this supplier.</div>
+      )}
+      {data?.pagination && (
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">Page {data.pagination.page} of {data.pagination.totalPages}</div>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Prev
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={data.pagination.page >= data.pagination.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </Button>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span>Page size</span>
+            <Select value={String(limit)} onValueChange={(v) => setLimit(parseInt(v) || 20)}>
+              <SelectTrigger className="h-7 w-[72px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="20">20</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
