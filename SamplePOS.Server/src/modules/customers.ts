@@ -5,8 +5,8 @@ import { authenticate, authorize } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 import { parsePagination, buildPaginationResponse, buildSearchFilter } from '../utils/helpers.js';
 import { CreateCustomerSchema, UpdateCustomerSchema } from '../validation/customer.js';
-import cacheMiddleware, { invalidateCache } from '../middleware/cache.js';
-import { CacheTTL } from '../services/cacheService.js';
+import cacheMiddleware, { invalidateCache } from '../middleware/redisCache.js';
+import { REDIS_TTL } from '../config/redis.js';
 import { CreatePaymentSchema } from '../validation/payment.js';
 
 const router = Router();
@@ -15,7 +15,7 @@ const router = Router();
 router.get(
   '/',
   authenticate,
-  cacheMiddleware({ ttl: CacheTTL.MEDIUM, keyPrefix: 'customers' }),
+  cacheMiddleware({ prefix: 'customers', ttl: REDIS_TTL.MEDIUM }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
@@ -61,7 +61,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
-  cacheMiddleware({ ttl: CacheTTL.MEDIUM, keyPrefix: 'customers' }),
+  cacheMiddleware({ prefix: 'customers', ttl: REDIS_TTL.MEDIUM }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

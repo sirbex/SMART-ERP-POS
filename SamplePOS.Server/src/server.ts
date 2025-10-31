@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import authRouter from './modules/auth.js';
 import usersRouter from './modules/users.js';
 import customersRouter from './modules/customers.js';
@@ -32,6 +33,7 @@ import { closeQueues } from './config/queue.js';
 import logger from './utils/logger.js';
 import prisma from './config/database.js';
 import apiLimiter, { authLimiter } from './middleware/rateLimit.js';
+import { connectRedis, disconnectRedis } from './config/redis.js';
 
 dotenv.config();
 
@@ -55,12 +57,22 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 
-// Request logging with timing
+// Request logging with timing, correlation IDs, and slow query detection
 app.use((req, res, next) => {
   const start = Date.now();
   
-  // Log request start
+  // Generate correlation ID for request tracking
+  const correlationId = crypto.randomUUID();
+  (req as any).correlationId = correlationId;
+  res.setHeader('X-Correlation-ID', correlationId);
+  
+  // Extract userId from JWT if authenticated (set by authenticate middleware later)
+  const userId = (req as any).user?.id || null;
+  
+  // Log request start with correlation ID
   logger.info(`→ ${req.method} ${req.path}`, {
+    correlationId,
+    userId,
     ip: req.ip,
     userAgent: req.get('user-agent')
   });
@@ -68,11 +80,22 @@ app.use((req, res, next) => {
   // Log response on finish
   res.on('finish', () => {
     const duration = Date.now() - start;
-    logger.info(`← ${req.method} ${req.path} ${res.statusCode} ${duration}ms`, {
+    const logData = {
+      correlationId,
+      userId,
       status: res.statusCode,
       duration,
-      ip: req.ip
-    });
+      ip: req.ip,
+      method: req.method,
+      path: req.path
+    };
+    
+    // Warn on slow requests (> 1 second)
+    if (duration > 1000) {
+      logger.warn(`⚠️ Slow request: ${req.method} ${req.path} ${res.statusCode} ${duration}ms`, logData);
+    } else {
+      logger.info(`← ${req.method} ${req.path} ${res.statusCode} ${duration}ms`, logData);
+    }
   });
   
   next();
@@ -164,9 +187,12 @@ app.use(errorHandler);
 // SERVER START
 // ============================================================================
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   logger.info(`🚀 Server running on port ${PORT}`);
   logger.info(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Connect to Redis (non-blocking - app works without it)
+  await connectRedis();
 });
 
 // ============================================================================
@@ -185,6 +211,11 @@ async function gracefulShutdown(signal: string) {
       logger.info('Closing job queues...');
       await closeQueues();
       logger.info('Job queues closed');
+      
+      // Disconnect from Redis
+      logger.info('Disconnecting from Redis...');
+      await disconnectRedis();
+      logger.info('Redis disconnected');
       
       // Disconnect from database
       logger.info('Disconnecting from database...');

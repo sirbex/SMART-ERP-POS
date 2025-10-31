@@ -5,7 +5,8 @@
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx src/server.ts",
+    "dev:watch": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint .",
@@ -52,6 +53,8 @@
     "jsonwebtoken": "^9.0.2",
     "node-cache": "^5.1.2",
     "pdfkit": "^0.17.2",
+    "rate-limit-redis": "^4.2.3",
+    "redis": "^5.9.0",
     "tsconfig-paths": "^4.2.0",
     "winston": "^3.18.3",
     "zod": "^3.23.8"

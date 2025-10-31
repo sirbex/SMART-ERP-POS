@@ -6,8 +6,8 @@ import logger from '../utils/logger.js';
 import { parsePagination, buildPaginationResponse } from '../utils/helpers.js';
 import { CreateProductSchema, UpdateProductSchema } from '../validation/product.js';
 import { ProductHistoryService } from '../services/productHistoryService.js';
-import cacheMiddleware, { invalidateCache } from '../middleware/cache.js';
-import { CacheTTL } from '../services/cacheService.js';
+import cacheMiddleware, { invalidateCache } from '../middleware/redisCache.js';
+import { REDIS_TTL } from '../config/redis.js';
 
 const router = Router();
 
@@ -15,7 +15,7 @@ const router = Router();
 router.get(
   '/',
   authenticate,
-  cacheMiddleware({ ttl: CacheTTL.MEDIUM, keyPrefix: 'products' }),
+  cacheMiddleware({ prefix: 'products', ttl: REDIS_TTL.MEDIUM }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, limit, skip } = parsePagination(req.query);
