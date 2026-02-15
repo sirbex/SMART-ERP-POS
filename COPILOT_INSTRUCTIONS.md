@@ -489,6 +489,15 @@ POS Module → Event Queue → Sync Module → Internal Event Bus → Accounting
 
 ## Checklist Before Committing Code
 
+### Build Verification (Mandatory)
+```powershell
+cd SamplePOS.Server && npm run build   # Must pass with zero TS errors
+cd ../samplepos.client && npm run build # Must pass with zero TS errors
+```
+- [ ] **Backend `npm run build` passes** (zero TypeScript errors)
+- [ ] **Frontend `npm run build` passes** (zero TypeScript errors, Vite bundle succeeds)
+
+### Code Standards
 - [ ] Followed Controller → Service → Repository layering
 - [ ] Used Zod schemas from `shared/zod/`
 - [ ] Used types from `shared/types/`

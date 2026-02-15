@@ -674,7 +674,21 @@ import PDFDocument from 'pdfkit';
 
 ## Pre-Commit Checklist
 
-### 🛡️ SAFETY FIRST (Mandatory)
+### � BUILD VERIFICATION (Mandatory)
+Before committing, both projects must build with zero errors:
+```powershell
+# Backend build
+cd SamplePOS.Server
+npm run build
+
+# Frontend build
+cd ../samplepos.client
+npm run build
+```
+- [ ] **Backend `npm run build` passes** (zero TypeScript errors)
+- [ ] **Frontend `npm run build` passes** (zero TypeScript errors, Vite bundle succeeds)
+
+### �🛡️ SAFETY FIRST (Mandatory)
 - [ ] **NO existing table schemas changed** (unless explicitly required)
 - [ ] **NO columns, routes, or components renamed**
 - [ ] **NO API contracts broken** (response shapes unchanged)

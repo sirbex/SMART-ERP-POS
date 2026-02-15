@@ -636,6 +636,15 @@ All new files must include JSDoc-style headers:
 
 Before committing any code, verify:
 
+### Build Verification (Mandatory)
+```powershell
+cd SamplePOS.Server && npm run build   # Must pass with zero TS errors
+cd ../samplepos.client && npm run build # Must pass with zero TS errors
+```
+- [ ] **Backend `npm run build` passes** (zero TypeScript errors)
+- [ ] **Frontend `npm run build` passes** (zero TypeScript errors, Vite bundle succeeds)
+
+### Code Standards
 - [ ] Followed Controller → Service → Repository layering
 - [ ] Used Zod schemas from `shared/zod/`
 - [ ] All SQL queries are parameterized
