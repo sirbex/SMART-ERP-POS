@@ -1,12 +1,13 @@
-# SamplePOS - Setup & Installation Guide
+# SMART-ERP-POS - Setup & Installation Guide
 
-## 🎯 Overview
+## Overview
 
-SamplePOS is a modular ERP system with:
-- **Backend**: Node.js + TypeScript + PostgreSQL (NO ORM - raw SQL only)
-- **Frontend**: React 19 + Vite + Tailwind + Radix UI
+SMART-ERP-POS is a full-featured enterprise ERP & Point of Sale system with:
+- **Backend**: Node.js + Express 5 + TypeScript + PostgreSQL (NO ORM - raw SQL only)
+- **Frontend**: React 19 + Vite 7 + Tailwind CSS + Radix UI
 - **Validation**: Zod schemas shared between frontend/backend
 - **Architecture**: Controller → Service → Repository pattern
+- **Auth**: JWT + 2FA + RBAC (ADMIN, MANAGER, CASHIER, STAFF)
 
 ---
 
@@ -23,8 +24,8 @@ SamplePOS is a modular ERP system with:
 
 ### 1. Clone Repository
 ```powershell
-git clone https://github.com/beccapowerz/sample-pos.git
-cd sample-pos
+git clone https://github.com/sirbex/SMART-ERP-POS.git
+cd SMART-ERP-POS
 ```
 
 ### 2. Setup Database
@@ -322,11 +323,14 @@ Get-Process -Id (Get-NetTCPConnection -LocalPort 3001).OwningProcess | Stop-Proc
 
 ---
 
-## 📖 Further Reading
+## Further Reading
 
 - **Architecture**: See `ARCHITECTURE.md`
+- **System Overview**: See `SYSTEM_OVERVIEW.md`
 - **AI Agent Guide**: See `.github/copilot-instructions.md`
 - **Pricing System**: See `SamplePOS.Server/PRICING_COSTING_SYSTEM.md`
+- **Timezone Strategy**: See `SamplePOS.Server/TIMEZONE_STRATEGY.md`
+- **Business Rules**: See `BUSINESS_RULES_REFERENCE.md`
 
 ---
 

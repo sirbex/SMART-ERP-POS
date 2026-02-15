@@ -145,4 +145,4 @@ Before committing, check:
 
 ---
 
-Last Updated: November 16, 2025
+Last Updated: February 2026

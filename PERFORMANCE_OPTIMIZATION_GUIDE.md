@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document outlines the comprehensive performance optimization strategy applied to the SamplePOS ERP/POS system. All optimizations target **global scalability, resource efficiency, and resilience**.
+This document outlines the comprehensive performance optimization strategy applied to the SMART-ERP-POS/POS system. All optimizations target **global scalability, resource efficiency, and resilience**.
 
 ---
 

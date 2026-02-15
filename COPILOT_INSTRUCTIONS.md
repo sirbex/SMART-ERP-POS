@@ -1,6 +1,6 @@
-# SamplePOS - Copilot Instructions for All Modules
+# SMART-ERP-POS - Copilot Instructions for All Modules
 
-**Date**: November 7, 2025  
+**Date**: February 2026  
 **Architecture**: Modular Hybrid Monolith (No ORM)  
 **Project Type**: ERP System with POS  
 **Database**: `pos_system` (PostgreSQL) - ALWAYS use this database consistently

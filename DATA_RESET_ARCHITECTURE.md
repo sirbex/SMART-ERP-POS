@@ -241,5 +241,5 @@ This is safe because:
 
 ---
 
-**Last Updated**: January 2025  
+**Last Updated**: February 2026  
 **Architecture**: Single Source of Truth for all calculated values

@@ -1,8 +1,8 @@
 # Copilot Implementation Instructions — Inventory & ERP Core
 
-**Purpose**: These are mandatory rules for Copilot when implementing or modifying any feature related to Inventory, Accounting, or POS within this ERP system.
+**Purpose**: These are mandatory rules for Copilot when implementing or modifying any feature related to Inventory, Accounting, or POS within the SMART-ERP-POS system.
 
-**Last Updated**: November 16, 2025  
+**Last Updated**: February 2026  
 **Status**: Active Development — Enforce Strictly
 
 ---
@@ -663,6 +663,6 @@ Before committing any code, verify:
 
 ---
 
-**Last Updated**: November 4, 2025  
+**Last Updated**: February 2026  
 **Maintainer**: Architecture Team  
 **Status**: Mandatory — All implementations must comply

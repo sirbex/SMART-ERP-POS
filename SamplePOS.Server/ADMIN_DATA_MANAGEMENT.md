@@ -6,7 +6,7 @@
 
 ## Overview
 
-ERP-standard backup/restore and transaction clearing system for SamplePOS. Preserves master data (customers, suppliers, products) while allowing safe deletion of transactional data (sales, purchases, inventory movements).
+ERP-standard backup/restore and transaction clearing system for SMART-ERP-POS. Preserves master data (customers, suppliers, products) while allowing safe deletion of transactional data (sales, purchases, inventory movements).
 
 ## Architecture
 
@@ -980,6 +980,6 @@ Depends on record counts:
 
 ---
 
-**Last Updated**: November 11, 2025  
+**Last Updated**: February 2026  
 **Author**: Backend API Complete, Frontend Integration Pending  
 **Status**: Production Ready (Backend)

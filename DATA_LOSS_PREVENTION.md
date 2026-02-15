@@ -1,11 +1,11 @@
 # Data Loss Prevention Strategy
 
-**Last Updated**: January 2025  
+**Last Updated**: February 2026  
 **Status**: IMPLEMENTED
 
 ## Overview
 
-This document describes the data protection mechanisms implemented across the SamplePOS system to ensure **zero data loss** for all financial, transactional, and business-critical data.
+This document describes the data protection mechanisms implemented across the SMART-ERP-POS system to ensure **zero data loss** for all financial, transactional, and business-critical data.
 
 ## Core Principle
 

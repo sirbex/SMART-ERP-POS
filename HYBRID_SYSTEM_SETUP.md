@@ -1,10 +1,10 @@
-# SamplePOS Hybrid System Setup
+# SMART-ERP-POS Hybrid System Setup
 
-This document describes how to set up and run the SamplePOS hybrid architecture with both Node.js and C# APIs working together.
+This document describes how to set up and run the SMART-ERP-POS hybrid architecture with both Node.js and C# APIs working together.
 
 ## Architecture Overview
 
-The SamplePOS system uses a hybrid architecture:
+The SMART-ERP-POS system uses a hybrid architecture:
 
 - **Node.js API** (Port 3001): Handles POS operations, inventory, sales, customers, suppliers
 - **C# Accounting API** (Port 5062): Handles double-entry bookkeeping, financial reports, accounting

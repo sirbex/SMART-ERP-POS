@@ -1,6 +1,6 @@
-# SamplePOS - AI Coding Agent Instructions
+# SMART-ERP-POS - AI Coding Agent Instructions
 
-**Architecture**: Modular Hybrid Monolith | **Status**: Active Development | **Date**: Nov 2025
+**Architecture**: Modular Hybrid Monolith | **Status**: Active Development | **Date**: Feb 2026
 
 > See also
 - **Copilot Implementation Rules (MANDATORY)**: `../COPILOT_IMPLEMENTATION_RULES.md`
@@ -745,5 +745,5 @@ npm test
 
 ---
 
-**Last Updated**: October 31, 2025  
+**Last Updated**: February 2026  
 **Maintainer**: Architecture in transition - favor documented patterns over installed dependencies

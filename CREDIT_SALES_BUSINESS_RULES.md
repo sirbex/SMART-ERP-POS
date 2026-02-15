@@ -1,6 +1,6 @@
 # Credit Sales & Invoice Business Rules
 
-**Last Updated**: November 23, 2025  
+**Last Updated**: February 2026  
 **Status**: ENFORCED (Frontend + Backend)
 
 ---

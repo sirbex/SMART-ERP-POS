@@ -1,6 +1,6 @@
 # Modal Close Behavior Enhancement
 
-**Date**: October 31, 2025  
+**Date**: February 2026  
 **Status**: Implemented  
 **Requirement**: All dialogs, popups, or overlays should close when the user clicks or taps outside (blank space), or presses ESC. The only exceptions are destructive confirmation modals or multi-step wizards.
 

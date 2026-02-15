@@ -3,7 +3,7 @@
 ## Overview
 Comprehensive pricing and inventory costing system following Odoo-style best practices with FIFO/AVCO valuation, formula-based pricing, customer group pricing, and intelligent caching.
 
-## Date: October 24, 2025
+## Date: February 2026
 
 ---
 

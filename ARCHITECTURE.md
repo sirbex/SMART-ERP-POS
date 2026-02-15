@@ -1,102 +1,107 @@
-# SamplePOS Architecture - Clean Slate Implementation
+# SMART-ERP-POS Architecture
 
-**Date**: October 31, 2025  
-**Branch**: restore-oct25-28-code  
-**Status**: Clean slate - ready for fresh implementation
+**Last Updated**: February 2026  
+**Status**: Production-ready
 
-## Project Structure
-
-This is the target architecture for the SamplePOS system rebuild:
+## System Architecture
 
 ```
-erp-offline-scaffold/
-├── frontend/
-│   └── (React + Vite UI placeholder)
-├── services/
-│   └── pos-service/
-│       ├── local-db/
-│       │   └── localStorage           # Browser persistence
-│       ├── event-queue/               # Offline event queue (JSON files)
-│       ├── src/
-│       │   ├── controllers/
-│       │   │   └── salesController.ts
-│       │   ├── services/
-│       │   │   └── syncService.ts
-│       │   ├── zod-schemas/
-│       │   │   └── saleSchema.ts
-│       │   └── server.ts
-│       └── README.md                   # Copilot instructions
-├── core/
-│   └── accounting-api/
-│       ├── Controllers/
-│       │   └── LedgerController.cs
-│       ├── Models/
-│       ├── DTOs/
-│       ├── Validators/
-│       └── Program.cs
-├── analytics/
-│   └── ml-service/
-│       ├── api/
-│       │   └── main.py
-│       └── models/
-├── shared/
-│   ├── contracts/
-│   │   └── sale.ts                     # Zod contract for Node & DTOs
-│   └── clients/
-│       └── kafkaClient.ts
-├── docker-compose.yml
-└── README.md
+┌─────────────────────────────────────────────────────────────────┐
+│                     FRONTEND (React 19 + Vite)                  │
+│  Port 5173                                                      │
+│  ┌───────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+│  │  POS  │ │Inventory│ │Accounting│ │ Reports  │ │  Admin   │ │
+│  │Terminal│ │& Stock  │ │& Banking │ │ & PDF    │ │& Settings│ │
+│  └───────┘ └─────────┘ └──────────┘ └──────────┘ └──────────┘ │
+│  React Query · Zustand · Radix UI · Tailwind CSS               │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │ HTTP/REST (Vite proxy /api → :3001)
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  BACKEND (Node.js + Express 5)                  │
+│  Port 3001 · 29 modules · 31 API routes                        │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Middleware: Helmet · CORS · Rate Limit · JWT Auth       │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Controller → Service → Repository (strict layering)     │   │
+│  │  (HTTP/Zod)   (logic)   (raw SQL only)                   │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│  21 business services · RBAC · Audit trail · PDF generation    │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │ Parameterized SQL (pg library)
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATABASE (PostgreSQL 14+)                     │
+│  Database: pos_system                                           │
+│  DATE columns (no timezone) · TIMESTAMPTZ for audit (UTC)       │
+│  UUID primary keys · Business ID indexes                        │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Architecture Overview
+## Technology Stack
 
-### Frontend Layer
-- **Technology**: React + Vite
-- **Purpose**: User interface placeholder
-- **Location**: `frontend/`
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19 + Vite 7 + TypeScript + Tailwind CSS + Radix UI |
+| State | TanStack React Query + Zustand |
+| Backend | Node.js + Express 5 + TypeScript (ES modules) |
+| Database | PostgreSQL (production) / SQLite (offline fallback) |
+| Auth | JWT + Refresh Tokens + 2FA (TOTP) + RBAC |
+| Validation | Zod (shared frontend/backend) |
+| Financial | Decimal.js (arbitrary precision) |
+| PDF | PDFKit + jsPDF |
+| Queue/Cache | Bull + Redis + NodeCache |
 
-### Services Layer
+## Backend Modules (29)
 
-#### POS Service (Node.js/TypeScript)
-- **Local Storage**: Browser localStorage for cart persistence
-- **Event Queue**: JSON-based queue for offline event handling
-- **Controllers**: Sales transaction handling
-- **Services**: Sync service for online/offline coordination
-- **Validation**: Zod schemas for type-safe data validation
+Each module follows: `controller.ts → service.ts → repository.ts → routes.ts`
 
-### Core Layer
-
-#### Accounting API (C#/.NET)
-- **Controllers**: Ledger operations
-- **Models**: Core business entities
-- **DTOs**: Data transfer objects
-- **Validators**: Input validation
-
-### Analytics Layer
-
-#### ML Service (Python)
-- **API**: FastAPI/Flask endpoints
-- **Models**: Machine learning models for business analytics
-
-### Shared Layer
-- **Contracts**: Zod-based schemas shared across services
-- **Clients**: Common clients (Kafka, etc.)
+| Domain | Modules |
+|--------|---------|
+| **Core POS** | pos, sales, products, inventory, customers |
+| **Procurement** | purchase-orders, goods-receipts, suppliers, supplier-payments |
+| **Finance** | accounting, invoices, payments, deposits, expenses, bank-cash |
+| **Reporting** | reports, financial-reports |
+| **Commerce** | quotations, discounts, delivery, cash-register |
+| **System** | auth, users, admin, audit, rbac, documents, settings, system-management, system-settings, stock-movements |
 
 ## Key Architectural Principles
 
-1. **Data Persistence**: PostgreSQL database with localStorage caching
-2. **Type Safety**: Zod schemas for contract validation
-3. **Microservices**: Separated POS, Accounting, and Analytics services
-4. **Event-Driven**: Queue-based communication for resilience
-5. **Shared Contracts**: Single source of truth for data structures
+1. **No ORM** — Raw parameterized SQL via `pg` for transparency and control
+2. **Strict 3-layer** — Controller (HTTP) → Service (logic) → Repository (SQL)
+3. **Decimal.js everywhere** — No native JS numbers for money/quantities
+4. **Dual ID system** — UUIDs for DB keys, business IDs for display (`SALE-2025-0001`)
+5. **Shared Zod schemas** — Single source of truth for validation
+6. **Timezone strategy** — DATE as `YYYY-MM-DD` strings, timestamps as UTC
+7. **Standard API format** — `{ success, data?, error?, message? }`
+8. **RBAC** — ADMIN, MANAGER, CASHIER, STAFF with granular permissions
+9. **Audit trail** — All state-changing operations logged
+10. **FEFO inventory** — First Expiry First Out batch selection
 
-## Current State
+## Project Structure
 
-**What Exists**:
-- Configuration files (Tailwind, PostCSS, TypeScript, Vite, ESLint)
-- Environment configuration (.env with Redis setup)
-- Node modules installed (1,115 packages)
-- Git repository with clean slate documented
+```
+SMART-ERP-POS/
+├── samplepos.client/             # React 19 + Vite frontend
+│   └── src/
+│       ├── components/           # 80+ UI components
+│       ├── hooks/                # 20+ React Query hooks
+│       ├── pages/                # Route pages (POS, inventory, accounting, etc.)
+│       ├── stores/               # Zustand (auth, cart, inventory)
+│       ├── services/             # API clients
+│       ├── types/                # TypeScript interfaces
+│       └── utils/                # Currency, formatting, validation
+├── SamplePOS.Server/             # Node.js + Express backend
+│   └── src/
+│       ├── modules/              # 29 feature modules
+│       ├── services/             # 21 business services
+│       ├── middleware/           # Auth, validation, security, audit
+│       ├── rbac/                 # Role-based access control
+│       └── utils/                # Logger, PDF, money, constants
+├── database/                     # Migrations & seeds
+└── shared/                       # Shared types, Zod schemas
+```
 
 **What Was Removed**:
 - All frontend source code (React components, services, hooks)

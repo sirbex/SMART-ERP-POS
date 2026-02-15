@@ -522,5 +522,5 @@ for (const product of products) {
 ---
 
 **Module Owner**: Backend Team  
-**Last Updated**: January 2025  
+**Last Updated**: February 2026  
 **Status**: Production Ready

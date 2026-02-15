@@ -1,4 +1,4 @@
-# SamplePOS API Testing Guide
+# SMART-ERP-POS API Testing Guide
 
 ## ✅ Database Initialization
 

@@ -1,13 +1,13 @@
-# SamplePOS Server
+# SMART-ERP-POS Server
 
-Backend API server for SamplePOS - Enterprise Point of Sale System
+Backend API server for SMART-ERP-POS - Enterprise ERP & Point of Sale System
 
 ## 🔧 Local Database Setup (Using `.env.local`)
 
 For local development, credentials are managed via a private `.env.local` file:
 
 ```bash
-# SamplePOS.Server/.env.local
+# SMART-ERP-POS.Server/.env.local
 PGHOST=localhost
 PGPORT=5432
 PGDATABASE=pos_system
