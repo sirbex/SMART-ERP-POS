@@ -1,0 +1,818 @@
+import { Pool, PoolClient } from 'pg';
+import Decimal from 'decimal.js';
+
+export interface SaleRecord {
+  id: string;
+  saleNumber: string;
+  customerId: string | null;
+  customerName: string | null;
+  totalAmount: number;
+  paymentMethod: string;
+  paymentReceived: number;
+  changeAmount: number;
+  status: string;
+  soldBy: string;
+  createdAt: Date;
+  saleDate?: string;
+}
+
+export interface SaleItemRecord {
+  id: string;
+  saleId: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  costPrice: number;
+  profit: number;
+}
+
+export interface CreateSaleData {
+  customerId: string | null;
+  subtotal?: number; // Subtotal before discount/tax
+  totalAmount: number;
+  totalCost?: number;
+  discountAmount?: number; // Discount applied to sale
+  taxAmount?: number;
+  paymentMethod: string;
+  paymentReceived: number;
+  changeAmount: number;
+  soldBy: string;
+  saleDate?: string; // ISO 8601 datetime for backdated sales
+  isSplitPayment?: boolean; // Indicates if sale uses split payment
+  totalPaid?: number; // Total amount paid (may differ from totalAmount for credit)
+  balanceDue?: number; // Remaining balance (for customer credit)
+  quoteId?: string | null; // Link to quotation if sale is from quote conversion
+}
+
+export interface CreateSaleItemData {
+  saleId: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  costPrice: number;
+  profit: number;
+  uomId?: string; // UUID of the product_uom used (optional for backward compatibility)
+}
+
+export const salesRepository = {
+  /**
+   * Generate next sale number (SALE-YYYY-NNNN format)
+   */
+  async generateSaleNumber(pool: Pool): Promise<string> {
+    const year = new Date().getFullYear();
+    const result = await pool.query(
+      `SELECT sale_number FROM sales 
+       WHERE sale_number LIKE $1 
+       ORDER BY sale_number DESC 
+       LIMIT 1`,
+      [`SALE-${year}-%`]
+    );
+
+    if (result.rows.length === 0) {
+      return `SALE-${year}-0001`;
+    }
+
+    const lastNumber = result.rows[0].sale_number;
+    const sequence = parseInt(lastNumber.split('-')[2]) + 1;
+    return `SALE-${year}-${sequence.toString().padStart(4, '0')}`;
+  },
+
+  /**
+   * Create a new sale (transaction wrapper should be handled in service)
+   * Maps to actual sales table schema from 001_initial_schema.sql
+   */
+  async createSale(pool: Pool, data: CreateSaleData): Promise<SaleRecord> {
+    const saleNumber = await this.generateSaleNumber(pool);
+
+    // Schema fields: sale_number, customer_id, sale_date, subtotal, tax_amount,
+    // discount_amount, total_amount, total_cost, profit, profit_margin,
+    // payment_method, amount_paid, change_amount, status, notes, cashier_id
+
+    // Calculate profit and margin with BANK-GRADE PRECISION
+    const totalAmount = new Decimal(data.totalAmount);
+    const totalCost = new Decimal(data.totalCost || 0);
+    const taxAmount = new Decimal(data.taxAmount || 0);
+    const discountAmount = new Decimal(data.discountAmount || 0);
+
+    // Use subtotal from input if provided, otherwise calculate as total + discount - tax
+    const subtotal = data.subtotal !== undefined
+      ? new Decimal(data.subtotal)
+      : totalAmount.plus(discountAmount).minus(taxAmount);
+
+    // CRITICAL: Profit should EXCLUDE tax (tax is pass-through to government)
+    // Profit = Revenue - Cost, where Revenue = Subtotal (before tax)
+    // Formula: Profit = (Subtotal - Discount) - TotalCost
+    const revenueBeforeTax = subtotal.minus(discountAmount);
+    const profit = revenueBeforeTax.minus(totalCost);
+    const profitMargin = revenueBeforeTax.greaterThan(0)
+      ? profit.dividedBy(revenueBeforeTax)
+      : new Decimal(0);
+
+    const result = await pool.query(
+      `INSERT INTO sales (
+        sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
+        total_cost, profit, profit_margin,
+        payment_method, amount_paid, change_amount, cashier_id, quote_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING 
+        id,
+        sale_number as "saleNumber",
+        customer_id as "customerId",
+        sale_date as "saleDate",
+        subtotal,
+        tax_amount as "taxAmount",
+        discount_amount as "discountAmount",
+        total_amount as "totalAmount",
+        total_cost as "totalCost",
+        profit,
+        profit_margin as "profitMargin",
+        payment_method as "paymentMethod",
+        amount_paid as "amountPaid",
+        change_amount as "changeAmount",
+        cashier_id as "cashierId",
+        quote_id as "quoteId",
+        created_at as "createdAt"`,
+      [
+        saleNumber,
+        data.customerId,
+        data.saleDate || new Date().toISOString().split('T')[0], // Use YYYY-MM-DD string format, no Date object conversion
+        parseFloat(subtotal.toFixed(2)),           // $4
+        parseFloat(taxAmount.toFixed(2)),          // $5
+        parseFloat(discountAmount.toFixed(2)),     // $6
+        parseFloat(totalAmount.toFixed(2)),        // $7
+        parseFloat(totalCost.toFixed(2)),          // $8
+        parseFloat(profit.toFixed(2)),             // $9
+        parseFloat(profitMargin.toFixed(4)), // 4 decimal places for margin (0.2500 = 25%)
+        data.paymentMethod,
+        data.paymentReceived,
+        data.changeAmount,
+        data.soldBy, // Maps to cashier_id
+        data.quoteId || null, // Link to quotation
+      ]
+    );
+
+    return result.rows[0];
+  },
+
+  /**
+   * Add items to a sale
+   * Schema fields: sale_id, product_id, product_name, item_type, batch_id, quantity, unit_price,
+   * unit_cost, discount_amount, total_price, profit
+   */
+  async addSaleItems(pool: Pool, items: CreateSaleItemData[]): Promise<SaleItemRecord[]> {
+    const values: any[] = [];
+    const placeholders: string[] = [];
+
+    items.forEach((item, index) => {
+      const offset = index * 10; // 10 fields including product_name and item_type
+      placeholders.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
+      );
+
+      // Use provided profit if available (may include discount allocation),
+      // otherwise calculate from lineTotal - (costPrice * quantity)
+      const lineTotal = new Decimal(item.lineTotal || 0);
+      const costPrice = new Decimal(item.costPrice || 0);
+      const quantity = new Decimal(item.quantity || 0);
+      const itemProfit = item.profit !== undefined
+        ? new Decimal(item.profit)  // Use pre-calculated profit (with discount allocation)
+        : lineTotal.minus(costPrice.times(quantity));  // Fallback calculation
+
+      // Handle custom/service items (productId starts with 'custom_')
+      const isCustomItem = item.productId?.startsWith('custom_');
+      const productId = isCustomItem ? null : item.productId;
+      const itemType = isCustomItem ? 'custom' : 'product';
+
+      values.push(
+        item.saleId,
+        productId, // NULL for custom items
+        item.productName || null, // Store name for custom items
+        itemType,
+        item.quantity,
+        item.unitPrice,
+        parseFloat(lineTotal.toFixed(2)), // Maps to total_price
+        parseFloat(costPrice.toFixed(2)), // Maps to unit_cost
+        parseFloat(itemProfit.toFixed(2)), // Maps to profit
+        item.uomId || null // Include uom_id (NULL if not provided)
+      );
+    });
+
+    const result = await pool.query(
+      `INSERT INTO sale_items (
+        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id
+      ) VALUES ${placeholders.join(', ')}
+      RETURNING *`,
+      values
+    );
+
+    return result.rows;
+  },
+
+  /**
+   * Get sale by ID with items
+   */
+  async getSaleById(
+    pool: Pool,
+    id: string
+  ): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines?: any[] } | null> {
+    const saleResult = await pool.query('SELECT * FROM sales WHERE id = $1', [id]);
+
+    if (saleResult.rows.length === 0) {
+      return null;
+    }
+
+    // Include product name (and identifiers) by joining products
+    // For custom items, use si.product_name; for inventory items, use p.name
+    const itemsResult = await pool.query(
+      `SELECT 
+        si.*,
+        COALESCE(p.name, si.product_name) AS product_name,
+        p.sku AS sku,
+        p.barcode AS barcode
+       FROM sale_items si
+       LEFT JOIN products p ON p.id = si.product_id
+       WHERE si.sale_id = $1
+       ORDER BY si.created_at`,
+      [id]
+    );
+
+    // Fetch payment lines (for split payment support)
+    const paymentLinesResult = await pool.query(
+      `SELECT 
+        id,
+        payment_method,
+        amount,
+        reference,
+        created_at
+       FROM payment_lines
+       WHERE sale_id = $1
+       ORDER BY created_at`,
+      [id]
+    );
+
+    return {
+      sale: saleResult.rows[0],
+      items: itemsResult.rows,
+      paymentLines: paymentLinesResult.rows.length > 0 ? paymentLinesResult.rows : undefined,
+    };
+  },
+
+  /**
+   * List sales with pagination
+   */
+  async listSales(
+    pool: Pool,
+    page: number = 1,
+    limit: number = 50,
+    filters?: { status?: string; customerId?: string; startDate?: string; endDate?: string }
+  ): Promise<{ sales: SaleRecord[]; total: number }> {
+    const offset = (page - 1) * limit;
+    const whereClauses: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (filters?.status) {
+      whereClauses.push(`s.status = $${paramIndex++}`);
+      values.push(filters.status);
+    }
+
+    if (filters?.customerId) {
+      whereClauses.push(`s.customer_id = $${paramIndex++}`);
+      values.push(filters.customerId);
+    }
+
+    if (filters?.startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}::date`);
+      values.push(filters.endDate);
+    }
+
+    const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const countResult = await pool.query(`SELECT COUNT(*) FROM sales s ${whereClause}`, values);
+
+    const result = await pool.query(
+      `SELECT 
+        s.id,
+        s.sale_number,
+        s.customer_id,
+        s.sale_date,
+        s.subtotal,
+        s.tax_amount,
+        s.discount_amount,
+        s.total_amount,
+        s.total_cost,
+        s.profit,
+        s.profit_margin,
+        s.payment_method,
+        s.amount_paid,
+        s.change_amount,
+        s.status,
+        s.notes,
+        s.cashier_id,
+        s.created_at,
+        c.name as customer_name,
+        u.full_name as cashier_name
+       FROM sales s
+       LEFT JOIN customers c ON s.customer_id = c.id
+       LEFT JOIN users u ON s.cashier_id = u.id
+       ${whereClause} 
+       ORDER BY s.sale_date DESC, s.created_at DESC 
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...values, limit, offset]
+    );
+
+    return {
+      sales: result.rows,
+      total: parseInt(countResult.rows[0].count),
+    };
+  },
+
+  /**
+   * Get FIFO cost layers for a product (oldest first)
+   */
+  async getFIFOCostLayers(pool: Pool, productId: string): Promise<any[]> {
+    const result = await pool.query(
+      `SELECT * FROM cost_layers 
+       WHERE product_id = $1 AND remaining_quantity > 0 
+       ORDER BY created_at ASC`,
+      [productId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Update cost layer remaining quantity
+   * @param poolOrClient - Pool for standalone operations, PoolClient for transactional operations
+   */
+  async updateCostLayerQuantity(poolOrClient: Pool | PoolClient, layerId: string, newQuantity: number): Promise<void> {
+    await poolOrClient.query('UPDATE cost_layers SET remaining_quantity = $1 WHERE id = $2', [
+      newQuantity,
+      layerId,
+    ]);
+  },
+
+  /**
+   * Create cost layer (when receiving goods)
+   */
+  async createCostLayer(
+    pool: Pool,
+    data: {
+      productId: string;
+      batchNumber?: string | null; // aligned with schema
+      quantity: number;
+      unitCost: number; // aligned with schema
+    }
+  ): Promise<any> {
+    // Note: Prefer using costLayerService.createCostLayer; this is a fallback aligned to schema
+    const result = await pool.query(
+      `INSERT INTO cost_layers (product_id, quantity, remaining_quantity, unit_cost, batch_number)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [data.productId, data.quantity, data.quantity, data.unitCost, data.batchNumber || null]
+    );
+    return result.rows[0];
+  },
+
+  /**
+   * Get overall sales summary (totals, count, by payment method)
+   */
+  async getSalesSummary(
+    pool: Pool,
+    filters?: {
+      startDate?: string;
+      endDate?: string;
+      groupBy?: string;
+    }
+  ): Promise<any> {
+    const whereClauses: string[] = ['status = $1'];
+    const values: any[] = ['COMPLETED'];
+    let paramIndex = 2;
+
+    if (filters?.startDate) {
+      whereClauses.push(`sale_date >= $${paramIndex++}::date`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`sale_date <= $${paramIndex++}::date`);
+      values.push(filters.endDate);
+    }
+
+    const whereClause = whereClauses.join(' AND ');
+
+    // Get overall summary
+    const summaryResult = await pool.query(
+      `SELECT 
+        COUNT(*) as total_sales,
+        COALESCE(SUM(total_amount), 0) as total_amount,
+        COALESCE(SUM(total_cost), 0) as total_cost,
+        COALESCE(SUM(total_amount - COALESCE(total_cost, 0)), 0) as total_profit
+       FROM sales
+       WHERE ${whereClause}`,
+      values
+    );
+
+    // Get breakdown by payment method
+    const paymentMethodResult = await pool.query(
+      `SELECT 
+        payment_method,
+        COUNT(*) as count,
+        COALESCE(SUM(total_amount), 0) as total_amount
+       FROM sales
+       WHERE ${whereClause}
+       GROUP BY payment_method
+       ORDER BY total_amount DESC`,
+      values
+    );
+
+    return {
+      totalSales: parseInt(summaryResult.rows[0].total_sales),
+      totalAmount: parseFloat(summaryResult.rows[0].total_amount),
+      totalCost: parseFloat(summaryResult.rows[0].total_cost),
+      totalProfit: parseFloat(summaryResult.rows[0].total_profit),
+      byPaymentMethod: paymentMethodResult.rows.map(row => ({
+        paymentMethod: row.payment_method,
+        count: parseInt(row.count),
+        totalAmount: parseFloat(row.total_amount),
+      })),
+    };
+  },
+
+  /**
+   * Get product sales summary report
+   * Returns aggregated sales data per product for a date range
+   */
+  async getProductSalesSummary(
+    pool: Pool,
+    filters?: {
+      startDate?: string;
+      endDate?: string;
+      productId?: string;
+      customerId?: string;
+    }
+  ): Promise<any[]> {
+    const whereClauses: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    // Join sales with sale_items to get product-level data
+    let query = `
+      SELECT 
+        si.product_id,
+        si.product_name,
+        COUNT(DISTINCT s.id) as transaction_count,
+        ROUND(SUM(si.quantity)::numeric, 2) as total_quantity_sold,
+        ROUND(SUM(si.line_total)::numeric, 2) as total_revenue,
+        ROUND(SUM(si.cost_price * si.quantity)::numeric, 2) as total_cost,
+        ROUND(SUM(si.profit)::numeric, 2) as total_profit,
+        ROUND(AVG(si.unit_price)::numeric, 2) as avg_selling_price,
+        ROUND(AVG(si.cost_price)::numeric, 2) as avg_cost_price,
+        TO_CHAR(MIN(s.sale_date), 'Mon DD, YYYY') as first_sale_date,
+        TO_CHAR(MAX(s.sale_date), 'Mon DD, YYYY') as last_sale_date
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+    `;
+
+    // Only include completed sales
+    whereClauses.push(`s.status = 'COMPLETED'`);
+
+    if (filters?.startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}::date`);
+      values.push(filters.endDate);
+    }
+
+    if (filters?.productId) {
+      whereClauses.push(`si.product_id = $${paramIndex++}`);
+      values.push(filters.productId);
+    }
+
+    if (filters?.customerId) {
+      whereClauses.push(`s.customer_id = $${paramIndex++}`);
+      values.push(filters.customerId);
+    }
+
+    if (whereClauses.length > 0) {
+      query += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    query += `
+      GROUP BY si.product_id, si.product_name
+      ORDER BY total_revenue DESC
+    `;
+
+    const result = await pool.query(query, values);
+
+    // Calculate profit margin percentage for each product
+    return result.rows.map((row: any) => ({
+      ...row,
+      profit_margin_pct: row.total_revenue > 0
+        ? ((row.total_profit / row.total_revenue) * 100).toFixed(2)
+        : '0.00',
+    }));
+  },
+
+  /**
+   * Get top selling products
+   */
+  async getTopSellingProducts(
+    pool: Pool,
+    limit: number = 10,
+    filters?: {
+      startDate?: string;
+      endDate?: string;
+    }
+  ): Promise<any[]> {
+    const whereClauses: string[] = ['s.status = \'COMPLETED\''];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (filters?.startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}::date`);
+      values.push(filters.endDate);
+    }
+
+    const query = `
+      SELECT 
+        si.product_id,
+        si.product_name,
+        ROUND(SUM(si.quantity)::numeric, 2) as total_quantity,
+        ROUND(SUM(si.line_total)::numeric, 2) as total_revenue,
+        COUNT(DISTINCT s.id) as sale_count
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY si.product_id, si.product_name
+      ORDER BY total_quantity DESC
+      LIMIT $${paramIndex}
+    `;
+
+    const result = await pool.query(query, [...values, limit]);
+    return result.rows;
+  },
+
+  /**
+   * Get sales summary by date (daily, weekly, monthly aggregation)
+   */
+  async getSalesSummaryByDate(
+    pool: Pool,
+    groupBy: 'day' | 'week' | 'month' = 'day',
+    filters?: {
+      startDate?: string;
+      endDate?: string;
+    }
+  ): Promise<any[]> {
+    const whereClauses: string[] = ['status = \'COMPLETED\''];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (filters?.startDate) {
+      whereClauses.push(`sale_date >= $${paramIndex++}::date`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`sale_date <= $${paramIndex++}::date`);
+      values.push(filters.endDate);
+    }
+
+    let dateGrouping = '';
+    let dateFormat = '';
+    switch (groupBy) {
+      case 'day':
+        dateGrouping = 'DATE(sale_date)';
+        dateFormat = 'TO_CHAR(DATE(sale_date), \'Mon DD, YYYY\')';
+        break;
+      case 'week':
+        dateGrouping = 'DATE_TRUNC(\'week\', sale_date)';
+        dateFormat = 'TO_CHAR(DATE_TRUNC(\'week\', sale_date), \'Mon DD, YYYY\')';
+        break;
+      case 'month':
+        dateGrouping = 'DATE_TRUNC(\'month\', sale_date)';
+        dateFormat = 'TO_CHAR(DATE_TRUNC(\'month\', sale_date), \'Mon YYYY\')';
+        break;
+    }
+
+    const query = `
+      SELECT 
+        ${dateFormat} as period,
+        COUNT(*) as transaction_count,
+        ROUND(SUM(total_amount)::numeric, 2) as total_revenue,
+        ROUND(SUM(total_cost)::numeric, 2) as total_cost,
+        ROUND(SUM(profit)::numeric, 2) as total_profit,
+        ROUND(AVG(total_amount)::numeric, 2) as avg_transaction_value
+      FROM sales
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY ${dateGrouping}
+      ORDER BY ${dateGrouping} DESC
+    `;
+
+    const result = await pool.query(query, values);
+    return result.rows;
+  },
+
+  /**
+   * Get sales details report - aggregated by date and product with revenue/cost metrics
+   */
+  async getSalesDetailsReport(pool: Pool, filters: any = {}): Promise<any[]> {
+    const whereClauses = ['s.status = $1'];
+    const values: any[] = ['COMPLETED'];
+    let paramIndex = 2;
+
+    if (filters.startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}`);
+      values.push(filters.startDate);
+    }
+
+    if (filters.endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}`);
+      values.push(filters.endDate);
+    }
+
+    if (filters.productId) {
+      whereClauses.push(`p.id = $${paramIndex++}`);
+      values.push(filters.productId);
+    }
+
+    const query = `
+      SELECT 
+        TO_CHAR(DATE(s.sale_date), 'Mon DD, YYYY') as sale_date,
+        p.name as product_name,
+        p.sku,
+        (SELECT u.symbol FROM product_uoms pu JOIN uoms u ON pu.uom_id = u.id WHERE pu.product_id = p.id AND pu.is_default = true LIMIT 1) as unit_of_measure,
+        ROUND(SUM(si.quantity)::numeric, 2) as total_quantity,
+        ROUND(AVG(si.unit_price)::numeric, 2) as avg_unit_price,
+        ROUND(SUM(si.total_price)::numeric, 2) as total_revenue,
+        CASE 
+          WHEN SUM(si.total_price) > 0 
+          THEN ROUND((SUM(si.profit) / SUM(si.total_price) * 100)::numeric, 2)
+          ELSE 0 
+        END as profit_margin_percent,
+        COUNT(DISTINCT s.id) as transaction_count
+      FROM sales s
+      INNER JOIN sale_items si ON s.id = si.sale_id
+      INNER JOIN products p ON si.product_id = p.id
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY DATE(s.sale_date), p.id, p.name, p.sku
+      ORDER BY DATE(s.sale_date) DESC, total_revenue DESC
+    `;
+
+    const result = await pool.query(query, values);
+    return result.rows;
+  },
+
+  /**
+   * Get sales by cashier report - shows sales performance by user/cashier
+   */
+  async getSalesByCashier(pool: Pool, filters: any = {}): Promise<any[]> {
+    const whereClauses = ['s.status = $1'];
+    const values: any[] = ['COMPLETED'];
+    let paramIndex = 2;
+
+    if (filters.startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}`);
+      values.push(filters.startDate);
+    }
+
+    if (filters.endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}`);
+      values.push(filters.endDate);
+    }
+
+    if (filters.userId) {
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.userId);
+    }
+
+    const query = `
+      SELECT 
+        u.id as user_id,
+        u.full_name as cashier_name,
+        u.email,
+        u.role,
+        COUNT(DISTINCT s.id) as total_transactions,
+        COUNT(DISTINCT s.customer_id) as unique_customers,
+        ROUND(SUM(s.total_amount)::numeric, 2) as total_revenue,
+        ROUND(SUM(s.total_cost)::numeric, 2) as total_cost,
+        ROUND(SUM(s.profit)::numeric, 2) as total_profit,
+        CASE 
+          WHEN SUM(s.total_cost) > 0 
+          THEN ROUND((SUM(s.profit) / SUM(s.total_cost) * 100)::numeric, 2)
+          ELSE 0 
+        END as profit_margin_percentage,
+        ROUND(AVG(s.total_amount)::numeric, 2) as avg_transaction_value,
+        TO_CHAR(MAX(s.sale_date), 'Mon DD, YYYY HH24:MI') as last_sale_date,
+        TO_CHAR(MIN(s.sale_date), 'Mon DD, YYYY HH24:MI') as first_sale_date
+      FROM sales s
+      INNER JOIN users u ON s.cashier_id = u.id
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY u.id, u.full_name, u.email, u.role
+      ORDER BY total_revenue DESC
+    `;
+
+    const result = await pool.query(query, values);
+    return result.rows;
+  },
+
+  /**
+   * Void a sale (mark as VOID, record who/when/why)
+   * Returns updated sale record with void details
+   */
+  async voidSale(
+    pool: Pool,
+    saleId: string,
+    voidedById: string,
+    voidReason: string,
+    approvedById?: string
+  ): Promise<any> {
+    const result = await pool.query(
+      `UPDATE sales 
+       SET status = 'VOID',
+           voided_at = CURRENT_TIMESTAMP,
+           voided_by_id = $2,
+           void_reason = $3,
+           void_approved_by_id = $4,
+           void_approved_at = CASE WHEN $4 IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END
+       WHERE id = $1 AND status = 'COMPLETED'
+       RETURNING 
+         id,
+         sale_number as "saleNumber",
+         status,
+         voided_at as "voidedAt",
+         voided_by_id as "voidedById",
+         void_reason as "voidReason",
+         void_approved_by_id as "voidApprovedById",
+         void_approved_at as "voidApprovedAt"`,
+      [saleId, voidedById, voidReason, approvedById || null]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Sale not found or already voided');
+    }
+
+    return result.rows[0];
+  },
+
+  /**
+   * Get sale items for a sale (needed for inventory restoration)
+   */
+  async getSaleItemsForVoid(pool: Pool, saleId: string): Promise<any[]> {
+    const result = await pool.query(
+      `SELECT 
+        si.id,
+        si.sale_id as "saleId",
+        si.product_id as "productId",
+        si.batch_id as "batchId",
+        si.quantity,
+        si.unit_price as "unitPrice",
+        si.unit_cost as "unitCost",
+        si.total_price as "totalPrice",
+        si.profit,
+        si.uom_id as "uomId",
+        p.name as "productName",
+        p.sku
+       FROM sale_items si
+       JOIN products p ON si.product_id = p.id
+       WHERE si.sale_id = $1`,
+      [saleId]
+    );
+
+    return result.rows;
+  },
+
+  /**
+   * Check if user has manager role (required for void approval)
+   */
+  async isManager(pool: Pool, userId: string): Promise<boolean> {
+    const result = await pool.query(
+      `SELECT role FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return false;
+    }
+
+    const role = result.rows[0].role;
+    return role === 'ADMIN' || role === 'MANAGER';
+  },
+};
+

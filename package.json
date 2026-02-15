@@ -1,0 +1,36 @@
+{
+  "name": "samplepos",
+  "version": "1.0.0",
+  "description": "Enterprise POS System with Accounting",
+  "private": true,
+  "scripts": {
+    "prepare": "husky install",
+    "test:accounting": "cd SamplePOS.Server && npm run test:accounting",
+    "test:integrity": "cd SamplePOS.Server && npm run test:integrity",
+    "dev:server": "cd SamplePOS.Server && npm run dev",
+    "dev:client": "cd samplepos.client && npm run dev",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "lint": "cd SamplePOS.Server && npm run lint && cd ../samplepos.client && npm run lint",
+    "lint:fix": "cd SamplePOS.Server && npm run lint:fix && cd ../samplepos.client && npm run lint -- --fix",
+    "build": "cd SamplePOS.Server && npm run build:prod && cd ../samplepos.client && npm run build",
+    "test": "cd SamplePOS.Server && npm run test && cd ../samplepos.client && npm run test"
+  },
+  "devDependencies": {
+    "husky": "^8.0.0",
+    "lint-staged": "^15.2.0",
+    "concurrently": "^8.2.0"
+  },
+  "lint-staged": {
+    "SamplePOS.Server/src/**/*.{ts,js}": [
+      "cd SamplePOS.Server && npm run lint --",
+      "cd SamplePOS.Server && npm run format --"
+    ],
+    "samplepos.client/src/**/*.{ts,tsx}": [
+      "cd samplepos.client && npm run lint --",
+      "cd samplepos.client && npm run format --"
+    ]
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

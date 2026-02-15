@@ -1,0 +1,133 @@
+import { z } from 'zod';
+
+// POS Sale Line Item Schema
+export const POSSaleLineItemSchema = z.object({
+  productId: z.string().min(1), // Accept UUID or custom IDs (e.g., custom_* for quotation items)
+  productName: z.string().min(1),
+  sku: z.string(), // Allow empty for custom/service items
+  uom: z.string().min(1),
+  uomId: z.string().uuid().optional(), // UUID of product_uom used
+  quantity: z.number().positive().finite(),
+  unitPrice: z.number().nonnegative().finite(),
+  costPrice: z.number().nonnegative().finite(),
+  subtotal: z.number().nonnegative().finite(),
+  taxAmount: z.number().nonnegative().finite().optional(),
+  notes: z.string().max(500).optional().or(z.null()).transform(val => val ?? undefined), // Line item notes (converts null to undefined)
+}).strict();
+
+// Payment Line Schema (for split payments)
+export const PaymentLineSchema = z.object({
+  paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'DEPOSIT']),
+  amount: z.number().nonnegative().finite(), // Allow 0 for full CREDIT sales
+  reference: z.string().optional(),
+}).strict();
+
+// POS Sale Schema
+export const POSSaleSchema = z.object({
+  customerId: z.string().uuid().optional(),
+  customerEmail: z.string().email().optional().or(z.literal('')).or(z.null()).transform(val => val === '' || val === null ? undefined : val), // Customer email (optional, handles empty/null)
+  quoteId: z.string().uuid().optional(), // Link to quotation if sale originates from quote
+  cashRegisterSessionId: z.string().uuid().optional(), // Link to cash register session for drawer tracking
+  lineItems: z.array(POSSaleLineItemSchema).min(1, 'At least one item is required'),
+  subtotal: z.number().nonnegative().finite(),
+  discountAmount: z.number().nonnegative().finite().optional(), // Cart-level discount
+  taxAmount: z.number().nonnegative().finite(),
+  totalAmount: z.number().nonnegative().finite(),
+  paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']).optional(), // Legacy single payment
+  paymentLines: z.array(PaymentLineSchema).optional(), // New split payment support
+  amountTendered: z.number().nonnegative().finite().optional(),
+  changeGiven: z.number().nonnegative().finite().optional(),
+  saleDate: z.string().datetime().optional(), // ISO 8601 datetime for backdated sales
+  notes: z.string().max(500).optional(),
+  requiresApproval: z.boolean().optional(), // Flag for discount approvals or special pricing
+}).strict().superRefine((data, ctx) => {
+  // Must have either paymentMethod OR paymentLines
+  if (!data.paymentMethod && (!data.paymentLines || data.paymentLines.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['paymentMethod'],
+      message: 'Must provide either paymentMethod or paymentLines',
+    });
+  }
+
+  // If paymentLines provided, sum must equal totalAmount (or exceed for CASH to give change)
+  if (data.paymentLines && data.paymentLines.length > 0) {
+    const sum = data.paymentLines.reduce((acc, line) => acc + line.amount, 0);
+    const hasCash = data.paymentLines.some(line => line.paymentMethod === 'CASH');
+    const hasCredit = data.paymentLines.some(line => line.paymentMethod === 'CREDIT');
+
+    // Allow underpayment ONLY if there's a CREDIT payment (for invoices/credit sales)
+    // Otherwise, require full payment or overpayment with cash
+    if (sum < data.totalAmount - 0.01 && !hasCredit) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paymentLines'],
+        message: `Sum of payment lines (${sum.toFixed(2)}) is less than total amount (${data.totalAmount.toFixed(2)}). Add CREDIT payment for partial payment.`,
+      });
+    }
+
+    // If overpaid, must have cash payment
+    if (sum > data.totalAmount + 0.01 && !hasCash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paymentLines'],
+        message: `Overpayment (${sum.toFixed(2)}) without CASH payment. Only CASH can be overpaid to give change.`,
+      });
+    }
+  }
+
+  // CRITICAL: CASH sales MUST have amountTendered (legacy single payment)
+  if (data.paymentMethod === 'CASH' && !data.paymentLines) {
+    if (data.amountTendered === undefined || data.amountTendered <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['amountTendered'],
+        message: 'CASH sales require amount tendered. Cannot record cash sale without cash received.',
+      });
+    }
+    if (data.amountTendered !== undefined && data.amountTendered < data.totalAmount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['amountTendered'],
+        message: `Insufficient cash. Tendered: ${data.amountTendered}, Required: ${data.totalAmount}`,
+      });
+    }
+  }
+
+  // Validate subtotal matches sum of line items
+  const calculatedSubtotal = data.lineItems.reduce((sum, item) => sum + item.subtotal, 0);
+  if (Math.abs(calculatedSubtotal - data.subtotal) > 0.01) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['subtotal'],
+      message: 'Subtotal does not match sum of line items',
+    });
+  }
+
+  // Validate total = subtotal - discount + tax
+  const discountAmount = data.discountAmount || 0;
+  const calculatedTotal = data.subtotal - discountAmount + data.taxAmount;
+  if (Math.abs(calculatedTotal - data.totalAmount) > 0.01) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['totalAmount'],
+      message: `Total amount does not match subtotal - discount + tax (expected ${calculatedTotal.toFixed(2)}, got ${data.totalAmount.toFixed(2)})`,
+    });
+  }
+
+  // Validate change given for cash payments (legacy)
+  if (data.paymentMethod === 'CASH' && data.amountTendered && !data.paymentLines) {
+    const calculatedChange = data.amountTendered - data.totalAmount;
+    if (data.changeGiven !== undefined && Math.abs(calculatedChange - data.changeGiven) > 0.01) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['changeGiven'],
+        message: 'Change given does not match amount tendered - total',
+      });
+    }
+  }
+});
+
+export type POSSaleLineItem = z.infer<typeof POSSaleLineItemSchema>;
+export type PaymentLine = z.infer<typeof PaymentLineSchema>;
+export type POSSale = z.infer<typeof POSSaleSchema>;

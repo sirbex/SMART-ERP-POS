@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (Shared by both APIs)
+  postgres:
+    image: postgres:15-alpine
+    container_name: samplepos-postgres
+    environment:
+      POSTGRES_DB: pos_system
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d pos_system" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - samplepos_network
+
+  # Redis (For caching and queues)
+  redis:
+    image: redis:7-alpine
+    container_name: samplepos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - samplepos_network
+
+  # Node.js Backend API
+  nodejs-api:
+    build:
+      context: ./SamplePOS.Server
+      dockerfile: Dockerfile
+    container_name: samplepos-nodejs-api
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/pos_system
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your_super_secret_jwt_key_here}
+      ACCOUNTING_API_BASE_URL: http://csharp-accounting-api:5062
+      ACCOUNTING_API_KEY: ${ACCOUNTING_API_KEY:-production_shared_secret}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - samplepos_network
+    restart: unless-stopped
+
+  # C# Accounting API
+  csharp-accounting-api:
+    build:
+      context: ./server-dotnet/accounting-api/AccountingApi
+      dockerfile: Dockerfile
+    container_name: samplepos-csharp-accounting-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5062
+      ConnectionStrings__PostgreSQL: Host=postgres;Database=pos_system;Username=postgres;Password=password
+      ApiKeys__NodeBackend: ${ACCOUNTING_API_KEY:-production_shared_secret}
+    ports:
+      - "5062:5062"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5062/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - samplepos_network
+    restart: unless-stopped
+
+  # React Frontend (Production build served by nginx)
+  frontend:
+    build:
+      context: ./samplepos.client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost/api
+    container_name: samplepos-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - nodejs-api
+      - csharp-accounting-api
+    networks:
+      - samplepos_network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy (Routes API requests)
+  nginx:
+    image: nginx:alpine
+    container_name: samplepos-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - nodejs-api
+      - csharp-accounting-api
+      - frontend
+    networks:
+      - samplepos_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  samplepos_network:
+    driver: bridge

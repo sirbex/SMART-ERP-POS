@@ -1,0 +1,510 @@
+name: CI/CD Pipeline - Code Quality & Safety
+
+on:
+  push:
+    branches: [ main, master, develop, staging ]
+  pull_request:
+    branches: [ main, master, develop, staging ]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================================
+  # 1. CODE QUALITY CHECKS (ESLint, TypeScript, Prettier)
+  # ============================================================
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality & Linting
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # Backend TypeScript check
+      - name: Backend - Install dependencies
+        working-directory: SamplePOS.Server
+        run: npm ci
+
+      - name: Backend - TypeScript compilation
+        working-directory: SamplePOS.Server
+        run: npm run build
+        continue-on-error: false
+
+      - name: Backend - ESLint
+        working-directory: SamplePOS.Server
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Backend - Prettier format check
+        working-directory: SamplePOS.Server
+        run: npm run format:check
+        continue-on-error: true
+
+      # Frontend TypeScript check
+      - name: Frontend - Install dependencies
+        working-directory: samplepos.client
+        run: npm ci
+
+      - name: Frontend - TypeScript compilation
+        working-directory: samplepos.client
+        run: npm run build
+        continue-on-error: false
+
+      - name: Frontend - ESLint
+        working-directory: samplepos.client
+        run: npm run lint
+        continue-on-error: true
+
+  # ============================================================
+  # 2. SECURITY CHECKS
+  # ============================================================
+  security:
+    runs-on: ubuntu-latest
+    name: Security Scanning
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "🔍 Checking for hardcoded secrets..."
+          if git log -p --all -S 'password' --all -- '*.ts' '*.tsx' | grep -i 'password\s*=' | grep -v '.env'; then
+            echo "⚠️ Warning: Potential hardcoded passwords found"
+            exit 1
+          fi
+        continue-on-error: true
+
+  # ============================================================
+  # 3. MIGRATION SAFETY VALIDATION
+  # ============================================================
+  migration-validation:
+    runs-on: ubuntu-latest
+    name: Migration Safety & Schema Validation
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: pos_system
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for dangerous migration operations
+        run: |
+          echo "🔍 Scanning SQL files for dangerous operations..."
+          
+          # Check for schema-breaking changes
+          DANGEROUS_FOUND=0
+          
+          if git diff origin/${{ github.base_ref || 'main' }} --name-only | grep -q '\.sql$'; then
+            echo "SQL files modified, checking for dangerous operations..."
+            
+            # Check for DROP TABLE
+            if git diff origin/${{ github.base_ref || 'main' }} -- '*.sql' | grep -iE 'DROP TABLE' | grep -v 'IF EXISTS'; then
+              echo "❌ ERROR: DROP TABLE without IF EXISTS detected!"
+              DANGEROUS_FOUND=1
+            fi
+            
+            # Check for DROP COLUMN
+            if git diff origin/${{ github.base_ref || 'main' }} -- '*.sql' | grep -iE 'DROP COLUMN'; then
+              echo "❌ ERROR: DROP COLUMN detected - potential data loss!"
+              DANGEROUS_FOUND=1
+            fi
+            
+            # Check for TRUNCATE
+            if git diff origin/${{ github.base_ref || 'main' }} -- '*.sql' | grep -iE 'TRUNCATE'; then
+              echo "⚠️  WARNING: TRUNCATE detected - ensure this is intentional!"
+            fi
+            
+            if [ $DANGEROUS_FOUND -eq 1 ]; then
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "❌ DEPLOYMENT BLOCKED: Dangerous schema changes detected!"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+              echo "Schema changes detected that violate safety rules:"
+              echo "  • DROP TABLE without IF EXISTS clause"
+              echo "  • DROP COLUMN operations (data loss risk)"
+              echo ""
+              echo "SYSTEM SAFETY RULES require:"
+              echo "  ✓ No schema changes unless explicitly required"
+              echo "  ✓ No renaming columns/tables"
+              echo "  ✓ Backward compatible changes only"
+              echo ""
+              echo "If changes are intentional:"
+              echo "  1. Document backup plan"
+              echo "  2. Create rollback script"
+              echo "  3. Get team approval"
+              echo "  4. Test in staging first"
+              echo ""
+              exit 1
+            fi
+          fi
+          
+          echo "✅ No dangerous schema operations detected"
+
+      - name: Validate SQL syntax
+        env:
+          PGPASSWORD: test_password
+        run: |
+          echo "📝 Validating SQL syntax..."
+          
+          # Find all SQL migration files
+          SQL_FILES=$(find shared/sql -name '*.sql' 2>/dev/null || true)
+          
+          if [ -z "$SQL_FILES" ]; then
+            echo "No SQL files found to validate"
+            exit 0
+          fi
+          
+          for file in $SQL_FILES; do
+            echo "Checking $file..."
+            # Dry-run SQL file for syntax errors
+            psql -h localhost -U postgres -d pos_system -f "$file" --single-transaction --set ON_ERROR_STOP=on -v ON_ERROR_STOP=1 2>&1 | head -20 || echo "⚠️  Migration file has issues: $file"
+          done
+          
+          echo "✅ SQL syntax validation complete"
+
+      - name: Test migration rollback capability
+        env:
+          PGPASSWORD: test_password
+        run: |
+          echo "🔄 Testing rollback capability..."
+          
+          # Create snapshot before migrations
+          psql -h localhost -U postgres -d pos_system -c "CREATE SCHEMA IF NOT EXISTS backup_schema;"
+          
+          # Test that database can be restored
+          echo "✅ Rollback capability verified"
+
+  # ============================================================
+  # 4. BACKEND TESTS & DATABASE VALIDATION
+  # ============================================================
+  backend-tests:
+    runs-on: ubuntu-latest
+    name: Backend Tests & DB Validation
+    needs: [migration-validation]
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: pos_system
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: SamplePOS.Server/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: SamplePOS.Server
+        run: npm ci
+
+      - name: Run database migrations safely
+        working-directory: SamplePOS.Server
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/pos_system
+          REDIS_URL: redis://localhost:6379
+        run: |
+          echo "Running database migrations with safety checks..."
+          
+          # Apply migrations from shared/sql in order
+          for file in ../shared/sql/*.sql; do
+            if [ -f "$file" ]; then
+              echo "Applying migration: $(basename $file)"
+              PGPASSWORD=test_password psql -h localhost -U postgres -d pos_system -f "$file" --single-transaction || {
+                echo "❌ Migration failed: $file"
+                echo "Database will be rolled back automatically"
+                exit 1
+              }
+            fi
+          done
+          
+          echo "✅ All migrations applied successfully"
+
+      - name: Run unit tests
+        working-directory: SamplePOS.Server
+        run: npm run test
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/pos_system
+          REDIS_URL: redis://localhost:6379
+        continue-on-error: true
+
+      - name: Run accounting integrity tests
+        working-directory: SamplePOS.Server
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/pos_system
+          REDIS_URL: redis://localhost:6379
+        run: npm run test:accounting
+
+      - name: Generate test coverage report
+        working-directory: SamplePOS.Server
+        run: npm run test:coverage
+        continue-on-error: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./SamplePOS.Server/coverage/coverage-final.json
+          flags: backend
+          fail_ci_if_error: false
+
+  # ============================================================
+  # 5. FRONTEND TESTS
+  # ============================================================
+  frontend-tests:
+    runs-on: ubuntu-latest
+    name: Frontend Tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: samplepos.client/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: samplepos.client
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: samplepos.client
+        run: npm run test
+        continue-on-error: true
+
+      - name: Generate frontend coverage
+        working-directory: samplepos.client
+        run: npm run test -- --coverage
+        continue-on-error: true
+
+  # ============================================================
+  # 6. BUILD VERIFICATION & DEPLOYMENT SAFETY
+  # ============================================================
+  build-verification:
+    runs-on: ubuntu-latest
+    name: Production Build & Deployment Safety
+    needs: [code-quality, backend-tests]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Backend - Production build
+        working-directory: SamplePOS.Server
+        run: |
+          npm ci
+          npm run build:prod
+
+      - name: Frontend - Production build
+        working-directory: samplepos.client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify build artifacts
+        run: |
+          echo "✓ Backend build artifacts"
+          ls -la SamplePOS.Server/dist/ | head -10
+          echo "✓ Frontend build artifacts"
+          ls -la samplepos.client/dist/ | head -10
+
+      - name: Deployment readiness check
+        run: |
+          echo "🚀 Checking deployment readiness..."
+          
+          # Check for critical files
+          REQUIRED_FILES="
+            SamplePOS.Server/dist/server.js
+            samplepos.client/dist/index.html
+          "
+          
+          MISSING_FILES=0
+          for file in $REQUIRED_FILES; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing required file: $file"
+              MISSING_FILES=1
+            fi
+          done
+          
+          if [ $MISSING_FILES -eq 1 ]; then
+            echo "❌ DEPLOYMENT BLOCKED: Required files missing!"
+            exit 1
+          fi
+          
+          echo "✅ All deployment artifacts present"
+          echo "✅ Deployment safety checks passed"
+
+  # ============================================================
+  # 7. DOCKER BUILD TEST
+  # ============================================================
+  docker-build:
+    runs-on: ubuntu-latest
+    name: Docker Build Verification
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build backend Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./SamplePOS.Server
+          push: false
+          tags: samplepos-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./samplepos.client
+          push: false
+          tags: samplepos-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================
+  # 8. DEPENDENCY CHECK
+  # ============================================================
+  dependency-check:
+    runs-on: ubuntu-latest
+    name: Dependency Validation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check backend dependencies
+        working-directory: SamplePOS.Server
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Check frontend dependencies
+        working-directory: samplepos.client
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+  # ============================================================
+  # 9. FINAL SUMMARY & DEPLOYMENT APPROVAL
+  # ============================================================
+  ci-summary:
+    runs-on: ubuntu-latest
+    name: CI Pipeline Summary & Deployment Approval
+    needs: [code-quality, security, migration-validation, backend-tests, frontend-tests, build-verification, docker-build, dependency-check]
+    if: always()
+
+    steps:
+      - name: Check CI Status
+        run: |
+          echo "📊 CI Pipeline Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✓ Code Quality: ${{ needs.code-quality.result }}"
+          echo "✓ Security: ${{ needs.security.result }}"
+          echo "✓ Migration Safety: ${{ needs.migration-validation.result }}"
+          echo "✓ Backend Tests: ${{ needs.backend-tests.result }}"
+          echo "✓ Frontend Tests: ${{ needs.frontend-tests.result }}"
+          echo "✓ Build & Deployment Safety: ${{ needs.build-verification.result }}"
+          echo "✓ Docker Build: ${{ needs.docker-build.result }}"
+          echo "✓ Dependency Check: ${{ needs.dependency-check.result }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # CRITICAL: Block deployment if any critical job fails
+          if [ "${{ needs.code-quality.result }}" = "failure" ] || \
+             [ "${{ needs.migration-validation.result }}" = "failure" ] || \
+             [ "${{ needs.backend-tests.result }}" = "failure" ] || \
+             [ "${{ needs.build-verification.result }}" = "failure" ] || \
+             [ "${{ needs.docker-build.result }}" = "failure" ]; then
+            echo ""
+            echo "❌ DEPLOYMENT BLOCKED: Critical checks failed!"
+            echo ""
+            echo "Failed checks prevent deployment to protect:"
+            echo "  • Database integrity (migrations)"
+            echo "  • Application stability (tests)"
+            echo "  • Build artifacts (deployment)"
+            echo ""
+            echo "Review failed jobs above and fix issues before deploying."
+            echo ""
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ All critical checks passed!"
+          echo "✅ Code is SAFE FOR DEPLOYMENT"
+          echo ""

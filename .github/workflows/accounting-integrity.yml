@@ -1,0 +1,97 @@
+name: Accounting Integrity Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - 'SamplePOS.Server/src/**'
+      - 'shared/**'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - 'SamplePOS.Server/src/**'
+      - 'shared/**'
+
+jobs:
+  accounting-integrity:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: pos_system
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: SamplePOS.Server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: SamplePOS.Server
+        run: npm ci
+
+      - name: Run database migrations
+        working-directory: SamplePOS.Server
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/pos_system
+        run: |
+          # Run all SQL migrations
+          for file in ../shared/sql/*.sql; do
+            echo "Running migration: $file"
+            psql $DATABASE_URL -f "$file" || true
+          done
+
+      - name: Run accounting integrity tests
+        working-directory: SamplePOS.Server
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/pos_system
+        run: npm run test:accounting
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accounting-test-results
+          path: SamplePOS.Server/test-results/
+
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: SamplePOS.Server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: SamplePOS.Server
+        run: npm ci
+
+      - name: Run TypeScript type check
+        working-directory: SamplePOS.Server
+        run: npx tsc --noEmit
+
+      - name: Run ESLint
+        working-directory: SamplePOS.Server
+        run: npm run lint || true

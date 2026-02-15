@@ -1,0 +1,82 @@
+import { getCustomerStatement } from '../customerService.js';
+import * as customerRepository from '../customerRepository.js';
+import Decimal from 'decimal.js';
+
+jest.mock('../customerRepository.js');
+
+const mockRepo = customerRepository as jest.Mocked<typeof customerRepository>;
+
+describe('getCustomerStatement', () => {
+  const customerId = '11111111-1111-1111-1111-111111111111';
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    mockRepo.findCustomerById.mockResolvedValue({
+      id: customerId,
+      name: 'Test Customer',
+      email: null,
+      phone: null,
+      address: null,
+      customerGroupId: null,
+      balance: 0,
+      creditLimit: 100000,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+  });
+
+  test('no entries returns opening=closing and empty array', async () => {
+    mockRepo.getOpeningBalance.mockResolvedValue(0);
+    mockRepo.getStatementEntries.mockResolvedValue([]);
+    const stmt = await getCustomerStatement(customerId);
+    expect(stmt.openingBalance).toBe(0);
+    expect(stmt.closingBalance).toBe(0);
+    expect(stmt.entries).toHaveLength(0);
+  });
+
+  test('only payments reduces balance', async () => {
+    mockRepo.getOpeningBalance.mockResolvedValue(50000);
+    mockRepo.getStatementEntries.mockResolvedValue([
+      { date: new Date(), type: 'PAYMENT', reference: 'RCPT-1', description: 'Payment', debit: 0, credit: 20000 },
+      { date: new Date(Date.now() + 1000), type: 'PAYMENT', reference: 'RCPT-2', description: 'Payment', debit: 0, credit: 30000 },
+    ]);
+    const stmt = await getCustomerStatement(customerId);
+    expect(stmt.openingBalance).toBe(50000);
+    expect(stmt.entries[0].balanceAfter).toBe(30000); // 50k - 20k
+    expect(stmt.entries[1].balanceAfter).toBe(0); // 30k - 30k
+    expect(stmt.closingBalance).toBe(0);
+  });
+
+  test('large debit then many credits maintains precision', async () => {
+    mockRepo.getOpeningBalance.mockResolvedValue(0);
+    mockRepo.getStatementEntries.mockResolvedValue([
+      { date: new Date(), type: 'INVOICE', reference: 'SALE-1', description: 'Big Sale', debit: 99999.99, credit: 0 },
+      { date: new Date(Date.now() + 1000), type: 'PAYMENT', reference: 'RCPT-1', description: 'Part Pay', debit: 0, credit: 33333.33 },
+      { date: new Date(Date.now() + 2000), type: 'PAYMENT', reference: 'RCPT-2', description: 'Part Pay', debit: 0, credit: 33333.33 },
+      { date: new Date(Date.now() + 3000), type: 'PAYMENT', reference: 'RCPT-3', description: 'Final Pay', debit: 0, credit: 33333.33 },
+    ]);
+    const stmt = await getCustomerStatement(customerId);
+    const balances = stmt.entries.map(e => new Decimal(e.balanceAfter));
+    expect(balances[0].toNumber()).toBeCloseTo(99999.99, 2);
+    expect(balances[1].toNumber()).toBeCloseTo(66666.66, 2);
+    expect(balances[2].toNumber()).toBeCloseTo(33333.33, 2);
+    expect(balances[3].toNumber()).toBeCloseTo(0, 2);
+    expect(new Decimal(stmt.closingBalance).toNumber()).toBeCloseTo(0, 2);
+  });
+
+  test('pagination slices entries correctly', async () => {
+    mockRepo.getOpeningBalance.mockResolvedValue(0);
+    const entries = [] as any[];
+    for (let i = 0; i < 25; i++) {
+      entries.push({ date: new Date(Date.now() + i * 1000), type: 'INVOICE', reference: `SALE-${i}`, description: 'Sale', debit: 100, credit: 0 });
+    }
+    mockRepo.getStatementEntries.mockResolvedValue(entries);
+    const stmtPage1 = await getCustomerStatement(customerId, undefined, undefined, 1, 10);
+    const stmtPage3 = await getCustomerStatement(customerId, undefined, undefined, 3, 10);
+    expect(stmtPage1.entries).toHaveLength(10);
+    expect(stmtPage3.entries).toHaveLength(5); // remaining
+    expect(stmtPage1.totalEntries).toBe(25);
+    expect(stmtPage3.totalEntries).toBe(25);
+  });
+});

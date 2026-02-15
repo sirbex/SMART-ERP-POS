@@ -1,0 +1,78 @@
+{
+  "startTime": "2025-12-01T06:06:33.232Z",
+  "endTime": "2025-12-01T06:06:44.675Z",
+  "totalDuration": 11443,
+  "suiteResults": {
+    "End-to-End Sales Workflow": {
+      "name": "End-to-End Sales Workflow",
+      "priority": "CRITICAL",
+      "success": false,
+      "partialSuccess": false,
+      "duration": 477.8217000000004,
+      "exitCode": 0,
+      "output": "🧪 Phase 5: End-to-End Sales Workflow Test\n===========================================\nStarting Phase 5 End-to-End Workflow Test...\n\n\n📋 Step 1: Authenticate User...\n❌ Authentication failed: Error\n",
+      "errorOutput": "",
+      "timestamp": "2025-12-01T06:06:34.023Z"
+    },
+    "Error Resilience Testing": {
+      "name": "Error Resilience Testing",
+      "priority": "HIGH",
+      "success": false,
+      "partialSuccess": false,
+      "duration": 469.0567000000001,
+      "exitCode": 0,
+      "output": "🛡️  Phase 5: Error Resilience Test\n=================================\nStarting Phase 5 Error Resilience Tests...\n\n❌ Auth setup failed: Error\n❌ Cannot proceed without authentication\n",
+      "errorOutput": "",
+      "timestamp": "2025-12-01T06:06:36.508Z"
+    },
+    "Financial Reports Validation": {
+      "name": "Financial Reports Validation",
+      "priority": "HIGH",
+      "success": false,
+      "partialSuccess": false,
+      "duration": 508.8626999999997,
+      "exitCode": 0,
+      "output": "📊 Phase 5: Financial Reports Validation Test\n============================================\nStarting Phase 5 Financial Reports Validation...\n\n❌ Auth setup failed: Error\n❌ Cannot proceed without authentication\n",
+      "errorOutput": "",
+      "timestamp": "2025-12-01T06:06:39.024Z"
+    },
+    "Performance Benchmarking": {
+      "name": "Performance Benchmarking",
+      "priority": "MEDIUM",
+      "success": false,
+      "partialSuccess": false,
+      "duration": 503.9387999999999,
+      "exitCode": 0,
+      "output": "⚡ Phase 5: Performance Benchmarking Test\n=======================================\nStarting Phase 5 Performance Benchmarking...\n\n❌ Auth setup failed: Error\n❌ Cannot proceed without authentication\n",
+      "errorOutput": "",
+      "timestamp": "2025-12-01T06:06:41.539Z"
+    },
+    "Data Consistency Validation": {
+      "name": "Data Consistency Validation",
+      "priority": "CRITICAL",
+      "success": false,
+      "partialSuccess": false,
+      "duration": 1125.0570000000007,
+      "exitCode": 0,
+      "output": "🔍 Phase 5: Data Consistency Validation Test\n============================================\nStarting Phase 5 Data Consistency Validation...\n\n❌ Auth setup failed: Error\n❌ Cannot proceed without authentication\n",
+      "errorOutput": "",
+      "timestamp": "2025-12-01T06:06:44.674Z"
+    }
+  },
+  "overallStatus": "FAILURE",
+  "systemHealth": {
+    "nodeApi": false,
+    "csharpApi": false,
+    "database": false
+  },
+  "summary": {
+    "totalSuites": 5,
+    "passedSuites": 0,
+    "failedSuites": 5,
+    "criticalFailures": 2,
+    "highPriorityFailures": 2
+  },
+  "generatedAt": "2025-12-01T06:06:44.688Z",
+  "phase": "Phase 5: Comprehensive Testing",
+  "version": "1.0"
+}

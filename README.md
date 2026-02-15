@@ -1,6 +1,6 @@
 ## Sample POS (React + TypeScript + Vite)
 
-This project is an in-browser Point of Sale (POS) prototype featuring inventory management (batches, expiry, unit conversions), a searchable cart, customer ledger integration, payments, and receipt printing. It is designed to function fully offline using `localStorage` for persistence.
+This project is an in-browser Point of Sale (POS) prototype featuring inventory management (batches, expiry, unit conversions), a searchable cart, customer ledger integration, payments, and receipt printing. It uses `localStorage` for cart persistence and real-time backend synchronization.
 
 ### Key Features
 
@@ -18,7 +18,13 @@ This project is an in-browser Point of Sale (POS) prototype featuring inventory 
 - Receipt modal with print support
 - CSV export (inventory, audit log, cart)
 - Inventory audit log (add actions & quantity context)
-- Keyboard shortcuts: Ctrl+F (focus search), Ctrl+Enter (payment), Ctrl+S (save cart), Ctrl+R (recall cart), Esc (close modal)
+- Keyboard shortcuts: 
+  - **Ctrl+F**: Focus product search
+  - **Ctrl+H**: Hold cart / Retrieve holds (NEW!)
+  - **Ctrl+Enter**: Open payment modal
+  - **Ctrl+D**: Apply discount
+  - **Esc**: Close current modal
+  - **Tab/Shift+Tab**: Navigate within modals
 - Accessibility enhancements with focus trapping and aria labels
 
 ### Persistence
@@ -56,7 +62,7 @@ npm run dev
 
 ### Potential Next Enhancements
 
-- Offline sync & conflict resolution layer (Service Worker + background sync)
+- Real-time data synchronization with backend APIs
 - Split payments / partial credit ledger posting
 - Advanced tax rules & multi-currency support
 - Report dashboards (daily sales, inventory aging, customer balances)
@@ -65,3 +71,13 @@ npm run dev
 ### License
 
 For internal demonstration / prototype purposes only (add a proper license if distributing).
+
+### AI coding agent instructions
+
+If you're using an AI assistant (like Copilot) with this repo, please read:
+
+- Global contract for schema/validation/UI synchronization: `./copilot.md`
+- Full project rules and architecture guidance: `./COPILOT_INSTRUCTIONS.md`
+- GitHub-scoped agent guide (for PRs/CI context): `./.github/copilot-instructions.md`
+
+These documents define strict layering, no-ORM policy, shared Zod validation, and the mandatory API response format used throughout the project.

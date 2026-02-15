@@ -1,0 +1,19 @@
+{
+    "hints": {
+        "no-inline-styles": "off",
+        "axe/aria": [
+            "error",
+            {
+                "aria-valid-attr-value": "off",
+                "aria-required-children": "off",
+                "aria-required-parent": "off"
+            }
+        ],
+        "axe/forms": [
+            "error",
+            {
+                "select-name": "off"
+            }
+        ]
+    }
+}

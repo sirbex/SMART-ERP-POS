@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Prepare commit message hook
+# Ensures consistent commit message formatting
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+
+# Only process for regular commits (not squash, fixup, merge)
+if [ "$COMMIT_SOURCE" != "" ]; then
+  exit 0
+fi
+
+# Example: Add ticket number if available
+# This is a placeholder - customize based on your needs
+
+exit 0

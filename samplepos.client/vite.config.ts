@@ -44,7 +44,10 @@ export default defineConfig({
     base: './', // Set base path to relative for proper asset loading
     resolve: {
         alias: {
-            '@': fileURLToPath(new URL('./src', import.meta.url))
+            '@': fileURLToPath(new URL('./src', import.meta.url)),
+            '@shared': fileURLToPath(new URL('../shared', import.meta.url)),
+            // Ensure modules imported from shared can resolve to this app's node_modules
+            'decimal.js': fileURLToPath(new URL('./node_modules/decimal.js', import.meta.url))
         }
     },
     build: {
@@ -54,32 +57,15 @@ export default defineConfig({
                 manualChunks: {
                     // Vendor chunk for React and core libraries
                     'vendor': ['react', 'react-dom'],
-                    
+
                     // UI components chunk
                     'ui': [
                         '@radix-ui/react-dialog',
-                        '@radix-ui/react-select', 
+                        '@radix-ui/react-select',
                         '@radix-ui/react-tabs',
                         '@radix-ui/react-label',
                         '@radix-ui/react-slot',
                         'lucide-react'
-                    ],
-                    
-                    // Business logic chunks
-                    'pos-system': [
-                        './src/components/POSScreenShadcn',
-                        './src/components/PaymentBillingShadcn'
-                    ],
-                    
-                    'customer-management': [
-                        './src/components/CustomerLedgerFormShadcn',
-                        './src/services/CustomerAccountService',
-                        './src/context/CustomerLedgerContext'
-                    ],
-                    
-                    'inventory-reports': [
-                        './src/components/InventoryManagement',
-                        './src/components/ReportsShadcn'
                     ]
                 }
             }
@@ -95,7 +81,8 @@ export default defineConfig({
                 target,
                 secure: false
             },
-            // Proxy API requests to our backend server
+            // Route ALL API requests to Node.js backend server (port 3001)
+            // The C# accounting API (port 5062) is optional and proxied via comprehensiveAccountingRoutes
             '^/api': {
                 target: 'http://localhost:3001',
                 changeOrigin: true,

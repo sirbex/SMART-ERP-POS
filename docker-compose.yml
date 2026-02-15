@@ -1,0 +1,157 @@
+# Phase 6: Docker Compose Production Configuration
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: samplepos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pos_system}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - samplepos-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: samplepos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - samplepos-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Node.js Backend API
+  backend:
+    build:
+      context: ./SamplePOS.Server
+      dockerfile: Dockerfile
+    container_name: samplepos-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-pos_system}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      API_PORT: 3001
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ACCOUNTING_API_URL: http://accounting-api:5062
+      ACCOUNTING_API_KEY: ${ACCOUNTING_API_KEY:-your_shared_secret_key_here}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - samplepos-network
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # C# Accounting API
+  accounting-api:
+    build:
+      context: ./server-dotnet/accounting-api/AccountingApi
+      dockerfile: Dockerfile
+    container_name: samplepos-accounting
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5062
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-pos_system};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password}
+      ApiSettings__SharedSecretKey: ${ACCOUNTING_API_KEY:-your_shared_secret_key_here}
+      Logging__LogLevel__Default: Information
+    ports:
+      - "5062:5062"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - samplepos-network
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5062/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (React + Vite)
+  frontend:
+    build:
+      context: ./samplepos.client
+      dockerfile: Dockerfile
+    container_name: samplepos-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${BACKEND_URL:-http://localhost:3001}
+      VITE_APP_NAME: SamplePOS
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - samplepos-network
+
+  # Nginx Reverse Proxy & Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: samplepos-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+      - accounting-api
+    networks:
+      - samplepos-network
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  samplepos-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

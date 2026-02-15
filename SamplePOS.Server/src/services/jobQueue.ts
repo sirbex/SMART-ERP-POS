@@ -1,0 +1,253 @@
+import Bull, { Queue, Job } from 'bull';
+import logger from '../utils/logger.js';
+
+/**
+ * JOB QUEUE SERVICE
+ * Handles asynchronous heavy operations:
+ * - Physical count processing
+ * - Report generation
+ * - Batch recalculations
+ * - Export operations
+ */
+
+interface JobData {
+    type: string;
+    payload: any;
+    userId: string;
+    timestamp: string;
+}
+
+class JobQueueService {
+    private queues: Map<string, Queue> = new Map();
+    private readonly REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+
+    constructor() {
+        this.initializeQueues();
+    }
+
+    private initializeQueues() {
+        // Inventory operations queue
+        this.createQueue('inventory', {
+            defaultJobOptions: {
+                attempts: 3,
+                backoff: {
+                    type: 'exponential',
+                    delay: 2000,
+                },
+                removeOnComplete: 100, // Keep last 100 completed jobs
+                removeOnFail: 500, // Keep last 500 failed jobs
+            },
+        });
+
+        // Reporting queue (lower priority)
+        this.createQueue('reports', {
+            defaultJobOptions: {
+                attempts: 2,
+                backoff: {
+                    type: 'exponential',
+                    delay: 5000,
+                },
+                removeOnComplete: 50,
+                removeOnFail: 200,
+            },
+            limiter: {
+                max: 5, // Max 5 concurrent report jobs
+                duration: 60000, // Per minute
+            },
+        });
+
+        // Export queue
+        this.createQueue('exports', {
+            defaultJobOptions: {
+                attempts: 2,
+                timeout: 300000, // 5 minutes timeout
+                removeOnComplete: 50,
+                removeOnFail: 100,
+            },
+        });
+
+        // Calculation queue (high priority, quick jobs)
+        this.createQueue('calculations', {
+            defaultJobOptions: {
+                attempts: 3,
+                priority: 1, // Higher priority
+                removeOnComplete: 200,
+                removeOnFail: 500,
+            },
+        });
+    }
+
+    private createQueue(name: string, options: Bull.QueueOptions = {}) {
+        const queue = new Bull(name, this.REDIS_URL, options);
+
+        // Event listeners
+        queue.on('error', (error) => {
+            logger.error(`Queue ${name} error:`, error);
+        });
+
+        queue.on('failed', (job, error) => {
+            logger.error(`Job ${job.id} in queue ${name} failed:`, error);
+        });
+
+        queue.on('completed', (job) => {
+            logger.info(`Job ${job.id} in queue ${name} completed`);
+        });
+
+        this.queues.set(name, queue);
+        return queue;
+    }
+
+    getQueue(name: string): Queue | undefined {
+        return this.queues.get(name);
+    }
+
+    /**
+     * Add job to queue
+     */
+    async addJob(
+        queueName: string,
+        jobType: string,
+        data: any,
+        options: Bull.JobOptions = {}
+    ): Promise<Job> {
+        const queue = this.getQueue(queueName);
+        if (!queue) {
+            throw new Error(`Queue ${queueName} not found`);
+        }
+
+        const jobData: JobData = {
+            type: jobType,
+            payload: data,
+            userId: data.userId || 'system',
+            timestamp: new Date().toISOString(),
+        };
+
+        const job = await queue.add(jobData, options);
+        logger.info(`Job ${job.id} added to queue ${queueName}`, { type: jobType });
+
+        return job;
+    }
+
+    /**
+     * Process jobs in queue
+     */
+    processQueue(
+        queueName: string,
+        processor: (job: Job<JobData>) => Promise<any>,
+        concurrency: number = 1
+    ) {
+        const queue = this.getQueue(queueName);
+        if (!queue) {
+            throw new Error(`Queue ${queueName} not found`);
+        }
+
+        queue.process(concurrency, async (job) => {
+            logger.info(`Processing job ${job.id} in queue ${queueName}`, { type: job.data.type });
+            return processor(job);
+        });
+    }
+
+    /**
+     * Get job status
+     */
+    async getJobStatus(queueName: string, jobId: string) {
+        const queue = this.getQueue(queueName);
+        if (!queue) {
+            throw new Error(`Queue ${queueName} not found`);
+        }
+
+        const job = await queue.getJob(jobId);
+        if (!job) {
+            return null;
+        }
+
+        const state = await job.getState();
+        return {
+            id: job.id,
+            state,
+            progress: job.progress(),
+            attemptsMade: job.attemptsMade,
+            failedReason: job.failedReason,
+            finishedOn: job.finishedOn,
+            processedOn: job.processedOn,
+            data: job.data,
+        };
+    }
+
+    /**
+     * Get queue stats
+     */
+    async getQueueStats(queueName: string) {
+        const queue = this.getQueue(queueName);
+        if (!queue) {
+            throw new Error(`Queue ${queueName} not found`);
+        }
+
+        const [waiting, active, completed, failed, delayed] = await Promise.all([
+            queue.getWaitingCount(),
+            queue.getActiveCount(),
+            queue.getCompletedCount(),
+            queue.getFailedCount(),
+            queue.getDelayedCount(),
+        ]);
+
+        return {
+            queueName,
+            waiting,
+            active,
+            completed,
+            failed,
+            delayed,
+        };
+    }
+
+    /**
+     * Clean old jobs
+     */
+    async cleanQueue(queueName: string, grace: number = 86400000) {
+        const queue = this.getQueue(queueName);
+        if (!queue) {
+            throw new Error(`Queue ${queueName} not found`);
+        }
+
+        await queue.clean(grace, 'completed');
+        await queue.clean(grace, 'failed');
+        logger.info(`Cleaned old jobs from queue ${queueName}`);
+    }
+
+    /**
+     * Close all queues
+     */
+    async closeAll() {
+        const closePromises = Array.from(this.queues.values()).map((queue) => queue.close());
+        await Promise.all(closePromises);
+        logger.info('All job queues closed');
+    }
+}
+
+// Singleton instance
+export const jobQueue = new JobQueueService();
+
+/**
+ * Job type definitions
+ */
+export const JobTypes = {
+    // Inventory
+    PHYSICAL_COUNT_BATCH: 'physical-count-batch',
+    BULK_ADJUSTMENT: 'bulk-adjustment',
+    STOCK_VALUATION: 'stock-valuation',
+
+    // Reports
+    SALES_REPORT: 'sales-report',
+    INVENTORY_REPORT: 'inventory-report',
+    PROFIT_ANALYSIS: 'profit-analysis',
+
+    // Exports
+    EXPORT_SALES: 'export-sales',
+    EXPORT_INVENTORY: 'export-inventory',
+    EXPORT_MOVEMENTS: 'export-movements',
+
+    // Calculations
+    RECALC_PRICING: 'recalc-pricing',
+    RECALC_COST_LAYERS: 'recalc-cost-layers',
+};

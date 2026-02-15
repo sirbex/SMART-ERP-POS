@@ -1,0 +1,969 @@
+// Reports Controller - HTTP endpoints for report generation
+// Handles parameter validation, authentication, and response formatting
+
+import { Request, Response } from 'express';
+import { Pool } from 'pg';
+import { reportsService } from './reportsService.js';
+import logger from '../../utils/logger.js';
+
+// Utility function to ensure end date includes the full day
+function adjustEndDate(dateString: string): Date {
+  const date = new Date(dateString);
+  // Set time to 23:59:59.999 to include the entire end date
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+import {
+  InventoryValuationParamsSchema,
+  SalesReportParamsSchema,
+  ExpiringItemsParamsSchema,
+  LowStockParamsSchema,
+  BestSellingProductsParamsSchema,
+  SupplierCostAnalysisParamsSchema,
+  GoodsReceivedParamsSchema,
+  PaymentReportParamsSchema,
+  CustomerPaymentsParamsSchema,
+  ProfitLossParamsSchema,
+  DeletedItemsParamsSchema,
+  InventoryAdjustmentsParamsSchema,
+  PurchaseOrderSummaryParamsSchema,
+  StockMovementAnalysisParamsSchema,
+  CustomerAccountStatementParamsSchema,
+  ProfitMarginByProductParamsSchema,
+  DailyCashFlowParamsSchema,
+  SupplierPaymentStatusParamsSchema,
+  TopCustomersParamsSchema,
+  StockAgingParamsSchema,
+  WasteDamageParamsSchema,
+  ReorderRecommendationsParamsSchema,
+} from '../../../../shared/zod/reports.js';
+
+// Helper to convert ISO datetime string to Date object
+function parseDate(dateString: string | undefined): Date | undefined {
+  return dateString ? new Date(dateString) : undefined;
+}
+
+export const reportsController = {
+  /**
+   * Generate Inventory Valuation Report
+   * GET /api/reports/inventory-valuation
+   */
+  async getInventoryValuation(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = InventoryValuationParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateInventoryValuation(pool, {
+        asOfDate: parseDate(params.as_of_date),
+        categoryId: params.category_id,
+        valuationMethod: params.valuation_method,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Inventory valuation report generated', {
+        userId,
+        recordCount: report.recordCount,
+        executionTime: report.executionTimeMs,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate inventory valuation report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Sales Report
+   * GET /api/reports/sales
+   */
+  async getSalesReport(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = SalesReportParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateSalesReport(pool, {
+        startDate: new Date(params.start_date),
+        endDate: adjustEndDate(params.end_date),
+        groupBy: params.group_by,
+        customerId: params.customer_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Sales report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate sales report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Expiring Items Report
+   * GET /api/reports/expiring-items
+   */
+  async getExpiringItems(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = ExpiringItemsParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateExpiringItems(pool, {
+        daysAhead: params.days_threshold,
+        categoryId: params.category_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Expiring items report generated', {
+        userId,
+        daysAhead: params.days_threshold,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate expiring items report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Low Stock Report
+   * GET /api/reports/low-stock
+   */
+  async getLowStock(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = LowStockParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateLowStock(pool, {
+        threshold: params.threshold_percentage,
+        categoryId: params.category_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Low stock report generated', {
+        userId,
+        threshold: params.threshold_percentage,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate low stock report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Best Selling Products Report
+   * GET /api/reports/best-selling
+   */
+  async getBestSelling(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = BestSellingProductsParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateBestSelling(pool, {
+        startDate: new Date(params.start_date),
+        endDate: adjustEndDate(params.end_date),
+        limit: params.limit || 10,
+        categoryId: params.category_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Best selling products report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate best selling report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Supplier Cost Analysis Report
+   * GET /api/reports/supplier-cost-analysis
+   */
+  async getSupplierCostAnalysis(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = SupplierCostAnalysisParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateSupplierCostAnalysis(pool, {
+        startDate: new Date(params.start_date),
+        endDate: adjustEndDate(params.end_date),
+        supplierId: params.supplier_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Supplier cost analysis report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate supplier cost analysis report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Goods Received Report
+   * GET /api/reports/goods-received
+   */
+  async getGoodsReceived(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = GoodsReceivedParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateGoodsReceived(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        supplierId: params.supplier_id,
+        productId: params.product_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Goods received report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate goods received report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Payment Report
+   * GET /api/reports/payments
+   */
+  async getPaymentReport(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = PaymentReportParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generatePaymentReport(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        paymentMethod: params.payment_method,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Payment report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate payment report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Customer Payments Report
+   * GET /api/reports/customer-payments
+   */
+  async getCustomerPayments(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = CustomerPaymentsParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateCustomerPayments(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        customerId: params.customer_id,
+        status: params.status,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Customer payments report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate customer payments report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Profit & Loss Report
+   * GET /api/reports/profit-loss
+   */
+  async getProfitLoss(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = ProfitLossParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateProfitLoss(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        groupBy: params.group_by,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Profit & loss report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate profit & loss report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Deleted Items Report
+   * GET /api/reports/deleted-items
+   */
+  async getDeletedItems(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = DeletedItemsParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateDeletedItems(pool, {
+        startDate: parseDate(params.start_date),
+        endDate: parseDate(params.end_date),
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Deleted items report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate deleted items report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Inventory Adjustments Report
+   * GET /api/reports/inventory-adjustments
+   */
+  async getInventoryAdjustments(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = InventoryAdjustmentsParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateInventoryAdjustments(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        productId: params.product_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Inventory adjustments report generated', {
+        userId,
+        startDate: params.start_date,
+        endDate: params.end_date,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate inventory adjustments report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Purchase Order Summary Report
+   * GET /api/reports/purchase-order-summary
+   */
+  async getPurchaseOrderSummary(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = PurchaseOrderSummaryParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generatePurchaseOrderSummary(pool, {
+        startDate: parseDate(params.start_date),
+        endDate: parseDate(params.end_date),
+        status: params.status,
+        supplierId: params.supplier_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Purchase order summary report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate purchase order summary report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Stock Movement Analysis Report
+   * GET /api/reports/stock-movement-analysis
+   */
+  async getStockMovementAnalysis(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = StockMovementAnalysisParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateStockMovementAnalysis(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        productId: params.product_id,
+        movementType: params.movement_type,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Stock movement analysis report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate stock movement analysis report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Customer Account Statement Report
+   * GET /api/reports/customer-account-statement
+   */
+  async getCustomerAccountStatement(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = CustomerAccountStatementParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateCustomerAccountStatement(pool, {
+        customerId: params.customer_id,
+        startDate: parseDate(params.start_date),
+        endDate: parseDate(params.end_date),
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Customer account statement generated', {
+        userId,
+        customerId: params.customer_id,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate customer account statement', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Profit Margin by Product Report
+   * GET /api/reports/profit-margin
+   */
+  async getProfitMarginByProduct(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = ProfitMarginByProductParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateProfitMarginByProduct(pool, {
+        startDate: parseDate(params.start_date),
+        endDate: parseDate(params.end_date),
+        categoryId: params.category_id,
+        minMargin: params.min_margin,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Profit margin by product report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate profit margin by product report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Daily Cash Flow Report
+   * GET /api/reports/daily-cash-flow
+   */
+  async getDailyCashFlow(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = DailyCashFlowParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateDailyCashFlow(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Daily cash flow report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate daily cash flow report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Supplier Payment Status Report
+   * GET /api/reports/supplier-payment-status
+   */
+  async getSupplierPaymentStatus(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = SupplierPaymentStatusParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateSupplierPaymentStatus(pool, {
+        supplierId: params.supplier_id,
+        status: params.status,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Supplier payment status report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate supplier payment status report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Top Customers Report
+   * GET /api/reports/top-customers
+   */
+  async getTopCustomers(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = TopCustomersParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateTopCustomers(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        limit: params.limit,
+        sortBy: params.sort_by,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Top customers report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate top customers report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Stock Aging Report
+   * GET /api/reports/stock-aging
+   */
+  async getStockAging(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = StockAgingParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateStockAging(pool, {
+        asOfDate: params.as_of_date ? new Date(params.as_of_date) : undefined,
+        categoryId: params.category_id,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Stock aging report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate stock aging report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Waste & Damage Report
+   * GET /api/reports/waste-damage
+   */
+  async getWasteDamage(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = WasteDamageParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateWasteDamageReport(pool, {
+        startDate: new Date(params.start_date),
+        endDate: new Date(params.end_date),
+        reason: params.reason,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Waste & damage report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate waste & damage report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Generate Reorder Recommendations Report
+   * GET /api/reports/reorder-recommendations
+   */
+  async getReorderRecommendations(req: Request, res: Response, pool: Pool) {
+    try {
+      const params = ReorderRecommendationsParamsSchema.parse(req.query);
+      const userId = req.user?.id;
+
+      const report = await reportsService.generateReorderRecommendations(pool, {
+        categoryId: params.category_id,
+        daysToConsider: params.days_to_consider,
+        format: params.format,
+        userId,
+      });
+
+      logger.info('Reorder recommendations report generated', {
+        userId,
+        recordCount: report.recordCount,
+      });
+
+      res.json({ success: true, data: report });
+    } catch (error: any) {
+      logger.error('Failed to generate reorder recommendations report', { error: error.message });
+      res.status(error.name === 'ZodError' ? 400 : 500).json({
+        success: false,
+        error: error.name === 'ZodError' ? 'Invalid parameters' : 'Failed to generate report',
+        details: error.name === 'ZodError' ? error.errors : undefined,
+      });
+    }
+  },
+
+  /**
+   * Get list of available report types
+   * GET /api/reports/types
+   */
+  async getReportTypes(req: Request, res: Response) {
+    try {
+      const reportTypes = [
+        {
+          id: 'inventory-valuation',
+          name: 'Inventory Valuation',
+          description: 'Current inventory value with FIFO/AVCO/LIFO methods',
+          category: 'INVENTORY',
+          parameters: ['as_of_date', 'category_id', 'valuation_method'],
+        },
+        {
+          id: 'sales',
+          name: 'Sales Report',
+          description: 'Sales analysis grouped by various dimensions',
+          category: 'SALES',
+          parameters: ['start_date', 'end_date', 'group_by', 'customer_id'],
+        },
+        {
+          id: 'expiring-items',
+          name: 'Expiring Items',
+          description: 'Items approaching or past expiry date',
+          category: 'INVENTORY',
+          parameters: ['days_threshold', 'category_id'],
+        },
+        {
+          id: 'low-stock',
+          name: 'Low Stock Alert',
+          description: 'Items below reorder level',
+          category: 'INVENTORY',
+          parameters: ['threshold_percentage', 'category_id'],
+        },
+        {
+          id: 'best-selling',
+          name: 'Best Selling Products',
+          description: 'Top selling products by quantity or revenue',
+          category: 'SALES',
+          parameters: ['start_date', 'end_date', 'limit', 'category_id'],
+        },
+        {
+          id: 'supplier-cost-analysis',
+          name: 'Supplier Cost Analysis',
+          description: 'Supplier performance and cost metrics',
+          category: 'PURCHASING',
+          parameters: ['start_date', 'end_date', 'supplier_id'],
+        },
+        {
+          id: 'goods-received',
+          name: 'Goods Received',
+          description: 'Detailed log of goods receipts',
+          category: 'PURCHASING',
+          parameters: ['start_date', 'end_date', 'supplier_id', 'product_id'],
+        },
+        {
+          id: 'payments',
+          name: 'Payment Report',
+          description: 'Payment analysis by method',
+          category: 'FINANCIAL',
+          parameters: ['start_date', 'end_date', 'payment_method'],
+        },
+        {
+          id: 'customer-payments',
+          name: 'Customer Payments',
+          description: 'Customer payment history and outstanding balances',
+          category: 'FINANCIAL',
+          parameters: ['start_date', 'end_date', 'customer_id', 'status'],
+        },
+        {
+          id: 'profit-loss',
+          name: 'Profit & Loss',
+          description: 'Revenue, costs, and profitability analysis',
+          category: 'FINANCIAL',
+          parameters: ['start_date', 'end_date', 'group_by'],
+        },
+        {
+          id: 'deleted-items',
+          name: 'Deleted Items',
+          description: 'Audit trail of deleted products',
+          category: 'AUDIT',
+          parameters: ['start_date', 'end_date'],
+        },
+        {
+          id: 'inventory-adjustments',
+          name: 'Inventory Adjustments',
+          description: 'Stock adjustments and movements',
+          category: 'INVENTORY',
+          parameters: ['start_date', 'end_date', 'product_id'],
+        },
+        {
+          id: 'purchase-order-summary',
+          name: 'Purchase Order Summary',
+          description: 'Overview of purchase orders by status and supplier',
+          category: 'PURCHASING',
+          parameters: ['start_date', 'end_date', 'status', 'supplier_id'],
+        },
+        {
+          id: 'stock-movement-analysis',
+          name: 'Stock Movement Analysis',
+          description: 'Detailed analysis of stock movements and trends',
+          category: 'INVENTORY',
+          parameters: ['start_date', 'end_date', 'product_id', 'movement_type', 'group_by'],
+        },
+        {
+          id: 'customer-account-statement',
+          name: 'Customer Account Statement',
+          description: 'Detailed customer account history and balances',
+          category: 'FINANCIAL',
+          parameters: ['customer_id', 'start_date', 'end_date'],
+        },
+        {
+          id: 'profit-margin',
+          name: 'Profit Margin by Product',
+          description: 'Product-level profitability analysis',
+          category: 'FINANCIAL',
+          parameters: ['start_date', 'end_date', 'category_id', 'min_margin_percent'],
+        },
+        {
+          id: 'daily-cash-flow',
+          name: 'Daily Cash Flow',
+          description: 'Daily cash in and out tracking',
+          category: 'FINANCIAL',
+          parameters: ['start_date', 'end_date', 'payment_method'],
+        },
+        {
+          id: 'supplier-payment-status',
+          name: 'Supplier Payment Status',
+          description: 'Outstanding supplier payments and balances',
+          category: 'PURCHASING',
+          parameters: ['supplier_id', 'status'],
+        },
+        {
+          id: 'top-customers',
+          name: 'Top Customers',
+          description: 'Customer ranking by revenue and purchases',
+          category: 'SALES',
+          parameters: ['start_date', 'end_date', 'limit', 'min_purchase_amount'],
+        },
+        {
+          id: 'stock-aging',
+          name: 'Stock Aging',
+          description: 'Inventory aging analysis',
+          category: 'INVENTORY',
+          parameters: ['category_id', 'min_days_in_stock'],
+        },
+        {
+          id: 'waste-damage',
+          name: 'Waste & Damage',
+          description: 'Track inventory losses from damage and expiry',
+          category: 'AUDIT',
+          parameters: ['start_date', 'end_date', 'product_id'],
+        },
+        {
+          id: 'reorder-recommendations',
+          name: 'Reorder Recommendations',
+          description: 'Smart reorder suggestions based on sales velocity',
+          category: 'INVENTORY',
+          parameters: ['category_id', 'days_to_analyze'],
+        },
+      ];
+
+      res.json({ success: true, data: reportTypes });
+    } catch (error: any) {
+      logger.error('Failed to get report types', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get report types',
+      });
+    }
+  },
+};
+

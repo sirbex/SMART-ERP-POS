@@ -12,7 +12,7 @@ Write-Host "============================================================`n" -For
 # TEST 0: Health Check
 Write-Host "[TEST 0] Server Health Check..." -ForegroundColor Yellow
 try {
-    $healthResponse = Invoke-WebRequest -Uri "$baseUrl/api/health" -UseBasicParsing
+    $healthResponse = Invoke-WebRequest -Uri "$baseUrl/health" -UseBasicParsing
     Write-Host "   ✅ Server responding - Status: $($healthResponse.StatusCode)" -ForegroundColor Green
 } catch {
     Write-Host "   ❌ Server not responding" -ForegroundColor Red
@@ -21,10 +21,14 @@ try {
 
 # TEST 1: Login & Get JWT Token
 Write-Host "`n[TEST 1] Authentication - Login..." -ForegroundColor Yellow
+$testEmail = "tester@example.com"
+$testPassword = "Password123!"
+$testFullName = "Tester One"
 try {
+    # Attempt login first
     $loginBody = @{
-        username = "testuser"
-        password = "password123"
+        email = $testEmail
+        password = $testPassword
     } | ConvertTo-Json
     
     $loginResponse = Invoke-WebRequest -Uri "$baseUrl/api/auth/login" `
@@ -34,26 +38,46 @@ try {
         -UseBasicParsing
     
     $loginData = $loginResponse.Content | ConvertFrom-Json
-    $token = $loginData.token
-    
-    if ($null -eq $token -or $token.Length -eq 0) {
-        Write-Host "   ❌ No token received" -ForegroundColor Red
+    $token = $loginData.data.token
+} catch {
+    Write-Host "   ℹ️  Login failed, attempting to register test user..." -ForegroundColor Cyan
+    try {
+        $registerBody = @{
+            email = $testEmail
+            password = $testPassword
+            fullName = $testFullName
+            role = "ADMIN"
+        } | ConvertTo-Json
+
+        $registerResponse = Invoke-WebRequest -Uri "$baseUrl/api/auth/register" `
+            -Method POST `
+            -Body $registerBody `
+            -ContentType "application/json" `
+            -UseBasicParsing
+
+        $registerData = $registerResponse.Content | ConvertFrom-Json
+        $token = $registerData.data.token
+    } catch {
+        Write-Host "   ❌ Login and register both failed: $($_.Exception.Message)" -ForegroundColor Red
+        if ($_.ErrorDetails.Message) { Write-Host "   Response: $($_.ErrorDetails.Message)" -ForegroundColor Red }
         exit 1
     }
-    
-    Write-Host "   ✅ Login successful - Token received (length: $($token.Length))" -ForegroundColor Green
-    
-    # Setup headers for authenticated requests
-    $authHeader = @{
-        "Authorization" = "Bearer $token"
-    }
-    $authHeaderWithContent = @{
-        "Authorization" = "Bearer $token"
-        "Content-Type" = "application/json"
-    }
-} catch {
-    Write-Host "   ❌ Login failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+if ($null -eq $token -or $token.Length -eq 0) {
+    Write-Host "   ❌ No token received" -ForegroundColor Red
     exit 1
+}
+
+Write-Host "   ✅ Authenticated - Token received (length: $($token.Length))" -ForegroundColor Green
+
+# Setup headers for authenticated requests
+$authHeader = @{
+    "Authorization" = "Bearer $token"
+}
+$authHeaderWithContent = @{
+    "Authorization" = "Bearer $token"
+    "Content-Type" = "application/json"
 }
 
 # TEST 2: Create Purchase Order

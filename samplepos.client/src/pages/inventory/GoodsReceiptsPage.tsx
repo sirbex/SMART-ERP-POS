@@ -1,0 +1,1407 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import Decimal from 'decimal.js';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { useGoodsReceipts, useFinalizeGoodsReceipt, useGoodsReceipt, useUpdateGRItem, useCreateGoodsReceipt } from '../../hooks/useGoodsReceipts';
+import { useAuth } from '../../hooks/useAuth';
+import { formatCurrency } from '../../utils/currency';
+import { api } from '../../utils/api';
+import ManualGRButton from '../../components/inventory/ManualGRButton';
+import { useProductWithUoms, findUom, getDefaultUom } from '../../hooks/useProductWithUoms';
+import { useStockLevelByProduct, inventoryKeys } from '../../hooks/useInventory';
+import { DatePicker } from '../../components/ui/date-picker';
+
+// Configure Decimal for financial calculations
+Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
+
+// TIMEZONE STRATEGY: Display dates without conversion
+// Backend returns DATE as YYYY-MM-DD string (no timezone)
+// Frontend displays as-is without parsing to Date object
+const formatDisplayDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return '-';
+
+  // If it's an ISO string, extract the date part
+  if (dateString.includes('T')) {
+    return dateString.split('T')[0];
+  }
+
+  return dateString;
+};
+
+interface CostAlert {
+  type: string;
+  severity: 'HIGH' | 'MEDIUM';
+  productId: string;
+  productName: string;
+  message: string;
+  details: {
+    previousCost: string;
+    newCost: string;
+    changeAmount: string;
+    changePercentage: string;
+    batchNumber: string;
+  };
+}
+
+export default function GoodsReceiptsPage() {
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [selectedGR, setSelectedGR] = useState<any>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showAlertsModal, setShowAlertsModal] = useState(false);
+  const [costAlerts, setCostAlerts] = useState<CostAlert[]>([]);
+  const [baseline, setBaseline] = useState<'PO' | 'PRODUCT'>('PO');
+  const [poSearch, setPoSearch] = useState('');
+  const [poPage, setPoPage] = useState(1);
+  const [selectedPoId, setSelectedPoId] = useState('');
+  const [focusedPoIndex, setFocusedPoIndex] = useState(0);
+  const poRadioRefs = useRef<HTMLInputElement[]>([]);
+  const [poQuickView, setPoQuickView] = useState<Record<string, { itemsCount: number }>>({});
+  const [editItems, setEditItems] = useState<Record<string, {
+    batchNumber?: string | null;
+    expiryDate?: string | null; // yyyy-mm-dd
+    receivedQuantity?: number;
+    unitCost?: number;
+    // UI-only fields
+    selectedUomId?: string; // chosen product_uom id
+  }>>({});
+  const [batchWarnings, setBatchWarnings] = useState<Record<string, string>>({});
+  const validationTimeout = useRef<Record<string, NodeJS.Timeout>>({});
+
+  const limit = 20;
+
+  // Check for duplicate batch numbers
+  const checkBatchDuplicate = async (itemId: string, batchNumber: string) => {
+    if (!batchNumber || batchNumber.trim() === '') {
+      setBatchWarnings(prev => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/inventory/batches/exists?batchNumber=${encodeURIComponent(batchNumber)}`);
+      const data = await response.json();
+
+      if (data.exists) {
+        setBatchWarnings(prev => ({
+          ...prev,
+          [itemId]: '⚠️ This batch number already exists in the system'
+        }));
+      } else {
+        // Also check within current GR items
+        const currentItems = Object.entries(editItems);
+        const duplicateInCurrent = currentItems.filter(
+          ([id, item]) => id !== itemId && item.batchNumber === batchNumber
+        ).length > 0;
+
+        if (duplicateInCurrent) {
+          setBatchWarnings(prev => ({
+            ...prev,
+            [itemId]: '⚠️ Duplicate batch number in this goods receipt'
+          }));
+        } else {
+          setBatchWarnings(prev => {
+            const next = { ...prev };
+            delete next[itemId];
+            return next;
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check batch duplicate:', error);
+    }
+  };
+
+  // Fetch goods receipts
+  const { data, isLoading, error } = useGoodsReceipts({
+    page,
+    limit,
+    status: statusFilter || undefined,
+  });
+
+  const finalizeMutation = useFinalizeGoodsReceipt();
+
+  // PDF Export for Goods Receipt
+  const handleExportGRPDF = (gr: any, grItems: any[]) => {
+    const doc = new jsPDF();
+
+    // Header
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('SamplePOS', 14, 20);
+
+    doc.setFontSize(14);
+    doc.text('Goods Receipt', 14, 30);
+
+    // GR Number and Status
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const grNumber = gr.grNumber || gr.receiptNumber || gr.receipt_number || 'N/A';
+    const poNumber = gr.poNumber || gr.po_number || 'N/A';
+    const supplierName = gr.supplierName || gr.supplier_name || 'N/A';
+    const status = gr.status || 'DRAFT';
+
+    doc.text(`GR Number: ${grNumber}`, 14, 42);
+    doc.text(`PO Number: ${poNumber}`, 14, 50);
+    doc.text(`Supplier: ${supplierName}`, 14, 58);
+
+    // Status badge simulation
+    const statusColors: Record<string, { r: number; g: number; b: number }> = {
+      'DRAFT': { r: 245, g: 158, b: 11 },
+      'PENDING': { r: 59, g: 130, b: 246 },
+      'COMPLETED': { r: 16, g: 185, b: 129 },
+      'FINALIZED': { r: 16, g: 185, b: 129 },
+    };
+    const statusColor = statusColors[status] || { r: 107, g: 114, b: 128 };
+    doc.setFillColor(statusColor.r, statusColor.g, statusColor.b);
+    doc.roundedRect(130, 38, 60, 8, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.text(status, 160, 44, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+
+    // Receipt details
+    doc.setFontSize(10);
+    const receivedDate = gr.received_date || gr.receivedDate || '-';
+    const receivedBy = gr.received_by_name || gr.receivedByName || '-';
+    const deliveryNote = gr.delivery_note || gr.deliveryNote || '-';
+
+    doc.text(`Received Date: ${formatDisplayDate(receivedDate)}`, 14, 70);
+    doc.text(`Received By: ${receivedBy}`, 14, 78);
+    doc.text(`Delivery Note: ${deliveryNote}`, 14, 86);
+
+    // Items table
+    const tableData = grItems.map((item: any) => {
+      const productName = item.productName || item.product_name || 'Unknown';
+      // Get UoM and conversion factor from item data
+      const uomSymbol = item.uomSymbol || item.uom_symbol || item.uomName || item.uom_name || 'base';
+      const conversionFactor = parseFloat(item.conversionFactor || item.conversion_factor || 1);
+
+      // Base quantities from database
+      const baseOrderedQty = parseFloat(item.orderedQuantity || item.ordered_quantity || 0);
+      const baseReceivedQty = parseFloat(item.receivedQuantity || item.received_quantity || 0);
+      const baseUnitCost = parseFloat(item.unitCost || item.unit_cost || 0);
+
+      // Convert to ordering UoM quantities
+      const orderedQty = conversionFactor > 0 ? new Decimal(baseOrderedQty).div(conversionFactor).toNumber() : baseOrderedQty;
+      const receivedQty = conversionFactor > 0 ? new Decimal(baseReceivedQty).div(conversionFactor).toNumber() : baseReceivedQty;
+      // Unit cost in ordering UoM = base cost * conversion factor
+      const unitCost = new Decimal(baseUnitCost).times(conversionFactor).toNumber();
+
+      const batchNumber = item.batchNumber || item.batch_number || '-';
+      const expiryDate = item.expiryDate || item.expiry_date || '-';
+      const totalCost = new Decimal(baseReceivedQty).times(baseUnitCost).toNumber();
+      const qtyVariance = baseOrderedQty > 0 ? ((baseReceivedQty - baseOrderedQty) / baseOrderedQty * 100).toFixed(2) : '0.00';
+
+      return [
+        productName,
+        uomSymbol,
+        orderedQty.toString(),
+        receivedQty.toString(),
+        formatCurrency(unitCost),
+        formatCurrency(totalCost),
+        batchNumber,
+        formatDisplayDate(expiryDate),
+        `${parseFloat(qtyVariance) >= 0 ? '+' : ''}${qtyVariance}%`
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 95,
+      head: [['Product', 'UoM', 'Ordered', 'Received', 'Unit Cost', 'Total Cost', 'Batch #', 'Expiry', 'Qty Var']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: {
+        fillColor: [59, 130, 246],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9
+      },
+      styles: {
+        fontSize: 8,
+        cellPadding: 3
+      },
+      columnStyles: {
+        0: { cellWidth: 35 },
+        1: { cellWidth: 18 },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+        8: { halign: 'center' }
+      }
+    });
+
+    // Calculate total
+    const totalValue = grItems.reduce((sum: number, item: any) => {
+      const receivedQty = parseFloat(item.receivedQuantity || item.received_quantity || 0);
+      const unitCost = parseFloat(item.unitCost || item.unit_cost || 0);
+      return sum + new Decimal(receivedQty).times(unitCost).toNumber();
+    }, 0);
+
+    // Get final Y position after table
+    const finalY = (doc as any).lastAutoTable?.finalY || 150;
+
+    // Total box
+    doc.setFillColor(240, 240, 240);
+    doc.rect(130, finalY + 10, 65, 10, 'F');
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Value:', 132, finalY + 17);
+    doc.text(formatCurrency(totalValue), 193, finalY + 17, { align: 'right' });
+
+    // Footer
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(128, 128, 128);
+    doc.text(`Generated on ${new Date().toLocaleString()}`, 14, 285);
+    doc.text('SamplePOS - Goods Receipt Document', 196, 285, { align: 'right' });
+
+    // Save
+    doc.save(`GoodsReceipt_${grNumber}.pdf`);
+  };
+  const updateItemMutation = useUpdateGRItem();
+  const createGRMutation = useCreateGoodsReceipt();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Persist baseline selection
+  useEffect(() => {
+    const saved = localStorage.getItem('gr_cost_baseline');
+    if (saved === 'PO' || saved === 'PRODUCT') setBaseline(saved);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem('gr_cost_baseline', baseline);
+  }, [baseline]);
+
+  // Load GR details when modal opens
+  const detailsQuery = useGoodsReceipt(selectedGR?.id || '');
+  const grDetail = detailsQuery.data?.data?.data; // { gr, items }
+  const items = useMemo(() => grDetail?.items || [], [grDetail]);
+
+  useEffect(() => {
+    if (showDetailsModal && items.length > 0) {
+      // initialize edit state with current values
+      const init: any = {};
+      items.forEach((it: any) => {
+        init[it.id] = {
+          batchNumber: it.batchNumber ?? it.batch_number ?? '',
+          expiryDate: (it.expiryDate ? new Date(it.expiryDate) : (it.expiry_date ? new Date(it.expiry_date) : null))
+            ? new Date(it.expiryDate || it.expiry_date).toISOString().slice(0, 10)
+            : '',
+          receivedQuantity: it.receivedQuantity ?? it.received_quantity ?? 0,
+          unitCost: it.unitCost ?? it.unit_cost ?? 0,
+        };
+      });
+      setEditItems(init);
+    }
+  }, [showDetailsModal, items]);
+
+  const handleFinalize = async (id: string) => {
+    if (!confirm('Finalize this goods receipt? This will create inventory batches and update stock levels.')) {
+      return;
+    }
+
+    try {
+      // Auto-save all pending edits before finalizing
+      const savePromises = items.map(async (item: any) => {
+        const itemId = item.id;
+        const edits = editItems[itemId];
+
+        if (edits) {
+          // Check if there are any changes
+          const hasChanges =
+            (edits.batchNumber !== undefined && edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
+            (edits.expiryDate !== undefined && edits.expiryDate !== (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
+            (edits.receivedQuantity !== undefined && edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
+            (edits.unitCost !== undefined && edits.unitCost !== (item.unitCost || item.unit_cost));
+
+          if (hasChanges) {
+            const payload: any = {};
+            if (edits.receivedQuantity !== undefined) payload.receivedQuantity = Number(edits.receivedQuantity);
+            if (edits.unitCost !== undefined) payload.unitCost = Number(edits.unitCost);
+            if (edits.batchNumber !== undefined) payload.batchNumber = edits.batchNumber || null;
+            if (edits.expiryDate !== undefined) payload.expiryDate = edits.expiryDate ? new Date(edits.expiryDate).toISOString() : null;
+
+            await updateItemMutation.mutateAsync({ grId: id, itemId, data: payload });
+          }
+        }
+      });
+
+      await Promise.all(savePromises);
+
+      // Refresh GR details after saving
+      await detailsQuery.refetch();
+
+      const response = await finalizeMutation.mutateAsync(id);
+
+      // Invalidate stock levels to refresh On Hand badges
+      queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevels() });
+      items.forEach((it: any) => {
+        const productId = it.productId || it.product_id;
+        if (productId) {
+          queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevelByProduct(productId) });
+        }
+      });
+
+      // Check for cost alerts (suppress alerts that are likely pure UoM conversions)
+      const alerts = (response.data.alerts as CostAlert[]) || [];
+      const filtered = alerts.filter(a => {
+        const prev = parseFloat(a.details.previousCost);
+        const next = parseFloat(a.details.newCost);
+        if (!isFinite(prev) || prev <= 0 || !isFinite(next) || next <= 0) return true;
+        const ratio = next / prev;
+        const rounded = Math.round(ratio);
+        const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
+        // Likely UoM conversion if ratio is a small-ish integer (e.g., pack size 2..200)
+        if (isIntegerish && rounded >= 2 && rounded <= 200) {
+          return false; // suppress
+        }
+        return true;
+      });
+      if (filtered.length > 0) {
+        setCostAlerts(filtered);
+        setShowAlertsModal(true);
+      } else {
+        alert('Goods receipt finalized successfully!');
+      }
+
+      setShowDetailsModal(false);
+    } catch (err: any) {
+      alert(`Failed to finalize: ${err.response?.data?.error || err.message}`);
+    }
+  };
+
+  const handleViewDetails = (gr: any) => {
+    setSelectedGR(gr);
+    setShowDetailsModal(true);
+  };
+
+  const handleItemFieldChange = (itemId: string, field: string, value: any) => {
+    setEditItems(prev => ({
+      ...prev,
+      [itemId]: {
+        ...(prev[itemId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const saveItem = async (item: any) => {
+    const id = item.id;
+    const current = editItems[id] || {};
+    const original = {
+      batchNumber: item.batchNumber ?? item.batch_number ?? '',
+      expiryDate: (item.expiryDate ? new Date(item.expiryDate) : (item.expiry_date ? new Date(item.expiry_date) : null))
+        ? new Date(item.expiryDate || item.expiry_date).toISOString().slice(0, 10)
+        : '',
+      receivedQuantity: item.receivedQuantity ?? item.received_quantity ?? 0,
+      unitCost: item.unitCost ?? item.unit_cost ?? 0,
+    };
+
+    const payload: any = {};
+    if (current.batchNumber !== undefined && current.batchNumber !== original.batchNumber) payload.batchNumber = current.batchNumber || null;
+    if (current.expiryDate !== undefined && current.expiryDate !== original.expiryDate) payload.expiryDate = current.expiryDate || null;
+    if (current.receivedQuantity !== undefined && current.receivedQuantity !== original.receivedQuantity) payload.receivedQuantity = Number(current.receivedQuantity);
+    if (current.unitCost !== undefined && current.unitCost !== original.unitCost) payload.unitCost = Number(current.unitCost);
+
+    if (Object.keys(payload).length === 0) return; // nothing to save
+
+    try {
+      await updateItemMutation.mutateAsync({ grId: selectedGR.id, itemId: id, data: payload });
+    } catch (e: any) {
+      alert(e?.response?.data?.error || e.message);
+    }
+  };
+
+  const openCreateModal = () => {
+    setPoSearch('');
+    setSelectedPoId('');
+    setPoPage(1);
+    setShowCreateModal(true);
+    // Refetch pending POs to ensure fresh data
+    pendingPOsQuery.refetch();
+  };
+
+  const handleCreateGR = async () => {
+    if (!user?.id) {
+      alert('You must be logged in to create a goods receipt.');
+      return;
+    }
+    const poId = selectedPoId.trim();
+    if (!poId) {
+      alert('Select a Purchase Order');
+      return;
+    }
+    try {
+      // Fetch PO to build items
+      const poRes = await api.purchaseOrders.getById(poId);
+      const poData: any = poRes.data?.data;
+      if (!poData?.po || !poData?.items) {
+        throw new Error('Purchase order not found');
+      }
+      const payload = {
+        purchaseOrderId: poData.po.id,
+        receiptDate: new Date().toISOString(),
+        notes: null,
+        receivedBy: user.id,
+        items: poData.items.map((it: any) => {
+          // Normalize unit cost to base units if PO unit_price looks like a UoM multiple
+          const rawUnit = Number(it.unit_price ?? it.unitCost ?? 0);
+          const baseCost = Number(it.product_cost_price ?? it.productCostPrice ?? 0);
+          let normalizedUnit = rawUnit;
+          if (isFinite(rawUnit) && rawUnit > 0 && isFinite(baseCost) && baseCost > 0) {
+            const ratio = rawUnit / baseCost;
+            const rounded = Math.round(ratio);
+            const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
+            if (isIntegerish && rounded >= 2 && rounded <= 200) {
+              normalizedUnit = rawUnit / rounded;
+            }
+          }
+          return ({
+            poItemId: it.id,
+            productId: it.product_id || it.productId,
+            productName: it.product_name || it.productName,
+            orderedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
+            receivedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
+            unitCost: normalizedUnit,
+            batchNumber: null,
+            expiryDate: null,
+          });
+        })
+      };
+      console.log('🚀 [Frontend] Creating GR from PO with payload:', JSON.stringify(payload, null, 2));
+      console.log('🔍 [Frontend] User object:', user);
+      console.log('🔍 [Frontend] PO Data:', poData);
+      await createGRMutation.mutateAsync(payload);
+
+      // Reset modal state after successful creation
+      setShowCreateModal(false);
+      setSelectedPoId('');
+      setPoSearch('');
+      setPoPage(1);
+      setFocusedPoIndex(0);
+    } catch (e: any) {
+      alert(e?.response?.data?.error || e.message || 'Failed to create goods receipt');
+    }
+  };
+
+  // Pending POs query and client-side filter
+  const pendingPOsQuery = useQuery({
+    queryKey: ['purchase-orders', 'pending', poPage],
+    queryFn: () => api.purchaseOrders.list({ status: 'PENDING', page: poPage, limit: 20 }),
+  });
+  const pendingPOs = pendingPOsQuery.data?.data?.data || [];
+  const poPagination = pendingPOsQuery.data?.data?.pagination;
+  const filteredPOs = useMemo(() => {
+    const q = poSearch.trim().toLowerCase();
+    if (!q) return pendingPOs;
+    return pendingPOs.filter((po: any) => {
+      const num = (po.order_number || po.poNumber || '').toString().toLowerCase();
+      const supplier = (po.supplier_name || po.supplierName || '').toString().toLowerCase();
+      return num.includes(q) || supplier.includes(q);
+    });
+  }, [poSearch, pendingPOs]);
+
+  // Ensure refs length matches list length
+  useEffect(() => {
+    poRadioRefs.current = poRadioRefs.current.slice(0, filteredPOs.length);
+  }, [filteredPOs.length]);
+
+  // Fetch quick-view details (items count) lazily and cache per PO id
+  const ensurePoQuickView = async (poId: string) => {
+    if (!poId || poQuickView[poId]) return;
+    try {
+      const res = await api.purchaseOrders.getById(poId);
+      const items = res.data?.data?.items || [];
+      setPoQuickView(prev => ({ ...prev, [poId]: { itemsCount: items.length } }));
+    } catch {
+      // ignore failures for quick-view
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const badges: Record<string, { bg: string; text: string }> = {
+      DRAFT: { bg: 'bg-gray-100', text: 'text-gray-800' },
+      FINALIZED: { bg: 'bg-green-100', text: 'text-green-800' },
+      CANCELLED: { bg: 'bg-red-100', text: 'text-red-800' },
+    };
+
+    const badge = badges[status] || badges.DRAFT;
+
+    return (
+      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${badge.bg} ${badge.text}`}>
+        {status}
+      </span>
+    );
+  };
+
+  const goodsReceipts = data?.data?.data || [];
+  const pagination = data?.data?.pagination;
+
+  return (
+    <div className="p-6">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Goods Receipts</h2>
+          <p className="text-gray-600 mt-1">Receiving workflow with batch creation and cost change alerts</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">Cost variance baseline:</span>
+            <select
+              aria-label="Cost variance baseline"
+              title="Cost variance baseline"
+              className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+              value={baseline}
+              onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
+            >
+              <option value="PO">PO Cost</option>
+              <option value="PRODUCT">Product Cost</option>
+            </select>
+          </div>
+          <ManualGRButton />
+          <button
+            onClick={openCreateModal}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+          >
+            + Create from PO
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
+        <div className="flex gap-4">
+          <div>
+            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <select
+              id="status-filter"
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All</option>
+              <option value="DRAFT">Draft</option>
+              <option value="FINALIZED">Finalized</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Loading State */}
+      {isLoading && (
+        <div className="text-center py-12">
+          <div className="text-gray-600">Loading goods receipts...</div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-800">Failed to load goods receipts</p>
+        </div>
+      )}
+
+      {/* Goods Receipts Table */}
+      {!isLoading && !error && (
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  GR Number
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  PO Number
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Supplier
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Received Date
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {goodsReceipts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    No goods receipts found
+                  </td>
+                </tr>
+              ) : (
+                goodsReceipts.map((gr: any) => (
+                  <tr key={gr.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {gr.receiptNumber || gr.receipt_number}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {gr.poNumber || gr.po_number || '-'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {gr.supplierName || gr.supplier_name || '-'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDisplayDate(gr.receivedDate || gr.received_date)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {getStatusBadge(gr.status)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleViewDetails(gr)}
+                          className="text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          👁️ View
+                        </button>
+                        {gr.status === 'DRAFT' && (
+                          <button
+                            onClick={() => handleFinalize(gr.id)}
+                            className="text-green-600 hover:text-green-800 font-medium"
+                          >
+                            ✓ Finalize
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+
+          {/* Pagination */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">
+              <div className="text-sm text-gray-700">
+                Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage(Math.max(1, page - 1))}
+                  disabled={page === 1}
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage(Math.min(pagination.totalPages, page + 1))}
+                  disabled={page === pagination.totalPages}
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Details Modal */}
+      {showDetailsModal && selectedGR && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900">
+                    {selectedGR.receiptNumber || selectedGR.receipt_number}
+                  </h3>
+                  <p className="text-gray-600 mt-1">
+                    PO: {selectedGR.poNumber || selectedGR.po_number} | Supplier: {selectedGR.supplierName || selectedGR.supplier_name}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowDetailsModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Received Date</label>
+                  <p className="text-gray-900">
+                    {formatDisplayDate(selectedGR.receivedDate || selectedGR.received_date)}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Status</label>
+                  <div className="mt-1">{getStatusBadge(selectedGR.status)}</div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Received By</label>
+                  <p className="text-gray-900">{selectedGR.receivedByName || selectedGR.received_by_name || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Delivery Note</label>
+                  <p className="text-gray-900">{selectedGR.supplierDeliveryNote || selectedGR.supplier_delivery_note || '-'}</p>
+                </div>
+              </div>
+
+              {selectedGR.notes && (
+                <div className="mb-6">
+                  <label className="text-sm font-medium text-gray-700">Notes</label>
+                  <p className="text-gray-900 mt-1">{selectedGR.notes}</p>
+                </div>
+              )}
+
+              {/* Items Table */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-lg font-semibold text-gray-900">Items</h4>
+                  {detailsQuery.isLoading && <span className="text-sm text-gray-500">Loading items…</span>}
+                </div>
+                <div className="overflow-x-auto border rounded-lg">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">On Hand</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UoM</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ordered</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Received</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch #</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty Var</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost Var</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {items.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-gray-500" colSpan={11}>No items</td>
+                        </tr>
+                      ) : (
+                        items.map((it: any) => (
+                          <GRItemRow
+                            key={it.id}
+                            item={it}
+                            baseline={baseline}
+                            selectedGR={selectedGR}
+                            editState={editItems[it.id] || {}}
+                            onFieldChange={handleItemFieldChange}
+                            onSave={saveItem}
+                            updatePending={updateItemMutation.isPending}
+                            batchWarnings={batchWarnings}
+                            validationTimeout={validationTimeout}
+                            checkBatchDuplicate={checkBatchDuplicate}
+                          />
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <button
+                  onClick={() => handleExportGRPDF(selectedGR, items)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Export PDF
+                </button>
+                {selectedGR.status === 'DRAFT' && (
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowDetailsModal(false)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleFinalize(selectedGR.id)}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                    >
+                      ✓ Finalize Goods Receipt
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cost Alerts Modal */}
+      {showAlertsModal && costAlerts.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowAlertsModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900">⚠️ Cost Price Change Alerts</h3>
+                  <p className="text-gray-600 mt-1">{costAlerts.length} product(s) with cost changes</p>
+                </div>
+                <button
+                  onClick={() => setShowAlertsModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {costAlerts.map((alert, index) => (
+                <div
+                  key={index}
+                  className={`rounded-lg p-4 border-2 ${alert.severity === 'HIGH'
+                    ? 'bg-red-50 border-red-200'
+                    : 'bg-yellow-50 border-yellow-200'
+                    }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 text-2xl">
+                      {alert.severity === 'HIGH' ? '🔴' : '🟡'}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span
+                          className={`px-2 py-1 text-xs font-bold rounded ${alert.severity === 'HIGH'
+                            ? 'bg-red-600 text-white'
+                            : 'bg-yellow-600 text-white'
+                            }`}
+                        >
+                          {alert.severity} SEVERITY
+                        </span>
+                        <span className="font-semibold text-gray-900">{alert.productName}</span>
+                      </div>
+                      <p className="text-sm text-gray-700 mb-3">{alert.message}</p>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-600">Previous Cost:</span>
+                          <span className="ml-2 font-semibold text-gray-900">
+                            {formatCurrency(parseFloat(alert.details.previousCost))}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">New Cost:</span>
+                          <span className="ml-2 font-semibold text-gray-900">
+                            {formatCurrency(parseFloat(alert.details.newCost))}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Change:</span>
+                          <span className="ml-2 font-semibold text-gray-900">
+                            {parseFloat(alert.details.changeAmount) > 0 ? '+' : ''}
+                            {formatCurrency(parseFloat(alert.details.changeAmount))}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Percentage:</span>
+                          <span className="ml-2 font-semibold text-gray-900">
+                            {parseFloat(alert.details.changePercentage) > 0 ? '+' : ''}
+                            {parseFloat(alert.details.changePercentage).toFixed(2)}%
+                          </span>
+                        </div>
+                        {alert.details.batchNumber && (
+                          <div className="col-span-2">
+                            <span className="text-gray-600">Batch:</span>
+                            <span className="ml-2 font-mono text-sm text-gray-900">
+                              {alert.details.batchNumber}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
+                <p className="text-sm text-blue-800">
+                  ℹ️ Cost changes have been applied. Pricing formulas will be recalculated automatically.
+                </p>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowAlertsModal(false)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Acknowledge
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create GR Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => { setShowCreateModal(false); setSelectedPoId(''); setPoSearch(''); setPoPage(1); setFocusedPoIndex(0); }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Create Goods Receipt from PO</h3>
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setSelectedPoId('');
+                  setPoSearch('');
+                  setPoPage(1);
+                  setFocusedPoIndex(0);
+                }}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label htmlFor="po-search" className="block text-sm font-medium text-gray-700 mb-1">Search POs (status: PENDING)</label>
+                <input
+                  id="po-search"
+                  className="w-full border rounded-lg px-3 py-2"
+                  placeholder="Search by PO number or supplier"
+                  value={poSearch}
+                  onChange={(e) => setPoSearch(e.target.value)}
+                />
+              </div>
+              <div
+                className="border rounded-lg max-h-64 overflow-y-auto"
+                role="radiogroup"
+                aria-label="Pending purchase orders"
+                onKeyDown={(e) => {
+                  if (filteredPOs.length === 0) return;
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = Math.min(filteredPOs.length - 1, focusedPoIndex + 1);
+                    setFocusedPoIndex(next);
+                    const el = poRadioRefs.current[next];
+                    el?.focus();
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = Math.max(0, focusedPoIndex - 1);
+                    setFocusedPoIndex(prev);
+                    const el = poRadioRefs.current[prev];
+                    el?.focus();
+                  } else if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    const current = poRadioRefs.current[focusedPoIndex];
+                    if (current) {
+                      current.checked = true;
+                      const val = current.value;
+                      setSelectedPoId(val);
+                      ensurePoQuickView(val);
+                    }
+                  }
+                }}
+              >
+                {pendingPOsQuery.isLoading ? (
+                  <div className="p-3 text-sm text-gray-500">Loading pending POs…</div>
+                ) : filteredPOs.length === 0 ? (
+                  <div className="p-3 text-sm text-gray-500">No pending POs found</div>
+                ) : (
+                  <ul>
+                    {filteredPOs.map((po: any, idx: number) => {
+                      const orderNumber = po.order_number || po.poNumber;
+                      const supplierName = po.supplier_name || po.supplierName;
+                      const orderDate = formatDisplayDate(po.order_date || po.orderDate);
+                      const totalAmount = po.total_amount ?? po.totalAmount ?? 0;
+                      const qv = poQuickView[po.id];
+                      return (
+                        <li key={po.id} className="border-b last:border-b-0">
+                          <label
+                            className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50"
+                            onMouseEnter={() => ensurePoQuickView(po.id)}
+                            onFocus={() => ensurePoQuickView(po.id)}
+                          >
+                            <input
+                              ref={(el) => { if (el) poRadioRefs.current[idx] = el; }}
+                              type="radio"
+                              name="selected-po"
+                              value={po.id}
+                              checked={selectedPoId === po.id}
+                              onChange={() => { setSelectedPoId(po.id); ensurePoQuickView(po.id); }}
+                              aria-label={`Select ${orderNumber} from ${supplierName}`}
+                            />
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{orderNumber}</div>
+                              <div className="text-xs text-gray-600">{supplierName}</div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                {qv ? `${qv.itemsCount} item${qv.itemsCount === 1 ? '' : 's'}` : 'items: —'} • Total {formatCurrency(totalAmount)}
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-500">{orderDate}</div>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+              {poPagination && (
+                <div className="flex items-center justify-between text-xs text-gray-600">
+                  <div>Page {poPagination.page} of {poPagination.totalPages}</div>
+                  <div className="flex gap-2">
+                    <button className="px-2 py-1 border rounded" disabled={poPage === 1} onClick={() => setPoPage(Math.max(1, poPage - 1))}>Prev</button>
+                    <button className="px-2 py-1 border rounded" disabled={poPage === poPagination.totalPages} onClick={() => setPoPage(Math.min(poPagination.totalPages, poPage + 1))}>Next</button>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setSelectedPoId('');
+                    setPoSearch('');
+                    setPoPage(1);
+                    setFocusedPoIndex(0);
+                  }}
+                  className="px-4 py-2 border rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button onClick={handleCreateGR} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" disabled={createGRMutation.isPending || !selectedPoId}>
+                  {createGRMutation.isPending ? 'Creating…' : 'Create GR'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Child row component to satisfy React Hook rules
+function GRItemRow({
+  item,
+  baseline,
+  selectedGR,
+  editState,
+  onFieldChange,
+  onSave,
+  updatePending,
+  batchWarnings,
+  validationTimeout,
+  checkBatchDuplicate,
+}: {
+  item: any;
+  baseline: 'PO' | 'PRODUCT';
+  selectedGR: any;
+  editState: any;
+  onFieldChange: (itemId: string, field: string, value: any) => void;
+  onSave: (item: any) => void;
+  updatePending: boolean;
+  batchWarnings: Record<string, string>;
+  validationTimeout: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
+  checkBatchDuplicate: (itemId: string, batchNumber: string) => Promise<void>;
+}) {
+  const es = editState || {};
+  const ordered = item.orderedQuantity ?? item.ordered_quantity ?? 0;
+  // For DRAFT GRs, default received to ordered quantity if not set
+  const baseReceived = es.receivedQuantity ?? item.receivedQuantity ?? item.received_quantity ?? (selectedGR.status === 'DRAFT' ? ordered : 0);
+  const disabled = selectedGR.status !== 'DRAFT';
+  const baseUnitCost = es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0;
+  const poBase = item.po_unit_price ?? item.poUnitPrice ?? 0;
+  const prodBase = item.product_cost_price ?? item.productCostPrice ?? 0;
+  const base = baseline === 'PO' ? poBase : prodBase;
+  const productId = item.productId || item.product_id;
+
+  // Fetch product with pre-computed UoM details from server
+  const { data: productWithUoms, isLoading: uomsLoading } = useProductWithUoms(productId);
+  const uomList = productWithUoms?.uoms || [];
+  const defaultUom = getDefaultUom(productWithUoms);
+  const selectedUomId = es.selectedUomId || defaultUom?.id;
+  const selectedUom = findUom(productWithUoms, selectedUomId || '');
+  const factor = selectedUom ? new Decimal(selectedUom.conversionFactor).toNumber() : 1;
+
+  // Fetch current stock level for this product
+  const { data: stockLevelData, isLoading: stockLoading } = useStockLevelByProduct(productId);
+  const stockLevel = stockLevelData?.data;
+  const onHandQty = Number(stockLevel?.totalQuantity ?? stockLevel?.total_quantity ?? 0);
+  const reorderLevel = Number(stockLevel?.reorderLevel ?? stockLevel?.reorder_level ?? 0);
+  const needsReorder = stockLevel?.needsReorder ?? stockLevel?.needs_reorder ?? false;
+
+  const displayedOrdered = new Decimal(ordered || 0).div(factor).toNumber();
+  const displayedReceived = new Decimal(baseReceived || 0).div(factor).toNumber();
+  const displayedUnitCost = new Decimal(baseUnitCost || 0).mul(factor).toNumber();
+
+  // DEBUG: Log all relevant values
+  console.log('🔍 GR Debug:', {
+    productName: item.productName,
+    ordered,
+    baseReceived,
+    factor,
+    selectedUomId,
+    selectedUom: selectedUom?.uomSymbol,
+    conversionFactor: selectedUom?.conversionFactor,
+    displayedOrdered,
+    displayedReceived,
+    'es.receivedUomQty': es.receivedUomQty,
+    'es.receivedLooseQty': es.receivedLooseQty,
+    'es.receivedQuantity': es.receivedQuantity
+  });
+
+  // DEBUG: Log variance calculation values
+  if (item.productName?.includes('SODA')) {
+    console.log('🔍 Variance Debug:', {
+      productName: item.productName,
+      ordered,
+      baseReceived,
+      factor,
+      displayedOrdered,
+      displayedReceived,
+      calculation: `(${baseReceived} - ${ordered}) / ${ordered} * 100`
+    });
+  }
+
+  // Calculate variance using BASE UNITS (not displayed UoM values)
+  const qtyVariancePct = ordered > 0
+    ? new Decimal(baseReceived || 0).minus(ordered).div(ordered).mul(100).toNumber()
+    : 0;
+  let costVarPct: number | null = null;
+  let costVarAbs: number | null = null;
+  if (base && base > 0) {
+    const baselineDisplay = new Decimal(base).mul(factor);
+    const dAbs = new Decimal(displayedUnitCost).minus(baselineDisplay);
+    costVarAbs = dAbs.toNumber();
+    const dPct = dAbs.div(baselineDisplay).mul(100);
+    costVarPct = dPct.toNumber();
+  }
+
+  const receivedError = ((): string | null => {
+    if (es.receivedQuantity == null) return null;
+    if (Number(es.receivedQuantity) < 0) return 'Must be ≥ 0';
+    if (ordered !== undefined && Number(es.receivedQuantity) > Number(ordered)) return 'Cannot exceed ordered';
+    return null;
+  })();
+  const unitCostError = ((): string | null => {
+    if (es.unitCost == null) return null;
+    return Number(es.unitCost) < 0 ? 'Must be ≥ 0' : null;
+  })();
+  const expiryError = ((): string | null => {
+    const v = es.expiryDate;
+    if (!v) return null;
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return 'Invalid date';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return d <= today ? 'Must be a future date' : null;
+  })();
+  const hasErrors = !!(receivedError || unitCostError || expiryError);
+
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="px-4 py-2 text-sm text-gray-900">{item.productName || item.product_name}</td>
+      <td className="px-4 py-2 text-sm">
+        {stockLoading ? (
+          <span className="text-gray-400 text-xs">...</span>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-2 py-1 rounded text-xs font-semibold ${needsReorder
+                ? 'bg-red-100 text-red-800'
+                : onHandQty > reorderLevel * 1.5
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-yellow-100 text-yellow-800'
+                }`}
+              title={`Reorder Level: ${reorderLevel}`}
+            >
+              {onHandQty.toFixed(4)}
+            </span>
+            {needsReorder && (
+              <span className="text-xs text-red-600" title="Below reorder level">
+                ⚠️
+              </span>
+            )}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        {uomsLoading ? (
+          <span className="text-gray-400">Loading…</span>
+        ) : uomList.length === 0 ? (
+          <span className="text-gray-400">—</span>
+        ) : (
+          <select
+            className="border rounded px-2 py-1"
+            disabled={disabled}
+            value={selectedUomId}
+            onChange={(e) => onFieldChange(item.id, 'selectedUomId', e.target.value)}
+            aria-label={`Unit of Measure for ${item.productName || item.product_name}`}
+            title="Unit of Measure"
+          >
+            {uomList.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.uomSymbol || u.uomName} × {u.factor.toString()}
+                {u.isDefault ? ' • default' : ''}
+              </option>
+            ))}
+          </select>
+        )}
+      </td>
+      <td className="px-4 py-2 text-sm text-gray-700">{displayedOrdered}</td>
+      <td className="px-4 py-2 text-sm">
+        {/* Dual Input: UoM Quantity + Base Units */}
+        <div className="flex items-center gap-2">
+          <div className="flex flex-col">
+            <input
+              type="number"
+              min={0}
+              className={`w-20 border rounded px-2 py-1 ${receivedError ? 'border-red-500' : ''}`}
+              value={es.receivedUomQty !== undefined ? es.receivedUomQty : (factor > 1 ? Math.floor(baseReceived / factor) : baseReceived)}
+              disabled={disabled}
+              placeholder="0"
+              aria-label={`Received ${selectedUom?.uomSymbol || 'units'} for ${item.productName || item.product_name}`}
+              title={`Number of ${selectedUom?.uomSymbol || 'UoM units'}`}
+              onChange={(e) => {
+                const uomQty = e.target.value === '' ? 0 : Number(e.target.value);
+                const looseQty = es.receivedLooseQty ?? 0;
+                const totalBase = new Decimal(uomQty).mul(factor).plus(looseQty).toNumber();
+                onFieldChange(item.id, 'receivedUomQty', uomQty);
+                onFieldChange(item.id, 'receivedQuantity', totalBase);
+              }}
+            />
+            <span className="text-xs text-gray-500 mt-0.5">{selectedUom?.uomSymbol || 'UoM'}</span>
+          </div>
+
+          <span className="text-gray-400">+</span>
+
+          <div className="flex flex-col">
+            <input
+              type="number"
+              min={0}
+              max={factor > 1 ? factor - 1 : undefined}
+              className={`w-20 border rounded px-2 py-1 ${receivedError ? 'border-red-500' : ''}`}
+              value={es.receivedLooseQty !== undefined ? es.receivedLooseQty : (factor > 1 ? baseReceived % factor : 0)}
+              disabled={disabled}
+              placeholder="0"
+              aria-label={`Loose base units for ${item.productName || item.product_name}`}
+              title="Loose base units"
+              onChange={(e) => {
+                const looseQty = e.target.value === '' ? 0 : Number(e.target.value);
+                const uomQty = es.receivedUomQty ?? (factor > 1 ? Math.floor(baseReceived / factor) : 0);
+                const totalBase = new Decimal(uomQty).mul(factor).plus(looseQty).toNumber();
+                onFieldChange(item.id, 'receivedLooseQty', looseQty);
+                onFieldChange(item.id, 'receivedQuantity', totalBase);
+              }}
+            />
+            <span className="text-xs text-gray-500 mt-0.5">base</span>
+          </div>
+
+          <div className="text-xs text-gray-600 ml-1">
+            = {Number(baseReceived || 0).toFixed(4)}
+          </div>
+        </div>
+        {receivedError && <div className="text-xs text-red-600 mt-1">{receivedError}</div>}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          className={`w-32 border rounded px-2 py-1 ${unitCostError ? 'border-red-500' : ''}`}
+          value={Number.isFinite(displayedUnitCost) ? displayedUnitCost : ''}
+          disabled={disabled}
+          aria-label={`Unit cost for ${item.productName || item.product_name}`}
+          title="Unit cost"
+          onChange={(e) => {
+            const v = e.target.value === '' ? undefined : Number(e.target.value);
+            if (v === undefined) {
+              onFieldChange(item.id, 'unitCost', undefined);
+            } else {
+              const baseVal = new Decimal(v).div(factor).toNumber();
+              onFieldChange(item.id, 'unitCost', baseVal);
+            }
+          }}
+        />
+        {unitCostError && <div className="text-xs text-red-600 mt-1">{unitCostError}</div>}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        <input
+          type="text"
+          className={`w-40 border rounded px-2 py-1 ${batchWarnings[item.id] ? 'border-red-500' : ''}`}
+          value={es.batchNumber ?? ''}
+          disabled={disabled}
+          onChange={(e) => {
+            const value = e.target.value;
+            onFieldChange(item.id, 'batchNumber', value);
+            // Debounce validation to avoid too many API calls
+            if (validationTimeout.current[item.id]) {
+              clearTimeout(validationTimeout.current[item.id]);
+            }
+            validationTimeout.current[item.id] = setTimeout(() => {
+              checkBatchDuplicate(item.id, value);
+            }, 500);
+          }}
+          placeholder="Auto on finalize if empty"
+        />
+        {batchWarnings[item.id] && (
+          <div className="text-xs text-red-600 mt-1">
+            {batchWarnings[item.id]}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        <DatePicker
+          value={es.expiryDate ?? ''}
+          onChange={(date) => onFieldChange(item.id, 'expiryDate', date || undefined)}
+          placeholder="Expiry date"
+          disabled={disabled}
+          minDate={new Date()}
+          className={expiryError ? 'border-red-500' : ''}
+        />
+        {expiryError && <div className="text-xs text-red-600 mt-1">{expiryError}</div>}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        {displayedOrdered > 0 ? (
+          <span className={`px-2 py-1 rounded text-xs font-semibold ${qtyVariancePct > 0 ? 'bg-yellow-100 text-yellow-800' : qtyVariancePct < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
+            {qtyVariancePct > 0 ? '+' : ''}{qtyVariancePct.toFixed(2)}%
+          </span>
+        ) : (
+          <span className="text-gray-400">-</span>
+        )}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        {costVarPct === null ? (
+          <span className="text-gray-400">-</span>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-1 rounded text-xs font-semibold ${costVarPct > 0 ? 'bg-red-100 text-red-800' : costVarPct < 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+              {costVarAbs !== null ? `${costVarAbs > 0 ? '+' : '-'}` : ''}{costVarAbs !== null ? formatCurrency(Math.abs(costVarAbs)) : ''}
+              {` (${costVarPct > 0 ? '+' : ''}${costVarPct.toFixed(2)}%)`}
+            </span>
+            <span className="text-xs text-gray-500">vs {baseline === 'PO' ? 'PO agreed price' : 'Product current cost'} {base ? `(${formatCurrency(new Decimal(base).mul(factor).toNumber())})` : ''}</span>
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2 text-sm">
+        <button
+          disabled={disabled || updatePending || hasErrors}
+          onClick={() => onSave(item)}
+          className={`px-3 py-1 rounded ${disabled ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+          title={disabled ? 'Cannot edit finalized GR' : 'Save changes'}
+        >
+          Save
+        </button>
+      </td>
+    </tr>
+  );
+}

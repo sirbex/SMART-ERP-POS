@@ -1,0 +1,83 @@
+name: Product Schema Consistency Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  product-consistency:
+    name: Enforce Product Field Propagation
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed files
+        id: diff
+        run: |
+          BASE_REF="${{ github.base_ref }}"
+          if [ -z "$BASE_REF" ]; then BASE_REF=$(jq -r '.pull_request.base.ref' < "$GITHUB_EVENT_PATH"); fi
+          git fetch origin "$BASE_REF" --quiet
+          echo "Base ref: $BASE_REF"
+          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD)
+          echo "$CHANGED" | sed 's/^/changed: /'
+          # Export to outputs
+          echo "changed<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check for product field related changes
+        id: guard
+        run: |
+          set -e
+          CHANGED_FILES="${{ steps.diff.outputs.changed }}"
+
+          echo "Evaluating product-related changes..."
+
+          # Signals that product schema/model might have changed
+          if echo "$CHANGED_FILES" | grep -E '^shared/zod/product\.ts$|^SamplePOS\.Server/src/modules/products/'; then
+            echo "Detected Product schema/repository changes. Running propagation checks..."
+            NEEDS_PROPAGATION_CHECK=1
+          else
+            echo "No direct Product schema/repository changes detected. Skipping propagation checks."
+            NEEDS_PROPAGATION_CHECK=0
+          fi
+
+          # If needs propagation check, enforce that:
+          # 1) UI updated: at least one client file under samplepos.client/src updated that likely impacts Product views/selectors
+          # 2) Migration present: at least one .sql file under shared/sql changed (when schema changes usually require DB change)
+
+          FAIL=0
+
+          if [ "$NEEDS_PROPAGATION_CHECK" = "1" ]; then
+            if echo "$CHANGED_FILES" | grep -E '^samplepos\.client/src/'; then
+              echo "UI changes detected under samplepos.client/src ✅"
+            else
+              echo "::error::No UI changes detected under samplepos.client/src while Product schema/repo changed. Ensure forms/lists/selectors are updated." 
+              FAIL=1
+            fi
+
+            if echo "$CHANGED_FILES" | grep -E '^shared/sql/.*\.sql$'; then
+              echo "SQL migration changes detected under shared/sql ✅"
+            else
+              echo "::warning::No SQL migration detected under shared/sql. If DB schema changed for Product fields, add a migration."
+              # Don't hard-fail; some Product field changes may not require DB schema updates
+            fi
+
+            # Encourage docs alignment
+            if echo "$CHANGED_FILES" | grep -E 'COPILOT_INSTRUCTIONS\.md|\.github/copilot-instructions\.md|DEVELOPMENT_RULES\.md'; then
+              echo "Instruction docs updated ✅"
+            else
+              echo "::notice::Consider updating COPILOT_INSTRUCTIONS.md / DEVELOPMENT_RULES.md if Product rules changed."
+            fi
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::error::Product Schema Consistency check failed. Please propagate Product field changes across UI and migrations as needed."
+            exit 1
+          fi
+
+          echo "All checks passed or not applicable."

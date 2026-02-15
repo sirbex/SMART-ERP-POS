@@ -1,0 +1,81 @@
+                                 pg_get_functiondef                                  
+-------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION public.fn_recalculate_account_balance()                 +
+  RETURNS trigger                                                                   +
+  LANGUAGE plpgsql                                                                  +
+ AS $function$\r                                                                    +
+ DECLARE\r                                                                          +
+     v_account_id UUID;\r                                                           +
+     v_total_debits NUMERIC;\r                                                      +
+     v_total_credits NUMERIC;\r                                                     +
+     v_normal_balance TEXT;\r                                                       +
+     v_new_balance NUMERIC;\r                                                       +
+ BEGIN\r                                                                            +
+     -- Determine which account to update based on operation type\r                 +
+     IF TG_OP = 'DELETE' THEN\r                                                     +
+         v_account_id := OLD."AccountId";\r                                         +
+     ELSE\r                                                                         +
+         v_account_id := NEW."AccountId";\r                                         +
+     END IF;\r                                                                      +
+     \r                                                                             +
+     -- Also handle case where AccountId changed on UPDATE\r                        +
+     IF TG_OP = 'UPDATE' AND OLD."AccountId" != NEW."AccountId" THEN\r              +
+         -- Recalculate old account first\r                                         +
+         SELECT \r                                                                  +
+             COALESCE(SUM("DebitAmount"), 0),\r                                     +
+             COALESCE(SUM("CreditAmount"), 0)\r                                     +
+         INTO v_total_debits, v_total_credits\r                                     +
+         FROM ledger_entries\r                                                      +
+         WHERE "AccountId" = OLD."AccountId";\r                                     +
+         \r                                                                         +
+         SELECT "NormalBalance" INTO v_normal_balance\r                             +
+         FROM accounts WHERE "Id" = OLD."AccountId";\r                              +
+         \r                                                                         +
+         IF v_normal_balance = 'DEBIT' THEN\r                                       +
+             v_new_balance := v_total_debits - v_total_credits;\r                   +
+         ELSE\r                                                                     +
+             v_new_balance := v_total_credits - v_total_debits;\r                   +
+         END IF;\r                                                                  +
+         \r                                                                         +
+         UPDATE accounts \r                                                         +
+         SET "CurrentBalance" = v_new_balance, "UpdatedAt" = CURRENT_TIMESTAMP\r    +
+         WHERE "Id" = OLD."AccountId";\r                                            +
+     END IF;\r                                                                      +
+     \r                                                                             +
+     -- Calculate totals for the affected account\r                                 +
+     SELECT \r                                                                      +
+         COALESCE(SUM("DebitAmount"), 0),\r                                         +
+         COALESCE(SUM("CreditAmount"), 0)\r                                         +
+     INTO v_total_debits, v_total_credits\r                                         +
+     FROM ledger_entries\r                                                          +
+     WHERE "AccountId" = v_account_id;\r                                            +
+     \r                                                                             +
+     -- Get the account's normal balance (DEBIT or CREDIT)\r                        +
+     SELECT "NormalBalance" INTO v_normal_balance\r                                 +
+     FROM accounts WHERE "Id" = v_account_id;\r                                     +
+     \r                                                                             +
+     -- Calculate balance based on normal balance convention\r                      +
+     -- DEBIT accounts (Assets, Expenses): balance = debits - credits\r             +
+     -- CREDIT accounts (Liabilities, Equity, Revenue): balance = credits - debits\r+
+     IF v_normal_balance = 'DEBIT' THEN\r                                           +
+         v_new_balance := v_total_debits - v_total_credits;\r                       +
+     ELSE\r                                                                         +
+         v_new_balance := v_total_credits - v_total_debits;\r                       +
+     END IF;\r                                                                      +
+     \r                                                                             +
+     -- Update the account balance\r                                                +
+     UPDATE accounts \r                                                             +
+     SET "CurrentBalance" = v_new_balance, "UpdatedAt" = CURRENT_TIMESTAMP\r        +
+     WHERE "Id" = v_account_id;\r                                                   +
+     \r                                                                             +
+     -- Return appropriate record\r                                                 +
+     IF TG_OP = 'DELETE' THEN\r                                                     +
+         RETURN OLD;\r                                                              +
+     ELSE\r                                                                         +
+         RETURN NEW;\r                                                              +
+     END IF;\r                                                                      +
+ END;\r                                                                             +
+ $function$                                                                         +
+ 
+(1 row)
+

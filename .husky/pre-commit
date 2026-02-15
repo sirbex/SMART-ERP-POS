@@ -1,0 +1,162 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+echo ""
+
+# Track if any checks fail
+HAS_ERRORS=0
+
+# Get list of staged files
+STAGED_FILES=$(git diff --cached --name-only)
+
+# Backend checks
+BACKEND_FILES=$(echo "$STAGED_FILES" | grep -E "SamplePOS\.Server/src/.*\.ts$" || true)
+if [ ! -z "$BACKEND_FILES" ]; then
+  echo "🏗️  Checking backend TypeScript files..."
+  
+  # TypeScript compilation check
+  echo "   📝 Checking TypeScript compilation..."
+  cd SamplePOS.Server
+  npm run build 2>&1 | head -20
+  if [ $? -ne 0 ]; then
+    echo "   ❌ TypeScript compilation failed!"
+    HAS_ERRORS=1
+  else
+    echo "   ✅ TypeScript compilation passed"
+  fi
+  
+  # Linting check
+  echo "   🧹 Running ESLint..."
+  npm run lint -- $BACKEND_FILES 2>&1 | head -20
+  if [ $? -ne 0 ]; then
+    echo "   ⚠️  Linting warnings found (non-blocking)"
+  fi
+  
+  cd ..
+  echo ""
+fi
+
+# Frontend checks
+FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "samplepos\.client/src/.*\.(ts|tsx)$" || true)
+if [ ! -z "$FRONTEND_FILES" ]; then
+  echo "⚛️  Checking frontend React files..."
+  
+  # TypeScript compilation check
+  echo "   📝 Checking TypeScript compilation..."
+  cd samplepos.client
+  npm run build 2>&1 | head -20
+  if [ $? -ne 0 ]; then
+    echo "   ❌ TypeScript compilation failed!"
+    HAS_ERRORS=1
+  else
+    echo "   ✅ TypeScript compilation passed"
+  fi
+  
+  # Linting check
+  echo "   🧹 Running ESLint..."
+  npm run lint -- $FRONTEND_FILES 2>&1 | head -20
+  if [ $? -ne 0 ]; then
+    echo "   ⚠️  Linting warnings found (non-blocking)"
+  fi
+  
+  cd ..
+  echo ""
+fi
+
+# Accounting integrity test (if backend files changed)
+if [ ! -z "$BACKEND_FILES" ]; then
+  echo "🔍 Running accounting integrity checks..."
+  cd SamplePOS.Server
+  npm run test:accounting 2>&1 | tail -10
+  if [ $? -ne 0 ]; then
+    echo "❌ COMMIT BLOCKED: Accounting integrity tests failed!"
+    echo "Run 'npm run test:accounting' in SamplePOS.Server for details."
+    HAS_ERRORS=1
+  else
+    echo "✅ Accounting integrity checks passed"
+  fi
+  cd ..
+  echo ""
+fi
+
+# Migration safety check
+SQL_FILES=$(echo "$STAGED_FILES" | grep -E "\.sql$" || true)
+if [ ! -z "$SQL_FILES" ]; then
+  echo "🗄️  Checking SQL migration files for dangerous operations..."
+  
+  # Check for dangerous schema operations
+  DANGEROUS_OPS=$(git diff --cached | grep -iE "(DROP TABLE|DROP COLUMN|ALTER TABLE.*DROP|TRUNCATE TABLE|DELETE FROM.*WHERE)" || true)
+  if [ ! -z "$DANGEROUS_OPS" ]; then
+    echo "⚠️  WARNING: Dangerous database operations detected!"
+    echo ""
+    echo "$DANGEROUS_OPS"
+    echo ""
+    echo "❌ COMMIT BLOCKED: Review schema changes carefully!"
+    echo "Schema changes detected that could cause data loss:"
+    echo "  • DROP TABLE/COLUMN operations"
+    echo "  • ALTER TABLE DROP operations"
+    echo "  • TRUNCATE or DELETE operations"
+    echo ""
+    echo "If these changes are intentional, ensure:"
+    echo "  1. Backup exists"
+    echo "  2. Rollback plan documented"
+    echo "  3. Team is notified"
+    echo ""
+    HAS_ERRORS=1
+  else
+    echo "   ✅ No dangerous operations detected"
+  fi
+  echo ""
+fi
+
+# API contract check (if backend routes changed)
+ROUTE_FILES=$(echo "$STAGED_FILES" | grep -E "(routes|controller)\.ts$" || true)
+if [ ! -z "$ROUTE_FILES" ]; then
+  echo "🔌 Checking API contract changes..."
+  
+  # Check for renamed or removed routes
+  ROUTE_CHANGES=$(git diff --cached | grep -E "(router\.(get|post|put|delete|patch))" | grep -E "^[-]" || true)
+  if [ ! -z "$ROUTE_CHANGES" ]; then
+    echo "⚠️  WARNING: API routes have been modified or removed!"
+    echo "$ROUTE_CHANGES"
+    echo ""
+    echo "Ensure backward compatibility:"
+    echo "  • Don't remove existing endpoints"
+    echo "  • Don't change response shapes"
+    echo "  • Version breaking changes (v2)"
+    echo ""
+  else
+    echo "   ✅ API contracts appear safe"
+  fi
+  echo ""
+fi
+
+# Security check for common issues
+echo "🔒 Security checks..."
+if echo "$STAGED_FILES" | grep -qE "\.(ts|tsx|js)$"; then
+  echo "   📋 Checking for hardcoded secrets..."
+  SECRETS_FOUND=$(git diff --cached | grep -E "(password|secret|token|key).*=" | grep -v "\.env\." || true)
+  if [ ! -z "$SECRETS_FOUND" ]; then
+    echo "   ⚠️  Possible hardcoded secrets found:"
+    echo "$SECRETS_FOUND"
+    HAS_ERRORS=1
+  else
+    echo "   ✅ No hardcoded secrets detected"
+  fi
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if [ $HAS_ERRORS -ne 0 ]; then
+  echo "❌ COMMIT BLOCKED - Fix the errors above before committing"
+  echo ""
+  echo "To bypass these checks (NOT RECOMMENDED for production):"
+  echo "  git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+echo "✅ All pre-commit checks passed! Proceeding with commit..."
+exit 0

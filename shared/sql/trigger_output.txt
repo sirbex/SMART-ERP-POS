@@ -1,0 +1,211 @@
+                                                       pg_get_functiondef                                                       
+--------------------------------------------------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION public.fn_post_sale_to_ledger()                                                                    +
+  RETURNS trigger                                                                                                              +
+  LANGUAGE plpgsql                                                                                                             +
+ AS $function$\r                                                                                                               +
+ DECLARE\r                                                                                                                     +
+     v_transaction_id UUID;\r                                                                                                  +
+     v_transaction_number TEXT;\r                                                                                              +
+     v_cash_account_id UUID;\r                                                                                                 +
+     v_ar_account_id UUID;\r                                                                                                   +
+     v_credit_card_account_id UUID;\r                                                                                          +
+     v_revenue_account_id UUID;\r                                                                                              +
+     v_cogs_account_id UUID;\r                                                                                                 +
+     v_inventory_account_id UUID;\r                                                                                            +
+     v_debit_account_id UUID;\r                                                                                                +
+     v_line_number INTEGER := 0;\r                                                                                             +
+ BEGIN\r                                                                                                                       +
+     -- Only trigger on status change to COMPLETED\r                                                                           +
+     IF NEW.status = 'COMPLETED' AND (OLD.status IS NULL OR OLD.status != 'COMPLETED') THEN\r                                  +
+         \r                                                                                                                    +
+         -- Get account IDs from Chart of Accounts\r                                                                           +
+         SELECT "Id" INTO v_cash_account_id FROM accounts WHERE "AccountCode" = '1010';\r                                      +
+         SELECT "Id" INTO v_credit_card_account_id FROM accounts WHERE "AccountCode" = '1020';\r                               +
+         SELECT "Id" INTO v_ar_account_id FROM accounts WHERE "AccountCode" = '1200';\r                                        +
+         SELECT "Id" INTO v_revenue_account_id FROM accounts WHERE "AccountCode" = '4000';\r                                   +
+         SELECT "Id" INTO v_cogs_account_id FROM accounts WHERE "AccountCode" = '5000';\r                                      +
+         SELECT "Id" INTO v_inventory_account_id FROM accounts WHERE "AccountCode" = '1300';\r                                 +
+         \r                                                                                                                    +
+         -- Determine debit account based on payment method\r                                                                  +
+         -- FIX: DEPOSIT sales should debit AR (which gets cleared by deposit application)\r                                   +
+         CASE NEW.payment_method::TEXT\r                                                                                       +
+             WHEN 'CASH' THEN v_debit_account_id := v_cash_account_id;\r                                                       +
+             WHEN 'CARD' THEN v_debit_account_id := v_credit_card_account_id;\r                                                +
+             WHEN 'CREDIT' THEN v_debit_account_id := v_ar_account_id;\r                                                       +
+             WHEN 'MOBILE_MONEY' THEN v_debit_account_id := v_cash_account_id;\r                                               +
+             WHEN 'DEPOSIT' THEN v_debit_account_id := v_ar_account_id; -- FIX: Debit AR, cleared by deposit app\r             +
+             ELSE v_debit_account_id := v_cash_account_id;\r                                                                   +
+         END CASE;\r                                                                                                           +
+         \r                                                                                                                    +
+         -- Generate transaction number\r                                                                                      +
+         v_transaction_number := COALESCE(\r                                                                                   +
+             (SELECT generate_ledger_transaction_number()),\r                                                                  +
+             'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || \r                                                               +
+             LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM '[0-9]+$') AS INTEGER)), 0) + 1 \r              +
+                   FROM ledger_transactions)::TEXT, 6, '0')\r                                                                  +
+         );\r                                                                                                                  +
+         v_transaction_id := gen_random_uuid();\r                                                                              +
+         \r                                                                                                                    +
+         -- Create ledger transaction\r                                                                                        +
+         INSERT INTO ledger_transactions (\r                                                                                   +
+             "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",\r                                   +
+             "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",\r                                      +
+             "Status", "CreatedAt", "UpdatedAt", "IsReversed"\r                                                                +
+         ) VALUES (\r                                                                                                          +
+             v_transaction_id,\r                                                                                               +
+             v_transaction_number,\r                                                                                           +
+             CURRENT_TIMESTAMP,\r                                                                                              +
+             'SALE',\r                                                                                                         +
+             NEW.id,\r                                                                                                         +
+             NEW.sale_number,\r                                                                                                +
+             'Sale: ' || NEW.sale_number,\r                                                                                    +
+             COALESCE(NEW.total_amount, 0) + COALESCE(NEW.total_cost, 0),\r                                                    +
+             COALESCE(NEW.total_amount, 0) + COALESCE(NEW.total_cost, 0),\r                                                    +
+             'POSTED',\r                                                                                                       +
+             CURRENT_TIMESTAMP,\r                                                                                              +
+             CURRENT_TIMESTAMP,\r                                                                                              +
+             FALSE\r                                                                                                           +
+         );\r                                                                                                                  +
+         \r                                                                                                                    +
+         -- Entry 1: DR Cash/Card/AR based on payment method\r                                                                 +
+         v_line_number := v_line_number + 1;\r                                                                                 +
+         INSERT INTO ledger_entries (\r                                                                                        +
+             "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",\r                                         +
+             "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",\r                                           +
+             "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"\r                                            +
+         ) VALUES (\r                                                                                                          +
+             gen_random_uuid(),\r                                                                                              +
+             v_transaction_id,\r                                                                                               +
+             v_transaction_id,\r                                                                                               +
+             v_debit_account_id,\r                                                                                             +
+             'DEBIT',\r                                                                                                        +
+             COALESCE(NEW.total_amount, 0),\r                                                                                  +
+             COALESCE(NEW.total_amount, 0),\r                                                                                  +
+             0,\r                                                                                                              +
+             CASE NEW.payment_method::TEXT \r                                                                                  +
+                 WHEN 'DEPOSIT' THEN 'DEPOSIT sale - A/R pending deposit application'\r                                        +
+                 ELSE 'Sale payment - ' || NEW.sale_number\r                                                                   +
+             END,\r                                                                                                            +
+             v_line_number,\r                                                                                                  +
+             'SALE',\r                                                                                                         +
+             NEW.id::TEXT,\r                                                                                                   +
+             CURRENT_TIMESTAMP,\r                                                                                              +
+             0,\r                                                                                                              +
+             CURRENT_TIMESTAMP\r                                                                                               +
+         );\r                                                                                                                  +
+         \r                                                                                                                    +
+         -- Update debit account balance (only for non-DEPOSIT - deposit app handles AR)\r                                     +
+         IF NEW.payment_method::TEXT != 'DEPOSIT' THEN\r                                                                       +
+             UPDATE accounts \r                                                                                                +
+             SET "CurrentBalance" = "CurrentBalance" + COALESCE(NEW.total_amount, 0),\r                                        +
+                 "UpdatedAt" = CURRENT_TIMESTAMP\r                                                                             +
+             WHERE "Id" = v_debit_account_id;\r                                                                                +
+         END IF;\r                                                                                                             +
+         -- Note: For DEPOSIT, the AR debit here nets with AR credit from deposit_application\r                                +
+         -- Net effect on AR = 0, which is correct\r                                                                           +
+         \r                                                                                                                    +
+         -- Entry 2: CR Sales Revenue\r                                                                                        +
+         v_line_number := v_line_number + 1;\r                                                                                 +
+         INSERT INTO ledger_entries (\r                                                                                        +
+             "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",\r                                         +
+             "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",\r                                           +
+             "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"\r                                            +
+         ) VALUES (\r                                                                                                          +
+             gen_random_uuid(),\r                                                                                              +
+             v_transaction_id,\r                                                                                               +
+             v_transaction_id,\r                                                                                               +
+             v_revenue_account_id,\r                                                                                           +
+             'CREDIT',\r                                                                                                       +
+             COALESCE(NEW.total_amount, 0),\r                                                                                  +
+             0,\r                                                                                                              +
+             COALESCE(NEW.total_amount, 0),\r                                                                                  +
+             'Sales revenue - ' || NEW.sale_number,\r                                                                          +
+             v_line_number,\r                                                                                                  +
+             'SALE',\r                                                                                                         +
+             NEW.id::TEXT,\r                                                                                                   +
+             CURRENT_TIMESTAMP,\r                                                                                              +
+             0,\r                                                                                                              +
+             CURRENT_TIMESTAMP\r                                                                                               +
+         );\r                                                                                                                  +
+         \r                                                                                                                    +
+         -- Update revenue account balance (credits increase revenue)\r                                                        +
+         UPDATE accounts \r                                                                                                    +
+         SET "CurrentBalance" = "CurrentBalance" + COALESCE(NEW.total_amount, 0),\r                                            +
+             "UpdatedAt" = CURRENT_TIMESTAMP\r                                                                                 +
+         WHERE "Id" = v_revenue_account_id;\r                                                                                  +
+         \r                                                                                                                    +
+         -- Entry 3: DR COGS (if there's cost)\r                                                                               +
+         IF COALESCE(NEW.total_cost, 0) > 0 THEN\r                                                                             +
+             v_line_number := v_line_number + 1;\r                                                                             +
+             INSERT INTO ledger_entries (\r                                                                                    +
+                 "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",\r                                     +
+                 "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",\r                                       +
+                 "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"\r                                        +
+             ) VALUES (\r                                                                                                      +
+                 gen_random_uuid(),\r                                                                                          +
+                 v_transaction_id,\r                                                                                           +
+                 v_transaction_id,\r                                                                                           +
+                 v_cogs_account_id,\r                                                                                          +
+                 'DEBIT',\r                                                                                                    +
+                 NEW.total_cost,\r                                                                                             +
+                 NEW.total_cost,\r                                                                                             +
+                 0,\r                                                                                                          +
+                 'Cost of goods sold - ' || NEW.sale_number,\r                                                                 +
+                 v_line_number,\r                                                                                              +
+                 'SALE',\r                                                                                                     +
+                 NEW.id::TEXT,\r                                                                                               +
+                 CURRENT_TIMESTAMP,\r                                                                                          +
+                 0,\r                                                                                                          +
+                 CURRENT_TIMESTAMP\r                                                                                           +
+             );\r                                                                                                              +
+             \r                                                                                                                +
+             -- Entry 4: CR Inventory\r                                                                                        +
+             v_line_number := v_line_number + 1;\r                                                                             +
+             INSERT INTO ledger_entries (\r                                                                                    +
+                 "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",\r                                     +
+                 "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",\r                                       +
+                 "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"\r                                        +
+             ) VALUES (\r                                                                                                      +
+                 gen_random_uuid(),\r                                                                                          +
+                 v_transaction_id,\r                                                                                           +
+                 v_transaction_id,\r                                                                                           +
+                 v_inventory_account_id,\r                                                                                     +
+                 'CREDIT',\r                                                                                                   +
+                 NEW.total_cost,\r                                                                                             +
+                 0,\r                                                                                                          +
+                 NEW.total_cost,\r                                                                                             +
+                 'Inventory reduction - ' || NEW.sale_number,\r                                                                +
+                 v_line_number,\r                                                                                              +
+                 'SALE',\r                                                                                                     +
+                 NEW.id::TEXT,\r                                                                                               +
+                 CURRENT_TIMESTAMP,\r                                                                                          +
+                 0,\r                                                                                                          +
+                 CURRENT_TIMESTAMP\r                                                                                           +
+             );\r                                                                                                              +
+             \r                                                                                                                +
+             -- Update COGS and Inventory balances\r                                                                           +
+             UPDATE accounts \r                                                                                                +
+             SET "CurrentBalance" = "CurrentBalance" + NEW.total_cost,\r                                                       +
+                 "UpdatedAt" = CURRENT_TIMESTAMP\r                                                                             +
+             WHERE "Id" = v_cogs_account_id;\r                                                                                 +
+             \r                                                                                                                +
+             UPDATE accounts \r                                                                                                +
+             SET "CurrentBalance" = "CurrentBalance" - NEW.total_cost,\r                                                       +
+                 "UpdatedAt" = CURRENT_TIMESTAMP\r                                                                             +
+             WHERE "Id" = v_inventory_account_id;\r                                                                            +
+         END IF;\r                                                                                                             +
+         \r                                                                                                                    +
+         RAISE NOTICE 'Posted sale % to ledger as % (payment: %)', NEW.sale_number, v_transaction_number, NEW.payment_method;\r+
+     END IF;\r                                                                                                                 +
+     \r                                                                                                                        +
+     RETURN NEW;\r                                                                                                             +
+ EXCEPTION\r                                                                                                                   +
+     WHEN OTHERS THEN\r                                                                                                        +
+         RAISE WARNING 'Sale GL posting failed: %', SQLERRM;\r                                                                 +
+         RETURN NEW;\r                                                                                                         +
+ END;\r                                                                                                                        +
+ $function$                                                                                                                    +
+ 
+(1 row)
+

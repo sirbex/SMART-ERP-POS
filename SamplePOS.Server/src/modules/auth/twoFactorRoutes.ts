@@ -1,0 +1,259 @@
+/**
+ * Two-Factor Authentication Routes
+ * 
+ * Endpoints for 2FA setup, verification, and management.
+ */
+
+import { Router, Request, Response } from 'express';
+import { authenticate, authorize, generateToken } from '../../middleware/auth.js';
+import * as twoFactorService from './twoFactorService.js';
+import { strictRateLimit } from '../../middleware/security.js';
+import logger from '../../utils/logger.js';
+import pool from '../../db/pool.js';
+
+const router = Router();
+
+/**
+ * GET /api/auth/2fa/status
+ * Get current 2FA status for the authenticated user
+ */
+router.get('/status', authenticate, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.id;
+        const status = await twoFactorService.get2FAStatus(userId);
+
+        res.json({
+            success: true,
+            data: status,
+        });
+    } catch (error) {
+        logger.error('Failed to get 2FA status', { error, userId: req.user?.id });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get 2FA status',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/2fa/setup
+ * Initialize 2FA setup - returns QR code and backup codes
+ */
+router.post('/setup', authenticate, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.id;
+        const email = req.user!.email;
+
+        const setupResult = await twoFactorService.setup2FA(userId, email);
+
+        res.json({
+            success: true,
+            data: {
+                qrCodeDataUrl: setupResult.qrCodeDataUrl,
+                backupCodes: setupResult.backupCodes,
+                // Don't return the secret directly for security
+                // User should scan QR code with authenticator app
+            },
+            message: 'Scan the QR code with your authenticator app, then verify with a code to enable 2FA',
+        });
+    } catch (error) {
+        logger.error('Failed to setup 2FA', { error, userId: req.user?.id });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to setup 2FA',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/2fa/verify-setup
+ * Verify 2FA setup with a token from authenticator app
+ */
+router.post('/verify-setup', authenticate, strictRateLimit, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.id;
+        const { token } = req.body;
+
+        if (!token || typeof token !== 'string' || token.length !== 6) {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid token. Please enter a 6-digit code from your authenticator app.',
+            });
+            return;
+        }
+
+        const verified = await twoFactorService.verify2FASetup(userId, token);
+
+        if (!verified) {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid verification code. Please try again.',
+            });
+            return;
+        }
+
+        res.json({
+            success: true,
+            message: '2FA has been enabled successfully. Please save your backup codes in a secure location.',
+        });
+    } catch (error) {
+        logger.error('Failed to verify 2FA setup', { error, userId: req.user?.id });
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to verify 2FA setup',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/2fa/verify
+ * Verify 2FA token during login (called after initial login)
+ * Returns JWT token on successful verification
+ */
+router.post('/verify', strictRateLimit, async (req: Request, res: Response) => {
+    try {
+        const { userId, token } = req.body;
+
+        if (!userId || !token) {
+            res.status(400).json({
+                success: false,
+                error: 'User ID and token are required',
+            });
+            return;
+        }
+
+        // Normalize token (remove spaces/dashes for backup codes)
+        const normalizedToken = token.toString().replace(/[\s-]/g, '');
+
+        const verified = await twoFactorService.verify2FALogin(userId, normalizedToken);
+
+        if (!verified) {
+            logger.warn('2FA verification failed', { userId, tokenLength: normalizedToken.length });
+            res.status(401).json({
+                success: false,
+                error: 'Invalid 2FA code. Please check your authenticator app and try again.',
+            });
+            return;
+        }
+
+        // Get user data to generate token
+        const userResult = await pool.query(
+            `SELECT id, email, full_name as "fullName", role, is_active as "isActive", 
+              created_at as "createdAt", updated_at as "updatedAt"
+       FROM users WHERE id = $1`,
+            [userId]
+        );
+
+        if (userResult.rows.length === 0) {
+            res.status(404).json({
+                success: false,
+                error: 'User not found',
+            });
+            return;
+        }
+
+        const user = userResult.rows[0];
+
+        // Generate JWT token after successful 2FA
+        const jwtToken = generateToken({
+            id: user.id,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+        });
+
+        logger.info('2FA login verified, token issued', { userId, email: user.email });
+
+        res.json({
+            success: true,
+            data: {
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    fullName: user.fullName,
+                    role: user.role,
+                    isActive: user.isActive,
+                    createdAt: user.createdAt,
+                    updatedAt: user.updatedAt,
+                },
+                token: jwtToken,
+            },
+            message: '2FA verification successful',
+        });
+    } catch (error) {
+        logger.error('Failed to verify 2FA', { error });
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to verify 2FA',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/2fa/disable
+ * Disable 2FA (requires current 2FA token)
+ */
+router.post('/disable', authenticate, strictRateLimit, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.id;
+        const { token } = req.body;
+
+        if (!token) {
+            res.status(400).json({
+                success: false,
+                error: 'Current 2FA token is required to disable 2FA',
+            });
+            return;
+        }
+
+        await twoFactorService.disable2FA(userId, token);
+
+        res.json({
+            success: true,
+            message: '2FA has been disabled',
+        });
+    } catch (error) {
+        logger.error('Failed to disable 2FA', { error, userId: req.user?.id });
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to disable 2FA',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/2fa/regenerate-backup-codes
+ * Regenerate backup codes (requires current 2FA token)
+ */
+router.post('/regenerate-backup-codes', authenticate, strictRateLimit, async (req: Request, res: Response) => {
+    try {
+        const userId = req.user!.id;
+        const { token } = req.body;
+
+        if (!token) {
+            res.status(400).json({
+                success: false,
+                error: '2FA token is required',
+            });
+            return;
+        }
+
+        const newBackupCodes = await twoFactorService.regenerateBackupCodes(userId, token);
+
+        res.json({
+            success: true,
+            data: {
+                backupCodes: newBackupCodes,
+            },
+            message: 'New backup codes generated. Please save them in a secure location.',
+        });
+    } catch (error) {
+        logger.error('Failed to regenerate backup codes', { error, userId: req.user?.id });
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to regenerate backup codes',
+        });
+    }
+});
+
+export default router;

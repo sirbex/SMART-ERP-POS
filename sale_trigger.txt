@@ -1,0 +1,156 @@
+                                                        prosrc                                                        
+----------------------------------------------------------------------------------------------------------------------
+ \r                                                                                                                  +
+ DECLARE\r                                                                                                           +
+     v_transaction_id UUID;\r                                                                                        +
+     v_transaction_number TEXT;\r                                                                                    +
+     v_debit_account_id UUID;\r                                                                                      +
+     v_revenue_account_id UUID;\r                                                                                    +
+     v_service_revenue_account_id UUID;\r                                                                            +
+     v_cogs_account_id UUID;\r                                                                                       +
+     v_inventory_account_id UUID;\r                                                                                  +
+     v_line_number INTEGER := 0;\r                                                                                   +
+     v_inventory_revenue NUMERIC := 0;\r                                                                             +
+     v_service_revenue NUMERIC := 0;\r                                                                               +
+     v_inventory_cost NUMERIC := 0;\r                                                                                +
+     v_sale_items_count INTEGER := 0;\r                                                                              +
+ BEGIN\r                                                                                                             +
+     -- Only post if status is COMPLETED\r                                                                           +
+     IF NEW.status != 'COMPLETED' THEN\r                                                                             +
+         RETURN NEW;\r                                                                                               +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     -- **FIX: Check if sale_items exist - don't post without items**\r                                              +
+     SELECT COUNT(*) INTO v_sale_items_count FROM sale_items WHERE sale_id = NEW.id;\r                               +
+     \r                                                                                                              +
+     IF v_sale_items_count = 0 THEN\r                                                                                +
+         RAISE NOTICE 'Sale % has no items yet - skipping GL posting until items are added', NEW.sale_number;\r      +
+         RETURN NEW;\r                                                                                               +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     -- Prevent duplicate postings using idempotency check\r                                                         +
+     IF EXISTS (SELECT 1 FROM ledger_transactions \r                                                                 +
+                WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = NEW.id) THEN\r                                    +
+         RAISE NOTICE 'Sale % already posted to ledger - skipping duplicate', NEW.sale_number;\r                     +
+         RETURN NEW;\r                                                                                               +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     -- Get account IDs\r                                                                                            +
+     SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1010'; -- Cash\r                       +
+     SELECT "Id" INTO v_revenue_account_id FROM accounts WHERE "AccountCode" = '4000'; -- Sales Revenue (inventory)\r+
+     SELECT "Id" INTO v_service_revenue_account_id FROM accounts WHERE "AccountCode" = '4100'; -- Service Revenue\r  +
+     SELECT "Id" INTO v_cogs_account_id FROM accounts WHERE "AccountCode" = '5000'; -- COGS\r                        +
+     SELECT "Id" INTO v_inventory_account_id FROM accounts WHERE "AccountCode" = '1300'; -- Inventory\r              +
+     \r                                                                                                              +
+     IF v_debit_account_id IS NULL OR v_revenue_account_id IS NULL OR v_service_revenue_account_id IS NULL THEN\r    +
+         RAISE EXCEPTION 'Required GL accounts not found (1010, 4000, 4100)';\r                                      +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     -- CALCULATE REVENUE AND COST SPLIT BY PRODUCT TYPE\r                                                           +
+     SELECT \r                                                                                                       +
+         COALESCE(SUM(CASE WHEN is_service = false THEN total_price ELSE 0 END), 0),\r                               +
+         COALESCE(SUM(CASE WHEN is_service = true THEN total_price ELSE 0 END), 0),\r                                +
+         COALESCE(SUM(CASE WHEN is_service = false THEN unit_cost * quantity ELSE 0 END), 0)\r                       +
+     INTO v_inventory_revenue, v_service_revenue, v_inventory_cost\r                                                 +
+     FROM sale_items\r                                                                                               +
+     WHERE sale_id = NEW.id;\r                                                                                       +
+     \r                                                                                                              +
+     RAISE NOTICE 'Posted sale % to ledger: inventory_rev=%, service_rev=%, cogs=%', \r                              +
+         NEW.sale_number, v_inventory_revenue, v_service_revenue, v_inventory_cost;\r                                +
+     \r                                                                                                              +
+     -- Generate transaction number\r                                                                                +
+     v_transaction_number := generate_ledger_transaction_number();\r                                                 +
+     v_transaction_id := gen_random_uuid();\r                                                                        +
+     \r                                                                                                              +
+     -- Create ledger transaction\r                                                                                  +
+     INSERT INTO ledger_transactions (\r                                                                             +
+         "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",\r                             +
+         "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",\r                                +
+         "Status", "CreatedAt", "UpdatedAt", "IsReversed"\r                                                          +
+     ) VALUES (\r                                                                                                    +
+         v_transaction_id,\r                                                                                         +
+         v_transaction_number,\r                                                                                     +
+         COALESCE(NEW.sale_date, CURRENT_DATE),\r                                                                    +
+         'SALE',\r                                                                                                   +
+         NEW.id,\r                                                                                                   +
+         NEW.sale_number,\r                                                                                          +
+         'Sale: ' || NEW.sale_number,\r                                                                              +
+         COALESCE(NEW.total_amount, 0) + v_inventory_cost,\r                                                         +
+         COALESCE(NEW.total_amount, 0) + v_inventory_cost,\r                                                         +
+         'POSTED',\r                                                                                                 +
+         CURRENT_TIMESTAMP,\r                                                                                        +
+         CURRENT_TIMESTAMP,\r                                                                                        +
+         FALSE\r                                                                                                     +
+     );\r                                                                                                            +
+     \r                                                                                                              +
+     -- DEBIT: Cash/AR (depending on payment method)\r                                                               +
+     v_line_number := v_line_number + 1;\r                                                                           +
+     INSERT INTO ledger_entries (\r                                                                                  +
+         "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", \r                                 +
+         "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"\r                          +
+     ) VALUES (\r                                                                                                    +
+         gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_debit_account_id,\r                 +
+         COALESCE(NEW.total_amount, 0), 0,\r                                                                         +
+         'Cash received from sale ' || NEW.sale_number,\r                                                            +
+         'DEBIT', COALESCE(NEW.total_amount, 0), CURRENT_TIMESTAMP\r                                                 +
+     );\r                                                                                                            +
+     \r                                                                                                              +
+     -- CREDIT: Sales Revenue (Inventory items only) - Account 4000\r                                                +
+     IF v_inventory_revenue > 0 THEN\r                                                                               +
+         v_line_number := v_line_number + 1;\r                                                                       +
+         INSERT INTO ledger_entries (\r                                                                              +
+             "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", \r                             +
+             "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"\r                      +
+         ) VALUES (\r                                                                                                +
+             gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_revenue_account_id,\r           +
+             0, v_inventory_revenue,\r                                                                               +
+             'Revenue from inventory sale ' || NEW.sale_number,\r                                                    +
+             'CREDIT', v_inventory_revenue, CURRENT_TIMESTAMP\r                                                      +
+         );\r                                                                                                        +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     -- CREDIT: Service Revenue (Service items only) - Account 4100\r                                                +
+     IF v_service_revenue > 0 THEN\r                                                                                 +
+         v_line_number := v_line_number + 1;\r                                                                       +
+         INSERT INTO ledger_entries (\r                                                                              +
+             "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", \r                             +
+             "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"\r                      +
+         ) VALUES (\r                                                                                                +
+             gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_service_revenue_account_id,\r   +
+             0, v_service_revenue,\r                                                                                 +
+             'Revenue from service sale ' || NEW.sale_number,\r                                                      +
+             'CREDIT', v_service_revenue, CURRENT_TIMESTAMP\r                                                        +
+         );\r                                                                                                        +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     -- DEBIT: COGS (Inventory items only, NOT service items)\r                                                      +
+     -- CREDIT: Inventory (Inventory items only, NOT service items)\r                                                +
+     IF v_inventory_cost > 0 THEN\r                                                                                  +
+         v_line_number := v_line_number + 1;\r                                                                       +
+         INSERT INTO ledger_entries (\r                                                                              +
+             "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", \r                             +
+             "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"\r                      +
+         ) VALUES (\r                                                                                                +
+             gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_cogs_account_id,\r              +
+             v_inventory_cost, 0,\r                                                                                  +
+             'Cost of goods sold - ' || NEW.sale_number,\r                                                           +
+             'DEBIT', v_inventory_cost, CURRENT_TIMESTAMP\r                                                          +
+         );\r                                                                                                        +
+         \r                                                                                                          +
+         v_line_number := v_line_number + 1;\r                                                                       +
+         INSERT INTO ledger_entries (\r                                                                              +
+             "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", \r                             +
+             "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"\r                      +
+         ) VALUES (\r                                                                                                +
+             gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_inventory_account_id,\r         +
+             0, v_inventory_cost,\r                                                                                  +
+             'Inventory reduction - ' || NEW.sale_number,\r                                                          +
+             'CREDIT', v_inventory_cost, CURRENT_TIMESTAMP\r                                                         +
+         );\r                                                                                                        +
+     END IF;\r                                                                                                       +
+     \r                                                                                                              +
+     RETURN NEW;\r                                                                                                   +
+ END;\r                                                                                                              +
+ 
+(1 row)
+

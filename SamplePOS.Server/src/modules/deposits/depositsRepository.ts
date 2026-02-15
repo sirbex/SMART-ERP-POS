@@ -1,0 +1,404 @@
+/**
+ * Deposits Repository - Raw SQL queries for customer deposits
+ * Part of the SamplePOS hybrid architecture (Node.js managed deposits)
+ */
+
+import { Pool, PoolClient } from 'pg';
+import Decimal from 'decimal.js';
+
+// Type for either a Pool or PoolClient - allows reuse in transactions
+type DbConnection = Pool | PoolClient;
+
+export interface DepositDbRow {
+    id: string;
+    deposit_number: string;
+    customer_id: string;
+    amount: string;
+    amount_used: string;
+    amount_available: string;
+    payment_method: string;
+    reference: string | null;
+    notes: string | null;
+    status: 'ACTIVE' | 'DEPLETED' | 'REFUNDED' | 'CANCELLED';
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+    customer_name?: string;
+}
+
+export interface DepositApplicationDbRow {
+    id: string;
+    deposit_id: string;
+    sale_id: string;
+    amount_applied: string;
+    applied_at: string;
+    applied_by: string | null;
+    deposit_number?: string;
+    sale_number?: string;
+}
+
+export interface CustomerDepositSummary {
+    customer_id: string;
+    customer_name: string;
+    available_deposit_balance: string;
+    total_deposits: string;
+    total_deposits_used: string;
+    active_deposit_count: number;
+}
+
+export interface CreateDepositInput {
+    customerId: string;
+    amount: number;
+    paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER';
+    reference?: string;
+    notes?: string;
+    createdBy?: string;
+}
+
+export interface ApplyDepositInput {
+    depositId: string;
+    saleId: string;
+    amount: number;
+    appliedBy?: string;
+}
+
+/**
+ * Create a new customer deposit
+ */
+export async function createDeposit(
+    pool: Pool,
+    input: CreateDepositInput
+): Promise<DepositDbRow> {
+    const result = await pool.query<DepositDbRow>(
+        `INSERT INTO pos_customer_deposits 
+     (customer_id, amount, amount_available, payment_method, reference, notes, created_by)
+     VALUES ($1, $2, $2, $3, $4, $5, $6)
+     RETURNING *`,
+        [
+            input.customerId,
+            input.amount,
+            input.paymentMethod,
+            input.reference || null,
+            input.notes || null,
+            input.createdBy || null
+        ]
+    );
+    return result.rows[0];
+}
+
+/**
+ * Get deposit by ID
+ */
+export async function getDepositById(
+    pool: Pool,
+    depositId: string
+): Promise<DepositDbRow | null> {
+    const result = await pool.query<DepositDbRow>(
+        `SELECT d.*, c.name as customer_name
+     FROM pos_customer_deposits d
+     JOIN customers c ON d.customer_id = c.id
+     WHERE d.id = $1`,
+        [depositId]
+    );
+    return result.rows[0] || null;
+}
+
+/**
+ * Get deposits by customer ID
+ */
+export async function getDepositsByCustomer(
+    pool: Pool,
+    customerId: string,
+    status?: 'ACTIVE' | 'DEPLETED' | 'REFUNDED' | 'CANCELLED'
+): Promise<DepositDbRow[]> {
+    let query = `
+    SELECT d.*, c.name as customer_name
+    FROM pos_customer_deposits d
+    JOIN customers c ON d.customer_id = c.id
+    WHERE d.customer_id = $1
+  `;
+    const params: any[] = [customerId];
+
+    if (status) {
+        query += ` AND d.status = $2`;
+        params.push(status);
+    }
+
+    query += ` ORDER BY d.created_at DESC`;
+
+    const result = await pool.query<DepositDbRow>(query, params);
+    return result.rows;
+}
+
+/**
+ * Get all active deposits with available balance for a customer
+ * Uses FIFO order (oldest deposits first)
+ */
+export async function getActiveDepositsForCustomer(
+    dbConn: DbConnection,
+    customerId: string
+): Promise<DepositDbRow[]> {
+    const result = await dbConn.query<DepositDbRow>(
+        `SELECT d.*, c.name as customer_name
+     FROM pos_customer_deposits d
+     JOIN customers c ON d.customer_id = c.id
+     WHERE d.customer_id = $1 
+       AND d.status = 'ACTIVE'
+       AND d.amount_available > 0
+     ORDER BY d.created_at ASC`,
+        [customerId]
+    );
+    return result.rows;
+}
+
+/**
+ * Get customer deposit summary (available balance)
+ */
+export async function getCustomerDepositSummary(
+    pool: Pool,
+    customerId: string
+): Promise<CustomerDepositSummary | null> {
+    const result = await pool.query<CustomerDepositSummary>(
+        `SELECT * FROM customer_deposit_summary WHERE customer_id = $1`,
+        [customerId]
+    );
+    return result.rows[0] || null;
+}
+
+/**
+ * Apply deposit to a sale (uses deposit funds)
+ * If a PoolClient is passed, it's assumed to be in an existing transaction
+ * If a Pool is passed, a new transaction is created
+ */
+export async function applyDepositToSale(
+    dbConn: DbConnection,
+    input: ApplyDepositInput
+): Promise<DepositApplicationDbRow> {
+    // Check if we're in an existing transaction (PoolClient) or need our own (Pool)
+    // Pool has 'connect' method, PoolClient does not
+    const isPool = 'connect' in dbConn && typeof (dbConn as Pool).connect === 'function';
+
+    if (!isPool) {
+        // Use the provided client directly (already in transaction)
+        return applyDepositToSaleWithClient(dbConn as PoolClient, input);
+    }
+
+    // Create our own transaction
+    const client = await (dbConn as Pool).connect();
+    try {
+        await client.query('BEGIN');
+        const result = await applyDepositToSaleWithClient(client, input);
+        await client.query('COMMIT');
+        return result;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Apply deposit to a sale using an existing transaction client
+ * Use this when calling from within an existing transaction
+ */
+export async function applyDepositToSaleInTransaction(
+    client: PoolClient,
+    input: ApplyDepositInput
+): Promise<DepositApplicationDbRow> {
+    // Lock the deposit row to prevent race conditions
+    const depositResult = await client.query<DepositDbRow>(
+        `SELECT * FROM pos_customer_deposits 
+     WHERE id = $1 AND status = 'ACTIVE'
+     FOR UPDATE`,
+        [input.depositId]
+    );
+
+    if (depositResult.rows.length === 0) {
+        throw new Error('Deposit not found or not active');
+    }
+
+    const deposit = depositResult.rows[0];
+    const available = new Decimal(deposit.amount_available);
+    const amountToApply = new Decimal(input.amount);
+
+    if (amountToApply.greaterThan(available)) {
+        throw new Error(`Insufficient deposit balance. Available: ${available.toFixed(2)}, Requested: ${amountToApply.toFixed(2)}`);
+    }
+
+    // Create application record
+    const applicationResult = await client.query<DepositApplicationDbRow>(
+        `INSERT INTO pos_deposit_applications 
+     (deposit_id, sale_id, amount_applied, applied_by)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+        [input.depositId, input.saleId, input.amount, input.appliedBy || null]
+    );
+
+    // Update deposit used amount (trigger will update available and status)
+    const newUsed = new Decimal(deposit.amount_used).plus(amountToApply);
+    await client.query(
+        `UPDATE pos_customer_deposits 
+     SET amount_used = $1
+     WHERE id = $2`,
+        [newUsed.toFixed(2), input.depositId]
+    );
+
+    return applicationResult.rows[0];
+}
+
+/**
+ * Internal function to apply deposit within a transaction client
+ */
+async function applyDepositToSaleWithClient(
+    client: PoolClient,
+    input: ApplyDepositInput
+): Promise<DepositApplicationDbRow> {
+    return applyDepositToSaleInTransaction(client, input);
+}
+
+/**
+ * Reverse a deposit application (e.g., when voiding a sale)
+ */
+export async function reverseDepositApplication(
+    pool: Pool,
+    applicationId: string
+): Promise<void> {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // Get the application
+        const appResult = await client.query<DepositApplicationDbRow>(
+            `SELECT * FROM pos_deposit_applications WHERE id = $1`,
+            [applicationId]
+        );
+
+        if (appResult.rows.length === 0) {
+            throw new Error('Deposit application not found');
+        }
+
+        const application = appResult.rows[0];
+
+        // Lock and update the deposit
+        await client.query(
+            `UPDATE pos_customer_deposits 
+       SET amount_used = amount_used - $1
+       WHERE id = $2`,
+            [application.amount_applied, application.deposit_id]
+        );
+
+        // Delete the application record
+        await client.query(
+            `DELETE FROM pos_deposit_applications WHERE id = $1`,
+            [applicationId]
+        );
+
+        await client.query('COMMIT');
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Get deposit applications for a sale
+ */
+export async function getDepositApplicationsBySale(
+    pool: Pool,
+    saleId: string
+): Promise<DepositApplicationDbRow[]> {
+    const result = await pool.query<DepositApplicationDbRow>(
+        `SELECT a.*, d.deposit_number, s.sale_number
+     FROM pos_deposit_applications a
+     JOIN pos_customer_deposits d ON a.deposit_id = d.id
+     JOIN sales s ON a.sale_id = s.id
+     WHERE a.sale_id = $1
+     ORDER BY a.applied_at`,
+        [saleId]
+    );
+    return result.rows;
+}
+
+/**
+ * Get all deposits with pagination
+ */
+export async function getAllDeposits(
+    pool: Pool,
+    options: {
+        page?: number;
+        limit?: number;
+        status?: string;
+        customerId?: string;
+    } = {}
+): Promise<{ deposits: DepositDbRow[]; total: number }> {
+    const page = options.page || 1;
+    const limit = options.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let whereClause = 'WHERE 1=1';
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (options.status) {
+        whereClause += ` AND d.status = $${paramIndex++}`;
+        params.push(options.status);
+    }
+
+    if (options.customerId) {
+        whereClause += ` AND d.customer_id = $${paramIndex++}`;
+        params.push(options.customerId);
+    }
+
+    // Get total count
+    const countResult = await pool.query(
+        `SELECT COUNT(*) FROM pos_customer_deposits d ${whereClause}`,
+        params
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    // Get deposits with pagination
+    const depositsResult = await pool.query<DepositDbRow>(
+        `SELECT d.*, c.name as customer_name
+     FROM pos_customer_deposits d
+     JOIN customers c ON d.customer_id = c.id
+     ${whereClause}
+     ORDER BY d.created_at DESC
+     LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+        [...params, limit, offset]
+    );
+
+    return {
+        deposits: depositsResult.rows,
+        total
+    };
+}
+
+/**
+ * Refund a deposit (mark as refunded and restore to customer)
+ */
+export async function refundDeposit(
+    pool: Pool,
+    depositId: string,
+    reason?: string
+): Promise<DepositDbRow> {
+    const result = await pool.query<DepositDbRow>(
+        `UPDATE pos_customer_deposits 
+     SET status = 'REFUNDED',
+         notes = COALESCE(notes || ' | ', '') || 'REFUNDED: ' || COALESCE($2, 'No reason provided'),
+         updated_at = NOW()
+     WHERE id = $1 AND status = 'ACTIVE'
+     RETURNING *`,
+        [depositId, reason || null]
+    );
+
+    if (result.rows.length === 0) {
+        throw new Error('Deposit not found or not refundable');
+    }
+
+    return result.rows[0];
+}
