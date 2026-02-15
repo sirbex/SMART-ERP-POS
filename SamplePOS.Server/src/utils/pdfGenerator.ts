@@ -291,8 +291,8 @@ export class ReportPDFGenerator {
       const centerX = this.pageWidth / 2;
 
       // Draw text without triggering pagination - use _fragment directly
-      this.doc._fragment(pageText, centerX - pageTextWidth / 2, this.doc.page.height - 40, {});
-      this.doc._fragment(companyText, centerX - companyTextWidth / 2, this.doc.page.height - 28, {});
+      (this.doc as any)._fragment(pageText, centerX - pageTextWidth / 2, this.doc.page.height - 40, {});
+      (this.doc as any)._fragment(companyText, centerX - companyTextWidth / 2, this.doc.page.height - 28, {});
 
       // Restore graphics state
       this.doc.restore();

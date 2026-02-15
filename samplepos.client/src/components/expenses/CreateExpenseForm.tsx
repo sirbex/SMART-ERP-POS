@@ -13,14 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { DatePicker } from '@/components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
-import { Loader2, Receipt, FileText, DollarSign, Calendar, User, Wallet } from 'lucide-react';
+import { Loader2, Receipt, FileText } from 'lucide-react';
 import { toast } from 'sonner';
-
-// Payment status options
-const PAYMENT_STATUSES = {
-  UNPAID: 'Unpaid (Create Liability)',
-  PAID: 'Paid (Deduct from Account)'
-} as const;
 
 interface CreateExpenseFormProps {
   onSuccess?: (expense: any) => void;

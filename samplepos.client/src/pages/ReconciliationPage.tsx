@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 import {

@@ -152,7 +152,6 @@ export const reportsController = {
           title: 'Inventory Valuation Report',
           subtitle: `As of ${asOfDate} - Valuation Method: ${method}`,
           generatedAt: formatDateTime(),
-          companyName,
         });
 
         pdfGen.addSummaryCards([
@@ -548,9 +547,9 @@ export const reportsController = {
 
         pdfGen.addSummaryCards([
           { label: 'Total Suppliers', value: String(report.summary.totalSuppliers || 0), color: PDFColors.primary },
-          { label: 'Total Purchases', value: formatCurrencyPDF(report.summary.totalPurchases || 0), color: PDFColors.success },
-          { label: 'Total Orders', value: String(report.summary.totalOrders || 0), color: PDFColors.info },
-          { label: 'Avg Order Value', value: formatCurrencyPDF(report.summary.avgOrderValue || 0), color: PDFColors.secondary },
+          { label: 'Total Purchase Value', value: formatCurrencyPDF(report.summary.totalPurchaseValue || 0), color: PDFColors.success },
+          { label: 'Total Orders', value: String(report.summary.totalPurchaseOrders || 0), color: PDFColors.info },
+          { label: 'Avg Order Value', value: formatCurrencyPDF(report.summary.totalPurchaseOrders ? (report.summary.totalPurchaseValue || 0) / report.summary.totalPurchaseOrders : 0), color: PDFColors.secondary },
         ]);
 
         const columns: PDFTableColumn[] = [
@@ -935,9 +934,7 @@ export const reportsController = {
         });
 
         pdfGen.addSummaryCards([
-          { label: 'Total Deleted', value: String(report.summary.totalDeleted || 0), color: PDFColors.danger },
-          { label: 'Total Value Lost', value: formatCurrencyPDF(report.summary.totalValueLost || 0), color: PDFColors.warning },
-          { label: 'Unique Products', value: String(report.summary.uniqueProducts || 0), color: PDFColors.info },
+          { label: 'Total Deleted Items', value: String(report.summary.totalDeletedItems || 0), color: PDFColors.danger },
         ]);
 
         const columns: PDFTableColumn[] = [
@@ -1012,9 +1009,9 @@ export const reportsController = {
 
         pdfGen.addSummaryCards([
           { label: 'Total Adjustments', value: String(report.summary.totalAdjustments || 0), color: PDFColors.primary },
-          { label: 'Qty Increased', value: String(report.summary.totalIncreased || 0), color: PDFColors.success },
-          { label: 'Qty Decreased', value: String(report.summary.totalDecreased || 0), color: PDFColors.danger },
-          { label: 'Net Change', value: String(report.summary.netChange || 0), color: PDFColors.info },
+          { label: 'Qty Increased', value: String(report.summary.totalAdjustmentsIn || 0), color: PDFColors.success },
+          { label: 'Qty Decreased', value: String(report.summary.totalAdjustmentsOut || 0), color: PDFColors.danger },
+          { label: 'Net Change', value: String((report.summary.totalAdjustmentsIn || 0) - (report.summary.totalAdjustmentsOut || 0)), color: PDFColors.info },
         ]);
 
         const columns: PDFTableColumn[] = [
@@ -1336,7 +1333,7 @@ export const reportsController = {
 
         pdfGen.addSummaryCards([
           { label: 'Products', value: String(report.summary.totalProducts || 0), color: PDFColors.primary },
-          { label: 'Avg Margin', value: `${(report.summary.avgMargin || 0).toFixed(1)}%`, color: PDFColors.success },
+          { label: 'Avg Margin', value: `${(report.summary.averageMarginPercent || 0).toFixed(1)}%`, color: PDFColors.success },
           { label: 'Total Revenue', value: formatCurrencyPDF(report.summary.totalRevenue || 0), color: PDFColors.info },
           { label: 'Total Profit', value: formatCurrencyPDF(report.summary.totalProfit || 0), color: PDFColors.secondary },
         ]);
@@ -1847,10 +1844,10 @@ export const reportsController = {
         });
 
         pdfGen.addSummaryCards([
-          { label: 'Products to Reorder', value: String(report.summary.totalProducts), color: PDFColors.warning },
+          { label: 'Products to Reorder', value: String(report.summary.totalProductsNeedingReorder), color: PDFColors.warning },
           { label: 'Urgent Items', value: String(report.summary.urgentCount), color: PDFColors.danger },
-          { label: 'Est. Order Value', value: formatCurrencyPDF(report.summary.estimatedTotalOrderCost), color: PDFColors.primary },
-          { label: 'High Priority', value: String(report.summary.highPriorityCount), color: PDFColors.info },
+          { label: 'Est. Order Value', value: formatCurrencyPDF(report.summary.totalEstimatedCost), color: PDFColors.primary },
+          { label: 'High Priority', value: String(report.summary.highCount), color: PDFColors.info },
         ]);
 
         const columns: PDFTableColumn[] = [
@@ -2248,9 +2245,9 @@ export const reportsController = {
 
         pdfGen.addSummaryCards([
           { label: 'Peak Hour', value: String(report.summary.peakHour || 'N/A'), color: PDFColors.primary },
-          { label: 'Peak Revenue', value: formatCurrencyPDF(report.summary.peakRevenue || 0), color: PDFColors.success },
+          { label: 'Peak Revenue', value: formatCurrencyPDF(report.summary.peakHourRevenue || 0), color: PDFColors.success },
           { label: 'Total Revenue', value: formatCurrencyPDF(report.summary.totalRevenue || 0), color: PDFColors.info },
-          { label: 'Avg/Hour', value: formatCurrencyPDF(report.summary.avgHourlyRevenue || 0), color: PDFColors.secondary },
+          { label: 'Avg/Hour', value: formatCurrencyPDF(report.summary.totalHours ? (report.summary.totalRevenue || 0) / report.summary.totalHours : 0), color: PDFColors.secondary },
         ]);
 
         const columns: PDFTableColumn[] = [
@@ -2388,7 +2385,7 @@ export const reportsController = {
 
         const startDate = formatDatePDF(new Date(params.start_date));
         const endDate = formatDatePDF(new Date(params.end_date));
-        const customerName = report.data?.customer?.name || 'Unknown Customer';
+        const customerName = (Array.isArray(report.data) && report.data.length > 0) ? (report.data[0]?.customerName || params.customer_id) : params.customer_id;
 
         pdfGen.addHeader({
           companyName,
@@ -2400,8 +2397,8 @@ export const reportsController = {
         pdfGen.addSummaryCards([
           { label: 'Total Purchases', value: String(report.summary.totalPurchases || 0), color: PDFColors.primary },
           { label: 'Total Spent', value: formatCurrencyPDF(report.summary.totalSpent || 0), color: PDFColors.success },
-          { label: 'Avg Order', value: formatCurrencyPDF(report.summary.avgOrderValue || 0), color: PDFColors.info },
-          { label: 'Items Purchased', value: String(report.summary.totalItems || 0), color: PDFColors.secondary },
+          { label: 'Avg Order', value: formatCurrencyPDF(report.summary.averagePurchaseValue || 0), color: PDFColors.info },
+          { label: 'Outstanding', value: formatCurrencyPDF(report.summary.totalOutstanding || 0), color: PDFColors.secondary },
         ]);
 
         const columns: PDFTableColumn[] = [
@@ -2414,7 +2411,7 @@ export const reportsController = {
           { header: 'Status', key: 'status', width: 0.14 },
         ];
 
-        pdfGen.addTable(columns, report.data?.purchases || []);
+        pdfGen.addTable(columns, report.data || []);
         pdfGen.end();
         return;
       }

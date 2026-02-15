@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && cp -r src/public dist/ 2>/dev/null || true",
-    "build:prod": "rm -rf dist && tsc --build --verbose && cp -r src/public dist/ 2>/dev/null || true",
+    "build": "tsc && shx cp -r src/public dist/ || echo 'no public dir'",
+    "build:prod": "shx rm -rf dist && tsc --build --verbose && shx cp -r src/public dist/ || echo 'no public dir'",
     "start": "node dist/server.js",
     "start:prod": "NODE_ENV=production node dist/server.js",
     "lint": "eslint .",
@@ -86,6 +86,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "jest": "^30.2.0",
     "prettier": "^3.6.2",
+    "shx": "^0.4.0",
     "supertest": "^7.1.4",
     "ts-jest": "^29.4.5",
     "tsx": "^4.21.0",
