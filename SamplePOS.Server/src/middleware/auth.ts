@@ -13,6 +13,8 @@ interface JwtPayload {
   userId: string;
   username?: string;
   role: UserRole;
+  tenantId?: string;
+  tenantSlug?: string;
   iat?: number;
   exp?: number;
 }
@@ -28,6 +30,8 @@ declare global {
         email: string;
         fullName: string;
         role: UserRole;
+        tenantId?: string;
+        tenantSlug?: string;
       };
       tokenPayload?: JwtPayload;
     }
@@ -87,7 +91,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       id: userRow.id,
       email: userRow.email,
       fullName: userRow.fullName,
-      role: userRow.role as UserRole
+      role: userRow.role as UserRole,
+      tenantId: payload.tenantId,
+      tenantSlug: payload.tenantSlug,
     };
 
     next();
@@ -170,13 +176,19 @@ export function generateToken(user: {
   email: string;
   fullName: string;
   role: UserRole;
+  tenantId?: string;
+  tenantSlug?: string;
 }): string {
-  const payload = {
+  const payload: Record<string, unknown> = {
     userId: user.id,
     email: user.email,
     fullName: user.fullName,
     role: user.role,
   };
+
+  // Include tenant context if available (multi-tenant mode)
+  if (user.tenantId) payload.tenantId = user.tenantId;
+  if (user.tenantSlug) payload.tenantSlug = user.tenantSlug;
 
   // @ts-ignore - JWT types are overly strict, expiresIn accepts string
   return jwt.sign(payload, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '24h' });

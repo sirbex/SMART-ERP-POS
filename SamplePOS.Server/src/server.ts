@@ -46,6 +46,10 @@ import { cashRegisterRoutes } from './modules/cash-register/index.js';
 import pool from './db/pool.js';
 import { auditContextMiddleware } from './middleware/auditContext.js';
 import { createRbacRoutes, initializeRbacMiddleware } from './rbac/index.js';
+import { platformRoutes } from './modules/platform/platformRoutes.js';
+import { syncRoutes } from './modules/platform/syncRoutes.js';
+import { tenantMiddleware } from './middleware/tenantMiddleware.js';
+import { connectionManager } from './db/connectionManager.js';
 
 // All modules now use consistent named exports for maintainability
 
@@ -93,6 +97,9 @@ app.use((req, res, next) => {
 // Should be after auth middleware to get user info
 app.use(auditContextMiddleware);
 
+// Multi-tenant middleware (resolves tenant from JWT/header/subdomain → attaches pool)
+app.use(tenantMiddleware);
+
 // ============================================================
 // ROUTES
 // ============================================================
@@ -126,6 +133,13 @@ app.get('/health', async (req, res) => {
 });
 
 // API routes
+
+// Platform routes (super admin — tenant management, no tenant middleware needed)
+app.use('/api/platform', platformRoutes);
+
+// Sync routes (edge node ↔ cloud synchronization)
+app.use('/api/sync', syncRoutes);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/accounting', accountingRoutes);  // Move accounting routes early to avoid interference
 app.use('/api/accounting/comprehensive', comprehensiveAccountingRoutes);  // Comprehensive accounting features
@@ -223,6 +237,7 @@ async function startServer() {
       console.log('   - Supplier Payments (/api/supplier-payments)');
       console.log('   - Banking (/api/banking)');
       console.log('   - RBAC (/api/rbac)');
+      console.log('   - Platform (/api/platform)');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
 
@@ -243,6 +258,17 @@ async function startServer() {
       logger.error('Unhandled rejection:', { reason, promise });
       console.error('Unhandled rejection:', reason);
     });
+
+    // Graceful shutdown
+    const shutdown = async (signal: string) => {
+      logger.info(`Received ${signal}, shutting down gracefully...`);
+      server.close(async () => {
+        await connectionManager.shutdown();
+        process.exit(0);
+      });
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 
   } catch (error) {
     logger.error('Failed to start server', { error });

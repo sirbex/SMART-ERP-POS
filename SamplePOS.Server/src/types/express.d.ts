@@ -1,5 +1,7 @@
-// Express type extensions for authentication
+// Express type extensions for authentication and multi-tenancy
 import type { UserRole } from '../../../shared/zod/user.js';
+import type { Pool } from 'pg';
+import type { Tenant } from '../../../shared/types/tenant.js';
 
 declare global {
   namespace Express {
@@ -9,7 +11,16 @@ declare global {
         email: string;
         fullName: string;
         role: UserRole;
+        tenantId?: string;
+        tenantSlug?: string;
       };
+      // Multi-tenant context (set by tenantMiddleware)
+      tenantPool?: Pool;
+      tenant?: Tenant;
+      tenantId?: string;
+      // Audit context
+      auditContext?: import('../../../shared/types/audit.js').AuditContext;
+      requestId?: string;
     }
   }
 }
