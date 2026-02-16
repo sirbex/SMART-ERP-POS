@@ -20,16 +20,8 @@ import NodeCache from 'node-cache';
 // Cache tenant metadata for 5 minutes to avoid DB lookups on every request
 const tenantCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
-// Extend Express Request to include tenant context
-declare global {
-  namespace Express {
-    interface Request {
-      tenantPool?: pg.Pool;
-      tenant?: Tenant;
-      tenantId?: string;
-    }
-  }
-}
+// Note: Express Request type extensions (tenantPool, tenant, tenantId)
+// are declared in src/types/express.d.ts — do NOT duplicate here.
 
 /**
  * Resolve tenant from request and attach pool + metadata.

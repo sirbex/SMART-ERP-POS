@@ -32,10 +32,18 @@ export const billingService = {
       ENTERPRISE: 299,
     };
 
+    // Map tenant status to billing status
+    const statusMap: Record<string, BillingInfo['status']> = {
+      ACTIVE: 'ACTIVE',
+      PROVISIONING: 'TRIALING',
+      SUSPENDED: 'PAST_DUE',
+      DEACTIVATED: 'CANCELLED',
+    };
+
     return {
       tenantId,
       plan: tenant.plan as TenantPlan,
-      status: tenant.status === 'ACTIVE' ? 'ACTIVE' : 'CANCELLED',
+      status: statusMap[tenant.status] || 'CANCELLED',
       currentPeriodStart: periodStart.toISOString().split('T')[0],
       currentPeriodEnd: periodEnd.toISOString().split('T')[0],
       amount: planPricing[tenant.plan] || 0,

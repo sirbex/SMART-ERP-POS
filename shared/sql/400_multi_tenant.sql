@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     stripe_subscription_id VARCHAR(255),
     billing_email VARCHAR(255),
     
-    -- Limits (enforced by middleware)
-    max_users INTEGER NOT NULL DEFAULT 3,
+    -- Limits (enforced by middleware — defaults match PLAN_LIMITS.FREE)
+    max_users INTEGER NOT NULL DEFAULT 2,
     max_products INTEGER NOT NULL DEFAULT 500,
     max_locations INTEGER NOT NULL DEFAULT 1,
     storage_limit_mb INTEGER NOT NULL DEFAULT 500,
@@ -147,6 +147,12 @@ CREATE TRIGGER trg_tenants_updated_at
     BEFORE UPDATE ON tenants
     FOR EACH ROW
     EXECUTE FUNCTION update_tenant_updated_at();
+
+-- Default tenant for backward compatibility (single-tenant / local development).
+-- The tenantMiddleware falls back to slug='default' when no tenant is specified.
+INSERT INTO tenants (slug, name, database_name, status, plan, max_users, max_products, max_locations, storage_limit_mb)
+VALUES ('default', 'Default Tenant (Local)', 'pos_system', 'ACTIVE', 'ENTERPRISE', 999, 999999, 999, 50000)
+ON CONFLICT (slug) DO NOTHING;
 
 -- Insert a default tenant for the current pos_system database (backward compatible)
 INSERT INTO tenants (slug, name, database_name, status, plan, max_users, max_products, max_locations)

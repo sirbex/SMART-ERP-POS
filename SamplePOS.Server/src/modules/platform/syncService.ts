@@ -15,16 +15,10 @@ import type {
 } from '../../../../shared/types/tenant.js';
 import logger from '../../utils/logger.js';
 
-// Entity types that can be synced
-const SYNCABLE_ENTITIES = [
-  'sale', 'sale_item', 'customer', 'product', 'inventory_batch',
-  'invoice', 'payment', 'stock_movement',
-] as const;
-
 // Entities with additive-only sync (never overwrite)
-const ADDITIVE_ONLY_ENTITIES = new Set(['sale', 'sale_item', 'payment', 'stock_movement', 'ledger_entry']);
+const ADDITIVE_ONLY_ENTITIES = new Set(['sale', 'sale_item', 'sale_payment', 'stock_movement', 'ledger_entry']);
 
-// Entity → table name mapping
+// Entity → table name mapping (single source of truth for syncable entities)
 const ENTITY_TABLE_MAP: Record<string, string> = {
   sale: 'sales',
   sale_item: 'sale_items',
@@ -32,9 +26,49 @@ const ENTITY_TABLE_MAP: Record<string, string> = {
   product: 'products',
   inventory_batch: 'inventory_batches',
   invoice: 'invoices',
-  payment: 'payments',
+  sale_payment: 'sale_payments',
   stock_movement: 'stock_movements',
+  ledger_entry: 'ledger_entries',
 };
+
+// Allowed columns per entity for sync upsert/update (prevents SQL injection)
+const ALLOWED_COLUMNS: Record<string, Set<string>> = {
+  sales: new Set(['id', 'sale_number', 'customer_id', 'cashier_id', 'sale_date', 'subtotal', 'tax_amount', 'discount_amount', 'total_amount', 'total_cost', 'profit', 'payment_method', 'amount_paid', 'change_amount', 'status', 'notes', 'created_at']),
+  sale_items: new Set(['id', 'sale_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'cost_price', 'discount_amount', 'tax_amount', 'total_amount', 'uom_id', 'uom_conversion_factor', 'created_at']),
+  customers: new Set(['id', 'name', 'email', 'phone', 'address', 'customer_group', 'credit_limit', 'balance', 'is_active', 'created_at', 'updated_at']),
+  products: new Set(['id', 'product_number', 'name', 'description', 'sku', 'barcode', 'category', 'price', 'cost_price', 'stock_quantity', 'reorder_level', 'base_uom', 'track_expiry', 'is_taxable', 'tax_rate', 'is_service', 'is_active', 'created_at', 'updated_at']),
+  inventory_batches: new Set(['id', 'product_id', 'batch_number', 'expiry_date', 'quantity', 'remaining_quantity', 'cost_price', 'created_at']),
+  invoices: new Set(['id', 'invoice_number', 'sale_id', 'customer_id', 'invoice_date', 'due_date', 'subtotal', 'tax_amount', 'total_amount', 'amount_paid', 'status', 'notes', 'created_at', 'updated_at']),
+  sale_payments: new Set(['id', 'sale_id', 'payment_method_id', 'amount', 'reference_number', 'notes', 'created_at']),
+  stock_movements: new Set(['id', 'product_id', 'movement_type', 'quantity', 'reference_type', 'reference_id', 'batch_id', 'notes', 'created_by', 'created_at']),
+  ledger_entries: new Set(['id', 'entry_date', 'account_id', 'debit', 'credit', 'description', 'reference_type', 'reference_id', 'created_by', 'created_at']),
+};
+
+/**
+ * Sanitize a column name: must be alphanumeric + underscores only.
+ * Returns null if the column name is invalid.
+ */
+function sanitizeColumnName(col: string): string | null {
+  return /^[a-z_][a-z0-9_]*$/i.test(col) ? col : null;
+}
+
+/**
+ * Filter data keys to only allowed columns for the given table.
+ * Prevents SQL injection via untrusted column names.
+ */
+function filterAllowedColumns(tableName: string, data: Record<string, unknown>): Record<string, unknown> {
+  const allowed = ALLOWED_COLUMNS[tableName];
+  if (!allowed) return {};
+
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    const safeKey = sanitizeColumnName(key);
+    if (safeKey && allowed.has(safeKey)) {
+      filtered[safeKey] = value;
+    }
+  }
+  return filtered;
+}
 
 export const syncService = {
   /**
@@ -369,37 +403,50 @@ export const syncService = {
   },
 
   async upsertEntity(pool: pg.Pool, tableName: string, item: SyncItem): Promise<void> {
-    const data = item.data as Record<string, unknown>;
-    const columns = Object.keys(data);
-    const values = Object.values(data);
-
-    if (columns.length === 0) return;
+    const rawData = item.data as Record<string, unknown>;
+    const safeData = filterAllowedColumns(tableName, rawData);
 
     // Ensure 'id' is present
-    if (!columns.includes('id')) {
-      columns.unshift('id');
-      values.unshift(item.entityId);
-    }
+    safeData.id = safeData.id || item.entityId;
+
+    const columns = Object.keys(safeData);
+    const values = Object.values(safeData);
+
+    if (columns.length === 0) return;
 
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
     const updateClauses = columns
       .filter(c => c !== 'id')
-      .map((col, i) => `${col} = EXCLUDED.${col}`)
+      .map((col) => `${col} = EXCLUDED.${col}`)
       .join(', ');
 
     const safeTable = tableName.replace(/[^a-z0-9_]/gi, '');
 
-    await pool.query(
-      `INSERT INTO ${safeTable} (${columns.join(', ')}) VALUES (${placeholders})
-       ON CONFLICT (id) DO UPDATE SET ${updateClauses}`,
-      values
-    );
+    if (!updateClauses) {
+      // Only 'id' column — nothing to update on conflict
+      await pool.query(
+        `INSERT INTO ${safeTable} (${columns.join(', ')}) VALUES (${placeholders})
+         ON CONFLICT (id) DO NOTHING`,
+        values
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO ${safeTable} (${columns.join(', ')}) VALUES (${placeholders})
+         ON CONFLICT (id) DO UPDATE SET ${updateClauses}`,
+        values
+      );
+    }
   },
 
   async updateEntity(pool: pg.Pool, tableName: string, item: SyncItem): Promise<void> {
-    const data = item.data as Record<string, unknown>;
-    const columns = Object.keys(data).filter(c => c !== 'id');
-    const values = Object.values(data).filter((_, i) => Object.keys(data)[i] !== 'id');
+    const rawData = item.data as Record<string, unknown>;
+    const safeData = filterAllowedColumns(tableName, rawData);
+
+    // Remove 'id' from SET clauses (can't update primary key)
+    delete safeData.id;
+
+    const columns = Object.keys(safeData);
+    const values = Object.values(safeData);
 
     if (columns.length === 0) return;
 

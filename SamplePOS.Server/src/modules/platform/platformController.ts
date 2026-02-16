@@ -1,7 +1,7 @@
 // Platform Controller — Super Admin & Tenant Management API
 // File: SamplePOS.Server/src/modules/platform/platformController.ts
 
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { connectionManager } from '../../db/connectionManager.js';
@@ -33,7 +33,7 @@ function getSuperAdmin(req: Request): { id: string; email: string } | null {
 /**
  * Middleware: require super admin authentication
  */
-export function requireSuperAdmin(req: Request, res: Response, next: Function): void {
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
   const admin = getSuperAdmin(req);
   if (!admin) {
     res.status(401).json({ success: false, error: 'Super admin authentication required' });
