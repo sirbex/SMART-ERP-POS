@@ -92,7 +92,7 @@ export const platformController = {
       });
     } catch (error) {
       logger.error('Super admin login failed', { error });
-      res.status(500).json({ success: false, error: 'Login failed' });
+      res.status(500).json({ success: false, error: `Login failed: ${(error as Error).message}` });
     }
   },
 
@@ -122,7 +122,7 @@ export const platformController = {
       });
     } catch (error) {
       logger.error('Failed to list tenants', { error });
-      res.status(500).json({ success: false, error: 'Failed to list tenants' });
+      res.status(500).json({ success: false, error: `Failed to list tenants: ${(error as Error).message}` });
     }
   },
 
@@ -139,7 +139,7 @@ export const platformController = {
       res.json({ success: true, data: tenant });
     } catch (error) {
       logger.error('Failed to get tenant', { error });
-      res.status(500).json({ success: false, error: 'Failed to get tenant' });
+      res.status(500).json({ success: false, error: `Failed to get tenant: ${(error as Error).message}` });
     }
   },
 
@@ -189,7 +189,7 @@ export const platformController = {
       res.json({ success: true, data: tenant });
     } catch (error) {
       logger.error('Failed to update tenant', { error });
-      res.status(500).json({ success: false, error: 'Failed to update tenant' });
+      res.status(500).json({ success: false, error: `Failed to update tenant: ${(error as Error).message}` });
     }
   },
 
@@ -217,7 +217,7 @@ export const platformController = {
       res.json({ success: true, data: tenant });
     } catch (error) {
       logger.error('Failed to update tenant status', { error });
-      res.status(500).json({ success: false, error: 'Failed to update tenant status' });
+      res.status(500).json({ success: false, error: `Failed to update tenant status: ${(error as Error).message}` });
     }
   },
 
@@ -232,7 +232,7 @@ export const platformController = {
       res.json({ success: true, data: usage });
     } catch (error) {
       logger.error('Failed to get tenant usage', { error });
-      res.status(500).json({ success: false, error: 'Failed to get tenant usage' });
+      res.status(500).json({ success: false, error: `Failed to get tenant usage: ${(error as Error).message}` });
     }
   },
 
@@ -244,7 +244,7 @@ export const platformController = {
       res.json({ success: true, data: log });
     } catch (error) {
       logger.error('Failed to get tenant audit log', { error });
-      res.status(500).json({ success: false, error: 'Failed to get audit log' });
+      res.status(500).json({ success: false, error: `Failed to get audit log: ${(error as Error).message}` });
     }
   },
 
@@ -270,7 +270,7 @@ export const platformController = {
       res.status(500).json({
         success: false,
         data: { status: 'unhealthy' },
-        error: 'Master database unreachable',
+        error: (error as Error).message || 'Master database unreachable',
       });
     }
   },
@@ -287,7 +287,7 @@ export const platformController = {
       res.json({ success: true, data: events });
     } catch (error) {
       logger.error('Failed to get billing events', { error });
-      res.status(500).json({ success: false, error: 'Failed to get billing events' });
+      res.status(500).json({ success: false, error: `Failed to get billing events: ${(error as Error).message}` });
     }
   },
 
@@ -298,7 +298,7 @@ export const platformController = {
       res.json({ success: true, data: info });
     } catch (error) {
       logger.error('Failed to get billing info', { error });
-      res.status(500).json({ success: false, error: 'Failed to get billing info' });
+      res.status(500).json({ success: false, error: `Failed to get billing info: ${(error as Error).message}` });
     }
   },
 
@@ -317,7 +317,7 @@ export const platformController = {
       res.json({ success: true, message: `Plan changed to ${plan}` });
     } catch (error) {
       logger.error('Failed to change plan', { error });
-      res.status(500).json({ success: false, error: 'Failed to change plan' });
+      res.status(500).json({ success: false, error: `Failed to change plan: ${(error as Error).message}` });
     }
   },
 
@@ -342,7 +342,7 @@ export const platformController = {
       res.json({ success: true, data: limits });
     } catch (error) {
       logger.error('Failed to check limits', { error });
-      res.status(500).json({ success: false, error: 'Failed to check limits' });
+      res.status(500).json({ success: false, error: `Failed to check limits: ${(error as Error).message}` });
     }
   },
 
@@ -391,7 +391,7 @@ export const platformController = {
       });
     } catch (error) {
       logger.error('Failed to get dashboard summary', { error });
-      res.status(500).json({ success: false, error: 'Failed to get dashboard summary' });
+      res.status(500).json({ success: false, error: `Failed to get dashboard summary: ${(error as Error).message}` });
     }
   },
 };

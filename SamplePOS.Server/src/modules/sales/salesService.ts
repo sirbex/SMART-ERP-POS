@@ -120,6 +120,7 @@ export const salesService = {
    */
   async createSale(pool: Pool, input: CreateSaleInput): Promise<any> {
     const client = await pool.connect();
+    const warnings: string[] = [];
 
     try {
       await client.query('BEGIN');
@@ -237,7 +238,11 @@ export const salesService = {
           }
           // Use productResult later below
         } catch (e) {
-          // Fallback: treat as base unit
+          logger.warn('UoM conversion failed, falling back to base unit', {
+            productId: item.productId,
+            uom: item.uom,
+            error: (e as Error).message,
+          });
           baseQty = new Decimal(item.quantity);
         }
         // BR-INV-002: Validate positive quantity
@@ -1021,6 +1026,7 @@ export const salesService = {
           });
           // Don't fail the sale if quote conversion fails
           // The sale is already successful, just log the issue
+          warnings.push(`Quote conversion failed for quote ${input.quoteId}: ${quoteError instanceof Error ? quoteError.message : String(quoteError)}. Sale created but quotation status not updated.`);
         }
       }
       // CREDIT SALE INVOICE: Create invoice if there's any outstanding balance
@@ -1177,6 +1183,7 @@ export const salesService = {
               error: error.message,
               remediation: 'Review cost layers for this product and adjust if needed',
             });
+            warnings.push(`Cost layer deduction failed for product ${deduction.productId}: ${error.message}. FIFO/AVCO tracking may be inaccurate.`);
           }
         }
       }
@@ -1239,6 +1246,7 @@ export const salesService = {
           error: error.message,
           remediation: 'Create bank transaction manually via Banking module',
         });
+        warnings.push(`Banking integration failed for sale ${sale.saleNumber}: ${error.message}. Manual remediation required.`);
         // Note: Not throwing here because sale is already committed
         // The GL entry exists (via trigger), only bank_transactions record is missing
       }
@@ -1304,12 +1312,14 @@ export const salesService = {
           error: error.message,
           remediation: 'Manually record cash movement in cash register',
         });
+        warnings.push(`Cash register integration failed: ${error.message}. Drawer tracking incomplete.`);
       }
 
       const result = {
         sale,
         items,
         paymentLines: input.paymentLines || [],
+        warnings: warnings.length > 0 ? warnings : undefined,
       };
 
       // ============================================================

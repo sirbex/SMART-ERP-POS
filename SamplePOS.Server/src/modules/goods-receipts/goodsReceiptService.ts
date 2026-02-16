@@ -288,6 +288,7 @@ export const goodsReceiptService = {
   // Finalize a goods receipt: create batches, stock movements, cost layers, pricing updates
   async finalizeGR(pool: Pool, id: string): Promise<any> {
     const client = await pool.connect();
+    const warnings: string[] = [];
     try {
       await client.query('BEGIN');
 
@@ -575,6 +576,7 @@ export const goodsReceiptService = {
             });
             // Don't fail the GR finalization if invoice creation fails
             // The invoice can be created manually
+            warnings.push(`Supplier invoice creation failed: ${invoiceError.message}. AP tracking requires manual action.`);
           }
         }
       }
@@ -599,6 +601,7 @@ export const goodsReceiptService = {
             error: err.message,
             remediation: 'Manually create cost layer via system management or re-process GR',
           });
+          warnings.push(`Cost layer creation failed for product ${costData.productId}: ${err.message}. Manual remediation required.`);
           // Note: Not throwing - cost layer failure should not block GR
           // Missing cost layer affects costing, not inventory quantity
         }
@@ -621,6 +624,7 @@ export const goodsReceiptService = {
         hasAlerts: alerts.length > 0,
         alertSummary:
           alerts.length > 0 ? `${alerts.length} product(s) with cost price changes` : null,
+        warnings: warnings.length > 0 ? warnings : undefined,
       };
     } catch (error) {
       await client.query('ROLLBACK');

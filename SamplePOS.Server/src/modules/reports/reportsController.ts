@@ -111,7 +111,7 @@ export const reportsController = {
       logger.error('Failed to get system settings for reports', { error });
       res.status(500).json({
         success: false,
-        error: 'Failed to get system settings',
+        error: `Failed to get system settings: ${(error as Error).message}`,
       });
     }
   },
@@ -2050,7 +2050,7 @@ export const reportsController = {
       logger.error('Failed to get report types', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to get report types',
+        error: `Failed to get report types: ${error.message}`,
       });
     }
   },
@@ -2542,7 +2542,7 @@ export const reportsController = {
       logger.error('Failed to generate sales summary by date report', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate report',
+        error: `Failed to generate report: ${error.message}`,
         details: error.message,
       });
     }
@@ -2642,7 +2642,7 @@ export const reportsController = {
       logger.error('Failed to generate sales details report', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate report',
+        error: `Failed to generate report: ${error.message}`,
         details: error.message,
       });
     }
@@ -2751,7 +2751,7 @@ export const reportsController = {
       logger.error('Failed to generate sales by cashier report', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate report',
+        error: `Failed to generate report: ${error.message}`,
         details: error.message,
       });
     }
@@ -3112,7 +3112,7 @@ export const reportsController = {
 
       return res.status(500).json({
         success: false,
-        error: 'Failed to generate report',
+        error: `Failed to generate report: ${error.message}`,
         details: error.message,
       });
     }
@@ -3251,7 +3251,7 @@ export const reportsController = {
       logger.error('Failed to generate business position report', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate business position report',
+        error: `Failed to generate business position report: ${error.message}`,
         details: error.message,
       });
     }
@@ -3298,7 +3298,7 @@ export const reportsController = {
       logger.error('Failed to generate cash register session summary', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate cash register session summary',
+        error: `Failed to generate cash register session summary: ${error.message}`,
         details: error.message,
       });
     }
@@ -3342,7 +3342,7 @@ export const reportsController = {
       logger.error('Failed to generate cash register movement breakdown', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate cash register movement breakdown',
+        error: `Failed to generate cash register movement breakdown: ${error.message}`,
         details: error.message,
       });
     }
@@ -3386,7 +3386,7 @@ export const reportsController = {
       logger.error('Failed to generate cash register session history', { error: error.message });
       res.status(500).json({
         success: false,
-        error: 'Failed to generate cash register session history',
+        error: `Failed to generate cash register session history: ${error.message}`,
         details: error.message,
       });
     }

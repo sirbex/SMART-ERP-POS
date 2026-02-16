@@ -53,7 +53,7 @@ router.post('/upload', authenticate, verifyTenantAccess, async (req: Request, re
 
   } catch (error) {
     logger.error('Sync upload failed', { error });
-    res.status(500).json({ success: false, error: 'Sync upload failed' });
+    res.status(500).json({ success: false, error: `Sync upload failed: ${(error as Error).message}` });
   }
 });
 
@@ -82,7 +82,7 @@ router.get('/download', authenticate, verifyTenantAccess, async (req: Request, r
 
   } catch (error) {
     logger.error('Sync download failed', { error });
-    res.status(500).json({ success: false, error: 'Sync download failed' });
+    res.status(500).json({ success: false, error: `Sync download failed: ${(error as Error).message}` });
   }
 });
 
@@ -105,7 +105,7 @@ router.get('/status', authenticate, verifyTenantAccess, async (req: Request, res
 
   } catch (error) {
     logger.error('Failed to get sync status', { error });
-    res.status(500).json({ success: false, error: 'Failed to get sync status' });
+    res.status(500).json({ success: false, error: `Failed to get sync status: ${(error as Error).message}` });
   }
 });
 
@@ -129,7 +129,7 @@ router.get('/conflicts', authenticate, verifyTenantAccess, async (req: Request, 
 
   } catch (error) {
     logger.error('Failed to get conflicts', { error });
-    res.status(500).json({ success: false, error: 'Failed to get conflicts' });
+    res.status(500).json({ success: false, error: `Failed to get conflicts: ${(error as Error).message}` });
   }
 });
 
@@ -156,7 +156,7 @@ router.post('/conflicts/resolve', authenticate, verifyTenantAccess, async (req: 
 
   } catch (error) {
     logger.error('Failed to resolve conflict', { error });
-    res.status(500).json({ success: false, error: 'Failed to resolve conflict' });
+    res.status(500).json({ success: false, error: `Failed to resolve conflict: ${(error as Error).message}` });
   }
 });
 

@@ -3,6 +3,7 @@
 
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
+import logger from '../../utils/logger.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -101,8 +102,7 @@ export const reportsRepository = {
       );
       return result.rows[0];
     } catch (error: any) {
-      // Gracefully handle if table doesn't exist yet (e.g., migration not run)
-      console.warn('Failed to log report run (table may not exist):', error.message);
+      logger.warn('Failed to log report run', { error: error.message });
       return null;
     }
   },

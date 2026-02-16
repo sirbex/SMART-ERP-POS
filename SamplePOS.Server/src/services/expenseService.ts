@@ -23,7 +23,7 @@ export const getExpenses = async (filters: ExpenseFilters) => {
     };
   } catch (error) {
     logger.error('Error in expense service getExpenses', { error, filters });
-    throw new Error('Failed to retrieve expenses');
+    throw new Error(`Failed to retrieve expenses: ${(error as Error).message}`);
   }
 };
 
@@ -35,7 +35,7 @@ export const getExpenseById = async (id: string) => {
     return await expenseRepository.getExpenseById(id);
   } catch (error) {
     logger.error('Error in expense service getExpenseById', { error, id });
-    throw new Error('Failed to retrieve expense');
+    throw new Error(`Failed to retrieve expense: ${(error as Error).message}`);
   }
 };
 
@@ -63,7 +63,7 @@ export const createExpense = async (data: CreateExpenseData) => {
     return expense;
   } catch (error) {
     logger.error('Error in expense service createExpense', { error, data });
-    throw new Error('Failed to create expense');
+    throw new Error(`Failed to create expense: ${(error as Error).message}`);
   }
 };
 
@@ -298,7 +298,7 @@ export const getExpenseCategories = async () => {
     return await expenseRepository.getExpenseCategories();
   } catch (error) {
     logger.error('Error in expense service getExpenseCategories', { error });
-    throw new Error('Failed to retrieve expense categories');
+    throw new Error(`Failed to retrieve expense categories: ${(error as Error).message}`);
   }
 };
 
@@ -311,7 +311,7 @@ export const getPaymentAccounts = async () => {
     return await expenseRepository.getPaymentAccounts();
   } catch (error) {
     logger.error('Error in expense service getPaymentAccounts', { error });
-    throw new Error('Failed to retrieve payment accounts');
+    throw new Error(`Failed to retrieve payment accounts: ${(error as Error).message}`);
   }
 };
 
@@ -341,7 +341,7 @@ export const getExpenseDocuments = async (expenseId: string) => {
     return await expenseRepository.getExpenseDocuments(expenseId);
   } catch (error) {
     logger.error('Error in expense service getExpenseDocuments', { error, expenseId });
-    throw new Error('Failed to retrieve expense documents');
+    throw new Error(`Failed to retrieve expense documents: ${(error as Error).message}`);
   }
 };
 
@@ -425,7 +425,7 @@ export const getExpensesByCategory = async (filters: { startDate?: string; endDa
     return await expenseRepository.getExpensesByCategory(filters);
   } catch (error) {
     logger.error('Error in expenseService getExpensesByCategory', { error, filters });
-    throw new Error('Failed to get expenses by category');
+    throw new Error(`Failed to get expenses by category: ${(error as Error).message}`);
   }
 };
 
@@ -437,7 +437,7 @@ export const getExpensesByVendor = async (filters: { startDate?: string; endDate
     return await expenseRepository.getExpensesByVendor(filters);
   } catch (error) {
     logger.error('Error in expenseService getExpensesByVendor', { error, filters });
-    throw new Error('Failed to get expenses by vendor');
+    throw new Error(`Failed to get expenses by vendor: ${(error as Error).message}`);
   }
 };
 
@@ -449,7 +449,7 @@ export const getExpenseTrends = async (filters: { startDate?: string; endDate?: 
     return await expenseRepository.getExpenseTrends(filters);
   } catch (error) {
     logger.error('Error in expenseService getExpenseTrends', { error, filters });
-    throw new Error('Failed to get expense trends');
+    throw new Error(`Failed to get expense trends: ${(error as Error).message}`);
   }
 };
 
@@ -461,7 +461,7 @@ export const getExpensesByPaymentMethod = async (filters: { startDate?: string; 
     return await expenseRepository.getExpensesByPaymentMethod(filters);
   } catch (error) {
     logger.error('Error in expenseService getExpensesByPaymentMethod', { error, filters });
-    throw new Error('Failed to get expenses by payment method');
+    throw new Error(`Failed to get expenses by payment method: ${(error as Error).message}`);
   }
 };
 
@@ -473,7 +473,7 @@ export const getExpensesForExport = async (filters: { startDate?: string; endDat
     return await expenseRepository.getExpensesForExport(filters);
   } catch (error) {
     logger.error('Error in expenseService getExpensesForExport', { error, filters });
-    throw new Error('Failed to get expenses for export');
+    throw new Error(`Failed to get expenses for export: ${(error as Error).message}`);
   }
 };
 
@@ -485,7 +485,7 @@ export const getExpenseSummary = async (filters: { startDate?: string; endDate?:
     return await expenseRepository.getExpenseSummary(filters);
   } catch (error) {
     logger.error('Error in expense service getExpenseSummary', { error, filters });
-    throw new Error('Failed to retrieve expense summary');
+    throw new Error(`Failed to retrieve expense summary: ${(error as Error).message}`);
   }
 };
 

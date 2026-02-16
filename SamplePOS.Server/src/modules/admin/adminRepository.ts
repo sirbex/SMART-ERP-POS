@@ -297,8 +297,8 @@ export const adminRepository = {
           `);
           await client.query('RELEASE SAVEPOINT sp_reset_customers_fallback');
           logger.warn('Used fallback direct reset for customer balances');
-        } catch {
-          // Ignore
+        } catch (error) {
+          logger.warn('Balance reset fallback failed', { error: (error as Error).message });
         }
       }
 
@@ -325,8 +325,8 @@ export const adminRepository = {
           `);
           await client.query('RELEASE SAVEPOINT sp_reset_suppliers_fallback');
           logger.warn('Used fallback direct reset for supplier balances');
-        } catch {
-          // Ignore
+        } catch (error) {
+          logger.warn('Balance reset fallback failed', { error: (error as Error).message });
         }
       }
 

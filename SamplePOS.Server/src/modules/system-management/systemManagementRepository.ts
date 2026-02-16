@@ -1028,8 +1028,8 @@ export const systemManagementRepository = {
                 if (count > 0) {
                     issues.push(`Found ${count} orphaned records in ${check.child}`);
                 }
-            } catch {
-                // Table doesn't exist, skip
+            } catch (error) {
+                logger.debug('Integrity check skipped', { check: 'orphaned records', error: (error as Error).message });
             }
         }
 
@@ -1041,8 +1041,8 @@ export const systemManagementRepository = {
             if (parseInt(negInv.rows[0].count) > 0) {
                 issues.push(`Found ${negInv.rows[0].count} products with negative inventory`);
             }
-        } catch {
-            // Skip
+        } catch (error) {
+            logger.debug('Integrity check skipped', { check: 'negative inventory', error: (error as Error).message });
         }
 
         // Check GL balance
@@ -1060,8 +1060,8 @@ export const systemManagementRepository = {
             if (debits.minus(credits).abs().greaterThan('0.01')) {
                 issues.push(`GL imbalance: Debits=${debits.toFixed(2)}, Credits=${credits.toFixed(2)}, Diff=${debits.minus(credits).toFixed(2)}`);
             }
-        } catch {
-            // Skip
+        } catch (error) {
+            logger.debug('Integrity check skipped', { check: 'GL balance', error: (error as Error).message });
         }
 
         return {

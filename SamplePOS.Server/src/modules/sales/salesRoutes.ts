@@ -139,6 +139,7 @@ export const salesController = {
         success: true,
         data: normalizeResponse(result),
         message: `Sale ${result.sale.sale_number || result.sale.saleNumber} created successfully`,
+        warnings: result.warnings,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -184,7 +185,7 @@ export const salesController = {
 
       res.status(500).json({
         success: false,
-        error: 'Failed to get sale',
+        error: `Failed to get sale: ${error.message}`,
       });
     }
   },
@@ -226,7 +227,7 @@ export const salesController = {
       console.error('Error listing sales:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to list sales',
+        error: `Failed to list sales: ${error.message}`,
       });
     }
   },  /**
@@ -252,7 +253,7 @@ export const salesController = {
       console.error('Error getting sales summary:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get sales summary',
+        error: `Failed to get sales summary: ${error.message}`,
       });
     }
   },
@@ -282,7 +283,7 @@ export const salesController = {
       console.error('Error getting product sales summary:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get product sales summary',
+        error: `Failed to get product sales summary: ${error.message}`,
       });
     }
   },
@@ -313,7 +314,7 @@ export const salesController = {
       console.error('Error getting top selling products:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get top selling products',
+        error: `Failed to get top selling products: ${error.message}`,
       });
     }
   },
@@ -345,7 +346,7 @@ export const salesController = {
       console.error('Error getting sales summary by date:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get sales summary by date',
+        error: `Failed to get sales summary by date: ${error.message}`,
       });
     }
   },

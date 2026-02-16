@@ -312,6 +312,7 @@ export const goodsReceiptController = {
         success: true,
         data: result,
         message: `Goods receipt ${result.gr.grNumber} completed successfully`,
+        warnings: result.warnings,
       };
 
       // Add alerts if cost prices changed

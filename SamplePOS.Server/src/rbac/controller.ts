@@ -31,7 +31,7 @@ function handleError(res: Response, error: unknown): void {
 
   res.status(500).json({
     success: false,
-    error: 'Internal server error',
+    error: (error as Error).message || 'Internal server error',
   });
 }
 

@@ -16,7 +16,7 @@ export async function getAllUsers(req: Request, res: Response, next: NextFunctio
     res.json({ success: true, data: users });
   } catch (error: any) {
     logger.error('Failed to get users', { error: error.message });
-    res.status(500).json({ success: false, error: 'Failed to retrieve users' });
+    res.status(500).json({ success: false, error: `Failed to retrieve users: ${error.message}` });
   }
 }
 
@@ -157,6 +157,6 @@ export async function getUserStats(req: Request, res: Response, next: NextFuncti
     res.json({ success: true, data: stats });
   } catch (error: any) {
     logger.error('Failed to get user stats', { error: error.message });
-    res.status(500).json({ success: false, error: 'Failed to retrieve user statistics' });
+    res.status(500).json({ success: false, error: `Failed to retrieve user statistics: ${error.message}` });
   }
 }

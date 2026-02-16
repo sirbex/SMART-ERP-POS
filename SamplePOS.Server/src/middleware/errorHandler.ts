@@ -111,7 +111,7 @@ export function errorHandler(
 
   res.status(500).json({
     success: false,
-    error: isDevelopment ? error.message : 'Internal server error',
+    error: error.message || 'Internal server error',
     ...(isDevelopment && { stack: error.stack }),
   });
 }

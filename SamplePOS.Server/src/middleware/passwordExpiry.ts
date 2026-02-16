@@ -96,7 +96,7 @@ export async function addPasswordExpiryHeader(
             res.setHeader('X-Password-Days-Remaining', status.daysUntilExpiry.toString());
         }
     } catch (error) {
-        // Silently ignore errors - this is non-critical
+        logger.warn('Password expiry check failed', { error: (error as Error).message });
     }
 
     next();

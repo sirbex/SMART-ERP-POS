@@ -103,7 +103,7 @@ export async function getDeliveryOrder(req: Request, res: Response): Promise<voi
 
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: error.message || 'Internal server error'
     });
   }
 }
@@ -252,7 +252,7 @@ export async function assignDriver(req: Request, res: Response): Promise<void> {
 
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: error.message || 'Internal server error'
     });
   }
 }
@@ -286,7 +286,7 @@ export async function trackDelivery(req: Request, res: Response): Promise<void> 
 
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: error.message || 'Internal server error'
     });
   }
 }
@@ -376,7 +376,7 @@ export async function getDeliveryRoute(req: Request, res: Response): Promise<voi
 
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: error.message || 'Internal server error'
     });
   }
 }
@@ -450,7 +450,7 @@ export async function getDeliveryAnalytics(req: Request, res: Response): Promise
 
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: error.message || 'Internal server error'
     });
   }
 }

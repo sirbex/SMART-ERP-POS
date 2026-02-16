@@ -442,7 +442,7 @@ export const stockMovementController = {
       console.error('Error getting product movements:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get product movements',
+        error: `Failed to get product movements: ${error.message}`,
       });
     }
   },
@@ -473,7 +473,7 @@ export const stockMovementController = {
       console.error('Error getting batch movements:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get batch movements',
+        error: `Failed to get batch movements: ${error.message}`,
       });
     }
   },
@@ -514,7 +514,7 @@ export const stockMovementController = {
       console.error('Error getting movements:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get movements',
+        error: `Failed to get movements: ${error.message}`,
       });
     }
   },
