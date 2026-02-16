@@ -2,13 +2,13 @@ import express from 'express';
 import path from 'path';
 import { adminController } from './adminController.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 const router = express.Router();
 
 // Middleware to attach pool to request
 router.use((req, res, next) => {
-  (req as any).pool = pool;
+  (req as any).pool = req.tenantPool || globalPool;
   next();
 });
 

@@ -1,6 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { inventoryService } from './inventoryService.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
 import { stockCountRoutes } from './stockCountRoutes.js';
@@ -36,6 +36,7 @@ export const inventoryController = {
    */
   async getBatchesByProduct(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { productId } = GetBatchesQuerySchema.parse(req.query);
       const batches = await inventoryService.getBatchesByProduct(pool, productId);
 
@@ -66,6 +67,7 @@ export const inventoryController = {
    */
   async getBatchesExpiringSoon(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { daysThreshold } = ExpiryQuerySchema.parse(req.query);
       const batches = await inventoryService.getBatchesExpiringSoon(pool, daysThreshold);
 
@@ -88,6 +90,7 @@ export const inventoryController = {
    */
   async getStockLevels(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const stockLevels = await inventoryService.getStockLevels(pool);
 
       res.json({
@@ -108,6 +111,7 @@ export const inventoryController = {
    */
   async getStockLevelByProduct(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { productId } = req.params;
       const stockLevel = await inventoryService.getStockLevelByProduct(pool, productId);
 
@@ -138,6 +142,7 @@ export const inventoryController = {
    */
   async getProductsNeedingReorder(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const products = await inventoryService.getProductsNeedingReorder(pool);
 
       res.json({
@@ -159,6 +164,7 @@ export const inventoryController = {
    */
   async adjustInventory(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const validatedData = AdjustInventorySchema.parse(req.body);
       const result = await inventoryService.adjustInventory(
         pool,
@@ -196,6 +202,7 @@ export const inventoryController = {
    */
   async getInventoryValue(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { productId } = req.query;
       const value = await inventoryService.getInventoryValue(pool, productId as string | undefined);
 
@@ -217,6 +224,7 @@ export const inventoryController = {
    */
   async checkBatchExists(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { batchNumber } = req.query;
 
       if (!batchNumber || typeof batchNumber !== 'string') {

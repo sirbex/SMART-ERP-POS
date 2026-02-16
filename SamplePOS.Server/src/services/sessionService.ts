@@ -1,7 +1,8 @@
 // Phase 7: Session Management Service
 // File: SamplePOS.Server/src/services/sessionService.ts
 
-import { pool } from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import crypto from 'crypto';
 import { User } from '../../../shared/types/user.js';
 
@@ -39,8 +40,10 @@ export class SessionService {
   async createSession(
     userId: string,
     ipAddress?: string,
-    userAgent?: string
+    userAgent?: string,
+    dbPool?: pg.Pool
   ): Promise<UserSession> {
+    const pool = dbPool || globalPool;
     // Generate secure session token
     const sessionToken = this.generateSessionToken();
     const expiresAt = new Date(Date.now() + this.SESSION_DURATION);
@@ -69,7 +72,8 @@ export class SessionService {
   /**
    * Get session by token
    */
-  async getSession(sessionToken: string): Promise<UserSession | null> {
+  async getSession(sessionToken: string, dbPool?: pg.Pool): Promise<UserSession | null> {
+    const pool = dbPool || globalPool;
     const result = await pool.query(
       `SELECT id, user_id, session_token, ip_address, user_agent, expires_at, is_active, created_at, updated_at
        FROM user_sessions 
@@ -98,7 +102,8 @@ export class SessionService {
   /**
    * Get session with user data
    */
-  async getSessionWithUser(sessionToken: string): Promise<SessionData | null> {
+  async getSessionWithUser(sessionToken: string, dbPool?: pg.Pool): Promise<SessionData | null> {
+    const pool = dbPool || globalPool;
     const result = await pool.query(
       `SELECT 
          us.id as session_id,
@@ -143,7 +148,8 @@ export class SessionService {
   /**
    * Update session activity
    */
-  async updateSessionActivity(sessionToken: string): Promise<void> {
+  async updateSessionActivity(sessionToken: string, dbPool?: pg.Pool): Promise<void> {
+    const pool = dbPool || globalPool;
     await pool.query(
       'UPDATE user_sessions SET updated_at = NOW() WHERE session_token = $1 AND is_active = true',
       [sessionToken]
@@ -153,7 +159,8 @@ export class SessionService {
   /**
    * Extend session expiration
    */
-  async extendSession(sessionToken: string): Promise<void> {
+  async extendSession(sessionToken: string, dbPool?: pg.Pool): Promise<void> {
+    const pool = dbPool || globalPool;
     const newExpiresAt = new Date(Date.now() + this.SESSION_DURATION);
 
     await pool.query(
@@ -165,7 +172,8 @@ export class SessionService {
   /**
    * Invalidate a specific session
    */
-  async invalidateSession(sessionToken: string): Promise<void> {
+  async invalidateSession(sessionToken: string, dbPool?: pg.Pool): Promise<void> {
+    const pool = dbPool || globalPool;
     await pool.query(
       'UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE session_token = $1',
       [sessionToken]
@@ -175,7 +183,8 @@ export class SessionService {
   /**
    * Invalidate all sessions for a user
    */
-  async invalidateAllUserSessions(userId: string): Promise<number> {
+  async invalidateAllUserSessions(userId: string, dbPool?: pg.Pool): Promise<number> {
+    const pool = dbPool || globalPool;
     const result = await pool.query(
       'UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE user_id = $1 AND is_active = true',
       [userId]
@@ -187,7 +196,8 @@ export class SessionService {
   /**
    * Get all active sessions for a user
    */
-  async getUserSessions(userId: string): Promise<UserSession[]> {
+  async getUserSessions(userId: string, dbPool?: pg.Pool): Promise<UserSession[]> {
+    const pool = dbPool || globalPool;
     const result = await pool.query(
       `SELECT id, user_id, session_token, ip_address, user_agent, expires_at, is_active, created_at, updated_at
        FROM user_sessions 
@@ -212,12 +222,13 @@ export class SessionService {
   /**
    * Get session statistics
    */
-  async getSessionStats(): Promise<{
+  async getSessionStats(dbPool?: pg.Pool): Promise<{
     totalActiveSessions: number;
     totalUniqueUsers: number;
     averageSessionDuration: number;
     topUserAgents: { userAgent: string; count: number; }[];
   }> {
+    const pool = dbPool || globalPool;
     // Total active sessions
     const totalResult = await pool.query(
       'SELECT COUNT(*) as total FROM user_sessions WHERE is_active = true AND expires_at > NOW()'
@@ -259,7 +270,8 @@ export class SessionService {
   /**
    * Cleanup expired sessions
    */
-  async cleanupExpiredSessions(): Promise<number> {
+  async cleanupExpiredSessions(dbPool?: pg.Pool): Promise<number> {
+    const pool = dbPool || globalPool;
     const result = await pool.query(
       'DELETE FROM user_sessions WHERE expires_at < NOW() OR (is_active = false AND updated_at < NOW() - INTERVAL \'7 days\')'
     );

@@ -5,7 +5,8 @@ import { UomSchema } from '../../../../shared/zod/uom.js';
 import * as repo from './uomRepository.js';
 import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 
 export async function listMasterUoms() {
   return repo.listUoms();
@@ -33,7 +34,8 @@ export async function getProductUoms(productId: string) {
   return repo.listProductUoms(productId);
 }
 
-export async function addProductUom(input: unknown, auditContext?: AuditContext) {
+export async function addProductUom(input: unknown, auditContext?: AuditContext, dbPool?: pg.Pool) {
+  const pool = dbPool || globalPool;
   const data = ProductUomSchema.parse(input);
 
   if (data.isDefault) {

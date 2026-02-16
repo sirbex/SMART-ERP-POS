@@ -5,7 +5,8 @@
  * Use this to verify accounting integrity at the API level.
  */
 
-import pool from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import logger from '../utils/logger.js';
 
 interface GLValidationResult {
@@ -25,7 +26,8 @@ interface ReconciliationResult {
 /**
  * Validates that a sale has proper GL entries
  */
-export async function validateSaleGLEntries(saleId: string): Promise<GLValidationResult> {
+export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): Promise<GLValidationResult> {
+  const pool = dbPool || globalPool;
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -129,7 +131,8 @@ export async function validateSaleGLEntries(saleId: string): Promise<GLValidatio
 /**
  * Validates that a customer payment has proper GL entries
  */
-export async function validatePaymentGLEntries(paymentId: string): Promise<GLValidationResult> {
+export async function validatePaymentGLEntries(paymentId: string, dbPool?: pg.Pool): Promise<GLValidationResult> {
+  const pool = dbPool || globalPool;
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -186,7 +189,8 @@ export async function validatePaymentGLEntries(paymentId: string): Promise<GLVal
 /**
  * Check AR reconciliation (GL vs Customer Subledger)
  */
-export async function checkARReconciliation(): Promise<ReconciliationResult> {
+export async function checkARReconciliation(dbPool?: pg.Pool): Promise<ReconciliationResult> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(`
     SELECT 
       COALESCE(
@@ -216,7 +220,8 @@ export async function checkARReconciliation(): Promise<ReconciliationResult> {
 /**
  * Check AP reconciliation (GL vs Supplier Subledger)
  */
-export async function checkAPReconciliation(): Promise<ReconciliationResult> {
+export async function checkAPReconciliation(dbPool?: pg.Pool): Promise<ReconciliationResult> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(`
     SELECT 
       COALESCE(
@@ -254,7 +259,8 @@ export async function checkAPReconciliation(): Promise<ReconciliationResult> {
  * - Goods receipts fail to trigger GL posting
  * - Manual adjustments to cost_layers without corresponding GL entries
  */
-export async function checkInventoryReconciliation(): Promise<ReconciliationResult> {
+export async function checkInventoryReconciliation(dbPool?: pg.Pool): Promise<ReconciliationResult> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(`
     SELECT 
       COALESCE(
@@ -286,7 +292,7 @@ export async function checkInventoryReconciliation(): Promise<ReconciliationResu
 /**
  * Full accounting integrity check
  */
-export async function runFullIntegrityCheck(): Promise<{
+export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
   passed: boolean;
   results: {
     arReconciliation: ReconciliationResult;
@@ -297,6 +303,7 @@ export async function runFullIntegrityCheck(): Promise<{
     paymentsWithoutGL: number;
   };
 }> {
+  const pool = dbPool || globalPool;
   const [ar, ap, inventory] = await Promise.all([
     checkARReconciliation(),
     checkAPReconciliation(),

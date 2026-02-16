@@ -1,6 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { goodsReceiptService } from './goodsReceiptService.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
 
@@ -80,6 +80,7 @@ export const goodsReceiptController = {
    */
   async createGR(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('📦 [GR CREATE] Incoming Request');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -204,6 +205,7 @@ export const goodsReceiptController = {
    */
   async getGRById(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await goodsReceiptService.getGRById(pool, id);
 
@@ -234,6 +236,7 @@ export const goodsReceiptController = {
    */
   async listGRs(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const query = ListGRsQuerySchema.parse(req.query);
       const result = await goodsReceiptService.listGRs(pool, query.page, query.limit, {
         status: query.status,
@@ -273,6 +276,7 @@ export const goodsReceiptController = {
    */
   async finalizeGR(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await goodsReceiptService.finalizeGR(pool, id);
 
@@ -345,6 +349,7 @@ export const goodsReceiptController = {
    */
   async hydrateFromPO(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await goodsReceiptService.hydrateFromPO(pool, id);
 
@@ -365,6 +370,7 @@ export const goodsReceiptController = {
    */
   async updateGRItem(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id: grId, itemId } = req.params as any;
       const payload = UpdateGRItemSchema.parse(req.body);
       const updated = await goodsReceiptService.updateGRItem(pool, grId, itemId, {

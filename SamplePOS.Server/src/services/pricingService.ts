@@ -4,7 +4,8 @@
 
 import Decimal from 'decimal.js';
 import { VM } from 'vm2';
-import pool from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import logger from '../utils/logger.js';
 import * as pricingCache from './pricingCacheService.js';
 
@@ -82,7 +83,8 @@ interface ProductPricing {
  * Performance: Sub-millisecond with cache, ~5-10ms cache miss
  * Precision: Bank-grade using Decimal.js (20 digits, ROUND_HALF_UP)
  */
-export async function calculatePrice(context: PricingContext): Promise<CalculatedPrice> {
+export async function calculatePrice(context: PricingContext, dbPool?: pg.Pool): Promise<CalculatedPrice> {
+  const pool = dbPool || globalPool;
   const { productId, customerGroupId, quantity = 1 } = context;
 
   // Check cache first
@@ -111,7 +113,7 @@ export async function calculatePrice(context: PricingContext): Promise<Calculate
   const basePrice = new Decimal(product.selling_price);
 
   // 1. Check for pricing tier (highest priority)
-  const tier = await findApplicableTier(productId, customerGroupId, quantity);
+  const tier = await findApplicableTier(productId, customerGroupId, quantity, pool);
   if (tier) {
     const tierPrice = new Decimal(tier.calculated_price);
     const discount = basePrice.minus(tierPrice);
@@ -193,8 +195,10 @@ export async function calculatePrice(context: PricingContext): Promise<Calculate
 async function findApplicableTier(
   productId: string,
   customerGroupId: string | null | undefined,
-  quantity: number
+  quantity: number,
+  dbPool?: pg.Pool
 ): Promise<PricingTierRow | null> {
+  const pool = dbPool || globalPool;
   const now = new Date();
 
   // Query for matching tiers with priority ordering
@@ -225,8 +229,10 @@ async function findApplicableTier(
 export async function evaluateFormula(
   formula: string,
   productId: string,
-  quantity: number = 1
+  quantity: number = 1,
+  dbPool?: pg.Pool
 ): Promise<number> {
+  const pool = dbPool || globalPool;
   // Get product cost data
   const result = await pool.query<ProductPricing>(
     `SELECT cost_price, average_cost, last_cost, selling_price
@@ -318,7 +324,8 @@ export function validateFormula(formula: string): { valid: boolean; error?: stri
  * Update calculated_price for all pricing tiers of a product
  * Called when product cost changes
  */
-export async function updatePricingTiers(productId: string): Promise<void> {
+export async function updatePricingTiers(productId: string, dbPool?: pg.Pool): Promise<void> {
+  const pool = dbPool || globalPool;
   const client = await pool.connect();
 
   try {
@@ -372,7 +379,8 @@ export async function updatePricingTiers(productId: string): Promise<void> {
  * Update product selling_price using its pricing formula
  * Called when auto_update_price is true and cost changes
  */
-export async function updateProductPrice(productId: string): Promise<void> {
+export async function updateProductPrice(productId: string, dbPool?: pg.Pool): Promise<void> {
+  const pool = dbPool || globalPool;
   const result = await pool.query<ProductPricing>(
     `SELECT pricing_formula, auto_update_price FROM products WHERE id = $1`,
     [productId]
@@ -439,8 +447,10 @@ export async function onCostChange(productId: string): Promise<void> {
 export async function getCustomerPrice(
   productId: string,
   customerId: string,
-  quantity: number = 1
+  quantity: number = 1,
+  dbPool?: pg.Pool
 ): Promise<CalculatedPrice> {
+  const pool = dbPool || globalPool;
   // Get customer's group
   const result = await pool.query(`SELECT customer_group_id FROM customers WHERE id = $1`, [
     customerId,

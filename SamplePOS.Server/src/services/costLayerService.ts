@@ -3,7 +3,8 @@
 // Bank-grade precision using Decimal.js for all monetary calculations
 
 import Decimal from 'decimal.js';
-import pool from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import logger from '../utils/logger.js';
 import type { CostLayer, CreateCostLayer } from '../../../shared/zod/cost-layer.js';
 
@@ -88,7 +89,8 @@ interface CostLayerSummary {
  * - BR-PRC-001: Unit cost cannot be negative
  * - Atomic transaction for data consistency
  */
-export async function createCostLayer(data: CreateCostLayer): Promise<void> {
+export async function createCostLayer(data: CreateCostLayer, dbPool?: pg.Pool): Promise<void> {
+  const pool = dbPool || globalPool;
   const client = await pool.connect();
 
   try {
@@ -281,8 +283,10 @@ export async function createCostLayer(data: CreateCostLayer): Promise<void> {
  */
 export async function calculateFIFOCost(
   productId: string,
-  quantity: number
+  quantity: number,
+  dbPool?: pg.Pool
 ): Promise<ActualCostResult> {
+  const pool = dbPool || globalPool;
   const requestedQty = new Decimal(quantity);
 
   if (requestedQty.lte(0)) {
@@ -355,8 +359,10 @@ export async function calculateFIFOCost(
  */
 export async function calculateAVCOCost(
   productId: string,
-  quantity: number
+  quantity: number,
+  dbPool?: pg.Pool
 ): Promise<ActualCostResult> {
+  const pool = dbPool || globalPool;
   const requestedQty = new Decimal(quantity);
 
   if (requestedQty.lte(0)) {
@@ -404,8 +410,10 @@ export async function calculateAVCOCost(
 export async function calculateActualCost(
   productId: string,
   quantity: number,
-  costingMethod: 'FIFO' | 'AVCO' | 'STANDARD'
+  costingMethod: 'FIFO' | 'AVCO' | 'STANDARD',
+  dbPool?: pg.Pool
 ): Promise<ActualCostResult> {
+  const pool = dbPool || globalPool;
   if (costingMethod === 'FIFO') {
     return await calculateFIFOCost(productId, quantity);
   } else if (costingMethod === 'AVCO') {
@@ -439,13 +447,15 @@ export async function calculateActualCost(
 export async function deductFromCostLayers(
   productId: string,
   quantity: number,
-  costingMethod: 'FIFO' | 'AVCO' | 'STANDARD'
+  costingMethod: 'FIFO' | 'AVCO' | 'STANDARD',
+  dbPool?: pg.Pool
 ): Promise<void> {
   if (costingMethod !== 'FIFO') {
     // AVCO and STANDARD don't need layer deduction
     return;
   }
 
+  const pool = dbPool || globalPool;
   const client = await pool.connect();
 
   try {
@@ -522,7 +532,8 @@ export async function deductFromCostLayers(
 /**
  * Update product's average_cost based on active cost layers
  */
-export async function updateAverageCost(productId: string, client?: any): Promise<void> {
+export async function updateAverageCost(productId: string, client?: any, dbPool?: pg.Pool): Promise<void> {
+  const pool = dbPool || globalPool;
   const queryClient = client || pool;
 
   const result = await queryClient.query(
@@ -554,7 +565,8 @@ export async function updateAverageCost(productId: string, client?: any): Promis
 /**
  * Get cost layer summary for a product
  */
-export async function getCostLayerSummary(productId: string): Promise<CostLayerSummary> {
+export async function getCostLayerSummary(productId: string, dbPool?: pg.Pool): Promise<CostLayerSummary> {
+  const pool = dbPool || globalPool;
   const result = await pool.query<CostLayerRow>(
     `SELECT * FROM cost_layers 
      WHERE product_id = $1 AND is_active = TRUE AND remaining_quantity > 0

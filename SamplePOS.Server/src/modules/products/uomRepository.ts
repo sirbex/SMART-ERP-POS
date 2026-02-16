@@ -1,5 +1,6 @@
 // UoM Repository - SQL only
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 
 export type DbUom = {
   id: string;
@@ -23,7 +24,8 @@ export type DbProductUom = {
   updatedAt: string;
 };
 
-export async function listUoms(): Promise<DbUom[]> {
+export async function listUoms(dbPool?: pg.Pool): Promise<DbUom[]> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(`SELECT id, name, symbol, type FROM uoms ORDER BY name ASC`);
   return res.rows;
 }
@@ -32,7 +34,8 @@ export async function createUom(data: {
   name: string;
   symbol?: string | null;
   type?: string;
-}): Promise<DbUom> {
+}, dbPool?: pg.Pool): Promise<DbUom> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(
     `INSERT INTO uoms (name, symbol, type)
      VALUES ($1, $2, COALESCE($3,'QUANTITY'))
@@ -46,7 +49,8 @@ export async function updateUom(id: string, data: {
   name?: string;
   symbol?: string | null;
   type?: string;
-}): Promise<DbUom | null> {
+}, dbPool?: pg.Pool): Promise<DbUom | null> {
+  const pool = dbPool || globalPool;
   const fields: string[] = [];
   const values: any[] = [];
   let i = 1;
@@ -82,12 +86,14 @@ export async function updateUom(id: string, data: {
   return res.rows[0] ?? null;
 }
 
-export async function deleteUom(id: string): Promise<boolean> {
+export async function deleteUom(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(`DELETE FROM uoms WHERE id = $1`, [id]);
   return (res.rowCount ?? 0) > 0;
 }
 
-export async function listProductUoms(productId: string): Promise<DbProductUom[]> {
+export async function listProductUoms(productId: string, dbPool?: pg.Pool): Promise<DbProductUom[]> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(
     `SELECT 
       pu.id,
@@ -119,7 +125,8 @@ export async function createProductUom(data: {
   isDefault?: boolean;
   priceOverride?: number | null;
   costOverride?: number | null;
-}): Promise<DbProductUom> {
+}, dbPool?: pg.Pool): Promise<DbProductUom> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(
     `INSERT INTO product_uoms (
       product_id, uom_id, conversion_factor, barcode, is_default, price_override, cost_override
@@ -150,7 +157,8 @@ export async function createProductUom(data: {
   return res.rows[0];
 }
 
-export async function unsetDefaultForProduct(productId: string) {
+export async function unsetDefaultForProduct(productId: string, dbPool?: pg.Pool) {
+  const pool = dbPool || globalPool;
   await pool.query(
     `UPDATE product_uoms SET is_default = false WHERE product_id = $1 AND is_default = true`,
     [productId]
@@ -165,8 +173,10 @@ export async function updateProductUom(
     isDefault?: boolean;
     priceOverride?: number | null;
     costOverride?: number | null;
-  }
+  },
+  dbPool?: pg.Pool
 ): Promise<DbProductUom | null> {
+  const pool = dbPool || globalPool;
   const fields: string[] = [];
   const values: any[] = [];
   let i = 1;
@@ -221,7 +231,8 @@ export async function updateProductUom(
   return res.rows[0] ?? null;
 }
 
-export async function deleteProductUom(id: string): Promise<boolean> {
+export async function deleteProductUom(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(`DELETE FROM product_uoms WHERE id = $1`, [id]);
   return (res.rowCount ?? 0) > 0;
 }

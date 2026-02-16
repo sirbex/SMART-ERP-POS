@@ -11,7 +11,7 @@
  */
 
 import { Pool } from 'pg';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import {
   AuditLog,
   AuditLogDbRow,

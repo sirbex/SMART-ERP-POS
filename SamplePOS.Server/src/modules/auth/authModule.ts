@@ -4,13 +4,14 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type { Pool } from 'pg';
 import { LoginSchema, CreateUserSchema } from '../../../../shared/zod/user.js';
 import { authenticate, authorize, generateToken } from '../../middleware/auth.js';
 
 // Repository
-async function findUserByEmail(email: string) {
-  const result = await pool.query(
+async function findUserByEmail(email: string, dbPool: Pool = globalPool) {
+  const result = await dbPool.query(
     `SELECT 
       id, email, password_hash as "passwordHash", full_name as "fullName", role, is_active as "isActive",
       created_at as "createdAt", updated_at as "updatedAt"
@@ -20,9 +21,9 @@ async function findUserByEmail(email: string) {
   return result.rows[0] || null;
 }
 
-async function createUser(data: any) {
+async function createUser(data: any, dbPool: Pool = globalPool) {
   const hashedPassword = await bcrypt.hash(data.password, 12);
-  const result = await pool.query(
+  const result = await dbPool.query(
     `INSERT INTO users (email, password_hash, full_name, role)
      VALUES ($1, $2, $3, $4)
      RETURNING 
@@ -36,9 +37,10 @@ async function createUser(data: any) {
 // Controllers
 export async function login(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const validatedData = LoginSchema.parse(req.body);
 
-    const user = await findUserByEmail(validatedData.email);
+    const user = await findUserByEmail(validatedData.email, pool);
     if (!user) {
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
@@ -72,15 +74,16 @@ export async function login(req: Request, res: Response, next: NextFunction) {
 
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const validatedData = CreateUserSchema.parse(req.body);
 
     // Check if user already exists
-    const existing = await findUserByEmail(validatedData.email);
+    const existing = await findUserByEmail(validatedData.email, pool);
     if (existing) {
       return res.status(400).json({ success: false, error: 'Email already registered' });
     }
 
-    const user = await createUser(validatedData);
+    const user = await createUser(validatedData, pool);
     const token = generateToken(user);
 
     res.status(201).json({
@@ -98,6 +101,7 @@ export async function register(req: Request, res: Response, next: NextFunction) 
 
 export async function getProfile(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     // req.user is set by authenticate middleware
     const userId = req.user?.id;
 

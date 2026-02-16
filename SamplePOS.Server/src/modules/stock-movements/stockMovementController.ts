@@ -3,7 +3,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { MovementType } from './types.js';
 import * as stockMovementService from './stockMovementService.js';
 import logger from '../../utils/logger.js';
@@ -58,6 +58,7 @@ const ListMovementsQuerySchema = z.object({
  */
 export async function recordMovement(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const validatedData = RecordMovementSchema.parse(req.body);
     const result = await stockMovementService.recordMovement(pool, validatedData);
 
@@ -86,6 +87,7 @@ export async function recordMovement(req: Request, res: Response, next: NextFunc
  */
 export async function getMovementsByProduct(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { productId } = req.params;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 100;
@@ -114,6 +116,7 @@ export async function getMovementsByProduct(req: Request, res: Response, next: N
  */
 export async function getMovementsByBatch(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { batchId } = req.params;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 100;
@@ -142,6 +145,7 @@ export async function getMovementsByBatch(req: Request, res: Response, next: Nex
  */
 export async function getAllMovements(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const query = ListMovementsQuerySchema.parse(req.query);
     const result = await stockMovementService.getAllMovements(pool, query.page, query.limit, {
       movementType: query.movementType as MovementType | undefined,

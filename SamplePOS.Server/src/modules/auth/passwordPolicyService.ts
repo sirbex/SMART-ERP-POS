@@ -10,7 +10,8 @@
  */
 
 import bcrypt from 'bcrypt';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type { Pool } from 'pg';
 import logger from '../../utils/logger.js';
 
 // Configuration constants
@@ -128,9 +129,10 @@ export function validatePassword(password: string): PasswordValidationResult {
  */
 export async function isPasswordInHistory(
     userId: string,
-    newPassword: string
+    newPassword: string,
+    dbPool: Pool = globalPool
 ): Promise<boolean> {
-    const result = await pool.query(
+    const result = await dbPool.query(
         'SELECT password_history FROM users WHERE id = $1',
         [userId]
     );
@@ -156,10 +158,11 @@ export async function isPasswordInHistory(
  */
 export async function addPasswordToHistory(
     userId: string,
-    currentPasswordHash: string
+    currentPasswordHash: string,
+    dbPool: Pool = globalPool
 ): Promise<void> {
     // Get current history
-    const result = await pool.query(
+    const result = await dbPool.query(
         'SELECT password_history FROM users WHERE id = $1',
         [userId]
     );
@@ -176,7 +179,7 @@ export async function addPasswordToHistory(
     // Keep only last N passwords
     history = history.slice(0, PASSWORD_CONFIG.historyCount);
 
-    await pool.query(
+    await dbPool.query(
         'UPDATE users SET password_history = $1 WHERE id = $2',
         [history, userId]
     );
@@ -186,9 +189,10 @@ export async function addPasswordToHistory(
  * Check password expiry status
  */
 export async function getPasswordExpiryStatus(
-    userId: string
+    userId: string,
+    dbPool: Pool = globalPool
 ): Promise<PasswordExpiryStatus> {
-    const result = await pool.query(
+    const result = await dbPool.query(
         'SELECT password_changed_at, role FROM users WHERE id = $1',
         [userId]
     );
@@ -225,10 +229,11 @@ export async function getPasswordExpiryStatus(
  * Record failed login attempt
  */
 export async function recordFailedLoginAttempt(
-    userId: string
+    userId: string,
+    dbPool: Pool = globalPool
 ): Promise<AccountLockoutStatus> {
     // Increment failed attempts
-    const result = await pool.query(
+    const result = await dbPool.query(
         `UPDATE users 
      SET failed_login_attempts = COALESCE(failed_login_attempts, 0) + 1,
          lockout_until = CASE 
@@ -281,9 +286,10 @@ export async function recordFailedLoginAttempt(
  * Check if account is locked
  */
 export async function checkAccountLockout(
-    userId: string
+    userId: string,
+    dbPool: Pool = globalPool
 ): Promise<AccountLockoutStatus> {
-    const result = await pool.query(
+    const result = await dbPool.query(
         'SELECT failed_login_attempts, lockout_until FROM users WHERE id = $1',
         [userId]
     );
@@ -306,7 +312,7 @@ export async function checkAccountLockout(
 
         if (now >= lockoutTime) {
             // Lockout expired - reset
-            await resetFailedLoginAttempts(userId);
+            await resetFailedLoginAttempts(userId, dbPool);
             return {
                 locked: false,
                 failedAttempts: 0,
@@ -336,8 +342,8 @@ export async function checkAccountLockout(
 /**
  * Reset failed login attempts after successful login
  */
-export async function resetFailedLoginAttempts(userId: string): Promise<void> {
-    await pool.query(
+export async function resetFailedLoginAttempts(userId: string, dbPool: Pool = globalPool): Promise<void> {
+    await dbPool.query(
         'UPDATE users SET failed_login_attempts = 0, lockout_until = NULL WHERE id = $1',
         [userId]
     );
@@ -349,7 +355,8 @@ export async function resetFailedLoginAttempts(userId: string): Promise<void> {
  */
 export async function updatePasswordWithPolicy(
     userId: string,
-    newPassword: string
+    newPassword: string,
+    dbPool: Pool = globalPool
 ): Promise<string> {
     // Validate password meets policy
     const validation = validatePassword(newPassword);
@@ -358,26 +365,26 @@ export async function updatePasswordWithPolicy(
     }
 
     // Check password history
-    const inHistory = await isPasswordInHistory(userId, newPassword);
+    const inHistory = await isPasswordInHistory(userId, newPassword, dbPool);
     if (inHistory) {
         throw new Error(`Cannot reuse one of your last ${PASSWORD_CONFIG.historyCount} passwords`);
     }
 
     // Get current password hash to add to history
-    const currentResult = await pool.query(
+    const currentResult = await dbPool.query(
         'SELECT password_hash FROM users WHERE id = $1',
         [userId]
     );
 
     if (currentResult.rows.length > 0 && currentResult.rows[0].password_hash) {
-        await addPasswordToHistory(userId, currentResult.rows[0].password_hash);
+        await addPasswordToHistory(userId, currentResult.rows[0].password_hash, dbPool);
     }
 
     // Hash new password with stronger salt rounds
     const newPasswordHash = await bcrypt.hash(newPassword, PASSWORD_CONFIG.saltRounds);
 
     // Update password and reset expiry
-    await pool.query(
+    await dbPool.query(
         `UPDATE users 
      SET password_hash = $1, 
          password_changed_at = CURRENT_TIMESTAMP,
@@ -412,11 +419,11 @@ export function getPasswordPolicyConfig() {
 /**
  * Check if user needs to change password (first login or expired)
  */
-export async function mustChangePassword(userId: string): Promise<{
+export async function mustChangePassword(userId: string, dbPool: Pool = globalPool): Promise<{
     mustChange: boolean;
     reason: 'expired' | 'first_login' | null;
 }> {
-    const result = await pool.query(
+    const result = await dbPool.query(
         'SELECT password_changed_at, role FROM users WHERE id = $1',
         [userId]
     );
@@ -433,7 +440,7 @@ export async function mustChangePassword(userId: string): Promise<{
     }
 
     // Check expiry
-    const expiryStatus = await getPasswordExpiryStatus(userId);
+    const expiryStatus = await getPasswordExpiryStatus(userId, dbPool);
     if (expiryStatus.expired) {
         return { mustChange: true, reason: 'expired' };
     }

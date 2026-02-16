@@ -4,12 +4,12 @@ import { z } from 'zod';
 import { DocumentService } from './documentService.js';
 import { authenticate } from '../../middleware/auth.js';
 import logger from '../../utils/logger.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 const router = express.Router();
 
-// Initialize document service
-const documentService = new DocumentService(pool, {
+// Document service options (shared across all instances)
+const documentServiceOptions = {
   maxFileSize: 10 * 1024 * 1024, // 10MB
   allowedMimeTypes: [
     'application/pdf',
@@ -23,7 +23,15 @@ const documentService = new DocumentService(pool, {
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ],
-});
+};
+
+/**
+ * Get a DocumentService instance for the current request's pool
+ */
+function getDocumentService(req: express.Request): DocumentService {
+  const pool = req.tenantPool || globalPool;
+  return new DocumentService(pool, documentServiceOptions);
+}
 
 // Configure multer for file uploads
 const upload = multer({
@@ -95,7 +103,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     const validatedData = UploadDocumentSchema.parse(uploadData);
 
     // Upload document
-    const result = await documentService.uploadDocument(req.file, req.user.id, {
+    const result = await getDocumentService(req).uploadDocument(req.file, req.user.id, {
       entityType: validatedData.entityType,
       entityId: validatedData.entityId,
       tags: validatedData.tags,
@@ -145,7 +153,7 @@ router.get('/:id/file', authenticate, async (req, res) => {
       });
     }
 
-    const { document, filePath } = await documentService.getDocumentFile(id);
+    const { document, filePath } = await getDocumentService(req).getDocumentFile(id);
 
     // Set appropriate headers
     res.setHeader('Content-Type', document.mimeType);
@@ -186,7 +194,7 @@ router.get('/:id', authenticate, async (req, res) => {
       });
     }
 
-    const document = await documentService.getDocumentMetadata(id);
+    const document = await getDocumentService(req).getDocumentMetadata(id);
 
     if (!document) {
       return res.status(404).json({
@@ -225,7 +233,7 @@ router.get('/', authenticate, async (req, res) => {
       limit: validatedQuery.limit ? parseInt(validatedQuery.limit) : 20,
     };
 
-    const result = await documentService.searchDocuments(filters);
+    const result = await getDocumentService(req).searchDocuments(filters);
 
     res.json({
       success: true,
@@ -266,7 +274,7 @@ router.put('/:id/associate', authenticate, async (req, res) => {
 
     const validatedData = AssociateDocumentSchema.parse(req.body);
 
-    const success = await documentService.associateWithEntity(
+    const success = await getDocumentService(req).associateWithEntity(
       id,
       validatedData.entityType,
       validatedData.entityId
@@ -331,7 +339,7 @@ router.get('/entity/:entityType/:entityId', authenticate, async (req, res) => {
       });
     }
 
-    const documents = await documentService.getEntityDocuments(entityType, entityId);
+    const documents = await getDocumentService(req).getEntityDocuments(entityType, entityId);
 
     res.json({
       success: true,
@@ -362,7 +370,7 @@ router.delete('/:id', authenticate, async (req, res) => {
       });
     }
 
-    const success = await documentService.deleteDocument(id);
+    const success = await getDocumentService(req).deleteDocument(id);
 
     if (!success) {
       return res.status(404).json({
@@ -393,7 +401,7 @@ router.delete('/:id', authenticate, async (req, res) => {
  */
 router.get('/stats/storage', authenticate, async (req, res) => {
   try {
-    const stats = await documentService.getStorageStats();
+    const stats = await getDocumentService(req).getStorageStats();
 
     res.json({
       success: true,

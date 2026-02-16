@@ -1,4 +1,5 @@
-import { pool } from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import { ExpenseFilters, Expense, ExpenseDbRow, CreateExpenseData, UpdateExpenseData } from '../types/expense';
 import logger from '../utils/logger.js';
 
@@ -6,7 +7,8 @@ import logger from '../utils/logger.js';
  * Get expenses with filtering and pagination
  * Updated to match actual database schema
  */
-export const getExpenses = async (filters: ExpenseFilters): Promise<Expense[]> => {
+export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool): Promise<Expense[]> => {
+  const pool = dbPool || globalPool;
   try {
     let query = `
       SELECT 
@@ -97,7 +99,8 @@ export const getExpenses = async (filters: ExpenseFilters): Promise<Expense[]> =
 /**
  * Get total count of expenses matching filters
  */
-export const getExpenseCount = async (filters: ExpenseFilters): Promise<number> => {
+export const getExpenseCount = async (filters: ExpenseFilters, dbPool?: pg.Pool): Promise<number> => {
+  const pool = dbPool || globalPool;
   try {
     let query = `
       SELECT COUNT(*) as count
@@ -149,7 +152,8 @@ export const getExpenseCount = async (filters: ExpenseFilters): Promise<number> 
 /**
  * Get expense by ID
  */
-export const getExpenseById = async (id: string): Promise<Expense | null> => {
+export const getExpenseById = async (id: string, dbPool?: pg.Pool): Promise<Expense | null> => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -202,7 +206,8 @@ export const getExpenseById = async (id: string): Promise<Expense | null> => {
  * Create new expense
  * Updated to include payment_status and payment_account_id for GL posting
  */
-export const createExpense = async (data: CreateExpenseData & { expense_number: string; status: string }): Promise<Expense> => {
+export const createExpense = async (data: CreateExpenseData & { expense_number: string; status: string }, dbPool?: pg.Pool): Promise<Expense> => {
+  const pool = dbPool || globalPool;
   try {
     // Lookup account_id from expense category (this is the expense GL account - DEBIT side)
     let expenseAccountId: string | null = null;
@@ -269,7 +274,8 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
 /**
  * Update expense
  */
-export const updateExpense = async (id: string, data: UpdateExpenseData): Promise<Expense | null> => {
+export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?: pg.Pool): Promise<Expense | null> => {
+  const pool = dbPool || globalPool;
   try {
     const fields = [];
     const values = [];
@@ -308,7 +314,8 @@ export const updateExpense = async (id: string, data: UpdateExpenseData): Promis
 /**
  * Delete expense (soft delete by updating status)
  */
-export const deleteExpense = async (id: string): Promise<boolean> => {
+export const deleteExpense = async (id: string, dbPool?: pg.Pool): Promise<boolean> => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       UPDATE expenses 
@@ -327,7 +334,8 @@ export const deleteExpense = async (id: string): Promise<boolean> => {
 /**
  * Generate expense number using database function
  */
-export const generateExpenseNumber = async (): Promise<string> => {
+export const generateExpenseNumber = async (dbPool?: pg.Pool): Promise<string> => {
+  const pool = dbPool || globalPool;
   try {
     const result = await pool.query('SELECT generate_expense_number() as expense_number');
     return result.rows[0].expense_number;
@@ -341,7 +349,8 @@ export const generateExpenseNumber = async (): Promise<string> => {
  * Get payment accounts (cash/bank accounts) for expense payment source
  * These are asset accounts that can be used as the CREDIT side of expense entries
  */
-export const getPaymentAccounts = async () => {
+export const getPaymentAccounts = async (dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -368,7 +377,8 @@ export const getPaymentAccounts = async () => {
 /**
  * Get expense categories
  */
-export const getExpenseCategories = async () => {
+export const getExpenseCategories = async (dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT id, name, description, code, is_active, created_at, updated_at
@@ -388,7 +398,8 @@ export const getExpenseCategories = async () => {
 /**
  * Get expense category by code
  */
-export const getExpenseCategoryByCode = async (code: string) => {
+export const getExpenseCategoryByCode = async (code: string, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT id, name, description, code, is_active, created_at, updated_at
@@ -407,7 +418,8 @@ export const getExpenseCategoryByCode = async (code: string) => {
 /**
  * Create expense category
  */
-export const createExpenseCategory = async (data: { name: string; code: string; description?: string }) => {
+export const createExpenseCategory = async (data: { name: string; code: string; description?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       INSERT INTO expense_categories (name, code, description)
@@ -426,7 +438,8 @@ export const createExpenseCategory = async (data: { name: string; code: string; 
 /**
  * Create approval record
  */
-export const createApprovalRecord = async (expenseId: string, approverId: string) => {
+export const createApprovalRecord = async (expenseId: string, approverId: string, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       INSERT INTO expense_approvals (expense_id, approver_id, status)
@@ -450,8 +463,10 @@ export const updateApprovalRecord = async (
   expenseId: string,
   approverId: string,
   status: string,
-  comments?: string
+  comments?: string,
+  dbPool?: pg.Pool
 ) => {
+  const pool = dbPool || globalPool;
   try {
     // First try to update an existing record for this expense
     // Update approver_id to the actual person who approved/rejected
@@ -484,7 +499,8 @@ export const updateApprovalRecord = async (
 /**
  * Get expense documents
  */
-export const getExpenseDocuments = async (expenseId: string) => {
+export const getExpenseDocuments = async (expenseId: string, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -506,7 +522,8 @@ export const getExpenseDocuments = async (expenseId: string) => {
 /**
  * Get expense document by ID
  */
-export const getExpenseDocumentById = async (documentId: string) => {
+export const getExpenseDocumentById = async (documentId: string, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -527,7 +544,8 @@ export const getExpenseDocumentById = async (documentId: string) => {
 /**
  * Delete expense document
  */
-export const deleteExpenseDocument = async (documentId: string): Promise<boolean> => {
+export const deleteExpenseDocument = async (documentId: string, dbPool?: pg.Pool): Promise<boolean> => {
+  const pool = dbPool || globalPool;
   try {
     const query = `DELETE FROM expense_documents WHERE id = $1`;
     const result = await pool.query(query, [documentId]);
@@ -541,7 +559,8 @@ export const deleteExpenseDocument = async (documentId: string): Promise<boolean
 /**
  * Get expense summary/statistics
  */
-export const getExpenseSummary = async (filters: { startDate?: string; endDate?: string; categoryId?: string }) => {
+export const getExpenseSummary = async (filters: { startDate?: string; endDate?: string; categoryId?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     let query = `
       SELECT 
@@ -588,7 +607,8 @@ export const getExpenseSummary = async (filters: { startDate?: string; endDate?:
 /**
  * Get expense report by category with breakdown
  */
-export const getExpensesByCategory = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpensesByCategory = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -639,7 +659,8 @@ export const getExpensesByCategory = async (filters: { startDate?: string; endDa
 /**
  * Get expense report by vendor
  */
-export const getExpensesByVendor = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpensesByVendor = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -680,7 +701,8 @@ export const getExpensesByVendor = async (filters: { startDate?: string; endDate
 /**
  * Get expense trends by period (monthly)
  */
-export const getExpenseTrends = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpenseTrends = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -719,7 +741,8 @@ export const getExpenseTrends = async (filters: { startDate?: string; endDate?: 
 /**
  * Get expense report by payment method
  */
-export const getExpensesByPaymentMethod = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpensesByPaymentMethod = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
@@ -756,7 +779,8 @@ export const getExpensesByPaymentMethod = async (filters: { startDate?: string; 
 /**
  * Get detailed expense list for export
  */
-export const getExpensesForExport = async (filters: { startDate?: string; endDate?: string; categoryId?: string; status?: string }) => {
+export const getExpensesForExport = async (filters: { startDate?: string; endDate?: string; categoryId?: string; status?: string }, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   try {
     let query = `
       SELECT 
@@ -860,7 +884,8 @@ const normalizeExpenseFromDb = (row: any): Expense => {
 /**
  * Update expense category
  */
-export const updateExpenseCategory = async (id: string, updateData: any) => {
+export const updateExpenseCategory = async (id: string, updateData: any, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   const query = `
     UPDATE expense_categories 
     SET name = $2, code = $3, description = $4, updated_at = NOW()
@@ -900,7 +925,8 @@ export const updateExpenseCategory = async (id: string, updateData: any) => {
 /**
  * Delete expense category (soft delete)
  */
-export const deleteExpenseCategory = async (id: string) => {
+export const deleteExpenseCategory = async (id: string, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   const query = 'UPDATE expense_categories SET is_active = false, updated_at = NOW() WHERE id = $1 AND is_active = true';
 
   try {
@@ -915,7 +941,8 @@ export const deleteExpenseCategory = async (id: string) => {
 /**
  * Get expense count by category
  */
-export const getExpenseCountByCategory = async (categoryId: string) => {
+export const getExpenseCountByCategory = async (categoryId: string, dbPool?: pg.Pool) => {
+  const pool = dbPool || globalPool;
   const query = 'SELECT COUNT(*) as count FROM expenses WHERE category_id = $1';
 
   try {

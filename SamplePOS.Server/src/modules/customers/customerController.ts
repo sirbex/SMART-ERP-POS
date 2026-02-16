@@ -6,7 +6,7 @@ import * as customerService from './customerService.js';
 import { z } from 'zod';
 import PDFDocument from 'pdfkit';
 import { getSettings } from '../settings/invoiceSettingsService.js';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 export async function getCustomers(req: Request, res: Response, next: NextFunction) {
   try {
@@ -85,7 +85,7 @@ export async function createCustomer(req: Request, res: Response, next: NextFunc
       };
 
       const { logCustomerCreated } = await import('../audit/auditService.js');
-      const { pool } = await import('../../db/pool.js');
+      const pool = req.tenantPool || globalPool;
       await logCustomerCreated(
         pool,
         customer.id,
@@ -345,7 +345,7 @@ export async function exportCustomerStatementPdf(req: Request, res: Response, ne
     const customer = await customerService.getCustomerById(id);
 
     // Get company settings
-    const settings = await getSettings(pool);
+    const settings = await getSettings(req.tenantPool || globalPool);
 
     const customerName = customer?.name?.replace(/[^a-z0-9]/gi, '_') || id.slice(0, 8);
     const filename = `statement-${customerName}-${new Date().toISOString().slice(0, 10)}.pdf`;

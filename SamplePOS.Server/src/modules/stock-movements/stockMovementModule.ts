@@ -2,7 +2,7 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
@@ -389,6 +389,7 @@ export const stockMovementController = {
    */
   async recordMovement(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const validatedData = RecordMovementSchema.parse(req.body);
       const result = await stockMovementService.recordMovement(pool, validatedData);
 
@@ -420,6 +421,7 @@ export const stockMovementController = {
    */
   async getMovementsByProduct(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { productId } = req.params;
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 100;
@@ -450,6 +452,7 @@ export const stockMovementController = {
    */
   async getMovementsByBatch(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { batchId } = req.params;
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 100;
@@ -480,6 +483,7 @@ export const stockMovementController = {
    */
   async getAllMovements(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const query = ListMovementsQuerySchema.parse(req.query);
       const result = await stockMovementService.getAllMovements(pool, query.page, query.limit, {
         movementType: query.movementType,

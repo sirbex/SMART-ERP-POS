@@ -15,8 +15,8 @@
  * - Session expected_closing derived from movements (single source of truth)
  */
 
-import { pool } from '../../db/pool.js';
-import { PoolClient } from 'pg';
+import { pool as globalPool } from '../../db/pool.js';
+import { Pool, PoolClient } from 'pg';
 import {
     cashRegisterRepository,
     CashRegister,
@@ -123,28 +123,28 @@ export const cashRegisterService = {
      * Get all registers
      */
     async getAllRegisters(): Promise<CashRegister[]> {
-        return cashRegisterRepository.getAllRegisters(pool);
+        return cashRegisterRepository.getAllRegisters(globalPool);
     },
 
     /**
      * Get active registers
      */
     async getActiveRegisters(): Promise<CashRegister[]> {
-        return cashRegisterRepository.getActiveRegisters(pool);
+        return cashRegisterRepository.getActiveRegisters(globalPool);
     },
 
     /**
      * Get register by ID
      */
     async getRegisterById(id: string): Promise<CashRegister | null> {
-        return cashRegisterRepository.getRegisterById(pool, id);
+        return cashRegisterRepository.getRegisterById(globalPool, id);
     },
 
     /**
      * Create a new register
      */
     async createRegister(data: CreateRegisterData, userId: string): Promise<CashRegister> {
-        const register = await cashRegisterRepository.createRegister(pool, data);
+        const register = await cashRegisterRepository.createRegister(globalPool, data);
 
         logger.info('Cash register created', {
             registerId: register.id,
@@ -163,7 +163,7 @@ export const cashRegisterService = {
         data: Partial<CreateRegisterData & { isActive: boolean }>,
         userId: string
     ): Promise<CashRegister | null> {
-        const register = await cashRegisterRepository.updateRegister(pool, id, data);
+        const register = await cashRegisterRepository.updateRegister(globalPool, id, data);
 
         if (register) {
             logger.info('Cash register updated', {
@@ -190,7 +190,7 @@ export const cashRegisterService = {
      */
     async openSession(data: OpenSessionData): Promise<CashRegisterSession> {
         // Validate register exists and is active
-        const register = await cashRegisterRepository.getRegisterById(pool, data.registerId);
+        const register = await cashRegisterRepository.getRegisterById(globalPool, data.registerId);
         if (!register) {
             throw new RegisterNotFoundError(data.registerId);
         }
@@ -202,13 +202,13 @@ export const cashRegisterService = {
         }
 
         // Check if register already has open session
-        const existingRegisterSession = await cashRegisterRepository.getOpenSession(pool, data.registerId);
+        const existingRegisterSession = await cashRegisterRepository.getOpenSession(globalPool, data.registerId);
         if (existingRegisterSession) {
             throw new RegisterBusyError(data.registerId, existingRegisterSession.sessionNumber);
         }
 
         // Check if user already has an open session
-        const existingUserSession = await cashRegisterRepository.getUserOpenSession(pool, data.userId);
+        const existingUserSession = await cashRegisterRepository.getUserOpenSession(globalPool, data.userId);
         if (existingUserSession) {
             throw new UserAlreadyHasSessionError(
                 existingUserSession.sessionNumber,
@@ -217,7 +217,7 @@ export const cashRegisterService = {
         }
 
         // Open the session
-        const session = await cashRegisterRepository.openSession(pool, data);
+        const session = await cashRegisterRepository.openSession(globalPool, data);
 
         logger.info('Cash register session opened', {
             sessionId: session.id,
@@ -234,21 +234,21 @@ export const cashRegisterService = {
      * Get current open session for a user
      */
     async getUserOpenSession(userId: string): Promise<CashRegisterSession | null> {
-        return cashRegisterRepository.getUserOpenSession(pool, userId);
+        return cashRegisterRepository.getUserOpenSession(globalPool, userId);
     },
 
     /**
      * Get open session for a register
      */
     async getRegisterOpenSession(registerId: string): Promise<CashRegisterSession | null> {
-        return cashRegisterRepository.getOpenSession(pool, registerId);
+        return cashRegisterRepository.getOpenSession(globalPool, registerId);
     },
 
     /**
      * Get session by ID
      */
     async getSessionById(sessionId: string): Promise<CashRegisterSession | null> {
-        return cashRegisterRepository.getSessionById(pool, sessionId);
+        return cashRegisterRepository.getSessionById(globalPool, sessionId);
     },
 
     /**
@@ -260,13 +260,13 @@ export const cashRegisterService = {
      * - If variance exists, create GL entries for overage/shortage
      */
     async closeSession(data: CloseSessionData, userId: string): Promise<CashRegisterSession> {
-        const client = await pool.connect();
+        const client = await globalPool.connect();
 
         try {
             await client.query('BEGIN');
 
             // Get and validate session
-            const session = await cashRegisterRepository.getSessionById(pool, data.sessionId);
+            const session = await cashRegisterRepository.getSessionById(globalPool, data.sessionId);
             if (!session) {
                 throw new SessionNotFoundError(data.sessionId);
             }
@@ -583,7 +583,7 @@ export const cashRegisterService = {
      * - Only managers/admins should call this (enforced at route level)
      */
     async reconcileSession(sessionId: string, reconciledBy: string): Promise<CashRegisterSession> {
-        const session = await cashRegisterRepository.getSessionById(pool, sessionId);
+        const session = await cashRegisterRepository.getSessionById(globalPool, sessionId);
         if (!session) {
             throw new SessionNotFoundError(sessionId);
         }
@@ -592,7 +592,7 @@ export const cashRegisterService = {
         }
 
         const reconciledSession = await cashRegisterRepository.reconcileSession(
-            pool,
+            globalPool,
             sessionId,
             reconciledBy
         );
@@ -618,14 +618,14 @@ export const cashRegisterService = {
         limit?: number;
         offset?: number;
     }): Promise<{ sessions: CashRegisterSession[]; total: number }> {
-        return cashRegisterRepository.getSessions(pool, filters);
+        return cashRegisterRepository.getSessions(globalPool, filters);
     },
 
     /**
      * Get session summary
      */
     async getSessionSummary(sessionId: string) {
-        return cashRegisterRepository.getSessionSummary(pool, sessionId);
+        return cashRegisterRepository.getSessionSummary(globalPool, sessionId);
     },
 
     // ===========================================================================
@@ -643,7 +643,7 @@ export const cashRegisterService = {
      */
     async recordMovement(data: RecordMovementData): Promise<CashMovement> {
         // Validate session exists and is open
-        const session = await cashRegisterRepository.getSessionById(pool, data.sessionId);
+        const session = await cashRegisterRepository.getSessionById(globalPool, data.sessionId);
         if (!session) {
             throw new SessionNotFoundError(data.sessionId);
         }
@@ -651,7 +651,7 @@ export const cashRegisterService = {
             throw new SessionNotOpenError(data.sessionId, session.status);
         }
 
-        const movement = await cashRegisterRepository.recordMovement(pool, data);
+        const movement = await cashRegisterRepository.recordMovement(globalPool, data);
 
         // Post to GL for applicable movement types
         // This is called after movement is saved (idempotency key prevents duplicates)
@@ -717,7 +717,7 @@ export const cashRegisterService = {
      * Get movements for a session
      */
     async getSessionMovements(sessionId: string): Promise<CashMovement[]> {
-        return cashRegisterRepository.getSessionMovements(pool, sessionId);
+        return cashRegisterRepository.getSessionMovements(globalPool, sessionId);
     },
 
     // ===========================================================================
@@ -730,7 +730,7 @@ export const cashRegisterService = {
      * QuickBooks/Odoo standard: Shows current session totals without closing
      */
     async generateXReport(sessionId: string): Promise<XReportData> {
-        const session = await cashRegisterRepository.getSessionById(pool, sessionId);
+        const session = await cashRegisterRepository.getSessionById(globalPool, sessionId);
         if (!session) {
             throw new SessionNotFoundError(sessionId);
         }
@@ -744,10 +744,10 @@ export const cashRegisterService = {
         }
 
         // Calculate expected closing from movements
-        const expectedClosing = await cashRegisterRepository.calculateExpectedClosing(pool, sessionId);
+        const expectedClosing = await cashRegisterRepository.calculateExpectedClosing(globalPool, sessionId);
 
         // Calculate payment summary
-        const paymentSummary = await cashRegisterRepository.calculatePaymentSummary(pool, sessionId);
+        const paymentSummary = await cashRegisterRepository.calculatePaymentSummary(globalPool, sessionId);
 
         return {
             reportType: 'X-REPORT',
@@ -842,7 +842,7 @@ export const cashRegisterService = {
         approverId: string,
         approvalNotes?: string
     ): Promise<CashRegisterSession> {
-        const session = await cashRegisterRepository.getSessionById(pool, sessionId);
+        const session = await cashRegisterRepository.getSessionById(globalPool, sessionId);
         if (!session) {
             throw new SessionNotFoundError(sessionId);
         }
@@ -851,7 +851,7 @@ export const cashRegisterService = {
         }
 
         // Update session with approval
-        const result = await pool.query(`
+        const result = await globalPool.query(`
       UPDATE cash_register_sessions
       SET 
         variance_approved_by = $2,

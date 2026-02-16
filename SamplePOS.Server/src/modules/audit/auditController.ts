@@ -11,7 +11,7 @@
 
 import { Request, Response } from 'express';
 import { Pool } from 'pg';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { AuditLogQuerySchema } from '../../../../shared/zod/audit.js';
 import * as auditService from './auditService.js';
 import logger from '../../utils/logger.js';
@@ -23,6 +23,7 @@ export class AuditController {
    */
   async getAuditLogs(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       // Validate query parameters
       const validation = AuditLogQuerySchema.safeParse(req.query);
       if (!validation.success) {
@@ -58,6 +59,7 @@ export class AuditController {
    */
   async getEntityAuditTrail(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { entityType, identifier } = req.params;
 
       if (!entityType || !identifier) {
@@ -93,6 +95,7 @@ export class AuditController {
    */
   async getActiveSessions(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const sessions = await auditService.getActiveSessions(pool);
 
       res.json({
@@ -114,6 +117,7 @@ export class AuditController {
    */
   async getUserSessions(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { userId } = req.params;
       const limit = parseInt(req.query.limit as string) || 10;
 
@@ -146,6 +150,7 @@ export class AuditController {
    */
   async getFailedTransactionSummary(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const days = parseInt(req.query.days as string) || 30;
 
       const summary = await auditService.getFailedTransactionSummary(pool, days);
@@ -169,7 +174,7 @@ export class AuditController {
    */
   async forceLogoutIdleSessions(req: Request, res: Response): Promise<void> {
     try {
-      const pool = req.app.locals.pool as Pool;
+      const pool = req.tenantPool || globalPool;
       const idleMinutes = parseInt(req.body.idleMinutes as string) || 15;
 
       // TODO: Add admin role check here

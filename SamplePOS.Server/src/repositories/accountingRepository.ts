@@ -14,7 +14,8 @@
  * - Journal entries are immutable once posted
  */
 
-import { pool } from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
@@ -131,7 +132,8 @@ export interface LedgerFilters {
 /**
  * Get all accounts with optional filtering
  */
-export async function getAccounts(filters: AccountFilters = {}): Promise<Account[]> {
+export async function getAccounts(filters: AccountFilters = {}, dbPool?: pg.Pool): Promise<Account[]> {
+  const pool = dbPool || globalPool;
   try {
     let query = `
       SELECT 
@@ -190,7 +192,8 @@ export async function getAccounts(filters: AccountFilters = {}): Promise<Account
 /**
  * Get account by ID
  */
-export async function getAccountById(id: string): Promise<Account | null> {
+export async function getAccountById(id: string, dbPool?: pg.Pool): Promise<Account | null> {
+  const pool = dbPool || globalPool;
   try {
     const result = await pool.query(`
       SELECT 
@@ -217,7 +220,8 @@ export async function getAccountById(id: string): Promise<Account | null> {
 /**
  * Get account by code
  */
-export async function getAccountByCode(code: string): Promise<Account | null> {
+export async function getAccountByCode(code: string, dbPool?: pg.Pool): Promise<Account | null> {
+  const pool = dbPool || globalPool;
   try {
     const result = await pool.query(`
       SELECT 
@@ -244,7 +248,8 @@ export async function getAccountByCode(code: string): Promise<Account | null> {
 /**
  * Create a new account
  */
-export async function createAccount(data: Omit<Account, 'id'>): Promise<Account> {
+export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool): Promise<Account> {
+  const pool = dbPool || globalPool;
   try {
     const id = uuidv4();
     const result = await pool.query(`
@@ -304,7 +309,8 @@ export interface CreateLedgerTransactionData {
  * This writes to ledger_transactions and ledger_entries tables
  * which are read by the General Ledger page
  */
-export async function createLedgerTransaction(data: CreateLedgerTransactionData): Promise<{ transactionId: string; transactionNumber: string }> {
+export async function createLedgerTransaction(data: CreateLedgerTransactionData, dbPool?: pg.Pool): Promise<{ transactionId: string; transactionNumber: string }> {
+  const pool = dbPool || globalPool;
   const client = await pool.connect();
 
   try {
@@ -408,7 +414,8 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData)
  * Create a journal entry with lines
  * Validates that debits = credits (double-entry principle)
  */
-export async function createJournalEntry(data: CreateJournalEntryData): Promise<JournalEntry> {
+export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: pg.Pool): Promise<JournalEntry> {
+  const pool = dbPool || globalPool;
   const client = await pool.connect();
 
   try {
@@ -534,7 +541,8 @@ export async function createJournalEntry(data: CreateJournalEntryData): Promise<
 /**
  * Get journal entry by ID with all lines
  */
-export async function getJournalEntryById(id: string): Promise<JournalEntry | null> {
+export async function getJournalEntryById(id: string, dbPool?: pg.Pool): Promise<JournalEntry | null> {
+  const pool = dbPool || globalPool;
   try {
     const entryResult = await pool.query(`
       SELECT 
@@ -592,10 +600,11 @@ export async function getJournalEntryById(id: string): Promise<JournalEntry | nu
  * Get ledger entries with filtering and running balance calculation
  * Uses ledger_entries and ledger_transactions tables (C# API generated)
  */
-export async function getLedgerEntries(filters: LedgerFilters): Promise<{
+export async function getLedgerEntries(filters: LedgerFilters, dbPool?: pg.Pool): Promise<{
   entries: LedgerEntry[];
   total: number;
 }> {
+  const pool = dbPool || globalPool;
   try {
     let whereClause = '';
     const params: any[] = [];
@@ -686,7 +695,7 @@ export async function getLedgerEntries(filters: LedgerFilters): Promise<{
  * Get ledger transaction by ID with all entries
  * Queries ledger_transactions and ledger_entries tables
  */
-export async function getLedgerTransactionById(id: string): Promise<{
+export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Promise<{
   id: string;
   transactionNumber: string;
   transactionDate: string;
@@ -709,6 +718,7 @@ export async function getLedgerTransactionById(id: string): Promise<{
     description: string;
   }>;
 } | null> {
+  const pool = dbPool || globalPool;
   try {
     // Get the transaction
     const txnResult = await pool.query(`
@@ -769,7 +779,7 @@ export async function getLedgerTransactionById(id: string): Promise<{
  * Calculate trial balance as of a given date
  * Returns account balances ensuring debits = credits
  */
-export async function getTrialBalance(asOfDate: string, includeZeroBalances: boolean = false): Promise<{
+export async function getTrialBalance(asOfDate: string, includeZeroBalances: boolean = false, dbPool?: pg.Pool): Promise<{
   asOfDate: string;
   generatedAt: string;
   accounts: TrialBalanceAccount[];
@@ -779,6 +789,7 @@ export async function getTrialBalance(asOfDate: string, includeZeroBalances: boo
     isBalanced: boolean;
   };
 }> {
+  const pool = dbPool || globalPool;
   try {
     // Get all account balances calculated from ledger entries up to asOfDate
     // netBalance is calculated from debits and credits, respecting normalBalance type
@@ -873,7 +884,7 @@ export async function getTrialBalance(asOfDate: string, includeZeroBalances: boo
  * Generate Balance Sheet from actual account balances
  * Balance Sheet: Assets = Liabilities + Equity
  */
-export async function getBalanceSheet(asOfDate: string): Promise<{
+export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promise<{
   companyName: string;
   reportDate: string;
   generatedAt: string;
@@ -898,6 +909,7 @@ export async function getBalanceSheet(asOfDate: string): Promise<{
   };
   totalLiabilitiesAndEquity: number;
 }> {
+  const pool = dbPool || globalPool;
   try {
     // Get account balances from ledger_entries (database-driven)
     const query = `
@@ -1009,7 +1021,7 @@ export async function getBalanceSheet(asOfDate: string): Promise<{
 /**
  * Generate Income Statement from actual revenue/expense account balances
  */
-export async function getIncomeStatement(startDate: string, endDate: string): Promise<{
+export async function getIncomeStatement(startDate: string, endDate: string, dbPool?: pg.Pool): Promise<{
   companyName: string;
   periodStart: string;
   periodEnd: string;
@@ -1037,6 +1049,7 @@ export async function getIncomeStatement(startDate: string, endDate: string): Pr
   operatingMargin: number;
   netProfitMargin: number;
 }> {
+  const pool = dbPool || globalPool;
   try {
     // Get revenue and expense account balances for the period from ledger_entries
     const query = `

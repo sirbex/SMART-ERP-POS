@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { invoiceService } from './invoiceService.js';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { CreateInvoiceSchema, RecordInvoicePaymentSchema } from '../../../../shared/zod/invoice.js';
 import { getSettings } from '../settings/invoiceSettingsService.js';
 import PDFDocument from 'pdfkit';
@@ -23,6 +23,7 @@ const ListInvoicesQuerySchema = z.object({
 export const invoiceController = {
   async createInvoice(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
       console.log('📄 Invoice creation request received:', {
         body: req.body,
         userId: (req as any).user?.id,
@@ -66,6 +67,7 @@ export const invoiceController = {
 
   async getInvoice(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await invoiceService.getInvoiceById(pool, id);
       res.json({ success: true, data: result });
@@ -77,6 +79,7 @@ export const invoiceController = {
 
   async listInvoices(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
       const q = ListInvoicesQuerySchema.parse(req.query);
       const result = await invoiceService.listInvoices(pool, q.page, q.limit, {
         customerId: q.customerId,
@@ -104,6 +107,7 @@ export const invoiceController = {
 
   async addPayment(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params; // invoice id
       const data = RecordInvoicePaymentSchema.parse(req.body);
       const userId = (req as any).user?.id || null;
@@ -130,6 +134,7 @@ export const invoiceController = {
 
   async listPayments(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params; // invoice id
       const payments = await invoiceService.listPayments(pool, id);
       res.json({ success: true, data: payments });
@@ -140,6 +145,7 @@ export const invoiceController = {
 
   async exportInvoicePdf(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
 
       // Get invoice settings from database

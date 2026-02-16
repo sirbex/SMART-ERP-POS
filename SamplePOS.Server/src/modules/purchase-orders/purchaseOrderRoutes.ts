@@ -1,6 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { purchaseOrderService } from './purchaseOrderService.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
 
@@ -51,6 +51,7 @@ export const purchaseOrderController = {
    */
   async createPO(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const validatedData = CreatePOSchema.parse(req.body);
 
       // Use authenticated user's ID if createdBy not provided
@@ -123,6 +124,7 @@ export const purchaseOrderController = {
    */
   async getPOById(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await purchaseOrderService.getPOById(pool, id);
 
@@ -153,6 +155,7 @@ export const purchaseOrderController = {
    */
   async listPOs(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const query = ListPOsQuerySchema.parse(req.query);
       const result = await purchaseOrderService.listPOs(pool, query.page, query.limit, {
         status: query.status,
@@ -192,6 +195,7 @@ export const purchaseOrderController = {
    */
   async updatePOStatus(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const { status } = UpdatePOStatusSchema.parse(req.body);
 
@@ -252,6 +256,7 @@ export const purchaseOrderController = {
    */
   async submitPO(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await purchaseOrderService.submitPO(pool, id);
 
@@ -274,6 +279,7 @@ export const purchaseOrderController = {
    */
   async cancelPO(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await purchaseOrderService.cancelPO(pool, id);
 
@@ -296,6 +302,7 @@ export const purchaseOrderController = {
    */
   async deletePO(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       await purchaseOrderService.deletePO(pool, id);
 
@@ -317,6 +324,7 @@ export const purchaseOrderController = {
    */
   async sendPOToSupplier(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const userId = (req as any).user.id;
 
@@ -341,6 +349,7 @@ export const purchaseOrderController = {
    */
   async createInvoice(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const {
         purchaseOrderId,
         goodsReceiptId,
@@ -386,6 +395,7 @@ export const purchaseOrderController = {
    */
   async recordPayment(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { invoiceId, supplierId, amount, paymentMethod, paymentDate, referenceNumber, notes } =
         req.body;
       const userId = (req as any).user.id;

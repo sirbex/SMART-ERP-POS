@@ -1,7 +1,8 @@
 // User Repository - Database layer for user CRUD operations
 // Contains ONLY SQL queries - NO business logic
 
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 import type { User, CreateUser, UpdateUser } from '../../../../shared/zod/user.js';
 import bcrypt from 'bcrypt';
 
@@ -10,7 +11,8 @@ const SALT_ROUNDS = 12;
 /**
  * Find all users (excluding password hashes)
  */
-export async function findAllUsers(): Promise<User[]> {
+export async function findAllUsers(dbPool?: pg.Pool): Promise<User[]> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id,
@@ -31,7 +33,8 @@ export async function findAllUsers(): Promise<User[]> {
 /**
  * Find user by ID (excluding password hash)
  */
-export async function findUserById(id: string): Promise<User | null> {
+export async function findUserById(id: string, dbPool?: pg.Pool): Promise<User | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id,
@@ -53,7 +56,8 @@ export async function findUserById(id: string): Promise<User | null> {
 /**
  * Find user by email (excluding password hash)
  */
-export async function findUserByEmail(email: string): Promise<User | null> {
+export async function findUserByEmail(email: string, dbPool?: pg.Pool): Promise<User | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id,
@@ -75,7 +79,8 @@ export async function findUserByEmail(email: string): Promise<User | null> {
 /**
  * Create a new user
  */
-export async function createUser(data: CreateUser): Promise<User> {
+export async function createUser(data: CreateUser, dbPool?: pg.Pool): Promise<User> {
+  const pool = dbPool || globalPool;
   const passwordHash = await bcrypt.hash(data.password, SALT_ROUNDS);
 
   const result = await pool.query(
@@ -99,7 +104,8 @@ export async function createUser(data: CreateUser): Promise<User> {
 /**
  * Update user details
  */
-export async function updateUser(id: string, data: UpdateUser): Promise<User | null> {
+export async function updateUser(id: string, data: UpdateUser, dbPool?: pg.Pool): Promise<User | null> {
+  const pool = dbPool || globalPool;
   const fields: string[] = [];
   const values: any[] = [];
   let paramIndex = 1;
@@ -150,7 +156,8 @@ export async function updateUser(id: string, data: UpdateUser): Promise<User | n
 /**
  * Change user password
  */
-export async function changeUserPassword(id: string, newPassword: string): Promise<boolean> {
+export async function changeUserPassword(id: string, newPassword: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
   const result = await pool.query(
@@ -169,7 +176,8 @@ export async function changeUserPassword(id: string, newPassword: string): Promi
 /**
  * Check if user has any associated data
  */
-export async function userHasData(id: string): Promise<boolean> {
+export async function userHasData(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT EXISTS (
       SELECT 1 FROM purchase_orders WHERE created_by_id = $1
@@ -193,7 +201,8 @@ export async function userHasData(id: string): Promise<boolean> {
 /**
  * Soft delete user (set is_active = false)
  */
-export async function deleteUser(id: string): Promise<boolean> {
+export async function deleteUser(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `UPDATE users 
      SET is_active = false, updated_at = CURRENT_TIMESTAMP
@@ -208,7 +217,8 @@ export async function deleteUser(id: string): Promise<boolean> {
  * Hard delete user (permanent deletion)
  * Only allowed if user has no associated data
  */
-export async function hardDeleteUser(id: string): Promise<boolean> {
+export async function hardDeleteUser(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `DELETE FROM users WHERE id = $1`,
     [id]
@@ -220,7 +230,8 @@ export async function hardDeleteUser(id: string): Promise<boolean> {
 /**
  * Verify user password (used for authentication and password change)
  */
-export async function verifyUserPassword(email: string, password: string): Promise<boolean> {
+export async function verifyUserPassword(email: string, password: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     'SELECT password_hash FROM users WHERE email = $1 AND is_active = true',
     [email]
@@ -236,7 +247,8 @@ export async function verifyUserPassword(email: string, password: string): Promi
 /**
  * Count active users
  */
-export async function countUsers(): Promise<number> {
+export async function countUsers(dbPool?: pg.Pool): Promise<number> {
+  const pool = dbPool || globalPool;
   const result = await pool.query('SELECT COUNT(*) as count FROM users WHERE is_active = true');
   return parseInt(result.rows[0].count, 10);
 }

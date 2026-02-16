@@ -1,7 +1,8 @@
 // Product History Repository - SQL only
 // Provides raw queries to fetch product-related history entries
 
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 
 export interface HistoryFilters {
   startDate?: Date;
@@ -10,7 +11,8 @@ export interface HistoryFilters {
 }
 
 export const productHistoryRepository = {
-  async getGoodsReceiptEvents(productId: string, filters?: HistoryFilters) {
+  async getGoodsReceiptEvents(productId: string, filters?: HistoryFilters, dbPool?: pg.Pool) {
+    const pool = dbPool || globalPool;
     const where: string[] = ['gri.product_id = $1'];
     const params: any[] = [productId];
     let i = 2;
@@ -71,7 +73,8 @@ export const productHistoryRepository = {
     return result.rows;
   },
 
-  async getSaleEvents(productId: string, filters?: HistoryFilters) {
+  async getSaleEvents(productId: string, filters?: HistoryFilters, dbPool?: pg.Pool) {
+    const pool = dbPool || globalPool;
     const where: string[] = ['si.product_id = $1'];
     const params: any[] = [productId];
     let i = 2;
@@ -120,7 +123,8 @@ export const productHistoryRepository = {
     return result.rows;
   },
 
-  async getStockMovementEvents(productId: string, filters?: HistoryFilters) {
+  async getStockMovementEvents(productId: string, filters?: HistoryFilters, dbPool?: pg.Pool) {
+    const pool = dbPool || globalPool;
     const where: string[] = [
       'sm.product_id = $1',
       // Exclude system-generated GR and SALE movements to avoid duplicates.

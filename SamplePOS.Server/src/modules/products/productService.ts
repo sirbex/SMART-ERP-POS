@@ -3,7 +3,8 @@
 
 import Decimal from 'decimal.js';
 import { Pool } from 'pg';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 import * as productRepository from './productRepository.js';
 import * as uomRepository from './uomRepository.js';
 import { ProductWithUom } from './ProductWithUom.js';
@@ -121,7 +122,8 @@ export async function convertQuantity(
  * 
  * Transaction: Wraps product creation and UoM setup in atomic transaction
  */
-export async function createProduct(data: CreateProduct): Promise<Product> {
+export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Promise<Product> {
+  const pool = dbPool || globalPool;
   // Business rule: Check if SKU already exists
   const existing = await productRepository.findProductBySku(data.sku);
   if (existing) {
@@ -209,7 +211,8 @@ export async function createProduct(data: CreateProduct): Promise<Product> {
   }
 }
 
-export async function updateProduct(id: string, data: UpdateProduct): Promise<Product> {
+export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product> {
+  const pool = dbPool || globalPool;
   // Check product exists
   const existing = await productRepository.findProductById(id);
   if (!existing) {

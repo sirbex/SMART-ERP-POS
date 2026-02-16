@@ -2,13 +2,14 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import { UpdateInvoiceSettingsSchema } from '../../../../shared/zod/invoiceSettings.js';
 import logger from '../../utils/logger.js';
 
 export async function getInvoiceSettings(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     logger.info('Fetching invoice settings');
     const settings = await invoiceSettingsService.getSettings(pool);
     
@@ -29,6 +30,7 @@ export async function getInvoiceSettings(req: Request, res: Response, next: Next
 
 export async function updateInvoiceSettings(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     logger.info('Updating invoice settings', { 
       userId: (req as any).user?.id,
       fieldsProvided: Object.keys(req.body),

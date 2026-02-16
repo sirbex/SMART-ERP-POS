@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { systemSettingsService } from './systemSettingsService.js';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 
 export const systemSettingsController = {
@@ -10,6 +10,7 @@ export const systemSettingsController = {
      */
     async getSettings(req: Request, res: Response) {
         try {
+            const pool = req.tenantPool || globalPool;
             const settings = await systemSettingsService.getSettings(pool);
 
             res.json({
@@ -31,6 +32,7 @@ export const systemSettingsController = {
      */
     async updateSettings(req: Request, res: Response) {
         try {
+            const pool = req.tenantPool || globalPool;
             const userId = (req as any).user?.id;
             const updates = req.body;
 
@@ -63,6 +65,7 @@ export const systemSettingsController = {
      */
     async getTaxConfig(req: Request, res: Response) {
         try {
+            const pool = req.tenantPool || globalPool;
             const taxConfig = await systemSettingsService.getTaxConfig(pool);
 
             res.json({
@@ -84,6 +87,7 @@ export const systemSettingsController = {
      */
     async getReceiptPrintConfig(req: Request, res: Response) {
         try {
+            const pool = req.tenantPool || globalPool;
             const config = await systemSettingsService.getReceiptPrintConfig(pool);
 
             res.json({
@@ -105,6 +109,7 @@ export const systemSettingsController = {
      */
     async getInvoicePrintConfig(req: Request, res: Response) {
         try {
+            const pool = req.tenantPool || globalPool;
             const config = await systemSettingsService.getInvoicePrintConfig(pool);
 
             res.json({

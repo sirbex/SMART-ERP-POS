@@ -1,13 +1,16 @@
 // Customers Repository - Database Layer
 // Contains ONLY SQL queries - NO business logic
 
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 
 export async function findAllCustomers(
   limit: number = 50,
-  offset: number = 0
+  offset: number = 0,
+  dbPool?: pg.Pool
 ): Promise<Customer[]> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
@@ -26,7 +29,8 @@ export async function findAllCustomers(
   return result.rows;
 }
 
-export async function findCustomerById(id: string): Promise<Customer | null> {
+export async function findCustomerById(id: string, dbPool?: pg.Pool): Promise<Customer | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
@@ -43,7 +47,8 @@ export async function findCustomerById(id: string): Promise<Customer | null> {
   return result.rows[0] || null;
 }
 
-export async function findCustomerByEmail(email: string): Promise<Customer | null> {
+export async function findCustomerByEmail(email: string, dbPool?: pg.Pool): Promise<Customer | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
@@ -60,7 +65,8 @@ export async function findCustomerByEmail(email: string): Promise<Customer | nul
   return result.rows[0] || null;
 }
 
-export async function createCustomer(data: CreateCustomer): Promise<Customer> {
+export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool): Promise<Customer> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `INSERT INTO customers (
       name, email, phone, address, customer_group_id, credit_limit
@@ -85,7 +91,8 @@ export async function createCustomer(data: CreateCustomer): Promise<Customer> {
   return result.rows[0];
 }
 
-export async function updateCustomer(id: string, data: UpdateCustomer): Promise<Customer | null> {
+export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: pg.Pool): Promise<Customer | null> {
+  const pool = dbPool || globalPool;
   const fields: string[] = [];
   const values: any[] = [];
   let paramIndex = 1;
@@ -138,13 +145,15 @@ export async function updateCustomer(id: string, data: UpdateCustomer): Promise<
   return result.rows[0] || null;
 }
 
-export async function deleteCustomer(id: string): Promise<boolean> {
+export async function deleteCustomer(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   const result = await pool.query('UPDATE customers SET is_active = false WHERE id = $1', [id]);
 
   return result.rowCount !== null && result.rowCount > 0;
 }
 
-export async function toggleCustomerActive(id: string, isActive: boolean): Promise<Customer | null> {
+export async function toggleCustomerActive(id: string, isActive: boolean, dbPool?: pg.Pool): Promise<Customer | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `UPDATE customers 
      SET is_active = $1
@@ -162,7 +171,8 @@ export async function toggleCustomerActive(id: string, isActive: boolean): Promi
   return result.rows[0] || null;
 }
 
-export async function updateCustomerBalance(id: string, amount: number): Promise<Customer | null> {
+export async function updateCustomerBalance(id: string, amount: number, dbPool?: pg.Pool): Promise<Customer | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `UPDATE customers 
      SET balance = balance + $1
@@ -180,7 +190,8 @@ export async function updateCustomerBalance(id: string, amount: number): Promise
   return result.rows[0] || null;
 }
 
-export async function findCustomerByNumber(customerNumber: string): Promise<Customer | null> {
+export async function findCustomerByNumber(customerNumber: string, dbPool?: pg.Pool): Promise<Customer | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
@@ -197,7 +208,8 @@ export async function findCustomerByNumber(customerNumber: string): Promise<Cust
   return result.rows[0] || null;
 }
 
-export async function searchCustomers(searchTerm: string, limit: number = 20): Promise<Customer[]> {
+export async function searchCustomers(searchTerm: string, limit: number = 20, dbPool?: pg.Pool): Promise<Customer[]> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
@@ -228,7 +240,8 @@ export async function searchCustomers(searchTerm: string, limit: number = 20): P
   return result.rows;
 }
 
-export async function countCustomers(): Promise<number> {
+export async function countCustomers(dbPool?: pg.Pool): Promise<number> {
+  const pool = dbPool || globalPool;
   const result = await pool.query('SELECT COUNT(*) as count FROM customers WHERE is_active = true');
 
   return parseInt(result.rows[0].count, 10);
@@ -253,8 +266,10 @@ export interface CustomerSale {
 export async function findCustomerSales(
   customerId: string,
   limit: number = 50,
-  offset: number = 0
+  offset: number = 0,
+  dbPool?: pg.Pool
 ): Promise<CustomerSale[]> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       s.id,
@@ -283,7 +298,8 @@ export async function findCustomerSales(
   }));
 }
 
-export async function countCustomerSales(customerId: string): Promise<number> {
+export async function countCustomerSales(customerId: string, dbPool?: pg.Pool): Promise<number> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     'SELECT COUNT(*) as count FROM sales WHERE customer_id = $1',
     [customerId]
@@ -308,8 +324,10 @@ export interface CustomerTransaction {
 export async function findCustomerTransactions(
   customerId: string,
   limit: number = 50,
-  offset: number = 0
+  offset: number = 0,
+  dbPool?: pg.Pool
 ): Promise<CustomerTransaction[]> {
+  const pool = dbPool || globalPool;
   // Combine credit sales and invoice payments
   // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const result = await pool.query(
@@ -348,7 +366,8 @@ export async function findCustomerTransactions(
 /**
  * Count total customer transactions (for pagination)
  */
-export async function countCustomerTransactions(customerId: string): Promise<number> {
+export async function countCustomerTransactions(customerId: string, dbPool?: pg.Pool): Promise<number> {
+  const pool = dbPool || globalPool;
   // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const result = await pool.query(
     `SELECT COUNT(*) as total FROM (
@@ -368,7 +387,8 @@ export async function countCustomerTransactions(customerId: string): Promise<num
 /**
  * Statement queries: opening balance and in-period entries
  */
-export async function getOpeningBalance(customerId: string, start: Date): Promise<number> {
+export async function getOpeningBalance(customerId: string, start: Date, dbPool?: pg.Pool): Promise<number> {
+  const pool = dbPool || globalPool;
   // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
     `WITH debits AS (
@@ -394,7 +414,8 @@ export async function getOpeningBalance(customerId: string, start: Date): Promis
  * This tracks: Credit sales (INVOICE), Payments (PAYMENT), Manual adjustments (ADJUSTMENT)
  * Deposits are tracked separately - they don't affect invoice balance
  */
-export async function getStatementEntries(customerId: string, start: Date, end: Date): Promise<any[]> {
+export async function getStatementEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool): Promise<any[]> {
+  const pool = dbPool || globalPool;
   // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
     `(
@@ -443,7 +464,8 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
  * Get deposit activity for a customer (separate from invoice ledger)
  * Returns both deposit receipts and deposit applications
  */
-export async function getDepositEntries(customerId: string, start: Date, end: Date): Promise<any[]> {
+export async function getDepositEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool): Promise<any[]> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(
     `(
       SELECT 
@@ -479,12 +501,13 @@ export async function getDepositEntries(customerId: string, start: Date, end: Da
 /**
  * Get customer deposit summary (current balances)
  */
-export async function getCustomerDepositSummary(customerId: string): Promise<{
+export async function getCustomerDepositSummary(customerId: string, dbPool?: pg.Pool): Promise<{
   totalDeposited: number;
   totalUsed: number;
   availableBalance: number;
   depositCount: number;
 }> {
+  const pool = dbPool || globalPool;
   const res = await pool.query(
     `SELECT 
       COALESCE(SUM(amount), 0) as total_deposited,
@@ -518,7 +541,8 @@ export interface CustomerSummary {
   lastPurchaseDate?: Date;
 }
 
-export async function getCustomerSummary(customerId: string): Promise<CustomerSummary> {
+export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool): Promise<CustomerSummary> {
+  const pool = dbPool || globalPool;
   const customer = await findCustomerById(customerId);
   if (!customer) {
     throw new Error(`Customer with ID ${customerId} not found`);

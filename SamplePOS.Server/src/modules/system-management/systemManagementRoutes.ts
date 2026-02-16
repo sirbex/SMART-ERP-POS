@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { systemManagementService } from './systemManagementService.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import { createReadStream } from 'fs';
 import fs from 'fs/promises';
@@ -30,7 +30,7 @@ interface AuthRequest extends Request {
 
 // Attach pool to request
 router.use((req, res, next) => {
-    (req as AuthRequest).pool = pool;
+    (req as AuthRequest).pool = req.tenantPool || globalPool;
     next();
 });
 
@@ -52,6 +52,7 @@ router.use(authorize('ADMIN'));
  */
 router.post('/backup', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { reason, backupType = 'FULL' } = req.body;
 
         if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
@@ -108,6 +109,7 @@ router.post('/backup', async (req: AuthRequest, res: Response) => {
  */
 router.get('/backups', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const backups = await systemManagementService.listBackups(pool);
 
         res.json({
@@ -143,6 +145,7 @@ router.get('/backups', async (req: AuthRequest, res: Response) => {
  */
 router.get('/backups/:id', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { id } = req.params;
         const backup = await systemManagementService.getBackup(pool, id);
 
@@ -174,6 +177,7 @@ router.get('/backups/:id', async (req: AuthRequest, res: Response) => {
  */
 router.post('/backups/:id/verify', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { id } = req.params;
         const result = await systemManagementService.verifyBackupIntegrity(pool, id);
 
@@ -198,6 +202,7 @@ router.post('/backups/:id/verify', async (req: AuthRequest, res: Response) => {
  */
 router.get('/backups/:id/download', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { id } = req.params;
         const backup = await systemManagementService.getBackup(pool, id);
 
@@ -256,6 +261,7 @@ router.get('/backups/:id/download', async (req: AuthRequest, res: Response) => {
  */
 router.delete('/backups/:id', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { id } = req.params;
         const { deleteFile } = req.query;
         const userId = req.user?.id || 'unknown';
@@ -290,6 +296,7 @@ router.delete('/backups/:id', async (req: AuthRequest, res: Response) => {
  */
 router.post('/backups/cleanup', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { keepCount = 10 } = req.body;
         const userId = req.user?.id || 'unknown';
 
@@ -333,6 +340,7 @@ router.post('/backups/cleanup', async (req: AuthRequest, res: Response) => {
  */
 router.post('/reset', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { confirmText, reason } = req.body;
 
         // Validate inputs
@@ -402,6 +410,7 @@ router.post('/reset', async (req: AuthRequest, res: Response) => {
  */
 router.get('/reset/preview', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const stats = await systemManagementService.getStatistics(pool);
 
         // Calculate totals
@@ -453,6 +462,7 @@ router.get('/reset/preview', async (req: AuthRequest, res: Response) => {
  */
 router.post('/restore/:backupId', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const { backupId } = req.params;
         const userId = req.user?.id || 'unknown';
         const userName = req.user?.fullName || req.user?.email || 'Unknown User';
@@ -500,6 +510,7 @@ router.post('/restore/:backupId', async (req: AuthRequest, res: Response) => {
  */
 router.get('/stats', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const stats = await systemManagementService.getStatistics(pool);
 
         res.json({
@@ -522,6 +533,7 @@ router.get('/stats', async (req: AuthRequest, res: Response) => {
  */
 router.get('/validate', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const result = await systemManagementService.validateIntegrity(pool);
 
         res.json({
@@ -547,6 +559,7 @@ router.get('/validate', async (req: AuthRequest, res: Response) => {
  */
 router.get('/maintenance-mode', async (req: AuthRequest, res: Response) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const isActive = await systemManagementService.isMaintenanceMode(pool);
 
         res.json({

@@ -1,7 +1,7 @@
 // Discount Controller - HTTP handlers for discount endpoints
 
 import { Request, Response } from 'express';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import * as discountService from './discountService';
 import { DiscountSchema, ApplyDiscountSchema } from '@shared/zod/discount';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { z } from 'zod';
  */
 export async function listDiscounts(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     const discounts = await discountService.getActiveDiscounts(pool);
 
     res.json({
@@ -31,6 +32,7 @@ export async function listDiscounts(req: Request, res: Response) {
  */
 export async function getDiscount(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { id } = req.params;
     const discount = await discountService.getDiscountById(pool, id);
 
@@ -59,6 +61,7 @@ export async function getDiscount(req: Request, res: Response) {
  */
 export async function createDiscount(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     // Validate request body
     const validatedData = DiscountSchema.omit({ id: true, createdAt: true, updatedAt: true }).parse(req.body);
 
@@ -93,6 +96,7 @@ export async function createDiscount(req: Request, res: Response) {
  */
 export async function updateDiscount(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { id } = req.params;
     const updates = req.body;
 
@@ -126,6 +130,7 @@ export async function updateDiscount(req: Request, res: Response) {
  */
 export async function deleteDiscount(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { id } = req.params;
     const user = (req as any).user;
 
@@ -156,6 +161,7 @@ export async function deleteDiscount(req: Request, res: Response) {
  */
 export async function applyDiscount(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     // Validate request body
     const discountData = ApplyDiscountSchema.parse(req.body);
     const { saleId, originalAmount, saleNumber } = req.body;
@@ -220,6 +226,7 @@ export async function applyDiscount(req: Request, res: Response) {
  */
 export async function approveDiscount(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { authorizationId, managerPin } = req.body;
 
     if (!authorizationId || !managerPin) {
@@ -276,6 +283,7 @@ export async function approveDiscount(req: Request, res: Response) {
  */
 export async function getPendingAuthorizations(req: Request, res: Response) {
   try {
+    const pool = req.tenantPool || globalPool;
     const authorizations = await discountService.getPendingAuthorizations(pool);
 
     res.json({

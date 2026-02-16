@@ -1,10 +1,12 @@
 // Products Repository - Database Layer
 // Contains ONLY SQL queries - NO business logic
 
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
 import type { Product, CreateProduct, UpdateProduct } from '../../../../shared/zod/product.js';
 
-export async function findAllProducts(limit: number = 50, offset: number = 0): Promise<Product[]> {
+export async function findAllProducts(limit: number = 50, offset: number = 0, dbPool?: pg.Pool): Promise<Product[]> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       p.id, p.product_number as "productNumber", p.sku, p.barcode, p.name, p.description, p.category,
@@ -56,7 +58,8 @@ export async function findAllProducts(limit: number = 50, offset: number = 0): P
   return result.rows;
 }
 
-export async function findProductById(id: string): Promise<Product | null> {
+export async function findProductById(id: string, dbPool?: pg.Pool): Promise<Product | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       p.id, p.product_number as "productNumber", p.sku, p.barcode, p.name, p.description, p.category,
@@ -106,7 +109,8 @@ export async function findProductById(id: string): Promise<Product | null> {
   return result.rows[0] || null;
 }
 
-export async function findProductBySku(sku: string): Promise<Product | null> {
+export async function findProductBySku(sku: string, dbPool?: pg.Pool): Promise<Product | null> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
       p.id, p.product_number as "productNumber", p.sku, p.barcode, p.name, p.description, p.category,
@@ -156,7 +160,8 @@ export async function findProductBySku(sku: string): Promise<Product | null> {
   return result.rows[0] || null;
 }
 
-export async function createProduct(data: CreateProduct): Promise<Product> {
+export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Promise<Product> {
+  const pool = dbPool || globalPool;
   const result = await pool.query(
     `INSERT INTO products (
       sku, barcode, name, description, category,
@@ -205,7 +210,8 @@ export async function createProduct(data: CreateProduct): Promise<Product> {
   return result.rows[0];
 }
 
-export async function updateProduct(id: string, data: UpdateProduct): Promise<Product | null> {
+export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product | null> {
+  const pool = dbPool || globalPool;
   const fields: string[] = [];
   const values: any[] = [];
   let paramIndex = 1;
@@ -294,14 +300,16 @@ export async function updateProduct(id: string, data: UpdateProduct): Promise<Pr
   return result.rows[0] || null;
 }
 
-export async function deleteProduct(id: string): Promise<boolean> {
+export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
   // Soft delete
   const result = await pool.query('UPDATE products SET is_active = false WHERE id = $1', [id]);
 
   return result.rowCount !== null && result.rowCount > 0;
 }
 
-export async function countProducts(): Promise<number> {
+export async function countProducts(dbPool?: pg.Pool): Promise<number> {
+  const pool = dbPool || globalPool;
   const result = await pool.query('SELECT COUNT(*) as count FROM products WHERE is_active = true');
 
   return parseInt(result.rows[0].count, 10);

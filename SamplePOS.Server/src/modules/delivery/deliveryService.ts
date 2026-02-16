@@ -6,9 +6,9 @@
  * RESPONSIBILITY: Business rules, validation, and coordination
  */
 
-import { Pool, PoolClient } from 'pg';
+import { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import * as auditService from '../audit/auditService.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
@@ -49,13 +49,13 @@ export async function createDeliveryOrder(
   data: CreateDeliveryOrderRequest,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
-  const client = await pool.connect();
+  const client = await globalPool.connect();
 
   try {
     await client.query('BEGIN');
 
     // Generate delivery number
-    const deliveryNumber = await deliveryRepo.generateDeliveryNumber(pool);
+    const deliveryNumber = await deliveryRepo.generateDeliveryNumber(globalPool);
 
     // Validate customer exists if provided
     if (data.customerId) {
@@ -101,7 +101,7 @@ export async function createDeliveryOrder(
     // Create audit entry
     // TODO: Implement proper audit logging for delivery orders
     // if (auditContext) {
-    //   await auditService.logAction(pool, data, auditContext);
+    //   await auditService.logAction(globalPool, data, auditContext);
     // }
 
     await client.query('COMMIT');
@@ -177,18 +177,18 @@ export async function getDeliveryOrder(
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
 
     const deliveryOrderRow = isUuid
-      ? await deliveryRepo.getDeliveryOrderById(pool, identifier)
-      : await deliveryRepo.getDeliveryOrderByNumber(pool, identifier);
+      ? await deliveryRepo.getDeliveryOrderById(globalPool, identifier)
+      : await deliveryRepo.getDeliveryOrderByNumber(globalPool, identifier);
 
     if (!deliveryOrderRow) {
       return { success: false, error: 'Delivery order not found' };
     }
 
     // Get delivery items
-    const itemRows = await deliveryRepo.getDeliveryItems(pool, deliveryOrderRow.id);
+    const itemRows = await deliveryRepo.getDeliveryItems(globalPool, deliveryOrderRow.id);
 
     // Get status history
-    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(pool, deliveryOrderRow.id);
+    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(globalPool, deliveryOrderRow.id);
 
     // Normalize response
     const deliveryOrder = normalizeDeliveryOrder(deliveryOrderRow);
@@ -209,14 +209,14 @@ export async function trackDelivery(
   trackingNumber: string
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const deliveryOrderRow = await deliveryRepo.getDeliveryOrderByTrackingNumber(pool, trackingNumber);
+    const deliveryOrderRow = await deliveryRepo.getDeliveryOrderByTrackingNumber(globalPool, trackingNumber);
 
     if (!deliveryOrderRow) {
       return { success: false, error: 'Tracking number not found' };
     }
 
     // Get status history for tracking
-    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(pool, deliveryOrderRow.id);
+    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(globalPool, deliveryOrderRow.id);
 
     // Return limited information for customer tracking
     const trackingInfo = {
@@ -256,7 +256,7 @@ export async function updateDeliveryStatus(
   data: UpdateDeliveryStatusRequest,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
-  const client = await pool.connect();
+  const client = await globalPool.connect();
 
   try {
     await client.query('BEGIN');
@@ -264,8 +264,8 @@ export async function updateDeliveryStatus(
     // Get current delivery order
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
     const currentRow = isUuid
-      ? await deliveryRepo.getDeliveryOrderById(pool, identifier)
-      : await deliveryRepo.getDeliveryOrderByNumber(pool, identifier);
+      ? await deliveryRepo.getDeliveryOrderById(globalPool, identifier)
+      : await deliveryRepo.getDeliveryOrderByNumber(globalPool, identifier);
 
     if (!currentRow) {
       throw new Error('Delivery order not found');
@@ -386,7 +386,7 @@ export async function assignDriver(
   driverId: string,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
-  const client = await pool.connect();
+  const client = await globalPool.connect();
 
   try {
     await client.query('BEGIN');
@@ -452,7 +452,7 @@ export async function searchDeliveryOrders(
   try {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const result = await deliveryRepo.searchDeliveryOrders(pool, query);
+    const result = await deliveryRepo.searchDeliveryOrders(globalPool, query);
 
     const orders = result.rows.map(normalizeDeliveryOrder);
 
@@ -491,7 +491,7 @@ export async function createDeliveryRoute(
   data: CreateDeliveryRouteRequest,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryRoute; error?: string }> {
-  const client = await pool.connect();
+  const client = await globalPool.connect();
 
   try {
     await client.query('BEGIN');
@@ -574,14 +574,14 @@ export async function getDeliveryRoute(
   routeId: string
 ): Promise<{ success: boolean; data?: DeliveryRoute; error?: string }> {
   try {
-    const routeRow = await deliveryRepo.getDeliveryRouteById(pool, routeId);
+    const routeRow = await deliveryRepo.getDeliveryRouteById(globalPool, routeId);
 
     if (!routeRow) {
       return { success: false, error: 'Delivery route not found' };
     }
 
     // Get route deliveries
-    const routeDeliveries = await deliveryRepo.getRouteDeliveries(pool, routeId);
+    const routeDeliveries = await deliveryRepo.getRouteDeliveries(globalPool, routeId);
 
     const deliveryRoute = normalizeDeliveryRoute(routeRow);
     deliveryRoute.deliveries = routeDeliveries;
@@ -606,7 +606,7 @@ export async function searchDeliveryRoutes(
   try {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const result = await deliveryRepo.searchDeliveryRoutes(pool, query);
+    const result = await deliveryRepo.searchDeliveryRoutes(globalPool, query);
 
     const routes = result.rows.map(row => {
       const route = normalizeDeliveryRoute(row);

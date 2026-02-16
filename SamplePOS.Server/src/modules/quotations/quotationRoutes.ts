@@ -6,13 +6,13 @@
 import { Router } from 'express';
 import { quotationController } from './quotationController';
 import { authenticate } from '../../middleware/auth.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 const router = Router();
 
 // Middleware to attach pool to request
 router.use((req, res, next) => {
-  (req as any).pool = pool;
+  (req as any).pool = req.tenantPool || globalPool;
   next();
 });
 

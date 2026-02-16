@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { pool } from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
 import Redis from 'ioredis';
 
 const router = Router();
@@ -48,7 +48,7 @@ router.get('/', async (req: Request, res: Response) => {
     let overallStatus: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
 
     // Database health check
-    const dbCheck = await checkDatabase(pool);
+    const dbCheck = await checkDatabase(globalPool);
     checks.push(dbCheck);
     if (dbCheck.status === 'unhealthy') {
       overallStatus = 'unhealthy';
@@ -127,7 +127,7 @@ router.get('/legacy', async (req: Request, res: Response) => {
 
   try {
     // Check database connection
-    await pool.query('SELECT 1');
+    await globalPool.query('SELECT 1');
     result.database.connected = true;
 
     // Check required tables
@@ -146,7 +146,7 @@ router.get('/legacy', async (req: Request, res: Response) => {
     ];
 
     for (const table of requiredTables) {
-      const tableCheck = await pool.query(
+      const tableCheck = await globalPool.query(
         `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)`,
         [table]
       );
@@ -170,7 +170,7 @@ router.get('/legacy', async (req: Request, res: Response) => {
     ];
 
     for (const { table, column } of criticalColumns) {
-      const columnCheck = await pool.query(
+      const columnCheck = await globalPool.query(
         `SELECT EXISTS (
           SELECT FROM information_schema.columns 
           WHERE table_name = $1 AND column_name = $2
@@ -205,7 +205,7 @@ router.get('/legacy', async (req: Request, res: Response) => {
     ];
 
     for (const check of integrityChecks) {
-      const checkResult = await pool.query(check.query);
+      const checkResult = await globalPool.query(check.query);
       const count = parseInt(checkResult.rows[0].count);
       if (count > 0) {
         result.warnings.push(`${check.name}: ${count} records`);
@@ -235,7 +235,7 @@ router.get('/legacy', async (req: Request, res: Response) => {
 router.get('/ready', async (req: Request, res: Response) => {
   try {
     // Check if database is accessible
-    await pool.query('SELECT 1');
+    await globalPool.query('SELECT 1');
 
     res.json({
       success: true,
@@ -346,7 +346,7 @@ async function checkDatabaseSchema(): Promise<HealthCheckResult> {
     ];
 
     for (const table of requiredTables) {
-      const tableCheck = await pool.query(
+      const tableCheck = await globalPool.query(
         `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)`,
         [table]
       );
@@ -365,7 +365,7 @@ async function checkDatabaseSchema(): Promise<HealthCheckResult> {
     ];
 
     for (const { table, column } of criticalColumns) {
-      const columnCheck = await pool.query(
+      const columnCheck = await globalPool.query(
         `SELECT EXISTS (
           SELECT FROM information_schema.columns 
           WHERE table_name = $1 AND column_name = $2

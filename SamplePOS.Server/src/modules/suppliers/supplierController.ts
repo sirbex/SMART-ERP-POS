@@ -3,7 +3,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import Decimal from 'decimal.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { CreateSupplierSchema, UpdateSupplierSchema } from '../../../../shared/zod/supplier.js';
 import * as supplierService from './supplierService.js';
 import logger from '../../utils/logger.js';
@@ -14,6 +14,7 @@ import logger from '../../utils/logger.js';
  */
 export async function getSuppliers(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
 
@@ -35,6 +36,7 @@ export async function getSuppliers(req: Request, res: Response, next: NextFuncti
  */
 export async function getSupplier(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const supplier = await supplierService.getSupplierById(pool, req.params.id);
     res.json({ success: true, data: supplier });
   } catch (error) {
@@ -48,6 +50,7 @@ export async function getSupplier(req: Request, res: Response, next: NextFunctio
  */
 export async function getSupplierByNumber(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const { supplierNumber } = req.params;
     const supplier = await supplierService.getSupplierByNumber(pool, supplierNumber);
     res.json({ success: true, data: supplier });
@@ -62,6 +65,7 @@ export async function getSupplierByNumber(req: Request, res: Response, next: Nex
  */
 export async function searchSuppliers(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const searchTerm = (req.query.q as string) || '';
     const limit = parseInt(req.query.limit as string) || 20;
     const suppliers = await supplierService.searchSuppliers(pool, searchTerm, limit);
@@ -77,6 +81,7 @@ export async function searchSuppliers(req: Request, res: Response, next: NextFun
  */
 export async function createSupplier(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const validatedData = CreateSupplierSchema.parse(req.body);
     const supplier = await supplierService.createSupplier(pool, validatedData);
 
@@ -96,6 +101,7 @@ export async function createSupplier(req: Request, res: Response, next: NextFunc
  */
 export async function updateSupplier(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const validatedData = UpdateSupplierSchema.parse(req.body);
     const supplier = await supplierService.updateSupplier(pool, req.params.id, validatedData);
 
@@ -115,6 +121,7 @@ export async function updateSupplier(req: Request, res: Response, next: NextFunc
  */
 export async function deleteSupplier(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     await supplierService.deleteSupplier(pool, req.params.id);
 
     res.json({
@@ -132,9 +139,8 @@ export async function deleteSupplier(req: Request, res: Response, next: NextFunc
  */
 export async function getSupplierPerformance(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const supplierId = req.params.id;
-
-    // Get purchase orders for this supplier
     const poResult = await pool.query(
       `SELECT 
         COUNT(*) as total_orders,
@@ -209,6 +215,7 @@ export async function getSupplierPerformance(req: Request, res: Response, next: 
  */
 export async function getSupplierOrders(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const supplierId = req.params.id;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -254,8 +261,8 @@ export async function getSupplierOrders(req: Request, res: Response, next: NextF
  */
 export async function getSupplierProducts(req: Request, res: Response, next: NextFunction) {
   try {
+    const pool = req.tenantPool || globalPool;
     const supplierId = req.params.id;
-
     const result = await pool.query(
       `SELECT 
         poi.product_id as "productId",

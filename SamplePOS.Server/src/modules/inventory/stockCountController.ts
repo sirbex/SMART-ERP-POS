@@ -6,7 +6,7 @@
 
 import { Request, Response } from 'express';
 import { stockCountService } from './stockCountService.js';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import {
   CreateStockCountSchema,
   UpdateCountLineSchema,
@@ -21,6 +21,7 @@ export const stockCountController = {
    */
   async createStockCount(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const userId = req.user?.id; // From JWT middleware
 
@@ -79,6 +80,7 @@ export const stockCountController = {
    */
   async getStockCount(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const { id } = req.params;
       const page = parseInt(req.query.page as string) || 1;
@@ -113,6 +115,7 @@ export const stockCountController = {
    */
   async listStockCounts(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -145,6 +148,7 @@ export const stockCountController = {
    */
   async updateCountLine(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const { id: stockCountId } = req.params;
       const userId = req.user?.id;
@@ -221,6 +225,7 @@ export const stockCountController = {
    */
   async validateStockCount(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const { id: stockCountId } = req.params;
       const userId = req.user?.id;
@@ -295,6 +300,7 @@ export const stockCountController = {
    */
   async cancelStockCount(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const { id: stockCountId } = req.params;
       const userId = req.user?.id;
@@ -352,6 +358,7 @@ export const stockCountController = {
    */
   async deleteStockCount(req: Request, res: Response) {
     try {
+      const pool = req.tenantPool || globalPool;
 
       const { id: stockCountId } = req.params;
       const userId = req.user?.id;

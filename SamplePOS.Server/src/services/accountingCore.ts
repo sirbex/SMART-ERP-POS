@@ -60,7 +60,8 @@
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
 
-import { pool } from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import { PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { Money, Decimal } from '../utils/money.js';
@@ -228,7 +229,8 @@ export class AccountingCore {
      * Lock a financial period
      * Prevents any new transactions in that period
      */
-    static async lockPeriod(periodId: string, userId: string): Promise<void> {
+    static async lockPeriod(periodId: string, userId: string, dbPool?: pg.Pool): Promise<void> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -354,7 +356,7 @@ export class AccountingCore {
      * - Atomic transaction
      * - Full audit trail
      */
-    static async createJournalEntry(request: JournalEntryRequest): Promise<JournalEntryResult> {
+    static async createJournalEntry(request: JournalEntryRequest, dbPool?: pg.Pool): Promise<JournalEntryResult> {
         // 1. Validate double-entry BEFORE touching database
         const validation = this.validateDoubleEntry(request.lines);
         if (!validation.isValid) {
@@ -371,6 +373,7 @@ export class AccountingCore {
             }
         }
 
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
 
         try {
@@ -544,7 +547,8 @@ export class AccountingCore {
      * 
      * IMMUTABILITY: Original transaction is never modified
      */
-    static async reverseTransaction(request: ReversalRequest): Promise<JournalEntryResult> {
+    static async reverseTransaction(request: ReversalRequest, dbPool?: pg.Pool): Promise<JournalEntryResult> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
 
         try {
@@ -739,7 +743,8 @@ export class AccountingCore {
     /**
      * Get transaction by ID
      */
-    static async getTransaction(transactionId: string): Promise<JournalEntryResult | null> {
+    static async getTransaction(transactionId: string, dbPool?: pg.Pool): Promise<JournalEntryResult | null> {
+        const pool = dbPool || globalPool;
         const result = await pool.query(`
       SELECT 
         "Id" as "transactionId",
@@ -767,7 +772,8 @@ export class AccountingCore {
      * Get account balance (calculated from transactions)
      * SOURCE-OF-TRUTH: Balance computed from actual ledger entries
      */
-    static async getAccountBalance(accountCode: string, asOfDate?: string): Promise<AccountBalance | null> {
+    static async getAccountBalance(accountCode: string, asOfDate?: string, dbPool?: pg.Pool): Promise<AccountBalance | null> {
+        const pool = dbPool || globalPool;
         const dateFilter = asOfDate
             ? `AND DATE(lt."TransactionDate") <= $2`
             : '';
@@ -819,12 +825,13 @@ export class AccountingCore {
      * Validate trial balance (all accounts)
      * SOURCE-OF-TRUTH: Computed from ledger entries
      */
-    static async validateTrialBalance(asOfDate: string): Promise<{
+    static async validateTrialBalance(asOfDate: string, dbPool?: pg.Pool): Promise<{
         isBalanced: boolean;
         totalDebits: number;
         totalCredits: number;
         difference: number;
     }> {
+        const pool = dbPool || globalPool;
         const result = await pool.query(`
       SELECT 
         COALESCE(SUM(le."DebitAmount"), 0) as "totalDebits",

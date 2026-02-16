@@ -5,7 +5,7 @@
 
 import express from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import * as depositsService from './depositsService.js';
 import { authenticate } from '../../middleware/auth.js';
 import logger from '../../utils/logger.js';
@@ -36,6 +36,7 @@ const ApplyDepositSchema = z.object({
  */
 router.get('/', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 20;
         const status = req.query.status as string;
@@ -67,6 +68,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const deposit = await depositsService.getDepositById(pool, req.params.id);
 
         if (!deposit) {
@@ -95,6 +97,7 @@ router.get('/:id', async (req, res) => {
  */
 router.get('/customer/:customerId', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const status = req.query.status as 'ACTIVE' | 'DEPLETED' | 'REFUNDED' | 'CANCELLED' | undefined;
         const deposits = await depositsService.getCustomerDeposits(
             pool,
@@ -124,6 +127,7 @@ router.get('/customer/:customerId', async (req, res) => {
  */
 router.get('/customer/:customerId/balance', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         logger.info('Fetching deposit balance for customer', { customerId: req.params.customerId });
 
         const balance = await depositsService.getCustomerDepositBalance(
@@ -155,6 +159,7 @@ router.get('/customer/:customerId/balance', async (req, res) => {
  */
 router.post('/', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const parsed = CreateDepositSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({
@@ -190,6 +195,7 @@ router.post('/', async (req, res) => {
  */
 router.post('/apply', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const parsed = ApplyDepositSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({
@@ -228,6 +234,7 @@ router.post('/apply', async (req, res) => {
  */
 router.post('/:id/refund', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const reason = req.body.reason;
         const deposit = await depositsService.refundDeposit(pool, req.params.id, reason);
 
@@ -251,6 +258,7 @@ router.post('/:id/refund', async (req, res) => {
  */
 router.get('/sale/:saleId/applications', async (req, res) => {
     try {
+        const pool = req.tenantPool || globalPool;
         const applications = await depositsService.getSaleDepositApplications(
             pool,
             req.params.saleId

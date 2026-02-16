@@ -1,6 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { salesService } from './salesService.js';
 import { authenticate, authorize } from '../../middleware/auth.js';
 import { normalizeResponse, normalizePaginatedResponse } from '../../utils/caseConverter.js';
@@ -49,6 +49,7 @@ export const salesController = {
    */
   async createSale(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       let validatedData: any;
       let serviceInput: any;
 
@@ -162,6 +163,7 @@ export const salesController = {
    */
   async getSaleById(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await salesService.getSaleById(pool, id);
 
@@ -192,6 +194,7 @@ export const salesController = {
    */
   async listSales(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const query = ListSalesQuerySchema.parse(req.query);
       const result = await salesService.listSales(pool, query.page, query.limit, {
         status: query.status,
@@ -231,6 +234,7 @@ export const salesController = {
    */
   async getSalesSummary(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { startDate, endDate, groupBy } = req.query;
 
       const filters: any = {};
@@ -258,6 +262,7 @@ export const salesController = {
    */
   async getProductSalesSummary(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { startDate, endDate, productId, customerId } = req.query;
 
       const filters: any = {};
@@ -287,6 +292,7 @@ export const salesController = {
    */
   async getTopSellingProducts(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { limit, startDate, endDate } = req.query;
 
       const filters: any = {};
@@ -317,6 +323,7 @@ export const salesController = {
    */
   async getSalesSummaryByDate(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { groupBy, startDate, endDate } = req.query;
 
       const filters: any = {};
@@ -350,6 +357,7 @@ export const salesController = {
    */
   async voidSale(req: Request, res: Response): Promise<void> {
     try {
+      const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const { reason, approvedById, amountThreshold } = req.body;
 

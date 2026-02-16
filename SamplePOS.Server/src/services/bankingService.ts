@@ -12,7 +12,8 @@
  *   Every bank transaction creates a GL entry automatically
  */
 
-import { pool } from '../db/pool.js';
+import { pool as globalPool } from '../db/pool.js';
+import type pg from 'pg';
 import { PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { Money } from '../utils/money.js';
@@ -81,7 +82,8 @@ export class BankingService {
      * Get all bank accounts with GL-derived balances
      * PRINCIPLE: Balance is ALWAYS derived from General Ledger, never stored separately
      */
-    static async getAllAccounts(includeInactive = false): Promise<BankAccount[]> {
+    static async getAllAccounts(includeInactive = false, dbPool?: pg.Pool): Promise<BankAccount[]> {
+        const pool = dbPool || globalPool;
         // Get bank accounts with GL balance calculated from ledger entries
         const result = await pool.query<BankAccountDbRow>(`
       SELECT 
@@ -109,7 +111,8 @@ export class BankingService {
      * Get bank account by ID with GL-derived balance
      * PRINCIPLE: Balance is ALWAYS derived from General Ledger
      */
-    static async getAccountById(id: string): Promise<BankAccount | null> {
+    static async getAccountById(id: string, dbPool?: pg.Pool): Promise<BankAccount | null> {
+        const pool = dbPool || globalPool;
         const result = await pool.query<BankAccountDbRow>(`
       SELECT 
         ba.*,
@@ -134,7 +137,8 @@ export class BankingService {
     /**
      * Create a new bank account
      */
-    static async createAccount(dto: CreateBankAccountDto, userId: string): Promise<BankAccount> {
+    static async createAccount(dto: CreateBankAccountDto, userId: string, dbPool?: pg.Pool): Promise<BankAccount> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -293,8 +297,10 @@ export class BankingService {
             isReconciled?: boolean;
             limit?: number;
             offset?: number;
-        } = {}
+        } = {},
+        dbPool?: pg.Pool
     ): Promise<{ transactions: BankTransaction[]; total: number }> {
+        const pool = dbPool || globalPool;
         const conditions: string[] = ['bt.bank_account_id = $1', 'bt.is_reversed = FALSE'];
         const params: (string | number | boolean)[] = [bankAccountId];
         let paramIndex = 2;
@@ -362,8 +368,10 @@ export class BankingService {
             isReconciled?: boolean;
             limit?: number;
             offset?: number;
-        } = {}
+        } = {},
+        dbPool?: pg.Pool
     ): Promise<{ transactions: BankTransaction[]; total: number }> {
+        const pool = dbPool || globalPool;
         const conditions: string[] = ['bt.is_reversed = FALSE'];
         const params: (string | number | boolean)[] = [];
         let paramIndex = 1;
@@ -426,7 +434,8 @@ export class BankingService {
     /**
      * Get a single transaction by ID
      */
-    static async getTransactionById(id: string): Promise<BankTransaction | null> {
+    static async getTransactionById(id: string, dbPool?: pg.Pool): Promise<BankTransaction | null> {
+        const pool = dbPool || globalPool;
         const result = await pool.query<BankTransactionDbRow>(`
       SELECT 
         bt.*,
@@ -452,8 +461,10 @@ export class BankingService {
      */
     static async createTransaction(
         dto: CreateBankTransactionDto,
-        userId: string
+        userId: string,
+        dbPool?: pg.Pool
     ): Promise<BankTransaction> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -602,10 +613,11 @@ export class BankingService {
      * Create bank-to-bank transfer
      * Creates two linked transactions (TRANSFER_OUT + TRANSFER_IN)
      */
-    static async createTransfer(dto: CreateTransferDto, userId: string): Promise<{
+    static async createTransfer(dto: CreateTransferDto, userId: string, dbPool?: pg.Pool): Promise<{
         outTransaction: BankTransaction;
         inTransaction: BankTransaction;
     }> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -760,8 +772,10 @@ export class BankingService {
      */
     static async reverseTransaction(
         dto: ReverseBankTransactionDto,
-        userId: string
+        userId: string,
+        dbPool?: pg.Pool
     ): Promise<BankTransaction> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -873,7 +887,8 @@ export class BankingService {
     /**
      * Get all bank categories
      */
-    static async getCategories(direction?: 'IN' | 'OUT'): Promise<BankCategory[]> {
+    static async getCategories(direction?: 'IN' | 'OUT', dbPool?: pg.Pool): Promise<BankCategory[]> {
+        const pool = dbPool || globalPool;
         const conditions: string[] = ['bc.is_active = TRUE'];
         const params: string[] = [];
 
@@ -906,8 +921,10 @@ export class BankingService {
     static async findMatchingPatterns(
         description: string,
         amount: number,
-        direction: 'IN' | 'OUT'
+        direction: 'IN' | 'OUT',
+        dbPool?: pg.Pool
     ): Promise<BankPattern[]> {
+        const pool = dbPool || globalPool;
         const result = await pool.query<BankPatternDbRow>(`
       SELECT 
         p.*,
@@ -968,8 +985,10 @@ export class BankingService {
         direction: 'IN' | 'OUT',
         categoryId: string | null,
         contraAccountId: string | null,
-        userId: string
+        userId: string,
+        dbPool?: pg.Pool
     ): Promise<BankPattern> {
+        const pool = dbPool || globalPool;
         // Extract key terms from description
         const terms = description
             .split(/\s+/)
@@ -1015,8 +1034,10 @@ export class BankingService {
      */
     static async updatePatternConfidence(
         patternId: string,
-        accepted: boolean
+        accepted: boolean,
+        dbPool?: pg.Pool
     ): Promise<void> {
+        const pool = dbPool || globalPool;
         if (accepted) {
             await pool.query(`
         UPDATE bank_transaction_patterns
@@ -1045,8 +1066,10 @@ export class BankingService {
      * Get active alerts
      */
     static async getAlerts(
-        status: 'NEW' | 'REVIEWED' | 'DISMISSED' | 'RESOLVED' = 'NEW'
+        status: 'NEW' | 'REVIEWED' | 'DISMISSED' | 'RESOLVED' = 'NEW',
+        dbPool?: pg.Pool
     ): Promise<BankAlert[]> {
+        const pool = dbPool || globalPool;
         const result = await pool.query<BankAlertDbRow>(`
       SELECT 
         al.*,
@@ -1080,8 +1103,10 @@ export class BankingService {
             transactionId?: string;
             statementLineId?: string;
             details?: Record<string, unknown>;
-        } = {}
+        } = {},
+        dbPool?: pg.Pool
     ): Promise<BankAlert> {
+        const pool = dbPool || globalPool;
         const id = uuidv4();
 
         await pool.query(`
@@ -1117,8 +1142,10 @@ export class BankingService {
         alertId: string,
         status: 'REVIEWED' | 'DISMISSED' | 'RESOLVED',
         notes: string | null,
-        userId: string
+        userId: string,
+        dbPool?: pg.Pool
     ): Promise<void> {
+        const pool = dbPool || globalPool;
         await pool.query(`
       UPDATE bank_alerts
       SET status = $2,
@@ -1140,8 +1167,10 @@ export class BankingService {
         bankAccountId: string,
         transactionIds: string[],
         statementBalance: number,
-        userId: string
+        userId: string,
+        dbPool?: pg.Pool
     ): Promise<{ reconciledCount: number; difference: number }> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -1223,7 +1252,8 @@ export class BankingService {
     /**
      * Get all recurring rules for a bank account
      */
-    static async getRecurringRules(bankAccountId?: string): Promise<BankRecurringRule[]> {
+    static async getRecurringRules(bankAccountId?: string, dbPool?: pg.Pool): Promise<BankRecurringRule[]> {
+        const pool = dbPool || globalPool;
         const conditions: string[] = ['r.is_active = TRUE'];
         const params: string[] = [];
 
@@ -1252,7 +1282,8 @@ export class BankingService {
     /**
      * Get a recurring rule by ID
      */
-    static async getRecurringRuleById(id: string): Promise<BankRecurringRule | null> {
+    static async getRecurringRuleById(id: string, dbPool?: pg.Pool): Promise<BankRecurringRule | null> {
+        const pool = dbPool || globalPool;
         const result = await pool.query<BankRecurringRuleDbRow>(`
       SELECT 
         r.*,
@@ -1274,8 +1305,10 @@ export class BankingService {
      */
     static async createRecurringRule(
         dto: CreateRecurringRuleDto,
-        userId: string
+        userId: string,
+        dbPool?: pg.Pool
     ): Promise<BankRecurringRule> {
+        const pool = dbPool || globalPool;
         const id = uuidv4();
 
         // Calculate next expected date based on frequency and day
@@ -1314,8 +1347,10 @@ export class BankingService {
      */
     static async updateRecurringRule(
         id: string,
-        dto: UpdateRecurringRuleDto
+        dto: UpdateRecurringRuleDto,
+        dbPool?: pg.Pool
     ): Promise<BankRecurringRule> {
+        const pool = dbPool || globalPool;
         const updates: string[] = [];
         const params: unknown[] = [id];
         let paramIndex = 2;
@@ -1371,7 +1406,8 @@ export class BankingService {
     /**
      * Delete a recurring rule
      */
-    static async deleteRecurringRule(id: string): Promise<void> {
+    static async deleteRecurringRule(id: string, dbPool?: pg.Pool): Promise<void> {
+        const pool = dbPool || globalPool;
         await pool.query(`
       UPDATE bank_recurring_rules
       SET is_active = FALSE
@@ -1382,7 +1418,8 @@ export class BankingService {
     /**
      * Check for overdue recurring transactions and create alerts
      */
-    static async checkOverdueRecurring(): Promise<number> {
+    static async checkOverdueRecurring(dbPool?: pg.Pool): Promise<number> {
+        const pool = dbPool || globalPool;
         // Find rules where next_expected_at is in the past
         const result = await pool.query<BankRecurringRuleDbRow>(`
       SELECT r.*, ba.name as bank_account_name
@@ -1446,7 +1483,8 @@ export class BankingService {
     /**
      * Match a transaction to recurring rules and update tracking
      */
-    static async matchToRecurringRules(transaction: BankTransaction): Promise<void> {
+    static async matchToRecurringRules(transaction: BankTransaction, dbPool?: pg.Pool): Promise<void> {
+        const pool = dbPool || globalPool;
         const rules = await this.getRecurringRules(transaction.bankAccountId);
 
         for (const rule of rules) {
@@ -1559,8 +1597,10 @@ export class BankingService {
     static async setLowBalanceThreshold(
         bankAccountId: string,
         threshold: number,
-        enabled: boolean
+        enabled: boolean,
+        dbPool?: pg.Pool
     ): Promise<void> {
+        const pool = dbPool || globalPool;
         // Store threshold in bank_accounts table using a JSONB settings column
         // For now, we'll add columns if they don't exist
         await pool.query(`
@@ -1575,7 +1615,8 @@ export class BankingService {
     /**
      * Check all accounts for low balance and create alerts
      */
-    static async checkLowBalanceAlerts(): Promise<number> {
+    static async checkLowBalanceAlerts(dbPool?: pg.Pool): Promise<number> {
+        const pool = dbPool || globalPool;
         const result = await pool.query(`
       SELECT 
         ba.id,
@@ -1637,7 +1678,8 @@ export class BankingService {
     /**
      * Get bank account summary report
      */
-    static async getAccountSummaries(): Promise<BankAccountSummary[]> {
+    static async getAccountSummaries(dbPool?: pg.Pool): Promise<BankAccountSummary[]> {
+        const pool = dbPool || globalPool;
         const result = await pool.query(`
       SELECT 
         ba.id,
@@ -1700,8 +1742,10 @@ export class BankingService {
     static async getActivityReport(
         bankAccountId: string,
         periodStart: string,
-        periodEnd: string
+        periodEnd: string,
+        dbPool?: pg.Pool
     ): Promise<BankActivityReport> {
+        const pool = dbPool || globalPool;
         const account = await this.getAccountById(bankAccountId);
         if (!account) {
             throw new Error('Bank account not found');
@@ -1780,7 +1824,8 @@ export class BankingService {
     /**
      * Get cash position report (all accounts as of a date)
      */
-    static async getCashPositionReport(asOfDate?: string): Promise<CashPositionReport> {
+    static async getCashPositionReport(asOfDate?: string, dbPool?: pg.Pool): Promise<CashPositionReport> {
+        const pool = dbPool || globalPool;
         const date = asOfDate || new Date().toISOString().split('T')[0];
 
         const result = await pool.query(`
@@ -1842,8 +1887,10 @@ export class BankingService {
         saleNumber: string,
         amount: number,
         paymentMethod: string,
-        saleDate: string
+        saleDate: string,
+        dbPool?: pg.Pool
     ): Promise<BankTransaction | null> {
+        const pool = dbPool || globalPool;
         // Only create bank transaction for non-cash payments
         if (paymentMethod === 'CASH') {
             return null;
@@ -1907,8 +1954,10 @@ export class BankingService {
         amount: number,
         paymentMethod: string,
         expenseDate: string,
-        expenseAccountId?: string
+        expenseAccountId?: string,
+        dbPool?: pg.Pool
     ): Promise<BankTransaction | null> {
+        const pool = dbPool || globalPool;
         if (paymentMethod === 'CASH') {
             return null;
         }
@@ -1953,7 +2002,8 @@ export class BankingService {
     /**
      * Get all import templates
      */
-    static async getTemplates(): Promise<any[]> {
+    static async getTemplates(dbPool?: pg.Pool): Promise<any[]> {
+        const pool = dbPool || globalPool;
         const result = await pool.query(`
       SELECT * FROM bank_templates
       WHERE is_active = TRUE
@@ -1982,7 +2032,8 @@ export class BankingService {
         skipHeaderRows?: number;
         skipFooterRows?: number;
         delimiter?: string;
-    }): Promise<any> {
+    }, dbPool?: pg.Pool): Promise<any> {
+        const pool = dbPool || globalPool;
         const id = uuidv4();
         const result = await pool.query(`
       INSERT INTO bank_templates (
@@ -2016,13 +2067,15 @@ export class BankingService {
         options: {
             periodStart?: string;
             periodEnd?: string;
-        } = {}
+        } = {},
+        dbPool?: pg.Pool
     ): Promise<{
         statementId: string;
         statementNumber: string;
         totalLines: number;
         parsedLines: any[];
     }> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -2197,8 +2250,10 @@ export class BankingService {
      */
     static async getStatementLines(
         statementId: string,
-        status?: 'UNMATCHED' | 'MATCHED' | 'CREATED' | 'SKIPPED'
+        status?: 'UNMATCHED' | 'MATCHED' | 'CREATED' | 'SKIPPED',
+        dbPool?: pg.Pool
     ): Promise<any[]> {
+        const pool = dbPool || globalPool;
         const conditions = ['sl.statement_id = $1'];
         const params: string[] = [statementId];
 
@@ -2234,8 +2289,10 @@ export class BankingService {
             categoryId?: string;       // For CREATE
             contraAccountId?: string;  // For CREATE
             skipReason?: string;       // For SKIP
-        } = {}
+        } = {},
+        dbPool?: pg.Pool
     ): Promise<any> {
+        const pool = dbPool || globalPool;
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -2374,7 +2431,8 @@ export class BankingService {
     /**
      * Complete statement processing
      */
-    static async completeStatement(statementId: string, userId: string): Promise<void> {
+    static async completeStatement(statementId: string, userId: string, dbPool?: pg.Pool): Promise<void> {
+        const pool = dbPool || globalPool;
         // Count processed lines
         const countResult = await pool.query(`
       SELECT 
