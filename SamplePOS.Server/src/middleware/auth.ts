@@ -1,5 +1,9 @@
 // Phase 7: Authentication Middleware - Enhanced JWT & RBAC
 // Validates JWT tokens and enforces comprehensive role-based permissions
+//
+// SECURITY: authenticate() uses req.tenantPool (set by tenantMiddleware)
+// to look up users in the correct tenant database. Falls back to the
+// global pool ONLY in single-tenant mode when tenantMiddleware is not active.
 
 /// <reference path="../types/express.d.ts" />
 import type { Request, Response, NextFunction } from 'express';
@@ -70,8 +74,13 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
     req.tokenPayload = payload;
 
+    // SECURITY: Use the tenant-scoped pool (set by tenantMiddleware) for user lookup.
+    // This ensures we look up the user in the CORRECT tenant database.
+    // Falls back to global pool only in single-tenant mode (no tenantMiddleware).
+    const queryPool = req.tenantPool || pool;
+
     // Get full user details from database
-    const userResult = await pool.query(
+    const userResult = await queryPool.query(
       `SELECT id, email, password_hash as "passwordHash", full_name as "fullName", role, is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
        FROM users 
        WHERE id = $1 AND is_active = true`,

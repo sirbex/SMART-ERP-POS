@@ -1,8 +1,9 @@
 // Auth Controller - HTTP request handlers
 // Validates input, calls service layer, formats responses
+// SECURITY: Uses req.tenantPool for multi-tenant isolation
 
 import type { Request, Response, NextFunction } from 'express';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import { authenticateUser, registerUser, getUserProfile } from './authService.js';
 import * as auditService from '../audit/auditService.js';
 import * as twoFactorService from './twoFactorService.js';
@@ -16,10 +17,14 @@ import logger from '../../utils/logger.js';
  */
 export async function login(req: Request, res: Response, next: NextFunction) {
   try {
+    // SECURITY: Use tenant pool for multi-tenant isolation
+    const pool = req.tenantPool || globalPool;
+    const tenantId = req.tenantId;
+    const tenantSlug = req.tenant?.slug;
     const result = await authenticateUser(pool, req.body);
 
     // Check if 2FA is enabled for this user
-    const twoFactorStatus = await twoFactorService.get2FAStatus(result.user.id);
+    const twoFactorStatus = await twoFactorService.get2FAStatus(result.user.id, pool);
 
     if (twoFactorStatus.enabled) {
       // 2FA is enabled - return partial login, require 2FA verification
@@ -44,9 +49,10 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       const deviceInfo = req.headers['user-agent'] || undefined;
       const ipAddress = req.ip || req.socket.remoteAddress || undefined;
       const tokenPair = await refreshTokenService.generateTokenPair(
-        { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role as any },
+        { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role as any, tenantId, tenantSlug },
         deviceInfo,
-        ipAddress
+        ipAddress,
+        pool
       );
 
       // Set refresh token as httpOnly cookie
@@ -77,9 +83,10 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     const deviceInfo = req.headers['user-agent'] || undefined;
     const ipAddress = req.ip || req.socket.remoteAddress || undefined;
     const tokenPair = await refreshTokenService.generateTokenPair(
-      { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role as any },
+      { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role as any, tenantId, tenantSlug },
       deviceInfo,
-      ipAddress
+      ipAddress,
+      pool
     );
 
     // Set refresh token as httpOnly cookie
@@ -147,7 +154,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       };
 
       await auditService.logLoginFailed(
-        pool,
+        req.tenantPool || globalPool,
         req.body.email || 'unknown',
         error instanceof Error ? error.message : 'Unknown error',
         auditContext
@@ -183,7 +190,8 @@ export async function login(req: Request, res: Response, next: NextFunction) {
  */
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await registerUser(pool, req.body);
+    const regPool = req.tenantPool || globalPool;
+    const result = await registerUser(regPool, req.body);
 
     res.status(201).json({
       success: true,
@@ -228,7 +236,8 @@ export async function logout(req: Request, res: Response, next: NextFunction) {
           userAgent: req.headers['user-agent'],
         };
 
-        await auditService.logUserLogout(pool, sessionId, 'MANUAL', auditContext);
+        const logoutPool = req.tenantPool || globalPool;
+        await auditService.logUserLogout(logoutPool, sessionId, 'MANUAL', auditContext);
 
         // Clear session cookie
         res.clearCookie('sessionId');
@@ -246,7 +255,8 @@ export async function logout(req: Request, res: Response, next: NextFunction) {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
     if (refreshToken) {
       try {
-        await refreshTokenService.revokeRefreshToken(refreshToken);
+        const logoutPool = req.tenantPool || globalPool;
+        await refreshTokenService.revokeRefreshToken(refreshToken, logoutPool);
       } catch (revokeError) {
         logger.error('Failed to revoke refresh token (non-fatal)', { error: revokeError });
       }
@@ -281,7 +291,8 @@ export async function getProfile(req: Request, res: Response, next: NextFunction
       });
     }
 
-    const user = await getUserProfile(pool, userId);
+    const profilePool = req.tenantPool || globalPool;
+    const user = await getUserProfile(profilePool, userId);
 
     res.json({
       success: true,

@@ -7,9 +7,10 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, authorize, generateToken } from '../../middleware/auth.js';
 import * as twoFactorService from './twoFactorService.js';
+import * as refreshTokenService from './refreshTokenService.js';
 import { strictRateLimit } from '../../middleware/security.js';
 import logger from '../../utils/logger.js';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ const router = Router();
 router.get('/status', authenticate, async (req: Request, res: Response) => {
     try {
         const userId = req.user!.id;
-        const status = await twoFactorService.get2FAStatus(userId);
+        const status = await twoFactorService.get2FAStatus(userId, req.tenantPool);
 
         res.json({
             success: true,
@@ -44,7 +45,7 @@ router.post('/setup', authenticate, async (req: Request, res: Response) => {
         const userId = req.user!.id;
         const email = req.user!.email;
 
-        const setupResult = await twoFactorService.setup2FA(userId, email);
+        const setupResult = await twoFactorService.setup2FA(userId, email, req.tenantPool);
 
         res.json({
             success: true,
@@ -82,7 +83,7 @@ router.post('/verify-setup', authenticate, strictRateLimit, async (req: Request,
             return;
         }
 
-        const verified = await twoFactorService.verify2FASetup(userId, token);
+        const verified = await twoFactorService.verify2FASetup(userId, token, req.tenantPool);
 
         if (!verified) {
             res.status(400).json({
@@ -125,7 +126,7 @@ router.post('/verify', strictRateLimit, async (req: Request, res: Response) => {
         // Normalize token (remove spaces/dashes for backup codes)
         const normalizedToken = token.toString().replace(/[\s-]/g, '');
 
-        const verified = await twoFactorService.verify2FALogin(userId, normalizedToken);
+        const verified = await twoFactorService.verify2FALogin(userId, normalizedToken, req.tenantPool);
 
         if (!verified) {
             logger.warn('2FA verification failed', { userId, tokenLength: normalizedToken.length });
@@ -137,7 +138,8 @@ router.post('/verify', strictRateLimit, async (req: Request, res: Response) => {
         }
 
         // Get user data to generate token
-        const userResult = await pool.query(
+        const queryPool = req.tenantPool || globalPool;
+        const userResult = await queryPool.query(
             `SELECT id, email, full_name as "fullName", role, is_active as "isActive", 
               created_at as "createdAt", updated_at as "updatedAt"
        FROM users WHERE id = $1`,
@@ -154,15 +156,33 @@ router.post('/verify', strictRateLimit, async (req: Request, res: Response) => {
 
         const user = userResult.rows[0];
 
-        // Generate JWT token after successful 2FA
-        const jwtToken = generateToken({
-            id: user.id,
-            email: user.email,
-            fullName: user.fullName,
-            role: user.role,
-        });
+        // Generate JWT token pair after successful 2FA (with tenant context)
+        const deviceInfo = req.headers['user-agent'] || undefined;
+        const ipAddress = req.ip || req.socket.remoteAddress || undefined;
+        const tokenPair = await refreshTokenService.generateTokenPair(
+            {
+                id: user.id,
+                email: user.email,
+                fullName: user.fullName,
+                role: user.role,
+                tenantId: req.tenantId,
+                tenantSlug: req.tenant?.slug,
+            },
+            deviceInfo,
+            ipAddress,
+            queryPool
+        );
 
         logger.info('2FA login verified, token issued', { userId, email: user.email });
+
+        // Set refresh token as httpOnly cookie
+        res.cookie('refreshToken', tokenPair.refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            path: '/api/auth/token',
+        });
 
         res.json({
             success: true,
@@ -176,7 +196,10 @@ router.post('/verify', strictRateLimit, async (req: Request, res: Response) => {
                     createdAt: user.createdAt,
                     updatedAt: user.updatedAt,
                 },
-                token: jwtToken,
+                token: tokenPair.accessToken,
+                accessToken: tokenPair.accessToken,
+                refreshToken: tokenPair.refreshToken,
+                expiresIn: tokenPair.expiresIn,
             },
             message: '2FA verification successful',
         });
@@ -206,7 +229,7 @@ router.post('/disable', authenticate, strictRateLimit, async (req: Request, res:
             return;
         }
 
-        await twoFactorService.disable2FA(userId, token);
+        await twoFactorService.disable2FA(userId, token, req.tenantPool);
 
         res.json({
             success: true,
@@ -238,7 +261,7 @@ router.post('/regenerate-backup-codes', authenticate, strictRateLimit, async (re
             return;
         }
 
-        const newBackupCodes = await twoFactorService.regenerateBackupCodes(userId, token);
+        const newBackupCodes = await twoFactorService.regenerateBackupCodes(userId, token, req.tenantPool);
 
         res.json({
             success: true,

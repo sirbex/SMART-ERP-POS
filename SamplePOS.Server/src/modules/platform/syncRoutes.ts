@@ -9,7 +9,7 @@ import { connectionManager } from '../../db/connectionManager.js';
 import { syncService } from './syncService.js';
 import { SyncBatchSchema } from '../../../../shared/zod/tenant.js';
 import { authenticate } from '../../middleware/auth.js';
-import { getTenantPool } from '../../middleware/tenantMiddleware.js';
+import { getTenantPool, verifyTenantAccess } from '../../middleware/tenantMiddleware.js';
 import logger from '../../utils/logger.js';
 
 const router = Router();
@@ -18,7 +18,7 @@ const router = Router();
 // UPLOAD: Edge → Cloud (push local changes)
 // ============================================================
 
-router.post('/upload', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/upload', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
   try {
     const parsed = SyncBatchSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -61,7 +61,7 @@ router.post('/upload', authenticate, async (req: Request, res: Response): Promis
 // DOWNLOAD: Cloud → Edge (pull updates)
 // ============================================================
 
-router.get('/download', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/download', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
   try {
     const tenantId = req.tenantId;
     if (!tenantId) {
@@ -90,7 +90,7 @@ router.get('/download', authenticate, async (req: Request, res: Response): Promi
 // SYNC STATUS
 // ============================================================
 
-router.get('/status', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/status', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
   try {
     const tenantId = req.tenantId;
     if (!tenantId) {
@@ -113,7 +113,7 @@ router.get('/status', authenticate, async (req: Request, res: Response): Promise
 // CONFLICTS
 // ============================================================
 
-router.get('/conflicts', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/conflicts', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
   try {
     const tenantId = req.tenantId;
     if (!tenantId) {
@@ -133,7 +133,7 @@ router.get('/conflicts', authenticate, async (req: Request, res: Response): Prom
   }
 });
 
-router.post('/conflicts/resolve', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/conflicts/resolve', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
   try {
     const tenantId = req.tenantId;
     if (!tenantId) {

@@ -7,9 +7,10 @@
 
 import { authenticator } from 'otplib';
 import * as QRCode from 'qrcode';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import crypto from 'crypto';
+import type pg from 'pg';
 
 // Configure TOTP settings
 // NOTE: window: 2 allows for ±60 seconds of clock drift
@@ -124,7 +125,7 @@ export function roleRequires2FA(role: string): boolean {
  * Initialize 2FA setup for a user
  * Returns secret and QR code, but doesn't enable 2FA until verified
  */
-export async function setup2FA(userId: string, email: string): Promise<TwoFactorSetupResult> {
+export async function setup2FA(userId: string, email: string, dbPool?: pg.Pool): Promise<TwoFactorSetupResult> {
     const secret = generateSecret();
     const backupCodes = generateBackupCodes(10);
     const qrCodeDataUrl = await generateQRCode(email, secret);
@@ -136,7 +137,8 @@ export async function setup2FA(userId: string, email: string): Promise<TwoFactor
         crypto.createHash('sha256').update(code).digest('hex')
     );
 
-    await pool.query(
+    const queryPool = dbPool || globalPool;
+    await queryPool.query(
         `UPDATE users 
      SET totp_secret = $1, 
          backup_codes = $2,
@@ -159,9 +161,10 @@ export async function setup2FA(userId: string, email: string): Promise<TwoFactor
 /**
  * Verify and enable 2FA after user enters correct token
  */
-export async function verify2FASetup(userId: string, token: string): Promise<boolean> {
+export async function verify2FASetup(userId: string, token: string, dbPool?: pg.Pool): Promise<boolean> {
     // Get the stored secret
-    const result = await pool.query(
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `SELECT totp_secret, email FROM users WHERE id = $1`,
         [userId]
     );
@@ -183,7 +186,7 @@ export async function verify2FASetup(userId: string, token: string): Promise<boo
     }
 
     // Enable 2FA
-    await pool.query(
+    await queryPool.query(
         `UPDATE users 
      SET totp_enabled = TRUE, 
          totp_verified_at = NOW()
@@ -198,8 +201,9 @@ export async function verify2FASetup(userId: string, token: string): Promise<boo
 /**
  * Verify 2FA token during login
  */
-export async function verify2FALogin(userId: string, token: string): Promise<boolean> {
-    const result = await pool.query(
+export async function verify2FALogin(userId: string, token: string, dbPool?: pg.Pool): Promise<boolean> {
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `SELECT totp_secret, totp_enabled, backup_codes, email FROM users WHERE id = $1`,
         [userId]
     );
@@ -236,7 +240,7 @@ export async function verify2FALogin(userId: string, token: string): Promise<boo
             const newBackupCodes = [...backupCodes];
             newBackupCodes.splice(codeIndex, 1);
 
-            await pool.query(
+            await queryPool.query(
                 `UPDATE users SET backup_codes = $1 WHERE id = $2`,
                 [newBackupCodes, userId]
             );
@@ -257,15 +261,16 @@ export async function verify2FALogin(userId: string, token: string): Promise<boo
 /**
  * Disable 2FA for a user
  */
-export async function disable2FA(userId: string, token: string): Promise<boolean> {
+export async function disable2FA(userId: string, token: string, dbPool?: pg.Pool): Promise<boolean> {
     // First verify the token
-    const verified = await verify2FALogin(userId, token);
+    const verified = await verify2FALogin(userId, token, dbPool);
 
     if (!verified) {
         throw new Error('Invalid 2FA token. Cannot disable 2FA.');
     }
 
-    await pool.query(
+    const queryPool = dbPool || globalPool;
+    await queryPool.query(
         `UPDATE users 
      SET totp_secret = NULL, 
          totp_enabled = FALSE, 
@@ -282,8 +287,9 @@ export async function disable2FA(userId: string, token: string): Promise<boolean
 /**
  * Get 2FA status for a user
  */
-export async function get2FAStatus(userId: string): Promise<TwoFactorStatus> {
-    const result = await pool.query(
+export async function get2FAStatus(userId: string, dbPool?: pg.Pool): Promise<TwoFactorStatus> {
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `SELECT totp_enabled, totp_verified_at, role FROM users WHERE id = $1`,
         [userId]
     );
@@ -304,8 +310,9 @@ export async function get2FAStatus(userId: string): Promise<TwoFactorStatus> {
 /**
  * Check if user needs to complete 2FA during login
  */
-export async function requires2FAVerification(userId: string): Promise<boolean> {
-    const result = await pool.query(
+export async function requires2FAVerification(userId: string, dbPool?: pg.Pool): Promise<boolean> {
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `SELECT totp_enabled, role FROM users WHERE id = $1`,
         [userId]
     );
@@ -329,9 +336,9 @@ export async function requires2FAVerification(userId: string): Promise<boolean> 
 /**
  * Regenerate backup codes
  */
-export async function regenerateBackupCodes(userId: string, token: string): Promise<string[]> {
+export async function regenerateBackupCodes(userId: string, token: string, dbPool?: pg.Pool): Promise<string[]> {
     // Verify current 2FA token
-    const verified = await verify2FALogin(userId, token);
+    const verified = await verify2FALogin(userId, token, dbPool);
 
     if (!verified) {
         throw new Error('Invalid 2FA token');
@@ -342,7 +349,8 @@ export async function regenerateBackupCodes(userId: string, token: string): Prom
         crypto.createHash('sha256').update(code).digest('hex')
     );
 
-    await pool.query(
+    const queryPool = dbPool || globalPool;
+    await queryPool.query(
         `UPDATE users SET backup_codes = $1 WHERE id = $2`,
         [hashedBackupCodes, userId]
     );

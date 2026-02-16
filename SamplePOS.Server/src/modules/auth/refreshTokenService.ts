@@ -7,6 +7,12 @@
  * - Revocation of compromised token families
  * - Device/IP tracking for security
  * 
+ * SECURITY (Multi-Tenant):
+ * - Access tokens include tenantId so auth middleware can cross-validate
+ * - Refresh tokens are stored in the tenant's database (not shared)
+ * - Token rotation validates user in the correct tenant database
+ * - Global pool retained as fallback for single-tenant mode only
+ * 
  * Security Features:
  * - Tokens are stored as SHA-256 hashes (not plain text)
  * - Token families detect and prevent token reuse attacks
@@ -16,9 +22,10 @@
 
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import pool from '../../db/pool.js';
+import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import type { UserRole } from '../../../../shared/types/user.js';
+import type pg from 'pg';
 
 // Configuration
 const REFRESH_TOKEN_CONFIG = {
@@ -59,14 +66,17 @@ function hashToken(token: string): string {
 
 /**
  * Generate access token (short-lived JWT)
+ * Includes tenantId/tenantSlug when provided (multi-tenant mode).
  */
 export function generateAccessToken(user: {
     id: string;
     email: string;
     fullName: string;
     role: UserRole;
+    tenantId?: string;
+    tenantSlug?: string;
 }): string {
-    const payload = {
+    const payload: Record<string, unknown> = {
         userId: user.id,
         email: user.email,
         fullName: user.fullName,
@@ -74,19 +84,25 @@ export function generateAccessToken(user: {
         type: 'access',
     };
 
+    // SECURITY: Embed tenant context so authenticate() can cross-validate
+    if (user.tenantId) payload.tenantId = user.tenantId;
+    if (user.tenantSlug) payload.tenantSlug = user.tenantSlug;
+
     return jwt.sign(payload, JWT_SECRET, {
         expiresIn: `${REFRESH_TOKEN_CONFIG.accessTokenExpiryMinutes}m`
     });
 }
 
 /**
- * Generate refresh token and store in database
+ * Generate refresh token and store in database.
+ * Uses the provided dbPool (tenant pool) to store in the correct tenant's database.
  */
 export async function generateRefreshToken(
     userId: string,
     deviceInfo?: string,
     ipAddress?: string,
-    existingFamilyId?: string
+    existingFamilyId?: string,
+    dbPool?: pg.Pool
 ): Promise<{ token: string; familyId: string; expiresAt: Date }> {
     const token = generateSecureToken();
     const tokenHash = hashToken(token);
@@ -95,7 +111,8 @@ export async function generateRefreshToken(
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_CONFIG.expiryDays);
 
-    await pool.query(
+    const queryPool = dbPool || globalPool;
+    await queryPool.query(
         `INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at, device_info, ip_address)
      VALUES ($1, $2, $3, $4, $5, $6)`,
         [userId, tokenHash, familyId, expiresAt, deviceInfo || null, ipAddress || null]
@@ -107,7 +124,9 @@ export async function generateRefreshToken(
 }
 
 /**
- * Generate complete token pair (access + refresh)
+ * Generate complete token pair (access + refresh).
+ * Accepts optional tenantId/tenantSlug to embed in JWT and optional dbPool
+ * for storing the refresh token in the correct tenant database.
  */
 export async function generateTokenPair(
     user: {
@@ -115,15 +134,20 @@ export async function generateTokenPair(
         email: string;
         fullName: string;
         role: UserRole;
+        tenantId?: string;
+        tenantSlug?: string;
     },
     deviceInfo?: string,
-    ipAddress?: string
+    ipAddress?: string,
+    dbPool?: pg.Pool
 ): Promise<TokenPair> {
     const accessToken = generateAccessToken(user);
     const { token: refreshToken, expiresAt } = await generateRefreshToken(
         user.id,
         deviceInfo,
-        ipAddress
+        ipAddress,
+        undefined,
+        dbPool
     );
 
     return {
@@ -141,12 +165,15 @@ export async function generateTokenPair(
 export async function rotateRefreshToken(
     refreshToken: string,
     deviceInfo?: string,
-    ipAddress?: string
+    ipAddress?: string,
+    dbPool?: pg.Pool,
+    tenantContext?: { tenantId?: string; tenantSlug?: string }
 ): Promise<TokenPair & { user: { id: string; email: string; fullName: string; role: UserRole } }> {
     const tokenHash = hashToken(refreshToken);
+    const queryPool = dbPool || globalPool;
 
     // Find token in database
-    const result = await pool.query(
+    const result = await queryPool.query(
         `SELECT rt.*, u.email, u.full_name as "fullName", u.role, u.is_active as "isActive"
      FROM refresh_tokens rt
      JOIN users u ON rt.user_id = u.id
@@ -164,7 +191,7 @@ export async function rotateRefreshToken(
     // Check if token is revoked (potential reuse attack!)
     if (tokenRecord.is_revoked) {
         // Token reuse detected - revoke ALL tokens in the family
-        await revokeTokenFamily(tokenRecord.family_id);
+        await revokeTokenFamily(tokenRecord.family_id, queryPool);
         logger.error('Refresh token reuse detected! Revoking token family', {
             userId: tokenRecord.user_id,
             familyId: tokenRecord.family_id,
@@ -185,7 +212,7 @@ export async function rotateRefreshToken(
     }
 
     // Mark old token as rotated (not revoked - we track rotation)
-    await pool.query(
+    await queryPool.query(
         `UPDATE refresh_tokens 
      SET is_revoked = true, rotated_at = CURRENT_TIMESTAMP
      WHERE id = $1`,
@@ -198,6 +225,9 @@ export async function rotateRefreshToken(
         email: tokenRecord.email,
         fullName: tokenRecord.fullName,
         role: tokenRecord.role as UserRole,
+        // SECURITY: Preserve tenant context in rotated tokens
+        tenantId: tenantContext?.tenantId,
+        tenantSlug: tenantContext?.tenantSlug,
     };
 
     const accessToken = generateAccessToken(user);
@@ -205,7 +235,8 @@ export async function rotateRefreshToken(
         user.id,
         deviceInfo,
         ipAddress,
-        tokenRecord.family_id // Keep same family for rotation tracking
+        tokenRecord.family_id, // Keep same family for rotation tracking
+        queryPool
     );
 
     logger.info('Refresh token rotated', { userId: user.id, familyId: tokenRecord.family_id });
@@ -222,8 +253,9 @@ export async function rotateRefreshToken(
 /**
  * Revoke all tokens in a family (security breach response)
  */
-export async function revokeTokenFamily(familyId: string): Promise<number> {
-    const result = await pool.query(
+export async function revokeTokenFamily(familyId: string, dbPool?: pg.Pool): Promise<number> {
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `UPDATE refresh_tokens 
      SET is_revoked = true 
      WHERE family_id = $1 AND is_revoked = false`,
@@ -238,8 +270,9 @@ export async function revokeTokenFamily(familyId: string): Promise<number> {
 /**
  * Revoke all tokens for a user (logout all devices)
  */
-export async function revokeAllUserTokens(userId: string): Promise<number> {
-    const result = await pool.query(
+export async function revokeAllUserTokens(userId: string, dbPool?: pg.Pool): Promise<number> {
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `UPDATE refresh_tokens 
      SET is_revoked = true 
      WHERE user_id = $1 AND is_revoked = false`,
@@ -254,10 +287,11 @@ export async function revokeAllUserTokens(userId: string): Promise<number> {
 /**
  * Revoke a specific refresh token (single logout)
  */
-export async function revokeRefreshToken(refreshToken: string): Promise<boolean> {
+export async function revokeRefreshToken(refreshToken: string, dbPool?: pg.Pool): Promise<boolean> {
     const tokenHash = hashToken(refreshToken);
+    const queryPool = dbPool || globalPool;
 
-    const result = await pool.query(
+    const result = await queryPool.query(
         `UPDATE refresh_tokens 
      SET is_revoked = true 
      WHERE token_hash = $1`,
@@ -274,7 +308,7 @@ export async function revokeRefreshToken(refreshToken: string): Promise<boolean>
 /**
  * Get active sessions for a user
  */
-export async function getUserSessions(userId: string): Promise<Array<{
+export async function getUserSessions(userId: string, dbPool?: pg.Pool): Promise<Array<{
     id: string;
     createdAt: Date;
     expiresAt: Date;
@@ -282,7 +316,8 @@ export async function getUserSessions(userId: string): Promise<Array<{
     ipAddress: string | null;
     isCurrent?: boolean;
 }>> {
-    const result = await pool.query(
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `SELECT id, created_at as "createdAt", expires_at as "expiresAt", 
             device_info as "deviceInfo", ip_address as "ipAddress"
      FROM refresh_tokens
@@ -297,8 +332,9 @@ export async function getUserSessions(userId: string): Promise<Array<{
 /**
  * Clean up expired tokens (run periodically)
  */
-export async function cleanupExpiredTokens(): Promise<number> {
-    const result = await pool.query(
+export async function cleanupExpiredTokens(dbPool?: pg.Pool): Promise<number> {
+    const queryPool = dbPool || globalPool;
+    const result = await queryPool.query(
         `DELETE FROM refresh_tokens 
      WHERE expires_at < CURRENT_TIMESTAMP 
         OR (is_revoked = true AND rotated_at < CURRENT_TIMESTAMP - INTERVAL '7 days')`

@@ -13,6 +13,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth.js';
 import { authRateLimit, strictRateLimit } from '../../middleware/security.js';
 import * as refreshTokenService from './refreshTokenService.js';
+import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 
 const router = Router();
@@ -39,7 +40,9 @@ router.post('/refresh', authRateLimit, async (req: Request, res: Response) => {
         const result = await refreshTokenService.rotateRefreshToken(
             refreshToken,
             deviceInfo,
-            ipAddress
+            ipAddress,
+            req.tenantPool || globalPool,
+            { tenantId: req.tenantId, tenantSlug: req.tenant?.slug }
         );
 
         // Set refresh token as httpOnly cookie for security
@@ -94,7 +97,7 @@ router.post('/revoke', async (req: Request, res: Response) => {
             return;
         }
 
-        await refreshTokenService.revokeRefreshToken(refreshToken);
+        await refreshTokenService.revokeRefreshToken(refreshToken, req.tenantPool || globalPool);
 
         // Clear the cookie
         res.clearCookie('refreshToken', { path: '/api/auth/token' });
@@ -119,7 +122,8 @@ router.post('/revoke', async (req: Request, res: Response) => {
 router.post('/revoke-all', authenticate, async (req: Request, res: Response) => {
     try {
         const userId = req.user!.id;
-        const count = await refreshTokenService.revokeAllUserTokens(userId);
+        const revokePool = req.tenantPool || globalPool;
+        const count = await refreshTokenService.revokeAllUserTokens(userId, revokePool);
 
         // Clear the cookie
         res.clearCookie('refreshToken', { path: '/api/auth/token' });
@@ -145,7 +149,8 @@ router.post('/revoke-all', authenticate, async (req: Request, res: Response) => 
 router.get('/sessions', authenticate, async (req: Request, res: Response) => {
     try {
         const userId = req.user!.id;
-        const sessions = await refreshTokenService.getUserSessions(userId);
+        const sessionsPool = req.tenantPool || globalPool;
+        const sessions = await refreshTokenService.getUserSessions(userId, sessionsPool);
 
         // Mark current session if we can identify it
         const currentToken = req.cookies?.refreshToken;
@@ -182,7 +187,8 @@ router.delete('/sessions/:sessionId', authenticate, async (req: Request, res: Re
         const { sessionId } = req.params;
 
         // Verify session belongs to user and revoke
-        const result = await (await import('../../db/pool.js')).default.query(
+        const deletePool = req.tenantPool || globalPool;
+        const result = await deletePool.query(
             `UPDATE refresh_tokens 
        SET is_revoked = true 
        WHERE id = $1 AND user_id = $2 AND is_revoked = false

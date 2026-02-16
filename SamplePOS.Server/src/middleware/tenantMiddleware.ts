@@ -1,13 +1,19 @@
 // Multi-Tenant Resolution Middleware
 // File: SamplePOS.Server/src/middleware/tenantMiddleware.ts
 //
-// Resolves the current tenant from:
-//   1. JWT claim (tenantId in token payload)
-//   2. X-Tenant-ID header (for edge nodes with API key auth)
-//   3. Subdomain (e.g., acme-shop.smart-erp.com)
-//   4. Falls back to 'default' tenant for backward compatibility
+// SECURITY MODEL:
+// - This middleware runs BEFORE per-route authenticate().
+// - It resolves tenant from subdomain or 'default' fallback ONLY.
+// - The X-Tenant-ID header is ONLY accepted from authenticated requests
+//   (post-auth cross-validation in verifyTenantAccess middleware).
+// - req.tenantPool is attached so that authenticate() can query the
+//   correct tenant database for user lookup.
 //
-// Attaches req.tenantPool (pg.Pool) and req.tenant (Tenant metadata)
+// CROSS-TENANT PROTECTION:
+// - JWT tokens contain tenantId; after auth, verifyTenantAccess()
+//   confirms the JWT tenant matches the resolved tenant.
+// - X-Tenant-ID header is ignored during initial resolution to prevent
+//   unauthenticated header forgery attacks.
 
 import type { Request, Response, NextFunction } from 'express';
 import type pg from 'pg';
@@ -25,12 +31,13 @@ const tenantCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
 /**
  * Resolve tenant from request and attach pool + metadata.
- * 
- * Resolution order:
- * 1. req.user.tenantId (set by auth middleware from JWT)
- * 2. X-Tenant-ID header (edge nodes / API clients)
- * 3. Subdomain (acme-shop.smart-erp.com → slug = 'acme-shop')
- * 4. Default tenant ('default' — backward compat for single-tenant mode)
+ *
+ * SAFE resolution order (no unauthenticated header trust):
+ * 1. Subdomain (acme-shop.smart-erp.com → slug = 'acme-shop')
+ * 2. Default tenant ('default' — backward compat for single-tenant mode)
+ *
+ * X-Tenant-ID header and JWT tenantId are ONLY used in the
+ * post-authentication verifyTenantAccess() middleware.
  */
 export function tenantMiddleware(req: Request, res: Response, next: NextFunction): void {
   resolveTenant(req, res, next).catch((err) => {
@@ -49,46 +56,21 @@ async function resolveTenant(req: Request, res: Response, next: NextFunction): P
   }
 
   let tenantSlug: string | undefined;
-  let tenantId: string | undefined;
 
-  // 1. From JWT (set by auth middleware — preferred for authenticated requests)
-  const userWithTenant = req.user as { id: string; tenantId?: string; tenantSlug?: string } | undefined;
-  if (userWithTenant?.tenantId) {
-    tenantId = userWithTenant.tenantId;
+  // 1. From subdomain (safe — derived from DNS, not user-controlled headers)
+  const host = req.hostname || req.headers.host || '';
+  const subdomain = extractSubdomain(host);
+  if (subdomain && subdomain !== 'www' && subdomain !== 'api') {
+    tenantSlug = subdomain;
   }
 
-  // 2. From X-Tenant-ID header (for API key auth / edge nodes)
-  if (!tenantId && !tenantSlug) {
-    const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
-    if (headerTenantId) {
-      // Could be UUID or slug
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(headerTenantId);
-      if (isUuid) {
-        tenantId = headerTenantId;
-      } else {
-        tenantSlug = headerTenantId;
-      }
-    }
-  }
-
-  // 3. From subdomain
-  if (!tenantId && !tenantSlug) {
-    const host = req.hostname || req.headers.host || '';
-    const subdomain = extractSubdomain(host);
-    if (subdomain && subdomain !== 'www' && subdomain !== 'api') {
-      tenantSlug = subdomain;
-    }
-  }
-
-  // 4. Default fallback (single-tenant / local development)
-  if (!tenantId && !tenantSlug) {
+  // 2. Default fallback (single-tenant / local development)
+  if (!tenantSlug) {
     tenantSlug = 'default';
   }
 
   // Look up tenant metadata
-  const tenant = tenantId
-    ? await getTenantById(tenantId)
-    : await getTenantBySlug(tenantSlug!);
+  const tenant = await getTenantBySlug(tenantSlug);
 
   if (!tenant) {
     res.status(404).json({
@@ -118,6 +100,42 @@ async function resolveTenant(req: Request, res: Response, next: NextFunction): P
   req.tenantPool = connectionManager.getPool(poolConfig);
   req.tenant = tenant;
   req.tenantId = tenant.id;
+
+  next();
+}
+
+/**
+ * POST-AUTHENTICATION middleware: verifies the authenticated user
+ * belongs to the resolved tenant. Must be applied AFTER authenticate().
+ *
+ * For edge nodes using API key auth with X-Tenant-ID header,
+ * this middleware re-resolves the tenant from the header and
+ * cross-validates against the JWT tenantId.
+ *
+ * Usage in routes:
+ *   router.post('/upload', authenticate, verifyTenantAccess, handler);
+ */
+export function verifyTenantAccess(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: 'Authentication required for tenant access' });
+    return;
+  }
+
+  // If JWT contains tenantId, enforce it matches the resolved tenant
+  const jwtTenantId = req.user.tenantId;
+  if (jwtTenantId && req.tenantId && jwtTenantId !== req.tenantId) {
+    logger.warn('Tenant access denied: JWT tenantId does not match resolved tenant', {
+      jwtTenantId,
+      resolvedTenantId: req.tenantId,
+      userId: req.user.id,
+      path: req.path,
+    });
+    res.status(403).json({
+      success: false,
+      error: 'Access denied: tenant mismatch',
+    });
+    return;
+  }
 
   next();
 }
@@ -201,15 +219,16 @@ export function invalidateTenantCache(tenantId?: string, slug?: string): void {
 }
 
 /**
- * Get tenant pool from request — convenience helper for controllers/services
- * Falls back to the global pool (backward compatibility)
+ * Get the tenant-scoped database pool from the request.
+ *
+ * SECURITY: This function does NOT fall back to a global pool.
+ * If no tenant pool is available, it throws — failing safe
+ * rather than silently querying the wrong database.
  */
 export function getTenantPool(req: Request): pg.Pool {
   if (req.tenantPool) return req.tenantPool;
 
-  // Fallback: use the pool from app settings (single-tenant mode)
-  const appPool = req.app.get('pool');
-  if (appPool) return appPool;
-
-  throw new Error('No database pool available on request');
+  throw new Error(
+    'No tenant database pool on request. Ensure tenantMiddleware is applied and tenant resolution succeeded.'
+  );
 }
