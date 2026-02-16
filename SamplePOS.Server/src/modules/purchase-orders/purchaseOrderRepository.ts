@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import Decimal from 'decimal.js';
 
 export interface PurchaseOrder {
   id: string;
@@ -50,6 +51,8 @@ export const purchaseOrderRepository = {
    */
   async generatePONumber(pool: Pool): Promise<string> {
     const year = new Date().getFullYear();
+    // Advisory lock prevents concurrent duplicate PO number generation (held until TX commit)
+    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('po_number_seq'))`);
     const result = await pool.query(
       `SELECT order_number FROM purchase_orders 
        WHERE order_number LIKE $1 
@@ -96,8 +99,8 @@ export const purchaseOrderRepository = {
 
     // Calculate total amount from items
     const totalAmount = data.items.reduce((sum, item) => {
-      return sum + item.quantity * item.unitCost;
-    }, 0);
+      return sum.plus(new Decimal(item.quantity).times(item.unitCost));
+    }, new Decimal(0)).toNumber();
 
     // Create PO with COMPLETED status and manual_receipt flag
     const poResult = await pool.query(
@@ -153,7 +156,7 @@ export const purchaseOrderRepository = {
 
     items.forEach((item, index) => {
       const offset = index * 6; // Changed from 5 to 6 to include uomId
-      const lineTotal = item.quantity * item.unitCost;
+      const lineTotal = new Decimal(item.quantity).times(item.unitCost).toNumber();
 
       placeholders.push(
         `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`

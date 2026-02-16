@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import Decimal from 'decimal.js';
 import { isService, requiresInventoryTracking } from '../products/product.utils.js';
 import logger from '../../utils/logger.js';
 
@@ -120,7 +121,7 @@ export async function processSaleItems(
             saleId,
             productId: item.productId,
             quantity: item.quantity,
-            revenue: item.quantity * item.unitPrice,
+            revenue: new Decimal(item.quantity).times(item.unitPrice).toNumber(),
             incomeAccount: item.incomeAccountId,
         });
 
@@ -157,7 +158,7 @@ export function hasServiceItems(items: SaleLineItem[]): boolean {
 export function calculateServiceRevenue(items: SaleLineItem[]): number {
     return items
         .filter((item) => isService(item.productType))
-        .reduce((total, item) => total + item.quantity * item.unitPrice, 0);
+        .reduce((sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitPrice)), new Decimal(0)).toNumber();
 }
 
 /**

@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
+import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 
 const execAsync = promisify(exec);
@@ -1054,10 +1055,10 @@ export const systemManagementRepository = {
         JOIN ledger_transactions lt ON le."LedgerTransactionId" = lt."Id"
         WHERE lt."Status" = 'POSTED'
       `);
-            const debits = parseFloat(glBalance.rows[0]?.debits) || 0;
-            const credits = parseFloat(glBalance.rows[0]?.credits) || 0;
-            if (Math.abs(debits - credits) > 0.01) {
-                issues.push(`GL imbalance: Debits=${debits}, Credits=${credits}, Diff=${debits - credits}`);
+            const debits = new Decimal(glBalance.rows[0]?.debits || '0');
+            const credits = new Decimal(glBalance.rows[0]?.credits || '0');
+            if (debits.minus(credits).abs().greaterThan('0.01')) {
+                issues.push(`GL imbalance: Debits=${debits.toFixed(2)}, Credits=${credits.toFixed(2)}, Diff=${debits.minus(credits).toFixed(2)}`);
             }
         } catch {
             // Skip

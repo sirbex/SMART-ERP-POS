@@ -81,16 +81,16 @@ export const salesService = {
    */
   async consumeCostLayers(pool: Pool, productId: string, quantity: number): Promise<void> {
     const costLayers = await salesRepository.getFIFOCostLayers(pool, productId);
-    let remainingQty = quantity;
+    let remainingQty = new Decimal(quantity);
 
     for (const layer of costLayers) {
-      if (remainingQty <= 0) break;
+      if (remainingQty.lessThanOrEqualTo(0)) break;
 
-      const qtyFromLayer = Math.min(remainingQty, layer.remaining_quantity);
-      const newQuantity = layer.remaining_quantity - qtyFromLayer;
+      const qtyFromLayer = Decimal.min(remainingQty, new Decimal(layer.remaining_quantity));
+      const newQuantity = new Decimal(layer.remaining_quantity).minus(qtyFromLayer).toNumber();
 
       await salesRepository.updateCostLayerQuantity(pool, layer.id, newQuantity);
-      remainingQty -= qtyFromLayer;
+      remainingQty = remainingQty.minus(qtyFromLayer);
     }
   },
 
@@ -132,9 +132,9 @@ export const salesService = {
       // BR-SAL-003: Validate credit sales
       if (input.paymentMethod === 'CREDIT') {
         const totalAmount = input.items.reduce(
-          (sum, item) => sum + item.quantity * item.unitPrice,
-          0
-        );
+          (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitPrice)),
+          new Decimal(0)
+        ).toNumber();
         await SalesBusinessRules.validateCreditSale(
           client as any,
           input.customerId || null,
@@ -395,20 +395,18 @@ export const salesService = {
       // This ensures amount_paid reflects what was actually received
       // ============================================================
       const paymentReceived = hasPaymentLines
-        ? new Decimal(
-          input.paymentLines
+        ? (input.paymentLines
             ?.filter(line => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-            .reduce((sum, line) => sum + line.amount, 0) ?? 0
-        )
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
+          )
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
-        ? new Decimal(
-          input.paymentLines
+        ? (input.paymentLines
             ?.filter(line => line.paymentMethod === 'CREDIT')
-            .reduce((sum, line) => sum + line.amount, 0) ?? 0
-        )
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
+          )
         : new Decimal(0);
 
       logger.info('Payment breakdown calculated', {
@@ -505,12 +503,12 @@ export const salesService = {
         }
 
         const customer = customerCheck.rows[0];
-        const outstandingAmount = actualTotalAmount - actualAmountPaid;
+        const outstandingAmount = new Decimal(actualTotalAmount).minus(actualAmountPaid).toNumber();
 
         // Check credit limit for sales with outstanding balance
         if (hasOutstandingBalance && customer.credit_limit) {
-          const newBalance = parseFloat(customer.balance || 0) + outstandingAmount;
-          const creditLimit = parseFloat(customer.credit_limit || 0);
+          const newBalance = new Decimal(customer.balance || 0).plus(outstandingAmount).toNumber();
+          const creditLimit = new Decimal(customer.credit_limit || 0).toNumber();
 
           if (newBalance > creditLimit) {
             logger.warn('Customer exceeding credit limit', {
@@ -699,12 +697,15 @@ export const salesService = {
           `SELECT id, remaining_quantity, expiry_date, cost_price
            FROM inventory_batches
            WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-           ORDER BY expiry_date ASC NULLS LAST, received_date ASC`,
+           ORDER BY expiry_date ASC NULLS LAST, received_date ASC
+           FOR UPDATE`,
           [item.productId]
         );
 
         // Generate movement number ONCE for all batch deductions per item
         // This drastically reduces DB queries (from O(batches) to O(1) per item)
+        // Advisory lock prevents concurrent duplicate movement number generation
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movNumRes = await client.query(
           `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
            LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0') 
@@ -830,13 +831,13 @@ export const salesService = {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           paymentCount: input.paymentLines.length,
-          totalPaid: parseFloat(input.paymentLines.reduce((sum, line) => sum + line.amount, 0).toFixed(2)),
+          totalPaid: input.paymentLines.reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)).toDecimalPlaces(2).toNumber(),
         });
 
         // ========== APPLY DEPOSITS (if DEPOSIT payment method used) ==========
         const depositPaymentLines = input.paymentLines.filter(line => line.paymentMethod === 'DEPOSIT');
         if (depositPaymentLines.length > 0 && input.customerId) {
-          const totalDepositAmount = depositPaymentLines.reduce((sum, line) => sum + line.amount, 0);
+          const totalDepositAmount = depositPaymentLines.reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)).toNumber();
 
           if (totalDepositAmount > 0) {
             try {
@@ -942,9 +943,9 @@ export const salesService = {
               // VALIDATION: Ensure total payment amount doesn't exceed invoice total
               const totalPayments = input.paymentLines
                 .filter(p => p.paymentMethod !== 'CREDIT' && p.amount > 0)
-                .reduce((sum, p) => sum + p.amount, 0);
+                .reduce((sum, p) => sum.plus(new Decimal(p.amount)), new Decimal(0)).toNumber();
 
-              if (totalPayments > parseFloat((input.totalAmount || 0).toFixed(2)) + 0.01) {
+              if (new Decimal(totalPayments).greaterThan(new Decimal(input.totalAmount || 0).plus('0.01'))) {
                 throw new Error(`Payment amount (${totalPayments}) exceeds invoice total (${input.totalAmount})`);
               }
 
@@ -1143,11 +1144,9 @@ export const salesService = {
         }
       }
 
-      await client.query('COMMIT');
-
       // ============================================================
-      // POST-COMMIT: Deduct from cost layers (FIFO products)
-      // Done after commit to avoid nested transactions and deadlocks
+      // PRE-COMMIT: Deduct from cost layers (FIFO products)
+      // Must run inside transaction for atomicity with inventory changes
       // ============================================================
       for (const deduction of costLayerDeductions) {
         try {
@@ -1181,6 +1180,8 @@ export const salesService = {
           }
         }
       }
+
+      await client.query('COMMIT');
 
       // NOTE: Audit logging is now handled in the controller layer
       // where we have access to request context (IP, user agent, session ID)
@@ -1713,6 +1714,8 @@ export const salesService = {
         }
 
         // 3. Record stock movement (VOID reversal)
+        // Advisory lock prevents concurrent duplicate movement number generation
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movNumRes = await client.query(
           `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
            LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0') 

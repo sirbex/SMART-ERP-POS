@@ -70,7 +70,7 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
         // Calculate selling price based on conversion factor and product base price
         const basePrice = parseFloat(product.selling_price || '0');
         const conversionFactor = parseFloat(uom.conversionFactor || '1');
-        const calculatedPrice = basePrice * conversionFactor;
+        const calculatedPrice = new Decimal(basePrice).times(conversionFactor).toNumber();
 
         await auditService.logUomPriceOverride(
           pool,

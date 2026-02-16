@@ -367,6 +367,8 @@ export const goodsReceiptService = {
 
           // Single atomic query to get next sequence number
           // Extract numeric suffix and find max, then add 1
+          // Advisory lock prevents concurrent duplicate batch number generation
+          await client.query(`SELECT pg_advisory_xact_lock(hashtext('batch_number_seq'))`);
           const seqResult = await client.query(
             `SELECT COALESCE(MAX(CAST(SUBSTRING(batch_number FROM $2) AS INTEGER)), 0) + 1 AS next_seq
              FROM inventory_batches 
@@ -430,6 +432,8 @@ export const goodsReceiptService = {
 
         // Record stock movement (RECEIVE)
         // Generate movement number
+        // Advisory lock prevents concurrent duplicate movement number generation
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movementNumberResult = await client.query(
           `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
            LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0') 
@@ -575,11 +579,9 @@ export const goodsReceiptService = {
         }
       }
 
-      await client.query('COMMIT');
-
       // ============================================================
-      // POST-COMMIT: Create cost layers and update pricing
-      // Done after commit to avoid nested transactions and deadlocks
+      // PRE-COMMIT: Create cost layers and update pricing
+      // Must run inside transaction for atomicity with inventory changes
       // ============================================================
       for (const costData of costLayerData) {
         try {
@@ -597,10 +599,12 @@ export const goodsReceiptService = {
             error: err.message,
             remediation: 'Manually create cost layer via system management or re-process GR',
           });
-          // Note: Not throwing - GR is committed with inventory updates
+          // Note: Not throwing - cost layer failure should not block GR
           // Missing cost layer affects costing, not inventory quantity
         }
       }
+
+      await client.query('COMMIT');
 
       // ============================================================
       // GL POSTING: Handled by database trigger (trg_post_goods_receipt_to_ledger)

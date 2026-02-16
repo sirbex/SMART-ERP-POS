@@ -1006,7 +1006,7 @@ export const reportsService = {
       totalCost: data.reduce((sum, p) => new Decimal(sum).plus(p.totalCost), new Decimal(0)).toDecimalPlaces(2).toNumber(),
       totalProfit: data.reduce((sum, p) => new Decimal(sum).plus(p.totalProfit), new Decimal(0)).toDecimalPlaces(2).toNumber(),
       averageMarginPercent: data.length > 0
-        ? data.reduce((sum, p) => sum + p.profitMarginPercent, 0) / data.length
+        ? data.reduce((sum, p) => sum.plus(p.profitMarginPercent), new Decimal(0)).dividedBy(data.length).toDecimalPlaces(2).toNumber()
         : 0,
     };
 

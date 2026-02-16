@@ -9,6 +9,7 @@
  */
 
 import { Pool } from 'pg';
+import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 
 // =============================================================================
@@ -375,10 +376,10 @@ export class AccountingPeriodService {
               AND lt."TransactionDate"::DATE <= $2
         `, [periodStart.toISOString().split('T')[0], periodEnd.toISOString().split('T')[0]]);
 
-        const debits = parseFloat(balanceCheck.rows[0]?.total_debits || '0');
-        const credits = parseFloat(balanceCheck.rows[0]?.total_credits || '0');
+        const debits = new Decimal(balanceCheck.rows[0]?.total_debits || '0');
+        const credits = new Decimal(balanceCheck.rows[0]?.total_credits || '0');
 
-        if (Math.abs(debits - credits) > 0.01) {
+        if (debits.minus(credits).abs().greaterThan('0.01')) {
             return {
                 valid: false,
                 message: `Period has unbalanced entries. Debits: ${debits.toFixed(2)}, Credits: ${credits.toFixed(2)}`

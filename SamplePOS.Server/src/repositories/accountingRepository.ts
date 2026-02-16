@@ -318,11 +318,11 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
 
     // Validate double-entry: total debits must equal total credits
     const totalDebits = data.lines.reduce((sum, line) =>
-      new Decimal(sum).plus(line.debitAmount).toNumber(), 0);
+      sum.plus(line.debitAmount), new Decimal(0)).toNumber();
     const totalCredits = data.lines.reduce((sum, line) =>
-      new Decimal(sum).plus(line.creditAmount).toNumber(), 0);
+      sum.plus(line.creditAmount), new Decimal(0)).toNumber();
 
-    if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
       throw new Error(`Ledger transaction is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
     }
 
@@ -435,11 +435,11 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
 
     // Validate double-entry: total debits must equal total credits
     const totalDebits = data.lines.reduce((sum, line) =>
-      new Decimal(sum).plus(line.debitAmount).toNumber(), 0);
+      sum.plus(line.debitAmount), new Decimal(0)).toNumber();
     const totalCredits = data.lines.reduce((sum, line) =>
-      new Decimal(sum).plus(line.creditAmount).toNumber(), 0);
+      sum.plus(line.creditAmount), new Decimal(0)).toNumber();
 
-    if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
       throw new Error(`Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
     }
 
@@ -976,11 +976,11 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
 
     // Calculate totals (simplified - in real world would separate current/non-current)
     const totalAssets = assets.reduce((sum, a) =>
-      new Decimal(sum).plus(a.amount).toNumber(), 0);
+      sum.plus(a.amount), new Decimal(0)).toNumber();
     const totalLiabilities = liabilities.reduce((sum, l) =>
-      new Decimal(sum).plus(l.amount).toNumber(), 0);
+      sum.plus(l.amount), new Decimal(0)).toNumber();
     const equityTotal = equityItems.reduce((sum, e) =>
-      new Decimal(sum).plus(e.amount).toNumber(), 0);
+      sum.plus(e.amount), new Decimal(0)).toNumber();
     const totalEquity = new Decimal(equityTotal).plus(retainedEarnings).toNumber();
 
     return {
@@ -991,18 +991,18 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
         currentAssets: assets.filter(a => a.accountCode.startsWith('1')),
         fixedAssets: assets.filter(a => !a.accountCode.startsWith('1')),
         totalCurrentAssets: assets.filter(a => a.accountCode.startsWith('1'))
-          .reduce((sum, a) => new Decimal(sum).plus(a.amount).toNumber(), 0),
+          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0)).toNumber(),
         totalFixedAssets: assets.filter(a => !a.accountCode.startsWith('1'))
-          .reduce((sum, a) => new Decimal(sum).plus(a.amount).toNumber(), 0),
+          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0)).toNumber(),
         totalAssets
       },
       liabilities: {
         currentLiabilities: liabilities.filter(l => l.accountCode.startsWith('2')),
         longTermLiabilities: liabilities.filter(l => !l.accountCode.startsWith('2')),
         totalCurrentLiabilities: liabilities.filter(l => l.accountCode.startsWith('2'))
-          .reduce((sum, l) => new Decimal(sum).plus(l.amount).toNumber(), 0),
+          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0)).toNumber(),
         totalLongTermLiabilities: liabilities.filter(l => !l.accountCode.startsWith('2'))
-          .reduce((sum, l) => new Decimal(sum).plus(l.amount).toNumber(), 0),
+          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0)).toNumber(),
         totalLiabilities
       },
       equity: {
@@ -1114,28 +1114,37 @@ export async function getIncomeStatement(startDate: string, endDate: string, dbP
       }
     }
 
-    const totalRevenue = revenue.reduce((sum, r) =>
-      new Decimal(sum).plus(r.amount).toNumber(), 0);
-    const totalCOGS = cogs.reduce((sum, c) =>
-      new Decimal(sum).plus(c.amount).toNumber(), 0);
-    const totalOperatingExpenses = operatingExpenses.reduce((sum, e) =>
-      new Decimal(sum).plus(e.amount).toNumber(), 0);
-    const totalOtherExpenses = otherExpenses.reduce((sum, e) =>
-      new Decimal(sum).plus(e.amount).toNumber(), 0);
+    const totalRevenueD = revenue.reduce((sum, r) =>
+      sum.plus(r.amount), new Decimal(0));
+    const totalCOGSD = cogs.reduce((sum, c) =>
+      sum.plus(c.amount), new Decimal(0));
+    const totalOperatingExpensesD = operatingExpenses.reduce((sum, e) =>
+      sum.plus(e.amount), new Decimal(0));
+    const totalOtherExpensesD = otherExpenses.reduce((sum, e) =>
+      sum.plus(e.amount), new Decimal(0));
 
-    const grossProfit = new Decimal(totalRevenue).minus(totalCOGS).toNumber();
-    const operatingIncome = new Decimal(grossProfit).minus(totalOperatingExpenses).toNumber();
-    const netIncome = new Decimal(operatingIncome).minus(totalOtherExpenses).toNumber();
+    const grossProfitD = totalRevenueD.minus(totalCOGSD);
+    const operatingIncomeD = grossProfitD.minus(totalOperatingExpensesD);
+    const netIncomeD = operatingIncomeD.minus(totalOtherExpensesD);
+
+    // Convert to numbers for the return value
+    const totalRevenue = totalRevenueD.toNumber();
+    const totalCOGS = totalCOGSD.toNumber();
+    const totalOperatingExpenses = totalOperatingExpensesD.toNumber();
+    const totalOtherExpenses = totalOtherExpensesD.toNumber();
+    const grossProfit = grossProfitD.toNumber();
+    const operatingIncome = operatingIncomeD.toNumber();
+    const netIncome = netIncomeD.toNumber();
 
     // Calculate margins
-    const grossProfitMargin = totalRevenue > 0
-      ? new Decimal(grossProfit).dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber()
+    const grossProfitMargin = totalRevenueD.greaterThan(0)
+      ? grossProfitD.dividedBy(totalRevenueD).times(100).toDecimalPlaces(2).toNumber()
       : 0;
-    const operatingMargin = totalRevenue > 0
-      ? new Decimal(operatingIncome).dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber()
+    const operatingMargin = totalRevenueD.greaterThan(0)
+      ? operatingIncomeD.dividedBy(totalRevenueD).times(100).toDecimalPlaces(2).toNumber()
       : 0;
-    const netProfitMargin = totalRevenue > 0
-      ? new Decimal(netIncome).dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber()
+    const netProfitMargin = totalRevenueD.greaterThan(0)
+      ? netIncomeD.dividedBy(totalRevenueD).times(100).toDecimalPlaces(2).toNumber()
       : 0;
 
     return {

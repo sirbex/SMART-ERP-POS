@@ -106,7 +106,7 @@ export const paymentsService = {
       await client.query('BEGIN');
 
       // Calculate totals
-      const totalPaid = input.payments.reduce((sum, p) => sum + p.amount, 0);
+      const totalPaid = input.payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
       const totalAmount = new Decimal(input.totalAmount);
       const paidDecimal = new Decimal(totalPaid);
 
@@ -287,7 +287,7 @@ export const paymentsService = {
     const payments = await paymentsRepository.getSalePayments(pool, saleId);
     const creditTransactions = await paymentsRepository.getSaleCreditTransactions(pool, saleId);
 
-    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    const totalPaid = payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
 
     return {
       payments: payments.map(p => ({
@@ -337,12 +337,12 @@ export const paymentsService = {
    */
   calculateChange(payments: PaymentSegment[], totalDue: number): number {
     const cashPayments = payments.filter(p => p.method === 'CASH');
-    const totalCash = cashPayments.reduce((sum, p) => sum + p.amount, 0);
+    const totalCash = cashPayments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
 
     const nonCashPayments = payments.filter(p => p.method !== 'CASH');
-    const totalNonCash = nonCashPayments.reduce((sum, p) => sum + p.amount, 0);
+    const totalNonCash = nonCashPayments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
 
-    const remainingAfterNonCash = totalDue - totalNonCash;
+    const remainingAfterNonCash = new Decimal(totalDue).minus(totalNonCash).toNumber();
 
     if (totalCash > remainingAfterNonCash && remainingAfterNonCash > 0) {
       return new Decimal(totalCash).minus(remainingAfterNonCash).toDecimalPlaces(2).toNumber();
@@ -366,7 +366,7 @@ export const paymentsService = {
       return { valid: false, errors };
     }
 
-    const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+    const totalPaid = payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
     const hasCreditPayment = payments.some(p => p.method === 'CUSTOMER_CREDIT');
 
     // Check individual payments
@@ -377,7 +377,7 @@ export const paymentsService = {
     }
 
     // Check total
-    if (!hasCreditPayment && totalPaid < totalDue - 0.01) {
+    if (!hasCreditPayment && totalPaid < new Decimal(totalDue).minus(0.01).toNumber()) {
       errors.push(`Insufficient payment: ${totalPaid.toFixed(2)} < ${totalDue.toFixed(2)}`);
     }
 

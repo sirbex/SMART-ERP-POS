@@ -250,9 +250,9 @@ export class InventoryBusinessRules {
 
     if (result.rows.length > 0) {
       const { name, max_stock_level, current_stock } = result.rows[0];
-      const projectedStock = parseFloat(current_stock) + additionalQuantity;
+      const projectedStock = new Decimal(current_stock).plus(additionalQuantity);
 
-      if (projectedStock > parseFloat(max_stock_level)) {
+      if (projectedStock.greaterThan(new Decimal(max_stock_level))) {
         logger.warn('BR-INV-009: Receiving would exceed maximum stock level', {
           productId,
           productName: name,
@@ -651,8 +651,8 @@ export class PurchaseOrderBusinessRules {
     receivedCost: number,
     thresholdPercentage: number = 10
   ): { exceeded: boolean; variance: number; percentage: number } {
-    const variance = Math.abs(receivedCost - orderedCost);
-    const percentage = orderedCost > 0 ? (variance / orderedCost) * 100 : 0;
+    const variance = new Decimal(receivedCost).minus(orderedCost).abs().toNumber();
+    const percentage = orderedCost > 0 ? new Decimal(variance).dividedBy(orderedCost).times(100).toNumber() : 0;
 
     if (percentage > thresholdPercentage) {
       logger.warn('BR-PO-007: Cost variance threshold exceeded', {

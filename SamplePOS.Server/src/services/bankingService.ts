@@ -17,6 +17,7 @@ import type pg from 'pg';
 import { PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { Money } from '../utils/money.js';
+import Decimal from 'decimal.js';
 import { AccountingCore, JournalEntryRequest } from './accountingCore.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
@@ -1489,8 +1490,8 @@ export class BankingService {
 
         for (const rule of rules) {
             // Check if amount is within tolerance
-            const tolerance = rule.expectedAmount * (rule.tolerancePercent / 100);
-            if (Math.abs(transaction.amount - rule.expectedAmount) > tolerance) {
+            const tolerance = new Decimal(rule.expectedAmount).times(rule.tolerancePercent).dividedBy(100);
+            if (new Decimal(transaction.amount).minus(rule.expectedAmount).abs().greaterThan(tolerance)) {
                 continue;
             }
 
@@ -1869,8 +1870,8 @@ export class BankingService {
         return {
             asOfDate: date,
             accounts,
-            totalCashBalance: accounts.reduce((sum, acc) => sum + acc.balance, 0),
-            totalUnreconciledAmount: accounts.reduce((sum, acc) => sum + Math.abs(acc.unreconciledAmount), 0)
+            totalCashBalance: accounts.reduce((sum, acc) => sum.plus(acc.balance), new Decimal(0)).toNumber(),
+            totalUnreconciledAmount: accounts.reduce((sum, acc) => sum.plus(new Decimal(acc.unreconciledAmount).abs()), new Decimal(0)).toNumber()
         };
     }
 

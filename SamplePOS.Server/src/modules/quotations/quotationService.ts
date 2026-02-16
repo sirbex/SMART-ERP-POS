@@ -586,16 +586,16 @@ export const quotationService = {
         uomName: item.uom_name,
         costPrice: item.unit_cost ? parseFloat(item.unit_cost) : 0,
         profit: item.unit_cost
-          ? parseFloat(item.line_total) - (parseFloat(item.unit_cost) * parseFloat(item.quantity))
+          ? new Decimal(item.line_total).minus(new Decimal(item.unit_cost).times(item.quantity)).toNumber()
           : 0,
       }));
 
       const totalAmount = parseFloat(quotation.total_amount);
       const totalCost = items.reduce((sum, item) => {
-        const cost = item.unit_cost ? parseFloat(item.unit_cost) : 0;
-        const qty = parseFloat(item.quantity);
-        return sum + (cost * qty);
-      }, 0);
+        const cost = item.unit_cost ? new Decimal(item.unit_cost) : new Decimal(0);
+        const qty = new Decimal(item.quantity);
+        return sum.plus(cost.times(qty));
+      }, new Decimal(0)).toNumber();
 
       // Handle missing customer_id by looking up customer by name
       let customerId = quotation.customer_id;
@@ -618,24 +618,24 @@ export const quotationService = {
       // BR-QUOTE-005: Quote total must match sale total
       // This validation ensures data integrity during conversion
       // ============================================================
-      const quoteSubtotal = parseFloat(quotation.subtotal);
-      const quoteTax = parseFloat(quotation.tax_amount);
-      const quoteDiscount = parseFloat(quotation.discount_amount);
-      const quoteTotal = parseFloat(quotation.total_amount);
+      const quoteSubtotal = new Decimal(quotation.subtotal);
+      const quoteTax = new Decimal(quotation.tax_amount);
+      const quoteDiscount = new Decimal(quotation.discount_amount);
+      const quoteTotal = new Decimal(quotation.total_amount);
 
       // Validate quote internal consistency: subtotal - discount + tax = total
-      const expectedTotal = quoteSubtotal - quoteDiscount + quoteTax;
-      const tolerance = 0.01; // Allow 1 cent tolerance for floating point
+      const expectedTotal = quoteSubtotal.minus(quoteDiscount).plus(quoteTax);
+      const tolerance = new Decimal('0.01'); // Allow 1 cent tolerance for floating point
 
-      if (Math.abs(expectedTotal - quoteTotal) > tolerance) {
+      if (expectedTotal.minus(quoteTotal).abs().greaterThan(tolerance)) {
         console.error('Quote data integrity failure:', {
           quoteNumber: quotation.quote_number,
-          subtotal: quoteSubtotal,
-          discount: quoteDiscount,
-          tax: quoteTax,
-          storedTotal: quoteTotal,
-          expectedTotal,
-          difference: Math.abs(expectedTotal - quoteTotal),
+          subtotal: quoteSubtotal.toNumber(),
+          discount: quoteDiscount.toNumber(),
+          tax: quoteTax.toNumber(),
+          storedTotal: quoteTotal.toNumber(),
+          expectedTotal: expectedTotal.toNumber(),
+          difference: expectedTotal.minus(quoteTotal).abs().toNumber(),
         });
         throw new Error(
           `Quote ${quotation.quote_number} has inconsistent totals. ` +
@@ -645,16 +645,16 @@ export const quotationService = {
       }
 
       // Validate subtotal > 0 and total > subtotal (when tax exists)
-      if (quoteSubtotal <= 0) {
+      if (quoteSubtotal.lessThanOrEqualTo(0)) {
         throw new Error('Quote subtotal must be greater than zero');
       }
 
-      if (quoteTax > 0 && quoteTotal <= quoteSubtotal) {
+      if (quoteTax.greaterThan(0) && quoteTotal.lessThanOrEqualTo(quoteSubtotal)) {
         console.error('Possible subtotal/total swap detected:', {
           quoteNumber: quotation.quote_number,
-          subtotal: quoteSubtotal,
-          total: quoteTotal,
-          tax: quoteTax,
+          subtotal: quoteSubtotal.toNumber(),
+          total: quoteTotal.toNumber(),
+          tax: quoteTax.toNumber(),
         });
         throw new Error(
           `Quote ${quotation.quote_number} appears to have swapped subtotal/total values. ` +

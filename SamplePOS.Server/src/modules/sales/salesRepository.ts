@@ -64,6 +64,8 @@ export const salesRepository = {
    */
   async generateSaleNumber(pool: Pool): Promise<string> {
     const year = new Date().getFullYear();
+    // Advisory lock prevents concurrent duplicate sale number generation (held until TX commit)
+    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('sale_number_seq'))`);
     const result = await pool.query(
       `SELECT sale_number FROM sales 
        WHERE sale_number LIKE $1 

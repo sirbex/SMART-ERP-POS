@@ -14,6 +14,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 
 interface AccountingApiConfig {
@@ -209,7 +210,7 @@ class AccountingApiClient {
       logger.info('Posting COGS to accounting system', {
         saleId: cogsData.saleId,
         itemCount: cogsData.items.length,
-        totalCost: cogsData.items.reduce((sum, item) => sum + item.totalCost, 0)
+        totalCost: cogsData.items.reduce((sum, item) => sum.plus(item.totalCost), new Decimal(0)).toNumber()
       });
 
       const response = await this.client.post<AccountingApiResponse>(

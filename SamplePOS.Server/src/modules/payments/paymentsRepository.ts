@@ -245,6 +245,7 @@ export const paymentsRepository = {
       WHERE customer_id = $1
       ORDER BY created_at DESC
       LIMIT 1
+      FOR UPDATE
     `;
 
     const result = await pool.query<{ balance: string }>(query, [customerId]);

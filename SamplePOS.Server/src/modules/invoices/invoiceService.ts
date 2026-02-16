@@ -5,6 +5,7 @@ import logger from '../../utils/logger.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as depositsService from '../deposits/depositsService.js';
+import Decimal from 'decimal.js';
 
 export const invoiceService = {
   /**
@@ -80,9 +81,9 @@ export const invoiceService = {
       }
 
       // Get sale totals
-      const saleSubtotal = Number((saleData as any).sale.subtotal || 0);
-      const saleTaxAmount = Number((saleData as any).sale.tax_amount || 0);
-      const saleTotalAmount = Number((saleData as any).sale.total_amount || 0);
+      const saleSubtotal = new Decimal((saleData as any).sale.subtotal || 0).toNumber();
+      const saleTaxAmount = new Decimal((saleData as any).sale.tax_amount || 0).toNumber();
+      const saleTotalAmount = new Decimal((saleData as any).sale.total_amount || 0).toNumber();
 
       // Calculate amount paid from payment_lines (EXCLUDING CREDIT payments)
       // Credit payments represent the invoice amount, not actual payments
@@ -94,13 +95,13 @@ export const invoiceService = {
         line.payment_method !== 'CREDIT' && line.paymentMethod !== 'CREDIT'
       );
 
-      const amountPaid = nonCreditPaymentLines.reduce((sum: number, line: any) => {
-        return sum + Number(line.amount || 0);
-      }, 0);
+      const amountPaid = nonCreditPaymentLines.reduce((sum: Decimal, line: any) => {
+        return sum.plus(new Decimal(line.amount || 0));
+      }, new Decimal(0)).toNumber();
 
-      const creditAmount = creditPaymentLines.reduce((sum: number, line: any) => {
-        return sum + Number(line.amount || 0);
-      }, 0);
+      const creditAmount = creditPaymentLines.reduce((sum: Decimal, line: any) => {
+        return sum.plus(new Decimal(line.amount || 0));
+      }, new Decimal(0)).toNumber();
 
       logger.info('Invoice creation - Payment calculation', {
         saleId: input.saleId,
@@ -144,9 +145,9 @@ export const invoiceService = {
       } else {
         // For regular credit sales, use the credit amount directly as the invoice amount
         // Calculate proportional subtotal and tax for the credit amount
-        const creditRatio = creditAmount / saleTotalAmount;
-        subtotal = saleSubtotal * creditRatio;
-        taxAmount = saleTaxAmount * creditRatio;
+        const creditRatio = new Decimal(creditAmount).dividedBy(saleTotalAmount).toNumber();
+        subtotal = new Decimal(saleSubtotal).times(creditRatio).toNumber();
+        taxAmount = new Decimal(saleTaxAmount).times(creditRatio).toNumber();
         totalAmount = creditAmount;
       }
 
@@ -156,7 +157,7 @@ export const invoiceService = {
           saleTotalAmount,
           amountPaid,
           creditAmount,
-          creditRatio: creditAmount / saleTotalAmount,
+          creditRatio: new Decimal(creditAmount).dividedBy(saleTotalAmount).toNumber(),
           invoiceSubtotal: subtotal,
           invoiceTaxAmount: taxAmount,
           invoiceTotalAmount: totalAmount,
@@ -247,8 +248,8 @@ export const invoiceService = {
                 productId: item.product_id,
                 productName: item.product_name,
                 quantityRequested: item.quantity,
-                unitPrice: parseFloat(item.unit_price),
-                lineTotal: parseFloat(item.line_total)
+                unitPrice: new Decimal(item.unit_price || 0).toNumber(),
+                lineTotal: new Decimal(item.line_total || 0).toNumber()
               }));
 
               const deliveryOrderData = {
@@ -260,7 +261,7 @@ export const invoiceService = {
                 customerEmail: customer.email || '',
                 deliveryAddress: customer.address,
                 items: deliveryItems,
-                totalAmount: parseFloat(fresh.total_amount.toString()),
+                totalAmount: new Decimal(fresh.total_amount.toString()).toNumber(),
                 deliveryDate: new Date().toISOString().split('T')[0], // Today
                 priority: 'NORMAL' as const,
                 notes: `Auto-generated from invoice ${fresh.invoice_number}`
@@ -345,10 +346,10 @@ export const invoiceService = {
         items = saleData.items.map((it: any) => ({
           id: it.id,
           productId: it.product_id ?? it.productId,
-          quantity: Number(it.quantity ?? 0),
-          unitPrice: Number(it.unit_price ?? it.unitPrice ?? 0),
-          lineTotal: Number(it.total_price ?? it.lineTotal ?? 0),
-          unitCost: Number(it.unit_cost ?? it.unitCost ?? 0),
+          quantity: new Decimal(it.quantity ?? 0).toNumber(),
+          unitPrice: new Decimal(it.unit_price ?? it.unitPrice ?? 0).toNumber(),
+          lineTotal: new Decimal(it.total_price ?? it.lineTotal ?? 0).toNumber(),
+          unitCost: new Decimal(it.unit_cost ?? it.unitCost ?? 0).toNumber(),
           productName: it.product_name ?? it.productName ?? it.name ?? null,
           productCode: it.product_code ?? it.productCode ?? null,
           sku: it.sku ?? null,
@@ -417,13 +418,13 @@ export const invoiceService = {
       }
 
       // BR-INV-001: Check if payment would exceed invoice total (SINGLE SOURCE OF TRUTH)
-      const newTotalPaid = Number(inv.amount_paid || 0) + input.amount;
-      if (newTotalPaid > Number(inv.total_amount)) {
+      const newTotalPaid = new Decimal(inv.amount_paid || 0).plus(input.amount).toNumber();
+      if (newTotalPaid > new Decimal(inv.total_amount).toNumber()) {
         throw new Error(
           `OVERPAYMENT PREVENTION: Payment of ${input.amount.toFixed(2)} would exceed invoice total. ` +
-          `Invoice ${inv.invoice_number} total: ${Number(inv.total_amount).toFixed(2)}, ` +
-          `Already paid: ${Number(inv.amount_paid).toFixed(2)}, ` +
-          `Maximum payment allowed: ${(Number(inv.total_amount) - Number(inv.amount_paid)).toFixed(2)}`
+          `Invoice ${inv.invoice_number} total: ${new Decimal(inv.total_amount).toFixed(2)}, ` +
+          `Already paid: ${new Decimal(inv.amount_paid || 0).toFixed(2)}, ` +
+          `Maximum payment allowed: ${new Decimal(inv.total_amount).minus(new Decimal(inv.amount_paid || 0)).toFixed(2)}`
         );
       }
 
@@ -437,10 +438,10 @@ export const invoiceService = {
 
         // Verify customer has sufficient deposit balance
         const depositBalance = await depositsService.getCustomerDepositBalance(pool, inv.customer_id);
-        if (depositBalance.availableBalance < input.amount) {
+        if (new Decimal(depositBalance.availableBalance).lessThan(input.amount)) {
           throw new Error(
-            `INSUFFICIENT DEPOSIT: Customer has ${depositBalance.availableBalance.toFixed(2)} available, ` +
-            `but payment requires ${input.amount.toFixed(2)}`
+            `INSUFFICIENT DEPOSIT: Customer has ${new Decimal(depositBalance.availableBalance).toFixed(2)} available, ` +
+            `but payment requires ${new Decimal(input.amount).toFixed(2)}`
           );
         }
 
@@ -461,7 +462,7 @@ export const invoiceService = {
           customerId: inv.customer_id,
           amount: input.amount,
           depositBalanceBefore: depositBalance.availableBalance,
-          depositBalanceAfter: depositBalance.availableBalance - input.amount,
+          depositBalanceAfter: new Decimal(depositBalance.availableBalance).minus(input.amount).toNumber(),
         });
       }
 
@@ -489,7 +490,7 @@ export const invoiceService = {
         // Check if sale is now fully paid - if so, we need to update payment_method
         // to avoid violating chk_sales_credit_has_debt constraint which requires
         // CREDIT sales to have amount_paid < total_amount
-        const isFullyPaid = Number(fresh.amount_paid) >= Number(fresh.total_amount);
+        const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(new Decimal(fresh.total_amount));
 
         // Get current sale payment method to determine if update is needed
         const saleResult = await client.query(

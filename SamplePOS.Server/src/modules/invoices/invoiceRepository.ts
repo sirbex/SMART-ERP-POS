@@ -62,6 +62,9 @@ export const invoiceRepository = {
   },
   async generateInvoiceNumber(pool: Pool): Promise<string> {
     const year = new Date().getFullYear();
+    // Advisory lock prevents concurrent duplicate invoice number generation
+    // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
+    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('invoice_number_seq'))`);
     const result = await pool.query(
       `SELECT "InvoiceNumber" FROM invoices 
        WHERE "InvoiceNumber" LIKE $1 
@@ -81,6 +84,9 @@ export const invoiceRepository = {
 
   async generateReceiptNumber(pool: Pool): Promise<string> {
     const year = new Date().getFullYear();
+    // Advisory lock prevents concurrent duplicate receipt number generation
+    // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
+    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('receipt_number_seq'))`);
     const result = await pool.query(
       `SELECT receipt_number FROM invoice_payments 
        WHERE receipt_number LIKE $1 

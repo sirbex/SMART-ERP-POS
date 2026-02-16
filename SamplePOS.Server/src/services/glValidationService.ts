@@ -7,6 +7,7 @@
 
 import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
+import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 
 interface GLValidationResult {
@@ -59,10 +60,10 @@ export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): P
         [saleId]
       );
 
-      const expectedAmount = parseFloat(sale.total_amount);
-      const actualDebit = parseFloat(arEntry.rows[0]?.debit_total || '0');
+      const expectedAmount = new Decimal(sale.total_amount || 0).toNumber();
+      const actualDebit = new Decimal(arEntry.rows[0]?.debit_total || 0).toNumber();
 
-      if (Math.abs(actualDebit - expectedAmount) > 0.01) {
+      if (new Decimal(actualDebit).minus(expectedAmount).abs().greaterThan('0.01')) {
         errors.push(
           `AR debit mismatch for ${sale.sale_number}: Expected ${expectedAmount}, Found ${actualDebit}`
         );
@@ -82,10 +83,10 @@ export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): P
       [saleId]
     );
 
-    const expectedRevenue = parseFloat(sale.total_amount);
-    const actualCredit = parseFloat(revenueEntry.rows[0]?.credit_total || '0');
+    const expectedRevenue = new Decimal(sale.total_amount || 0).toNumber();
+    const actualCredit = new Decimal(revenueEntry.rows[0]?.credit_total || 0).toNumber();
 
-    if (Math.abs(actualCredit - expectedRevenue) > 0.01) {
+    if (new Decimal(actualCredit).minus(expectedRevenue).abs().greaterThan('0.01')) {
       errors.push(
         `Revenue credit mismatch for ${sale.sale_number}: Expected ${expectedRevenue}, Found ${actualCredit}`
       );
@@ -104,10 +105,10 @@ export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): P
       [saleId]
     );
 
-    const debits = parseFloat(balanceCheck.rows[0]?.total_debits || '0');
-    const credits = parseFloat(balanceCheck.rows[0]?.total_credits || '0');
+    const debits = new Decimal(balanceCheck.rows[0]?.total_debits || 0).toNumber();
+    const credits = new Decimal(balanceCheck.rows[0]?.total_credits || 0).toNumber();
 
-    if (Math.abs(debits - credits) > 0.01) {
+    if (new Decimal(debits).minus(credits).abs().greaterThan('0.01')) {
       errors.push(
         `Journal entry not balanced for ${sale.sale_number}: Debits ${debits}, Credits ${credits}`
       );
@@ -162,10 +163,10 @@ export async function validatePaymentGLEntries(paymentId: string, dbPool?: pg.Po
       [paymentId]
     );
 
-    const expectedAmount = parseFloat(payment.Amount);
-    const actualCredit = parseFloat(arEntry.rows[0]?.credit_total || '0');
+    const expectedAmount = new Decimal(payment.Amount || 0).toNumber();
+    const actualCredit = new Decimal(arEntry.rows[0]?.credit_total || 0).toNumber();
 
-    if (Math.abs(actualCredit - expectedAmount) > 0.01) {
+    if (new Decimal(actualCredit).minus(expectedAmount).abs().greaterThan('0.01')) {
       errors.push(
         `AR credit mismatch for ${payment.PaymentNumber}: Expected ${expectedAmount}, Found ${actualCredit}`
       );
@@ -204,16 +205,16 @@ export async function checkARReconciliation(dbPool?: pg.Pool): Promise<Reconcili
       ) as subledger_balance
   `);
 
-  const glBalance = parseFloat(result.rows[0]?.gl_balance || '0');
-  const subledgerBalance = parseFloat(result.rows[0]?.subledger_balance || '0');
-  const difference = glBalance - subledgerBalance;
+  const glBalance = new Decimal(result.rows[0]?.gl_balance || 0).toNumber();
+  const subledgerBalance = new Decimal(result.rows[0]?.subledger_balance || 0).toNumber();
+  const difference = new Decimal(glBalance).minus(subledgerBalance).toNumber();
 
   return {
     account: 'AR (1200)',
     glBalance,
     subledgerBalance,
     difference,
-    isBalanced: Math.abs(difference) < 0.01
+    isBalanced: new Decimal(difference).abs().lessThan('0.01')
   };
 }
 
@@ -235,16 +236,16 @@ export async function checkAPReconciliation(dbPool?: pg.Pool): Promise<Reconcili
       ) as subledger_balance
   `);
 
-  const glBalance = parseFloat(result.rows[0]?.gl_balance || '0');
-  const subledgerBalance = parseFloat(result.rows[0]?.subledger_balance || '0');
-  const difference = glBalance - subledgerBalance;
+  const glBalance = new Decimal(result.rows[0]?.gl_balance || 0).toNumber();
+  const subledgerBalance = new Decimal(result.rows[0]?.subledger_balance || 0).toNumber();
+  const difference = new Decimal(glBalance).minus(subledgerBalance).toNumber();
 
   return {
     account: 'AP (2100)',
     glBalance,
     subledgerBalance,
     difference,
-    isBalanced: Math.abs(difference) < 0.01
+    isBalanced: new Decimal(difference).abs().lessThan('0.01')
   };
 }
 
@@ -276,16 +277,16 @@ export async function checkInventoryReconciliation(dbPool?: pg.Pool): Promise<Re
       ) as subledger_balance
   `);
 
-  const glBalance = parseFloat(result.rows[0]?.gl_balance || '0');
-  const subledgerBalance = parseFloat(result.rows[0]?.subledger_balance || '0');
-  const difference = glBalance - subledgerBalance;
+  const glBalance = new Decimal(result.rows[0]?.gl_balance || 0).toNumber();
+  const subledgerBalance = new Decimal(result.rows[0]?.subledger_balance || 0).toNumber();
+  const difference = new Decimal(glBalance).minus(subledgerBalance).toNumber();
 
   return {
     account: 'Inventory (1300)',
     glBalance,
     subledgerBalance,
     difference,
-    isBalanced: Math.abs(difference) < 0.01
+    isBalanced: new Decimal(difference).abs().lessThan('0.01')
   };
 }
 
