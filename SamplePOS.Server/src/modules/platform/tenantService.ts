@@ -167,6 +167,22 @@ export const tenantService = {
   },
 
   /**
+   * Deactivate a tenant (soft-delete: disable access, remove pool, keep data)
+   */
+  async deactivateTenant(masterPool: pg.Pool, tenantId: string, actor: string, reason?: string): Promise<Tenant> {
+    const updated = await tenantRepository.updateStatus(masterPool, tenantId, 'DEACTIVATED');
+    if (!updated) throw new Error('Tenant not found');
+
+    await tenantRepository.logAudit(masterPool, tenantId, 'DEACTIVATED', actor, { reason });
+    invalidateTenantCache(tenantId, updated.slug);
+
+    // Remove the pool so no more queries go through
+    await connectionManager.removePool(tenantId);
+
+    return normalizeTenant(updated);
+  },
+
+  /**
    * Reactivate a suspended tenant
    */
   async activateTenant(masterPool: pg.Pool, tenantId: string, actor: string): Promise<Tenant> {

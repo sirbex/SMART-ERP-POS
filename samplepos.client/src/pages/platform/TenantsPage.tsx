@@ -1,7 +1,7 @@
 // Tenants Management Page — List, Create, Edit, Suspend/Activate, View Details
 import { useEffect, useState, useCallback } from 'react';
 import { platformApi } from '../../services/platformApi';
-import type { Tenant, TenantUsage, BillingInfo, AuditLogEntry, LimitCheck } from '../../services/platformApi';
+import type { Tenant, TenantUsage, BillingInfo, AuditLogEntry, LimitCheck, BillingEvent } from '../../services/platformApi';
 import {
   Building2,
   Plus,
@@ -21,6 +21,8 @@ import {
   CheckCircle2,
   ArrowUpRight,
   ArrowDownRight,
+  Trash2,
+  FileText,
 } from 'lucide-react';
 
 // ============================================================
@@ -351,9 +353,31 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
   const [billing, setBilling] = useState<BillingInfo | null>(null);
   const [limits, setLimits] = useState<LimitCheck | null>(null);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const [billingEvents, setBillingEvents] = useState<BillingEvent[]>([]);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [editOpen, setEditOpen] = useState(false);
   const [planChangeOpen, setPlanChangeOpen] = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deactivateConfirm, setDeactivateConfirm] = useState('');
+  const [deactivateError, setDeactivateError] = useState('');
+
+  const handleDeactivate = async () => {
+    if (deactivateConfirm !== tenant.slug) {
+      setDeactivateError(`Type "${tenant.slug}" to confirm`);
+      return;
+    }
+    setDeactivating(true);
+    setDeactivateError('');
+    try {
+      await platformApi.tenants.updateStatus(tenant.id, 'DEACTIVATED', 'Deactivated by super admin');
+      onRefresh();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { error?: string } } };
+      setDeactivateError(axiosErr.response?.data?.error || 'Failed to deactivate tenant');
+    } finally {
+      setDeactivating(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -370,8 +394,15 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
     }
     if (tab === 'billing') {
       setLoading((l) => ({ ...l, billing: true }));
-      platformApi.tenants.getBilling(tenant.id)
-        .then((res) => { if (!cancelled && res.data.success && res.data.data) setBilling(res.data.data); })
+      Promise.all([
+        platformApi.tenants.getBilling(tenant.id),
+        platformApi.tenants.getBillingEvents(tenant.id),
+      ])
+        .then(([billingRes, eventsRes]) => {
+          if (cancelled) return;
+          if (billingRes.data.success && billingRes.data.data) setBilling(billingRes.data.data);
+          if (eventsRes.data.success && eventsRes.data.data) setBillingEvents(eventsRes.data.data);
+        })
         .catch(() => {})
         .finally(() => { if (!cancelled) setLoading((l) => ({ ...l, billing: false })); });
     }
@@ -498,6 +529,53 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                     </div>
                   </>
                 )}
+
+                {/* Danger Zone — Deactivate */}
+                {tenant.status !== 'DEACTIVATED' && (
+                  <>
+                    <hr className="border-slate-200" />
+                    <div className="border border-red-200 bg-red-50/50 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                        <p className="text-sm font-semibold text-red-700">Danger Zone</p>
+                      </div>
+                      <p className="text-xs text-red-600">
+                        Deactivating a tenant removes database access and marks it inactive. Data is preserved but the tenant cannot log in.
+                        This action is reversible by reactivating.
+                      </p>
+                      <div>
+                        <label className="block text-xs text-red-600 mb-1">
+                          Type <strong>{tenant.slug}</strong> to confirm:
+                        </label>
+                        <input
+                          value={deactivateConfirm}
+                          onChange={(e) => { setDeactivateConfirm(e.target.value); setDeactivateError(''); }}
+                          placeholder={tenant.slug}
+                          className="w-full border border-red-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                        />
+                      </div>
+                      {deactivateError && (
+                        <p className="text-xs text-red-600">{deactivateError}</p>
+                      )}
+                      <button
+                        onClick={handleDeactivate}
+                        disabled={deactivating || deactivateConfirm !== tenant.slug}
+                        className="w-full px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {deactivating ? 'Deactivating...' : 'Deactivate Tenant'}
+                      </button>
+                    </div>
+                  </>
+                )}
+                {tenant.status === 'DEACTIVATED' && (
+                  <>
+                    <hr className="border-slate-200" />
+                    <div className="border border-slate-200 bg-slate-50 rounded-lg p-4 text-center">
+                      <p className="text-sm text-slate-500 mb-2">This tenant is deactivated.</p>
+                      <p className="text-xs text-slate-400">Deactivated on {tenant.deactivatedAt ? new Date(tenant.deactivatedAt).toLocaleDateString() : 'Unknown'}</p>
+                    </div>
+                  </>
+                )}
               </>
             )}
 
@@ -581,6 +659,27 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                     {billing.cancelAtPeriodEnd && (
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">Subscription set to cancel at end of period</div>
                     )}
+
+                    {/* Billing Events */}
+                    <hr className="border-slate-200" />
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <FileText className="w-4 h-4 text-slate-400" />
+                        <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Billing Events</p>
+                      </div>
+                      {billingEvents.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-4">No billing events this period</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {billingEvents.map((event) => (
+                            <div key={event.eventType} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg">
+                              <span className="text-sm text-slate-700">{event.eventType.replace(/_/g, ' ')}</span>
+                              <span className="text-sm font-semibold text-slate-900">{event.totalQuantity}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-sm text-slate-400 text-center py-8">Billing data unavailable</p>
@@ -670,6 +769,21 @@ export default function TenantsPage() {
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: string } } };
       setError(axiosErr.response?.data?.error || `Failed to ${newStatus === 'SUSPENDED' ? 'suspend' : 'activate'} tenant`);
+    } finally { setActionLoading(null); }
+  };
+
+  const deactivateTenant = async (tenant: Tenant) => {
+    const confirmed = window.confirm(
+      `DEACTIVATE "${tenant.name}" (${tenant.slug})?\n\nThis will:\n- Remove database access\n- Prevent all logins\n- Mark tenant as DEACTIVATED\n\nData is preserved. You can reactivate later.`
+    );
+    if (!confirmed) return;
+    setActionLoading(tenant.id);
+    try {
+      await platformApi.tenants.updateStatus(tenant.id, 'DEACTIVATED', 'Deactivated from admin panel');
+      fetchTenants();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { error?: string } } };
+      setError(axiosErr.response?.data?.error || 'Failed to deactivate tenant');
     } finally { setActionLoading(null); }
   };
 
@@ -777,6 +891,16 @@ export default function TenantsPage() {
                               title={t.status === 'ACTIVE' ? 'Suspend tenant' : 'Activate tenant'}
                             >
                               {actionLoading === t.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : t.status === 'ACTIVE' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                            </button>
+                          )}
+                          {t.status !== 'DEACTIVATED' && (
+                            <button
+                              onClick={() => deactivateTenant(t)}
+                              disabled={actionLoading === t.id}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                              title="Deactivate tenant"
+                            >
+                              {actionLoading === t.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                             </button>
                           )}
                         </div>

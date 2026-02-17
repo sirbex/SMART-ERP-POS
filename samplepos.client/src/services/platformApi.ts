@@ -71,6 +71,11 @@ export interface LimitCheck {
   usage: Record<string, { current: number; max: number; exceeded: boolean }>;
 }
 
+export interface BillingEvent {
+  eventType: string;
+  totalQuantity: number;
+}
+
 export interface AuditLogEntry {
   id: string;
   tenantId: string;
@@ -204,14 +209,14 @@ export const platformApi = {
       maxLocations?: number;
     }) =>
       platformClient.put<PlatformApiResponse<Tenant>>(`/tenants/${id}`, data),
-    updateStatus: (id: string, status: 'ACTIVE' | 'SUSPENDED', reason?: string) =>
+    updateStatus: (id: string, status: 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED', reason?: string) =>
       platformClient.patch<PlatformApiResponse<Tenant>>(`/tenants/${id}/status`, { status, reason }),
     getUsage: (id: string) =>
       platformClient.get<PlatformApiResponse<TenantUsage>>(`/tenants/${id}/usage`),
     getAuditLog: (id: string, limit?: number) =>
       platformClient.get<PlatformApiResponse<AuditLogEntry[]>>(`/tenants/${id}/audit`, { params: { limit } }),
     getBillingEvents: (id: string, period?: string) =>
-      platformClient.get<PlatformApiResponse<unknown[]>>(`/tenants/${id}/billing/events`, { params: { period } }),
+      platformClient.get<PlatformApiResponse<BillingEvent[]>>(`/tenants/${id}/billing/events`, { params: { period } }),
     getBilling: (id: string) =>
       platformClient.get<PlatformApiResponse<BillingInfo>>(`/tenants/${id}/billing`),
     changePlan: (id: string, plan: string) =>

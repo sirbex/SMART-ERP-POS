@@ -223,8 +223,10 @@ export const platformController = {
         tenant = await tenantService.suspendTenant(masterPool, req.params.id, admin?.email || 'system', parsed.data.reason);
       } else if (parsed.data.status === 'ACTIVE') {
         tenant = await tenantService.activateTenant(masterPool, req.params.id, admin?.email || 'system');
+      } else if (parsed.data.status === 'DEACTIVATED') {
+        tenant = await tenantService.deactivateTenant(masterPool, req.params.id, admin?.email || 'system', parsed.data.reason);
       } else {
-        res.status(400).json({ success: false, error: 'Only ACTIVE and SUSPENDED status changes are supported' });
+        res.status(400).json({ success: false, error: 'Only ACTIVE, SUSPENDED, and DEACTIVATED status changes are supported' });
         return;
       }
 
