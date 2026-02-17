@@ -106,21 +106,29 @@ export const billingService = {
     if (!tenant) throw new Error('Tenant not found');
 
     // Query current usage
-    const [userCount, productCount] = await Promise.all([
+    const [userCount, productCount, txnCount] = await Promise.all([
       tenantPool.query('SELECT COUNT(*)::int as count FROM users WHERE is_active = true'),
       tenantPool.query('SELECT COUNT(*)::int as count FROM products WHERE is_active = true'),
+      tenantPool.query(
+        `SELECT COUNT(*)::int as count FROM sales
+         WHERE sale_date >= date_trunc('month', CURRENT_DATE)
+           AND status = 'COMPLETED'`
+      ),
     ]);
 
     const users = userCount.rows[0]?.count || 0;
     const products = productCount.rows[0]?.count || 0;
+    const transactions = txnCount.rows[0]?.count || 0;
+    const maxTxn = (tenant as unknown as Record<string, unknown>).max_transactions_per_month as number || 999999;
 
     const usage = {
       users: { current: users, max: tenant.max_users, exceeded: users > tenant.max_users },
       products: { current: products, max: tenant.max_products, exceeded: products > tenant.max_products },
+      transactionsThisMonth: { current: transactions, max: maxTxn, exceeded: transactions > maxTxn },
     };
 
     return {
-      withinLimits: !usage.users.exceeded && !usage.products.exceeded,
+      withinLimits: !usage.users.exceeded && !usage.products.exceeded && !usage.transactionsThisMonth.exceeded,
       usage,
     };
   },

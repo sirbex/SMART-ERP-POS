@@ -18,7 +18,8 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { Pool } from 'pg';
 import { salesService, CreateSaleInput } from '../sales/salesService.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import logger from '../../utils/logger.js';
 
 // ── Validation ────────────────────────────────────────────────
@@ -69,7 +70,7 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
     router.post(
         '/',
         authenticate,
-        authorize('ADMIN', 'MANAGER', 'CASHIER'),
+        requirePermission('pos.create'),
         async (req: Request, res: Response): Promise<void> => {
             try {
                 // ── 1. Validate payload ──

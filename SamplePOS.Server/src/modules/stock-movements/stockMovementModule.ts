@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
 
@@ -536,10 +537,10 @@ stockMovementRoutes.get(
   stockMovementController.getMovementsByBatch
 );
 
-// Manual movement recording - ADMIN, MANAGER only
+// Manual movement recording - requires inventory.create permission
 stockMovementRoutes.post(
   '/',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('inventory.create'),
   stockMovementController.recordMovement
 );

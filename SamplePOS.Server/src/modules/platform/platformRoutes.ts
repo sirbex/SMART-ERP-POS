@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import { platformController, requireSuperAdmin } from './platformController.js';
+import { strictRateLimit } from '../../middleware/security.js';
 
 const router = Router();
 
@@ -13,8 +14,8 @@ const router = Router();
 // PUBLIC (no auth required)
 // ============================================================
 
-// Super admin login
-router.post('/auth/login', platformController.login);
+// Super admin login (rate-limited to prevent brute force)
+router.post('/auth/login', strictRateLimit, platformController.login);
 
 // Platform health check
 router.get('/health', platformController.platformHealth);
@@ -42,6 +43,13 @@ router.get('/tenants/:id/limits', requireSuperAdmin, platformController.checkLim
 
 // Dashboard
 router.get('/dashboard', requireSuperAdmin, platformController.dashboardSummary);
+
+// Super Admin CRUD
+router.get('/admins', requireSuperAdmin, platformController.listAdmins);
+router.get('/admins/:id', requireSuperAdmin, platformController.getAdmin);
+router.post('/admins', requireSuperAdmin, platformController.createAdmin);
+router.put('/admins/:id', requireSuperAdmin, platformController.updateAdmin);
+router.delete('/admins/:id', requireSuperAdmin, platformController.deleteAdmin);
 
 export default router;
 export { router as platformRoutes };

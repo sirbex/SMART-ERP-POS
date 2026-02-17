@@ -3,7 +3,10 @@
 // SECURITY: Uses req.tenantPool for multi-tenant isolation
 
 import type { Request, Response, NextFunction } from 'express';
+import bcrypt from 'bcrypt';
 import { pool as globalPool } from '../../db/pool.js';
+import { connectionManager } from '../../db/connectionManager.js';
+import { tenantRepository } from '../platform/tenantRepository.js';
 import { authenticateUser, registerUser, getUserProfile } from './authService.js';
 import * as auditService from '../audit/auditService.js';
 import * as twoFactorService from './twoFactorService.js';
@@ -141,6 +144,43 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       message: 'Login successful',
     });
   } catch (error) {
+    // ── Super admin fallback ──────────────────────────────
+    // If tenant login fails with "Invalid email or password",
+    // check the master DB's super_admins table so platform
+    // admins can log in through any tenant's login page.
+    if (error instanceof Error && error.message === 'Invalid email or password') {
+      try {
+        const masterPool = connectionManager.getMasterPool();
+        const superAdmin = await tenantRepository.findSuperAdminByEmail(masterPool, req.body.email);
+
+        if (superAdmin && superAdmin.isActive) {
+          const validPassword = await bcrypt.compare(req.body.password, superAdmin.passwordHash);
+
+          if (validPassword) {
+            logger.info('Super admin detected via tenant login — redirecting to platform portal', { email: superAdmin.email });
+
+            // Do NOT issue a tenant-scoped token — the super admin UUID
+            // does not exist in the tenant's users table, so subsequent
+            // authenticate() calls would fail with 401.
+            // Instead, tell the frontend to redirect to the platform login.
+            return res.json({
+              success: true,
+              data: {
+                isSuperAdmin: true,
+                redirectTo: '/platform/login',
+              },
+              message: 'Please use the Platform Admin portal to log in.',
+            });
+          }
+        }
+      } catch (superAdminError) {
+        // Super admin fallback failed — continue to normal error handling
+        logger.debug('Super admin fallback check failed (non-fatal)', {
+          error: superAdminError instanceof Error ? superAdminError.message : String(superAdminError),
+        });
+      }
+    }
+
     logger.error('Login failed', { error, body: req.body });
 
     // Log failed login attempt to audit trail

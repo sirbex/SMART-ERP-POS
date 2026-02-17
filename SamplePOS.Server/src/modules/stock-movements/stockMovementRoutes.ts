@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import * as stockMovementController from './stockMovementController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { authorize } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 export const stockMovementRoutes = Router();
 
@@ -25,10 +25,10 @@ stockMovementRoutes.get(
   stockMovementController.getMovementsByBatch
 );
 
-// Record manual movement (ADMIN, MANAGER only)
+// Record manual movement (requires inventory.create permission)
 stockMovementRoutes.post(
   '/',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('inventory.create'),
   stockMovementController.recordMovement
 );

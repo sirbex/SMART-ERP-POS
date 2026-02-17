@@ -5,7 +5,8 @@ import { Router } from 'express';
 import * as productController from './productController.js';
 import { getProductHistory } from './productHistoryController.js';
 import * as uomController from './uomController.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 const router = Router();
 
@@ -18,27 +19,27 @@ router.get('/:id/history', authenticate, getProductHistory);
 
 // UoM endpoints
 router.get('/uoms/master', authenticate, uomController.listUoms);
-router.post('/uoms/master', authenticate, authorize('ADMIN', 'MANAGER'), uomController.createUom);
-router.patch('/uoms/master/:uomId', authenticate, authorize('ADMIN', 'MANAGER'), uomController.updateUom);
-router.delete('/uoms/master/:uomId', authenticate, authorize('ADMIN', 'MANAGER'), uomController.deleteUom);
+router.post('/uoms/master', authenticate, requirePermission('inventory.create'), uomController.createUom);
+router.patch('/uoms/master/:uomId', authenticate, requirePermission('inventory.update'), uomController.updateUom);
+router.delete('/uoms/master/:uomId', authenticate, requirePermission('inventory.delete'), uomController.deleteUom);
 router.get('/:id/uoms', authenticate, uomController.getProductUoms);
-router.post('/:id/uoms', authenticate, authorize('ADMIN', 'MANAGER'), uomController.addProductUom);
+router.post('/:id/uoms', authenticate, requirePermission('inventory.create'), uomController.addProductUom);
 router.patch(
   '/:id/uoms/:productUomId',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('inventory.update'),
   uomController.updateProductUom
 );
 router.delete(
   '/:id/uoms/:productUomId',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('inventory.delete'),
   uomController.deleteProductUom
 );
 
-// Create/Update/Delete - ADMIN and MANAGER only
-router.post('/', authenticate, authorize('ADMIN', 'MANAGER'), productController.createProduct);
-router.put('/:id', authenticate, authorize('ADMIN', 'MANAGER'), productController.updateProduct);
-router.delete('/:id', authenticate, authorize('ADMIN', 'MANAGER'), productController.deleteProduct);
+// Create/Update/Delete - requires inventory permissions
+router.post('/', authenticate, requirePermission('inventory.create'), productController.createProduct);
+router.put('/:id', authenticate, requirePermission('inventory.update'), productController.updateProduct);
+router.delete('/:id', authenticate, requirePermission('inventory.delete'), productController.deleteProduct);
 
 export const productRoutes = router;

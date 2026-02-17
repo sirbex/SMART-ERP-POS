@@ -16,20 +16,17 @@ router.use((req, res, next) => {
   next();
 });
 
-// All routes require authentication
-router.use(authenticate);
-
-// Standard quotation management
-router.post('/quotations', quotationController.createQuotation);
-router.get('/quotations', quotationController.listQuotations);
-router.get('/quotations/:id', quotationController.getQuotation);
-router.get('/quotations/number/:quoteNumber', quotationController.getQuotationByNumber);
-router.put('/quotations/:id', quotationController.updateQuotation);
-router.put('/quotations/:id/status', quotationController.updateQuotationStatus);
-router.post('/quotations/:id/convert', quotationController.convertQuotation);
-router.delete('/quotations/:id', quotationController.deleteQuotation);
+// Standard quotation management (all routes require authentication)
+router.post('/quotations', authenticate, quotationController.createQuotation);
+router.get('/quotations', authenticate, quotationController.listQuotations);
+router.get('/quotations/:id', authenticate, quotationController.getQuotation);
+router.get('/quotations/number/:quoteNumber', authenticate, quotationController.getQuotationByNumber);
+router.put('/quotations/:id', authenticate, quotationController.updateQuotation);
+router.put('/quotations/:id/status', authenticate, quotationController.updateQuotationStatus);
+router.post('/quotations/:id/convert', authenticate, quotationController.convertQuotation);
+router.delete('/quotations/:id', authenticate, quotationController.deleteQuotation);
 
 // POS quick quote endpoints
-router.post('/pos/quote', quotationController.createQuickQuote);
+router.post('/pos/quote', authenticate, quotationController.createQuickQuote);
 
 export default router;

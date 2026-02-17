@@ -49,6 +49,34 @@ import JournalEntriesPage from './pages/JournalEntriesPage';
 import PeriodManagementPage from './pages/PeriodManagementPage';
 import BankingPage from './pages/accounting/BankingPage';
 
+// Platform (Super Admin) imports
+import { PlatformAuthProvider, usePlatformAuth } from './contexts/PlatformAuthContext';
+import PlatformLoginPage from './pages/platform/PlatformLoginPage';
+import PlatformLayout from './components/platform/PlatformLayout';
+import PlatformDashboardPage from './pages/platform/PlatformDashboardPage';
+import TenantsPage from './pages/platform/TenantsPage';
+import AdminsPage from './pages/platform/AdminsPage';
+import PlatformHealthPage from './pages/platform/PlatformHealthPage';
+
+// Platform route guard
+function PlatformProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading } = usePlatformAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/platform/login" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function App() {
   const { isAuthenticated, isLoading } = useAuth();
 
@@ -65,6 +93,7 @@ function App() {
   }
 
   return (
+    <PlatformAuthProvider>
     <BrowserRouter>
       <Toaster
         position="top-right"
@@ -93,6 +122,19 @@ function App() {
       <SonnerToaster position="top-right" richColors />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Platform (Super Admin) Routes — own auth context */}
+        <Route path="/platform/login" element={<PlatformLoginPage />} />
+        <Route path="/platform" element={
+          <PlatformProtectedRoute>
+            <PlatformLayout />
+          </PlatformProtectedRoute>
+        }>
+          <Route index element={<PlatformDashboardPage />} />
+          <Route path="tenants" element={<TenantsPage />} />
+          <Route path="admins" element={<AdminsPage />} />
+          <Route path="health" element={<PlatformHealthPage />} />
+        </Route>
 
         {isAuthenticated ? (
           <>
@@ -471,6 +513,7 @@ function App() {
         )}
       </Routes>
     </BrowserRouter>
+    </PlatformAuthProvider>
   );
 }
 

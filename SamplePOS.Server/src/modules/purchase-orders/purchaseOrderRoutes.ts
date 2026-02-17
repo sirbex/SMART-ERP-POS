@@ -2,7 +2,8 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { purchaseOrderService } from './purchaseOrderService.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 // Validation schemas
 const POItemSchema = z.object({
@@ -433,41 +434,41 @@ export const purchaseOrderRoutes = Router();
 purchaseOrderRoutes.get('/', authenticate, purchaseOrderController.listPOs);
 purchaseOrderRoutes.get('/:id', authenticate, purchaseOrderController.getPOById);
 
-// Create/modify routes - ADMIN, MANAGER only
+// Create/modify routes - requires purchasing permissions
 purchaseOrderRoutes.post(
   '/',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.create'),
   purchaseOrderController.createPO
 );
 purchaseOrderRoutes.put(
   '/:id/status',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.update'),
   purchaseOrderController.updatePOStatus
 );
 purchaseOrderRoutes.post(
   '/:id/submit',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.approve'),
   purchaseOrderController.submitPO
 );
 purchaseOrderRoutes.post(
   '/:id/send-to-supplier',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.approve'),
   purchaseOrderController.sendPOToSupplier
 );
 purchaseOrderRoutes.post(
   '/:id/cancel',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.update'),
   purchaseOrderController.cancelPO
 );
 purchaseOrderRoutes.delete(
   '/:id',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.delete'),
   purchaseOrderController.deletePO
 );
 
@@ -475,12 +476,12 @@ purchaseOrderRoutes.delete(
 purchaseOrderRoutes.post(
   '/invoices',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.create'),
   purchaseOrderController.createInvoice
 );
 purchaseOrderRoutes.post(
   '/payments',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.create'),
   purchaseOrderController.recordPayment
 );

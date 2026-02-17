@@ -204,7 +204,10 @@ export function generateToken(user: {
 }
 
 /**
- * Permission-based authorization middleware
+ * @deprecated Use requirePermission from rbac/middleware.ts instead.
+ * This legacy stub is kept only for backward compatibility — it grants
+ * blanket access to ADMIN/MANAGER/CASHIER regardless of the permission key.
+ * Remove once all routes use RBAC requirePermission().
  */
 export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -215,17 +218,13 @@ export function requirePermission(permission: string) {
       });
     }
 
-    // Simple role-based permission check
-    const userRole = req.user.role;
-
     // Admin has all permissions
-    if (userRole === 'ADMIN') {
+    if (req.user.role === 'ADMIN') {
       return next();
     }
 
-    // Add more granular permission logic here as needed
-    // For now, allow MANAGER and above for most operations
-    if (['MANAGER', 'CASHIER'].includes(userRole)) {
+    // Manager has most permissions
+    if (req.user.role === 'MANAGER') {
       return next();
     }
 

@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'path';
 import { adminController } from './adminController.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';
 
 const router = express.Router();
@@ -12,9 +13,9 @@ router.use((req, res, next) => {
   next();
 });
 
-// All admin routes require authentication and ADMIN role
+// All admin routes require authentication and admin permissions
 router.use(authenticate);
-router.use(authorize('ADMIN'));
+router.use(requirePermission('admin.read'));
 
 /**
  * Database Backup & Restore

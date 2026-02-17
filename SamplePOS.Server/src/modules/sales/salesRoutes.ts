@@ -2,7 +2,8 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { salesService } from './salesService.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { normalizeResponse, normalizePaginatedResponse } from '../../utils/caseConverter.js';
 import { POSSaleSchema, POSSaleLineItemSchema } from '../../../../shared/zod/pos-sale.js';
 
@@ -462,11 +463,11 @@ export const salesController = {
 // Routes
 export const salesRoutes = Router();
 
-// Create sale - CASHIER, MANAGER, ADMIN can create sales
+// Create sale - requires sales.create permission
 salesRoutes.post(
   '/',
   authenticate,
-  authorize('ADMIN', 'MANAGER', 'CASHIER'),
+  requirePermission('sales.create'),
   salesController.createSale
 );
 
@@ -480,10 +481,10 @@ salesRoutes.get('/reports/product-summary', authenticate, salesController.getPro
 salesRoutes.get('/reports/top-selling', authenticate, salesController.getTopSellingProducts);
 salesRoutes.get('/reports/summary-by-date', authenticate, salesController.getSalesSummaryByDate);
 
-// Void sale - MANAGER or ADMIN only (with audit trail)
+// Void sale - requires sales.void permission (with audit trail)
 salesRoutes.post(
   '/:id/void',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('sales.void'),
   salesController.voidSale
 );

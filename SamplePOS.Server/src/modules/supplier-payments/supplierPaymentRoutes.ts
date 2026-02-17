@@ -4,7 +4,8 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import * as supplierPaymentService from './supplierPaymentService.js';
 import logger from '../../utils/logger.js';
 
@@ -66,7 +67,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Create supplier payment
-    router.post('/payments', authorize('ADMIN', 'MANAGER', 'CASHIER'), async (req: Request, res: Response) => {
+    router.post('/payments', requirePermission('suppliers.create'), async (req: Request, res: Response) => {
         try {
             const { supplierId, amount, paymentMethod, paymentDate, reference, notes } = req.body;
 
@@ -95,7 +96,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Update supplier payment
-    router.put('/payments/:id', authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+    router.put('/payments/:id', requirePermission('suppliers.update'), async (req: Request, res: Response) => {
         try {
             const payment = await supplierPaymentService.updateSupplierPayment(pool, req.params.id, req.body);
             if (!payment) {
@@ -109,7 +110,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Delete supplier payment
-    router.delete('/payments/:id', authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+    router.delete('/payments/:id', requirePermission('suppliers.delete'), async (req: Request, res: Response) => {
         try {
             const result = await supplierPaymentService.deleteSupplierPayment(pool, req.params.id);
             if (!result) {
@@ -134,7 +135,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Auto-allocate payment
-    router.post('/payments/:id/auto-allocate', authorize('ADMIN', 'MANAGER', 'CASHIER'), async (req: Request, res: Response) => {
+    router.post('/payments/:id/auto-allocate', requirePermission('suppliers.create'), async (req: Request, res: Response) => {
         try {
             const userId = (req as any).user?.id;
             const allocations = await supplierPaymentService.autoAllocatePayment(pool, req.params.id, userId);
@@ -197,7 +198,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Create supplier invoice
-    router.post('/invoices', authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+    router.post('/invoices', requirePermission('purchasing.create'), async (req: Request, res: Response) => {
         try {
             const { supplierId, supplierInvoiceNumber, invoiceDate, dueDate, notes, lineItems } = req.body;
 
@@ -226,7 +227,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Delete supplier invoice
-    router.delete('/invoices/:id', authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+    router.delete('/invoices/:id', requirePermission('purchasing.delete'), async (req: Request, res: Response) => {
         try {
             const result = await supplierPaymentService.deleteSupplierInvoice(pool, req.params.id);
             if (!result) {
@@ -255,7 +256,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     // ============================================================
 
     // Allocate payment to invoice
-    router.post('/allocations', authorize('ADMIN', 'MANAGER', 'CASHIER'), async (req: Request, res: Response) => {
+    router.post('/allocations', requirePermission('suppliers.create'), async (req: Request, res: Response) => {
         try {
             const { supplierPaymentId, supplierInvoiceId, amount } = req.body;
 
@@ -281,7 +282,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     });
 
     // Remove allocation
-    router.delete('/allocations/:id', authorize('ADMIN', 'MANAGER'), async (req: Request, res: Response) => {
+    router.delete('/allocations/:id', requirePermission('suppliers.delete'), async (req: Request, res: Response) => {
         try {
             const result = await supplierPaymentService.removeAllocation(pool, req.params.id);
             if (!result) {

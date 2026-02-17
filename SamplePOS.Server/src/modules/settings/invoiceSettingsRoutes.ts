@@ -1,7 +1,8 @@
 // Invoice Settings Routes
 
 import { Router } from 'express';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import * as invoiceSettingsController from './invoiceSettingsController.js';
 
 export const invoiceSettingsRoutes = Router();
@@ -13,6 +14,6 @@ invoiceSettingsRoutes.get('/', authenticate, invoiceSettingsController.getInvoic
 invoiceSettingsRoutes.put(
   '/',
   authenticate,
-  authorize('ADMIN'),
+  requirePermission('admin.update'),
   invoiceSettingsController.updateInvoiceSettings
 );

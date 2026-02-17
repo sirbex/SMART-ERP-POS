@@ -7,7 +7,8 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { CreateSupplierSchema, UpdateSupplierSchema } from '../../../../shared/zod/supplier.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { PurchaseOrderBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
 
@@ -663,9 +664,9 @@ router.get('/:id/performance', authenticate, getSupplierPerformance);
 router.get('/:id/orders', authenticate, getSupplierOrders);
 router.get('/:id/products', authenticate, getSupplierProducts);
 
-// Modify routes - ADMIN, MANAGER only
-router.post('/', authenticate, authorize('ADMIN', 'MANAGER'), createSupplier);
-router.put('/:id', authenticate, authorize('ADMIN', 'MANAGER'), updateSupplier);
-router.delete('/:id', authenticate, authorize('ADMIN', 'MANAGER'), deleteSupplier);
+// Modify routes - requires supplier permissions
+router.post('/', authenticate, requirePermission('suppliers.create'), createSupplier);
+router.put('/:id', authenticate, requirePermission('suppliers.update'), updateSupplier);
+router.delete('/:id', authenticate, requirePermission('suppliers.delete'), deleteSupplier);
 
 export default router;

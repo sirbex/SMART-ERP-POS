@@ -99,8 +99,9 @@ export const tenantRepository = {
 
   async updateStatus(pool: pg.Pool, id: string, status: string): Promise<TenantDbRow | null> {
     const result = await pool.query<TenantDbRow>(
-      `UPDATE tenants SET status = $2, 
-       deactivated_at = CASE WHEN $2 = 'DEACTIVATED' THEN NOW() ELSE deactivated_at END
+      `UPDATE tenants SET status = $2,
+       deactivated_at = CASE WHEN $2::varchar = 'DEACTIVATED' THEN NOW() ELSE deactivated_at END,
+       updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [id, status]
     );
@@ -231,5 +232,86 @@ export const tenantRepository = {
       'UPDATE super_admins SET last_login_at = NOW() WHERE id = $1',
       [id]
     );
+  },
+
+  async listSuperAdmins(pool: pg.Pool): Promise<Array<{
+    id: string;
+    email: string;
+    fullName: string;
+    isActive: boolean;
+    createdAt: string;
+    lastLoginAt: string | null;
+  }>> {
+    const result = await pool.query(
+      `SELECT id, email, full_name as "fullName", is_active as "isActive",
+              created_at as "createdAt", last_login_at as "lastLoginAt"
+       FROM super_admins ORDER BY created_at ASC`
+    );
+    return result.rows;
+  },
+
+  async findSuperAdminById(pool: pg.Pool, id: string): Promise<{
+    id: string;
+    email: string;
+    fullName: string;
+    isActive: boolean;
+    createdAt: string;
+    lastLoginAt: string | null;
+  } | null> {
+    const result = await pool.query(
+      `SELECT id, email, full_name as "fullName", is_active as "isActive",
+              created_at as "createdAt", last_login_at as "lastLoginAt"
+       FROM super_admins WHERE id = $1`,
+      [id]
+    );
+    return result.rows[0] || null;
+  },
+
+  async createSuperAdmin(pool: pg.Pool, data: {
+    email: string;
+    passwordHash: string;
+    fullName: string;
+  }): Promise<{ id: string; email: string; fullName: string }> {
+    const result = await pool.query(
+      `INSERT INTO super_admins (email, password_hash, full_name)
+       VALUES ($1, $2, $3)
+       RETURNING id, email, full_name as "fullName"`,
+      [data.email, data.passwordHash, data.fullName]
+    );
+    return result.rows[0];
+  },
+
+  async updateSuperAdmin(pool: pg.Pool, id: string, data: {
+    email?: string;
+    fullName?: string;
+    isActive?: boolean;
+    passwordHash?: string;
+  }): Promise<{ id: string; email: string; fullName: string; isActive: boolean } | null> {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (data.email !== undefined) { sets.push(`email = $${paramIdx++}`); values.push(data.email); }
+    if (data.fullName !== undefined) { sets.push(`full_name = $${paramIdx++}`); values.push(data.fullName); }
+    if (data.isActive !== undefined) { sets.push(`is_active = $${paramIdx++}`); values.push(data.isActive); }
+    if (data.passwordHash !== undefined) { sets.push(`password_hash = $${paramIdx++}`); values.push(data.passwordHash); }
+
+    if (sets.length === 0) return this.findSuperAdminById(pool, id) as Promise<{ id: string; email: string; fullName: string; isActive: boolean } | null>;
+
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE super_admins SET ${sets.join(', ')} WHERE id = $${paramIdx}
+       RETURNING id, email, full_name as "fullName", is_active as "isActive"`,
+      values
+    );
+    return result.rows[0] || null;
+  },
+
+  async deleteSuperAdmin(pool: pg.Pool, id: string): Promise<boolean> {
+    const result = await pool.query(
+      'DELETE FROM super_admins WHERE id = $1',
+      [id]
+    );
+    return (result.rowCount ?? 0) > 0;
   },
 };

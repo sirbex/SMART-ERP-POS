@@ -2,7 +2,8 @@
 
 import { Router } from 'express';
 import * as customerController from './customerController.js';
-import { authenticate, authorize, optionalAuth } from '../../middleware/auth.js';
+import { authenticate, optionalAuth } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 const router = Router();
 
@@ -20,19 +21,19 @@ router.get('/:id/statement', optionalAuth, customerController.getCustomerStateme
 router.get('/:id/statement/export.csv', optionalAuth, customerController.exportCustomerStatementCsv);
 router.get('/:id/statement/export.pdf', optionalAuth, customerController.exportCustomerStatementPdf);
 
-// Create/Update/Delete - ADMIN and MANAGER only
-router.post('/', authenticate, authorize('ADMIN', 'MANAGER'), customerController.createCustomer);
-router.put('/:id', authenticate, authorize('ADMIN', 'MANAGER'), customerController.updateCustomer);
+// Create/Update/Delete - requires customer permissions
+router.post('/', authenticate, requirePermission('customers.create'), customerController.createCustomer);
+router.put('/:id', authenticate, requirePermission('customers.update'), customerController.updateCustomer);
 router.patch(
   '/:id/active',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('customers.update'),
   customerController.toggleCustomerActive
 );
 router.delete(
   '/:id',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('customers.delete'),
   customerController.deleteCustomer
 );
 

@@ -295,7 +295,9 @@ export const salesService = {
           const costResult = await costLayerService.calculateActualCost(
             item.productId,
             baseQty.toNumber(),
-            costingMethod
+            costingMethod,
+            undefined, // dbPool
+            client as any // txClient: reuse sale transaction to prevent deadlock
           );
           unitCost = parseFloat(costResult.averageCost.toFixed(2));
 
@@ -401,17 +403,17 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-            ?.filter(line => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
-          )
+          ?.filter(line => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
+        )
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-            ?.filter(line => line.paymentMethod === 'CREDIT')
-            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
-          )
+          ?.filter(line => line.paymentMethod === 'CREDIT')
+          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
+        )
         : new Decimal(0);
 
       logger.info('Payment breakdown calculated', {
@@ -1159,7 +1161,9 @@ export const salesService = {
           await costLayerService.deductFromCostLayers(
             deduction.productId,
             deduction.quantity,
-            deduction.costingMethod
+            deduction.costingMethod,
+            undefined, // dbPool
+            client as any // txClient: reuse sale transaction to prevent deadlock
           );
           logger.info(`Cost layers deducted for product ${deduction.productId}`, {
             quantity: deduction.quantity,

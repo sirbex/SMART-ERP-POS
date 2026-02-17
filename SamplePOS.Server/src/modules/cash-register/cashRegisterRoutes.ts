@@ -7,7 +7,8 @@
 
 import express from 'express';
 import { z } from 'zod';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { cashRegisterService } from './cashRegisterService.js';
 import logger from '../../utils/logger.js';
 
@@ -144,7 +145,7 @@ router.get('/:id', authenticate, async (req, res) => {
  * POST /api/cash-registers
  * Create a new register (admin/manager only)
  */
-router.post('/', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authenticate, requirePermission('pos.create'), async (req, res) => {
     try {
         const data = CreateRegisterSchema.parse(req.body);
         const user = req.user as { id: string };
@@ -176,7 +177,7 @@ router.post('/', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) =
  * PUT /api/cash-registers/:id
  * Update a register (admin/manager only)
  */
-router.put('/:id', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authenticate, requirePermission('pos.create'), async (req, res) => {
     try {
         const data = UpdateRegisterSchema.parse(req.body);
         const user = req.user as { id: string };
@@ -424,7 +425,7 @@ router.post('/sessions/:id/close', authenticate, async (req, res) => {
 router.post(
     '/sessions/:id/reconcile',
     authenticate,
-    authorize('ADMIN', 'MANAGER'),
+    requirePermission('pos.approve'),
     async (req, res) => {
         try {
             const user = req.user as { id: string };
@@ -634,7 +635,7 @@ router.post('/sessions/:id/z-report', authenticate, async (req, res) => {
 router.post(
     '/sessions/:id/approve-variance',
     authenticate,
-    authorize('ADMIN', 'MANAGER'),
+    requirePermission('pos.approve'),
     async (req, res) => {
         try {
             const user = req.user as { id: string };

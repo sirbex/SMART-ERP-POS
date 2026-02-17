@@ -2,7 +2,8 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { goodsReceiptService } from './goodsReceiptService.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 // Validation schemas
 const GRItemSchema = z.object({
@@ -406,28 +407,28 @@ export const goodsReceiptRoutes = Router();
 goodsReceiptRoutes.get('/', authenticate, goodsReceiptController.listGRs);
 goodsReceiptRoutes.get('/:id', authenticate, goodsReceiptController.getGRById);
 
-// Create/finalize routes - ADMIN, MANAGER only
+// Create/finalize routes - requires purchasing permissions
 goodsReceiptRoutes.post(
   '/',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.create'),
   goodsReceiptController.createGR
 );
 goodsReceiptRoutes.post(
   '/:id/finalize',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.post'),
   goodsReceiptController.finalizeGR
 );
 goodsReceiptRoutes.put(
   '/:id/items/:itemId',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.update'),
   goodsReceiptController.updateGRItem
 );
 goodsReceiptRoutes.post(
   '/:id/hydrate-from-po',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('purchasing.create'),
   goodsReceiptController.hydrateFromPO
 );

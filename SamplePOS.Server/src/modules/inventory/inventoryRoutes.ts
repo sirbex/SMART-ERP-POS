@@ -2,7 +2,8 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { inventoryService } from './inventoryService.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { stockCountRoutes } from './stockCountRoutes.js';
 
 // Validation schemas
@@ -270,11 +271,11 @@ inventoryRoutes.get(
 inventoryRoutes.get('/reorder', authenticate, inventoryController.getProductsNeedingReorder);
 inventoryRoutes.get('/value', authenticate, inventoryController.getInventoryValue);
 
-// Adjustment route - ADMIN, MANAGER only
+// Adjustment route - requires inventory.approve permission
 inventoryRoutes.post(
   '/adjust',
   authenticate,
-  authorize('ADMIN', 'MANAGER'),
+  requirePermission('inventory.approve'),
   inventoryController.adjustInventory
 );
 

@@ -587,7 +587,7 @@ export const goodsReceiptService = {
       // ============================================================
       for (const costData of costLayerData) {
         try {
-          await costLayerService.createCostLayer(costData as any);
+          await costLayerService.createCostLayer(costData as any, undefined, client as any);
           await pricingService.onCostChange(costData.productId);
         } catch (err: any) {
           // CRITICAL: Cost layer creation failed - GR exists but cost valuation incomplete

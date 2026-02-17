@@ -3,14 +3,15 @@
 import { Router } from 'express';
 import type { Pool } from 'pg';
 import * as userController from './userController.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 export function createUserRoutes(pool: Pool): Router {
   const router = Router();
 
-  // All user routes require authentication and ADMIN role
+  // All user routes require authentication and user-management permissions
   router.use(authenticate);
-  router.use(authorize('ADMIN'));
+  router.use(requirePermission('system.users_read'));
 
   // GET /api/users - Get all users
   router.get('/', (req, res, next) => userController.getAllUsers(req, res, next, pool));

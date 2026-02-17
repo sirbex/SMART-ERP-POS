@@ -1,7 +1,8 @@
 import express, { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { systemManagementService } from './systemManagementService.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import { createReadStream } from 'fs';
@@ -34,9 +35,9 @@ router.use((req, res, next) => {
     next();
 });
 
-// All system management routes require ADMIN role
+// All system management routes require system permissions
 router.use(authenticate);
-router.use(authorize('ADMIN'));
+router.use(requirePermission('system.read'));
 
 // ============================================================================
 // BACKUP ENDPOINTS

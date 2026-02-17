@@ -24,6 +24,12 @@ export default function LoginPage() {
       const response = await api.auth.login({ email, password });
 
       if (response.data.success && response.data.data) {
+        // Super admin detected — redirect to platform portal
+        if (response.data.data.isSuperAdmin && response.data.data.redirectTo) {
+          navigate(response.data.data.redirectTo);
+          return;
+        }
+
         // Check if 2FA is required
         if (response.data.data.requires2FA) {
           setPendingUserId(response.data.data.userId);

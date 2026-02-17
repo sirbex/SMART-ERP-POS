@@ -224,7 +224,7 @@ export const tenantService = {
     });
 
     // Query the tenant database for usage stats
-    const [users, products, sales] = await Promise.all([
+    const [users, products, sales, dbSize] = await Promise.all([
       tenantPool.query('SELECT COUNT(*)::int as count FROM users WHERE is_active = true'),
       tenantPool.query('SELECT COUNT(*)::int as count FROM products'),
       tenantPool.query(
@@ -232,14 +232,20 @@ export const tenantService = {
          WHERE sale_date >= date_trunc('month', CURRENT_DATE)
            AND status = 'COMPLETED'`
       ),
+      tenantPool.query(
+        `SELECT pg_database_size(current_database())::bigint as size_bytes`
+      ).catch(() => ({ rows: [{ size_bytes: 0 }] })),
     ]);
+
+    const sizeBytes = Number(dbSize.rows[0]?.size_bytes || 0);
+    const storageMb = Math.round((sizeBytes / (1024 * 1024)) * 100) / 100;
 
     return {
       tenantId,
       userCount: users.rows[0]?.count || 0,
       productCount: products.rows[0]?.count || 0,
       locationCount: 1, // TODO: implement locations table
-      storageUsedMb: 0, // TODO: calculate from pg_database_size
+      storageUsedMb: storageMb,
       salesThisMonth: sales.rows[0]?.count || 0,
     };
   },

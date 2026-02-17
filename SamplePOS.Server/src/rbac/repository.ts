@@ -210,7 +210,6 @@ export class RbacRepository {
     scopeType?: string | null,
     scopeId?: string | null
   ): Promise<boolean> {
-    console.log(`[RBAC Repository] userHasPermission(${userId}, ${permissionKey})`);
     const result = await this.pool.query<{ has_permission: boolean }>(
       `SELECT EXISTS(
          SELECT 1 FROM rbac_user_roles ur
@@ -226,7 +225,6 @@ export class RbacRepository {
        ) as has_permission`,
       [userId, permissionKey, scopeType || null, scopeId || null]
     );
-    console.log(`[RBAC Repository] Result:`, result.rows[0]);
     return result.rows[0]?.has_permission ?? false;
   }
 
