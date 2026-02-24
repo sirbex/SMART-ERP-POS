@@ -2,7 +2,7 @@
 // File: SamplePOS.Server/src/middleware/security.ts
 
 import { Request, Response, NextFunction } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { MemoryStore } from 'express-rate-limit';
 import helmet from 'helmet';
 import { body, query, param, validationResult, ValidationChain } from 'express-validator';
 // import xss from 'xss'; // Commented out - install xss package if needed
@@ -46,9 +46,16 @@ export const globalRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Auth rate limiter with a shared MemoryStore so we can reset the counter
+ * for a given IP on successful login (prevents permanent lockout in dev / 
+ * single-IP production setups like reverse-proxied deployments).
+ */
+const authRateLimitStore = new MemoryStore();
+
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // Limit each IP to 50 login attempts per windowMs (increased for development)
+  max: 100, // Allow generous attempts per window (account-level lockout is the real guard)
   message: {
     success: false,
     error: 'Too many login attempts from this IP, please try again after 15 minutes'
@@ -56,7 +63,17 @@ export const authRateLimit = rateLimit({
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
+  store: authRateLimitStore,
 });
+
+/**
+ * Call after a successful login to wipe the IP's failure count so 
+ * the user is never blocked after proving valid credentials.
+ */
+export function resetAuthRateLimit(req: Request): void {
+  const key = req.ip || req.socket.remoteAddress || 'unknown';
+  authRateLimitStore.resetKey(key);
+}
 
 export const apiRateLimit = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute

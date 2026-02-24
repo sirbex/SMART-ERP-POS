@@ -12,6 +12,7 @@ import * as auditService from '../audit/auditService.js';
 import * as twoFactorService from './twoFactorService.js';
 import * as refreshTokenService from './refreshTokenService.js';
 import { createUserSessionMiddleware, endUserSessionMiddleware } from '../../middleware/auditContext.js';
+import { resetAuthRateLimit } from '../../middleware/security.js';
 import logger from '../../utils/logger.js';
 
 /**
@@ -25,6 +26,9 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     const tenantId = req.tenantId;
     const tenantSlug = req.tenant?.slug;
     const result = await authenticateUser(pool, req.body);
+
+    // Successful auth — clear IP-based rate limit so the user is never locked out
+    resetAuthRateLimit(req);
 
     // Check if 2FA is enabled for this user
     const twoFactorStatus = await twoFactorService.get2FAStatus(result.user.id, pool);

@@ -11,7 +11,6 @@ import {
   UpdateQuotationInputSchema,
   ConvertQuotationInputSchema,
   CreateQuickQuoteInputSchema,
-  SendQuotationEmailInputSchema,
   QuotationListFiltersSchema,
 } from '../../../../shared/zod/quotation';
 import { quotationService } from './quotationService';
@@ -30,22 +29,15 @@ export const quotationController = {
       const validatedData = CreateQuotationInputSchema.parse(req.body);
 
       const result = await quotationService.createQuotation(pool, {
-        quoteType: 'standard',
+        quoteType: validatedData.quoteType || 'standard',
         customerId: validatedData.customerId || null,
         customerName: validatedData.customerName || null,
         customerPhone: validatedData.customerPhone || null,
         customerEmail: validatedData.customerEmail || null,
-        reference: validatedData.reference || null,
-        description: validatedData.description || null,
+        description: validatedData.notes || null,
         validFrom: validatedData.validFrom || new Date().toISOString().split('T')[0],
-        validUntil: validatedData.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        validUntil: validatedData.validUntil || new Date(Date.now() + (validatedData.validityDays || 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         createdById: userId,
-        assignedToId: validatedData.assignedToId || null,
-        termsAndConditions: validatedData.termsAndConditions || null,
-        paymentTerms: validatedData.paymentTerms || null,
-        deliveryTerms: validatedData.deliveryTerms || null,
-        internalNotes: validatedData.internalNotes || null,
-        requiresApproval: validatedData.requiresApproval || false,
         items: validatedData.items,
       });
 
@@ -82,16 +74,17 @@ export const quotationController = {
 
       const validatedData = CreateQuickQuoteInputSchema.parse(req.body);
 
-      // Quick quotes have default 30 day validity
+      // Quick quotes use validityDays (default 30)
       const validFrom = new Date().toISOString().split('T')[0];
-      const validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const validityDays = validatedData.validityDays || 30;
+      const validUntil = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       const result = await quotationService.createQuotation(pool, {
         quoteType: 'quick',
         customerId: validatedData.customerId || null,
         customerName: validatedData.customerName || null,
         customerPhone: validatedData.customerPhone || null,
-        description: 'Quick quote from POS',
+        description: validatedData.notes || 'Quick quote from POS',
         validFrom,
         validUntil,
         createdById: userId,
@@ -196,8 +189,6 @@ export const quotationController = {
         customerId: req.query.customerId,
         status: req.query.status,
         quoteType: req.query.quoteType,
-        assignedToId: req.query.assignedToId,
-        createdById: req.query.createdById,
         fromDate: req.query.fromDate,
         toDate: req.query.toDate,
         searchTerm: req.query.searchTerm,
@@ -229,9 +220,7 @@ export const quotationController = {
   /**
    * PUT /api/quotations/:id/status
    * Update quotation status
-   * 
-   * Note: CONVERTED status cannot be set manually - use the convert endpoint
-   * Converted quotations are locked and cannot have their status changed
+   * SIMPLIFIED: Only CANCELLED is useful manually. CONVERTED is set via /convert.
    */
   async updateQuotationStatus(req: Request, res: Response) {
     try {
@@ -240,10 +229,10 @@ export const quotationController = {
       const { status, notes } = req.body;
 
       // CONVERTED is not allowed here - must use /convert endpoint
-      if (!['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED'].includes(status)) {
+      if (status === 'CONVERTED') {
         return res.status(400).json({
           success: false,
-          error: 'Invalid status. Allowed values: DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED, CANCELLED',
+          error: 'Use the /convert endpoint to convert a quotation to a sale',
         });
       }
 

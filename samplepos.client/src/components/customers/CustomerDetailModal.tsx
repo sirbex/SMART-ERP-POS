@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
-import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement } from '../../hooks/useApi';
+import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
 import { formatCurrency } from '../../utils/currency';
 import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
@@ -29,6 +29,15 @@ export default function CustomerDetailModal({
     const [tab, setTab] = useState<Tab>(initialTab);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
+    // Invoice state
+    const [invoicePage, setInvoicePage] = useState(1);
+    const [paymentOpen, setPaymentOpen] = useState(false);
+    const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+    const [payAmount, setPayAmount] = useState('');
+    const [payMethod, setPayMethod] = useState<string>('CASH');
+    const [payRefNum, setPayRefNum] = useState('');
+    const [payNotes, setPayNotes] = useState('');
+
     // Statement state
     const [stmtStart, setStmtStart] = useState<string>('');
     const [stmtEnd, setStmtEnd] = useState<string>('');
@@ -45,6 +54,10 @@ export default function CustomerDetailModal({
         limit: stmtLimit,
     });
 
+    const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useInvoices(invoicePage, 20, customerId || undefined);
+    const invoices: any[] = Array.isArray(invoicesData) ? invoicesData : [];
+    const recordPayment = useRecordInvoicePayment();
+
     const updateCustomer = useUpdateCustomer();
     const toggleActiveM = useToggleCustomerActive();
     const deleteCustomerM = useDeleteCustomer();
@@ -59,6 +72,9 @@ export default function CustomerDetailModal({
             setStmtStart('');
             setStmtEnd('');
             setStmtPage(1);
+            setInvoicePage(1);
+            setPaymentOpen(false);
+            setSelectedInvoice(null);
         }
     }, [isOpen, customerId, initialTab]);
 
@@ -185,13 +201,13 @@ export default function CustomerDetailModal({
                     {/* Tabs */}
                     <div className="border-b border-gray-200 px-6 bg-white">
                         <nav className="-mb-px flex space-x-6">
-                            {(['overview', 'transactions', 'deposits', 'credits', 'edit'] as Tab[]).map((t) => (
+                            {(['overview', 'invoices', 'transactions', 'deposits', 'credits', 'edit'] as Tab[]).map((t) => (
                                 <button
                                     key={t}
                                     onClick={() => setTab(t)}
                                     className={`py-3 px-1 border-b-2 font-medium text-sm capitalize ${tab === t
-                                            ? 'border-blue-500 text-blue-600'
-                                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                        ? 'border-blue-500 text-blue-600'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                                         }`}
                                 >
                                     {t}
@@ -307,8 +323,8 @@ export default function CustomerDetailModal({
                                             <button
                                                 onClick={handleToggleActive}
                                                 className={`px-4 py-2 rounded-lg ${c.isActive
-                                                        ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-                                                        : 'bg-green-100 text-green-800 hover:bg-green-200'
+                                                    ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                                                    : 'bg-green-100 text-green-800 hover:bg-green-200'
                                                     }`}
                                             >
                                                 {c.isActive ? '⏸️ Deactivate' : '▶️ Activate'}
@@ -320,6 +336,197 @@ export default function CustomerDetailModal({
                                                 🗑️ Delete
                                             </button>
                                         </div>
+                                    </div>
+                                )}
+
+                                {/* Invoices Tab */}
+                                {tab === 'invoices' && (
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="text-lg font-semibold text-gray-900">Invoices</h3>
+                                        </div>
+
+                                        {isLoadingInvoices ? (
+                                            <div className="text-center py-10 text-gray-500">Loading invoices…</div>
+                                        ) : invoices.length === 0 ? (
+                                            <div className="text-center py-10 text-gray-500">No invoices found for this customer</div>
+                                        ) : (
+                                            <>
+                                                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                                    <table className="min-w-full divide-y divide-gray-200">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
+                                                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                                                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
+                                                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Outstanding</th>
+                                                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                                                <th className="px-4 py-3" />
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white divide-y divide-gray-200">
+                                                            {invoices.map((inv: any) => {
+                                                                const total = Number(inv.totalAmount || inv.total_amount || 0);
+                                                                const paid = Number(inv.amountPaid || inv.amount_paid || 0);
+                                                                const outstanding = total - paid;
+                                                                const status = (inv.status || '').toUpperCase();
+                                                                const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
+                                                                const statusColor = status === 'PAID' ? 'bg-green-100 text-green-800' : (status.includes('PARTIAL') ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
+                                                                return (
+                                                                    <tr key={inv.id} className="hover:bg-gray-50">
+                                                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{inv.invoiceNumber || inv.invoice_number}</td>
+                                                                        <td className="px-4 py-3 text-sm text-gray-600">{inv.issueDate || inv.issue_date ? new Date(inv.issueDate || inv.issue_date).toLocaleDateString() : '-'}</td>
+                                                                        <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(total)}</td>
+                                                                        <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(paid)}</td>
+                                                                        <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">{formatCurrency(outstanding)}</td>
+                                                                        <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColor}`}>{statusLabel}</span></td>
+                                                                        <td className="px-4 py-3 text-right">
+                                                                            {status !== 'PAID' && outstanding > 0 && (
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        setSelectedInvoice({ ...inv, outstanding });
+                                                                                        setPayAmount('');
+                                                                                        setPayMethod('CASH');
+                                                                                        setPayRefNum('');
+                                                                                        setPayNotes('');
+                                                                                        setPaymentOpen(true);
+                                                                                    }}
+                                                                                    className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                                                                >
+                                                                                    Receive Payment
+                                                                                </button>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+
+                                                <div className="flex items-center justify-between">
+                                                    <div className="text-sm text-gray-700">Page {invoicePage}</div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => setInvoicePage(Math.max(1, invoicePage - 1))} disabled={invoicePage === 1} className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50 disabled:opacity-50">Previous</button>
+                                                        <button onClick={() => setInvoicePage(invoicePage + 1)} className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50">Next</button>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* Receive Payment Modal */}
+                                        {paymentOpen && selectedInvoice && (
+                                            <div className="fixed inset-0 z-[60] flex items-center justify-center">
+                                                <div className="absolute inset-0 bg-black/40" onClick={() => setPaymentOpen(false)} />
+                                                <div className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 z-10">
+                                                    <h3 className="text-lg font-semibold text-gray-900 mb-1">Receive Payment</h3>
+                                                    <p className="text-sm text-gray-500 mb-4">
+                                                        Invoice: <span className="font-medium">{selectedInvoice.invoiceNumber || selectedInvoice.invoice_number}</span>
+                                                        {' — Outstanding: '}<span className="font-medium text-red-600">{formatCurrency(selectedInvoice.outstanding)}</span>
+                                                    </p>
+
+                                                    <form className="space-y-3" onSubmit={async (e) => {
+                                                        e.preventDefault();
+                                                        try {
+                                                            const amt = Number(payAmount);
+                                                            if (amt <= 0 || amt > selectedInvoice.outstanding) {
+                                                                alert('Invalid amount');
+                                                                return;
+                                                            }
+                                                            await recordPayment.mutateAsync({
+                                                                invoiceId: String(selectedInvoice.id),
+                                                                data: {
+                                                                    amount: amt,
+                                                                    paymentMethod: payMethod,
+                                                                    referenceNumber: payRefNum || undefined,
+                                                                    notes: payNotes || undefined,
+                                                                },
+                                                            });
+                                                            alert('✅ Payment recorded successfully!');
+                                                            setPaymentOpen(false);
+                                                            setSelectedInvoice(null);
+                                                            refetchInvoices();
+                                                            refetchCustomer();
+                                                        } catch (err: any) {
+                                                            alert(`❌ Payment failed: ${err?.response?.data?.error || err?.message || 'Unknown error'}`);
+                                                        }
+                                                    }}>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+                                                            <input
+                                                                type="number"
+                                                                value={payAmount}
+                                                                onChange={(e) => setPayAmount(e.target.value)}
+                                                                max={selectedInvoice.outstanding}
+                                                                min={1}
+                                                                step="any"
+                                                                placeholder={`Max: ${selectedInvoice.outstanding}`}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                                autoFocus
+                                                                required
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+                                                            <select
+                                                                value={payMethod}
+                                                                onChange={(e) => setPayMethod(e.target.value)}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                            >
+                                                                <option value="CASH">Cash</option>
+                                                                <option value="CARD">Card</option>
+                                                                <option value="MOBILE_MONEY">Mobile Money</option>
+                                                                <option value="BANK_TRANSFER">Bank Transfer</option>
+                                                            </select>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Reference #</label>
+                                                            <input
+                                                                type="text"
+                                                                value={payRefNum}
+                                                                onChange={(e) => setPayRefNum(e.target.value)}
+                                                                placeholder="Optional"
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                                                            <textarea
+                                                                value={payNotes}
+                                                                onChange={(e) => setPayNotes(e.target.value)}
+                                                                rows={2}
+                                                                placeholder="Optional"
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        e.currentTarget.form?.requestSubmit();
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </div>
+
+                                                        <div className="flex justify-end gap-3 mt-5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPaymentOpen(false)}
+                                                                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                type="submit"
+                                                                disabled={recordPayment.isPending || !payAmount || Number(payAmount) <= 0 || Number(payAmount) > selectedInvoice.outstanding}
+                                                                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                                                            >
+                                                                {recordPayment.isPending ? 'Processing...' : 'Save Payment'}
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -428,8 +635,8 @@ export default function CustomerDetailModal({
                                                             <td className="px-4 py-3 text-sm text-gray-600">{new Date(e.date).toLocaleDateString()}</td>
                                                             <td className="px-4 py-3 text-sm">
                                                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${e.type === 'INVOICE' ? 'bg-blue-100 text-blue-800' :
-                                                                        e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
-                                                                            'bg-gray-100 text-gray-800'
+                                                                    e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
+                                                                        'bg-gray-100 text-gray-800'
                                                                     }`}>
                                                                     {e.type}
                                                                 </span>

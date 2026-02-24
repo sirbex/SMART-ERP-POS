@@ -19,6 +19,8 @@ import { invoiceService } from '../invoices/invoiceService.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
+// Re-declared locally because service returns Date objects for timestamps
+// while shared/types uses string-only representation.
 // ============================================================================
 
 export interface Quotation {
@@ -35,12 +37,11 @@ export interface Quotation {
   discountAmount: number;
   taxAmount: number;
   totalAmount: number;
-  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CONVERTED' | 'CANCELLED';
+  status: string; // DB status; caller should normalizeStatus() for display
   validFrom: string;
   validUntil: string;
   convertedToSaleId: string | null;
   convertedToInvoiceId: string | null;
-  // Human-readable identifiers for display (e.g., SALE-2025-0001, INV-2025-0001)
   convertedToSaleNumber: string | null;
   convertedToInvoiceNumber: string | null;
   convertedAt: Date | null;
@@ -363,9 +364,10 @@ export const quotationService = {
         throw new Error('Quotation not found');
       }
 
-      // Only allow updates to DRAFT quotations
-      if (existing.rows[0].status !== 'DRAFT') {
-        throw new Error('Can only update DRAFT quotations');
+      // Allow updates to any non-terminal quote (OPEN status)
+      const status = existing.rows[0].status;
+      if (status === 'CONVERTED' || status === 'CANCELLED') {
+        throw new Error(`Cannot update ${status} quotations`);
       }
 
       // Update quotation header
@@ -449,14 +451,13 @@ export const quotationService = {
 
   /**
    * Update quotation status
-   * 
-   * BR-QUOTE-007: CONVERTED quotes cannot have their status changed (deal closed)
-   * BR-QUOTE-008: Quotes with converted_to_sale_id are locked (payment received)
+   * SIMPLIFIED: Only CANCELLED is a valid manual status change.
+   * CONVERTED is set automatically via convert endpoint.
    */
   async updateQuotationStatus(
     pool: Pool,
     id: string,
-    status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CONVERTED' | 'CANCELLED',
+    status: string,
     notes?: string
   ): Promise<Quotation> {
     const client = await pool.connect();
@@ -576,19 +577,30 @@ export const quotationService = {
       );
 
       // Prepare sale data
-      const saleItems = items.map((item, index) => ({
-        productId: item.product_id,
-        productName: item.description,
-        quantity: parseFloat(item.quantity),
-        unitPrice: parseFloat(item.unit_price),
-        lineTotal: parseFloat(item.line_total),
-        uomId: validatedUomIds[index],
-        uomName: item.uom_name,
-        costPrice: item.unit_cost ? parseFloat(item.unit_cost) : 0,
-        profit: item.unit_cost
-          ? new Decimal(item.line_total).minus(new Decimal(item.unit_cost).times(item.quantity)).toNumber()
-          : 0,
-      }));
+      // CRITICAL: Use unit_price * quantity (pre-tax) as lineTotal, NOT item.line_total.
+      // Quotation items store line_total as TAX-INCLUSIVE (subtotal + tax).
+      // The GL trigger fn_post_sale_to_ledger sums sale_items.total_price as revenue
+      // and then adds sale.tax_amount separately. Using the tax-inclusive line_total
+      // would double-count tax and cause GL BALANCE VIOLATION.
+      const saleItems = items.map((item, index) => {
+        const qty = new Decimal(item.quantity);
+        const price = new Decimal(item.unit_price);
+        const preTaxLineTotal = qty.times(price);
+        const costPerItem = item.unit_cost ? new Decimal(item.unit_cost) : new Decimal(0);
+        const itemCost = costPerItem.times(qty);
+
+        return {
+          productId: item.product_id,
+          productName: item.description,
+          quantity: parseFloat(item.quantity),
+          unitPrice: parseFloat(item.unit_price),
+          lineTotal: parseFloat(preTaxLineTotal.toFixed(2)),
+          uomId: validatedUomIds[index],
+          uomName: item.uom_name,
+          costPrice: item.unit_cost ? parseFloat(item.unit_cost) : 0,
+          profit: parseFloat(preTaxLineTotal.minus(itemCost).toFixed(2)),
+        };
+      });
 
       const totalAmount = parseFloat(quotation.total_amount);
       const totalCost = items.reduce((sum, item) => {
@@ -734,11 +746,15 @@ export const quotationService = {
       // GL POSTING FIX: Manually trigger GL posting for quotation conversions
       // The automatic trigger (trg_post_sale_to_ledger) fires on INSERT but skips
       // because sale_items don't exist yet. We must manually invoke it after items are added.
+      // Use SAVEPOINT so a GL failure doesn't abort the entire transaction.
       // ============================================================
       try {
+        await client.query('SAVEPOINT gl_posting');
         await client.query('SELECT fn_post_sale_to_ledger() FROM sales WHERE id = $1', [saleRecord.id]);
+        await client.query('RELEASE SAVEPOINT gl_posting');
       } catch (glError: any) {
         console.error('GL posting failed for quotation conversion:', glError);
+        await client.query('ROLLBACK TO SAVEPOINT gl_posting');
         // Continue - GL posting failure shouldn't block the sale
       }
 
@@ -818,7 +834,7 @@ export const quotationService = {
   },
 
   /**
-   * Delete quotation (only DRAFT status allowed - marks as CANCELLED)
+   * Delete quotation (cancel any non-terminal quote)
    */
   async deleteQuotation(pool: Pool, id: string): Promise<void> {
     const client = await pool.connect();
@@ -826,14 +842,17 @@ export const quotationService = {
     try {
       await client.query('BEGIN');
 
-      // Check status
       const result = await quotationRepository.getQuotationById(pool, id);
       if (!result) {
         throw new Error('Quotation not found');
       }
 
-      if (result.quotation.status !== 'DRAFT') {
-        throw new Error('Only DRAFT quotations can be deleted');
+      const status = result.quotation.status;
+      if (status === 'CONVERTED') {
+        throw new Error('Cannot delete a converted quotation');
+      }
+      if (status === 'CANCELLED') {
+        throw new Error('Quotation is already cancelled');
       }
 
       // Soft delete by setting status to CANCELLED

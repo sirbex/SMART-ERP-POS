@@ -8,9 +8,12 @@ import logger from '../../utils/logger.js';
 // Configure Decimal for financial precision (2 decimal places for currency)
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
-// Utility function to format dates in a simplified, human-readable format
+// Utility function to format timestamps in a simplified, human-readable format
+// NOTE: This is only for TIMESTAMPTZ audit fields, NOT for DATE columns
 function formatDate(date: Date | string | null | undefined): string | null {
   if (!date) return null;
+  // If already a plain date string (YYYY-MM-DD), return as-is (timezone strategy)
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
   const d = typeof date === 'string' ? new Date(date) : date;
   return d.toLocaleString('en-US', {
     year: 'numeric',
@@ -23,8 +26,11 @@ function formatDate(date: Date | string | null | undefined): string | null {
 }
 
 // Utility function to format date only (no time)
+// For DATE columns, returns the string as-is per timezone strategy
 function formatDateOnly(date: Date | string | null | undefined): string | null {
   if (!date) return null;
+  // If already a plain date string (YYYY-MM-DD), return as-is (timezone strategy)
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
   const d = typeof date === 'string' ? new Date(date) : date;
   return d.toLocaleString('en-US', {
     year: 'numeric',
@@ -124,11 +130,16 @@ export const reportsRepository = {
 
     let categoryFilter = '';
     const params: any[] = [asOfDate];
+    let methodParamIndex = 2;
 
     if (options.categoryId) {
       categoryFilter = 'AND p.category = $2';
       params.push(options.categoryId);
+      methodParamIndex = 3;
     }
+
+    // Add method as a parameter to avoid SQL injection
+    params.push(method);
 
     // Get all batches with remaining quantity as of the specified date
     const query = `
@@ -154,9 +165,9 @@ export const reportsRepository = {
           p.category,
           SUM(bq.remaining_quantity) as total_quantity,
           CASE 
-            WHEN '${method}' = 'FIFO' THEN 
+            WHEN $${methodParamIndex} = 'FIFO' THEN 
               (SELECT cost_price FROM inventory_batches WHERE product_id = p.id AND received_date <= $1 AND remaining_quantity > 0 ORDER BY received_date ASC LIMIT 1)
-            WHEN '${method}' = 'LIFO' THEN
+            WHEN $${methodParamIndex} = 'LIFO' THEN
               (SELECT cost_price FROM inventory_batches WHERE product_id = p.id AND received_date <= $1 AND remaining_quantity > 0 ORDER BY received_date DESC LIMIT 1)
             ELSE 
               AVG(bq.unit_cost)
@@ -219,53 +230,97 @@ export const reportsRepository = {
 
     switch (options.groupBy) {
       case 'day':
-        selectClause = "DATE(s.sale_date) as period";
-        groupByClause = "DATE(s.sale_date)";
+        selectClause = "DATE(fs.sale_date) as period";
+        groupByClause = "DATE(fs.sale_date)";
         break;
       case 'week':
-        selectClause = "DATE_TRUNC('week', s.sale_date)::DATE as period";
-        groupByClause = "DATE_TRUNC('week', s.sale_date)";
+        selectClause = "DATE_TRUNC('week', fs.sale_date)::DATE as period";
+        groupByClause = "DATE_TRUNC('week', fs.sale_date)";
         break;
       case 'month':
-        selectClause = "DATE_TRUNC('month', s.sale_date)::DATE as period";
-        groupByClause = "DATE_TRUNC('month', s.sale_date)";
+        selectClause = "DATE_TRUNC('month', fs.sale_date)::DATE as period";
+        groupByClause = "DATE_TRUNC('month', fs.sale_date)";
         break;
       case 'product':
-        selectClause = "p.name as period";
-        groupByClause = "p.id, p.name";
+        // Handled separately below — groups by product at item level
+        selectClause = '';
+        groupByClause = '';
         break;
       case 'customer':
-        selectClause = "c.name as period";
-        groupByClause = "c.id, c.name";
+        selectClause = "COALESCE(c.name, 'Walk-in Customer') as period";
+        groupByClause = "COALESCE(c.name, 'Walk-in Customer')";
         break;
       case 'payment_method':
-        selectClause = "s.payment_method as period";
-        groupByClause = "s.payment_method";
+        selectClause = "fs.payment_method as period";
+        groupByClause = "fs.payment_method";
         break;
       default:
-        selectClause = "DATE(s.sale_date) as period";
-        groupByClause = "DATE(s.sale_date)";
+        selectClause = "DATE(fs.sale_date) as period";
+        groupByClause = "DATE(fs.sale_date)";
     }
 
-    const query = `
-      SELECT 
-        ${selectClause},
-        COUNT(DISTINCT s.id) as transaction_count,
-        SUM(si.quantity) as total_quantity_sold,
-        SUM(si.total_price) as total_sales,
-        SUM(s.discount_amount) as total_discounts,
-        SUM(si.quantity * si.unit_cost) as total_cost,
-        SUM(si.profit) as gross_profit,
-        AVG(s.total_amount) as average_transaction_value
-      FROM sales s
-      INNER JOIN sale_items si ON si.sale_id = s.id
-      LEFT JOIN products p ON p.id = si.product_id
-      LEFT JOIN customers c ON c.id = s.customer_id
-      WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
-        ${customerFilter}
-      GROUP BY ${groupByClause}
-      ORDER BY period
-    `;
+    let query: string;
+
+    if (options.groupBy === 'product') {
+      // Product groupBy: group sale_items directly by product name.
+      // Sale-level discount can't be meaningfully attributed to individual products.
+      query = `
+        SELECT 
+          COALESCE(p.name, si.product_name, 'Custom Item') as period,
+          COUNT(DISTINCT s.id) as transaction_count,
+          SUM(si.quantity) as total_quantity_sold,
+          SUM(si.total_price) as total_sales,
+          0 as total_discounts,
+          SUM(si.quantity * si.unit_cost) as total_cost,
+          SUM(si.profit) as gross_profit,
+          AVG(si.total_price) as average_transaction_value
+        FROM sale_items si
+        INNER JOIN sales s ON s.id = si.sale_id
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+          AND s.status NOT IN ('VOID', 'REFUNDED')
+          ${customerFilter}
+        GROUP BY COALESCE(p.name, si.product_name, 'Custom Item')
+        ORDER BY period
+      `;
+    } else {
+      // All other groupBy modes: use CTEs to avoid inflating sale-header fields
+      // (discount_amount, total_amount) by the number of sale_items per sale.
+      query = `
+        WITH filtered_sales AS (
+          SELECT s.id, s.sale_date, s.customer_id, s.payment_method,
+                 s.total_amount, s.discount_amount
+          FROM sales s
+          WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+            AND s.status NOT IN ('VOID', 'REFUNDED')
+            ${customerFilter}
+        ),
+        sale_line_agg AS (
+          SELECT si.sale_id,
+                 SUM(si.quantity) as total_qty,
+                 SUM(si.total_price) as total_sales,
+                 SUM(si.quantity * si.unit_cost) as total_cost,
+                 SUM(si.profit) as gross_profit
+          FROM sale_items si
+          WHERE si.sale_id IN (SELECT id FROM filtered_sales)
+          GROUP BY si.sale_id
+        )
+        SELECT 
+          ${selectClause},
+          COUNT(fs.id) as transaction_count,
+          SUM(sla.total_qty) as total_quantity_sold,
+          SUM(sla.total_sales) as total_sales,
+          SUM(fs.discount_amount) as total_discounts,
+          SUM(sla.total_cost) as total_cost,
+          SUM(sla.gross_profit) as gross_profit,
+          AVG(fs.total_amount) as average_transaction_value
+        FROM filtered_sales fs
+        INNER JOIN sale_line_agg sla ON sla.sale_id = fs.id
+        LEFT JOIN customers c ON c.id = fs.customer_id
+        GROUP BY ${groupByClause}
+        ORDER BY period
+      `;
+    }
 
     const result = await pool.query(query, params);
 
@@ -467,7 +522,7 @@ export const reportsRepository = {
     const query = `
       SELECT 
         p.id as product_id,
-        p.name as product_name,
+        COALESCE(p.name, si.product_name, 'Custom Item') as product_name,
         p.sku,
         SUM(si.quantity) as quantity_sold,
         SUM(si.total_price) as total_revenue,
@@ -476,10 +531,11 @@ export const reportsRepository = {
         COUNT(DISTINCT s.id) as transaction_count
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
-      INNER JOIN products p ON p.id = si.product_id
+      LEFT JOIN products p ON p.id = si.product_id
       WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+        AND s.status NOT IN ('VOID', 'REFUNDED')
         ${categoryFilter}
-      GROUP BY p.id, p.name, p.sku
+      GROUP BY p.id, COALESCE(p.name, si.product_name, 'Custom Item'), p.sku
       ORDER BY quantity_sold DESC
       LIMIT $3
     `;
@@ -522,27 +578,49 @@ export const reportsRepository = {
     let supplierFilter = '';
 
     if (options.supplierId) {
-      supplierFilter = 'AND s.id = $3';
+      supplierFilter = 'AND s."Id" = $3';
       params.push(options.supplierId);
     }
 
+    // Use pre-aggregated subqueries to avoid multiplicative joins
+    // (joining POs to GRs directly would inflate SUM(po.total_amount) when a PO has multiple GRs)
     const query = `
+      WITH po_agg AS (
+        SELECT 
+          supplier_id,
+          COUNT(id) as total_purchase_orders,
+          SUM(total_amount) as total_purchase_value
+        FROM purchase_orders
+        WHERE DATE(order_date) BETWEEN DATE($1) AND DATE($2)
+        GROUP BY supplier_id
+      ),
+      gr_agg AS (
+        SELECT 
+          po.supplier_id,
+          SUM(gri.received_quantity) as total_items_received,
+          AVG(EXTRACT(EPOCH FROM (gr.received_date - po.order_date)) / 86400) as average_lead_time_days,
+          (COUNT(CASE WHEN gr.received_date <= po.expected_delivery_date THEN 1 END)::DECIMAL / 
+           NULLIF(COUNT(gr.id), 0) * 100) as on_time_delivery_rate
+        FROM purchase_orders po
+        INNER JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+        LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+        WHERE DATE(po.order_date) BETWEEN DATE($1) AND DATE($2)
+        GROUP BY po.supplier_id
+      )
       SELECT 
-        s.id as supplier_id,
-        s.supplier_number as supplier_number,
-        s.name as supplier_name,
-        COUNT(DISTINCT po.id) as total_purchase_orders,
-        SUM(po.total_amount) as total_purchase_value,
-        SUM((SELECT SUM(gri.received_quantity) FROM goods_receipt_items gri WHERE gri.goods_receipt_id = gr.id)) as total_items_received,
-        AVG(EXTRACT(EPOCH FROM (gr.received_date - po.order_date)) / 86400) as average_lead_time_days,
-        (COUNT(CASE WHEN gr.received_date <= po.expected_delivery_date THEN 1 END)::DECIMAL / 
-         NULLIF(COUNT(gr.id), 0) * 100) as on_time_delivery_rate
+        s."Id" as supplier_id,
+        s."SupplierCode" as supplier_number,
+        s."CompanyName" as supplier_name,
+        COALESCE(pa.total_purchase_orders, 0) as total_purchase_orders,
+        COALESCE(pa.total_purchase_value, 0) as total_purchase_value,
+        COALESCE(ga.total_items_received, 0) as total_items_received,
+        ga.average_lead_time_days,
+        ga.on_time_delivery_rate
       FROM suppliers s
-      INNER JOIN purchase_orders po ON po.supplier_id = s.id
-      LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
-      WHERE DATE(po.order_date) BETWEEN DATE($1) AND DATE($2)
+      INNER JOIN po_agg pa ON pa.supplier_id = s."Id"
+      LEFT JOIN gr_agg ga ON ga.supplier_id = s."Id"
+      WHERE 1=1
         ${supplierFilter}
-      GROUP BY s.id, s.supplier_number, s.name
       ORDER BY total_purchase_value DESC
     `;
 
@@ -577,7 +655,7 @@ export const reportsRepository = {
     let filters = '';
 
     if (options.supplierId) {
-      filters += ' AND s.id = $3';
+      filters += ' AND s."Id" = $3';
       params.push(options.supplierId);
     }
 
@@ -654,6 +732,7 @@ export const reportsRepository = {
           SUM(s.total_amount) as total_amount
         FROM sales s
         WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+          AND s.status NOT IN ('VOID', 'REFUNDED')
           ${methodFilter}
         GROUP BY s.payment_method
       ),
@@ -709,27 +788,50 @@ export const reportsRepository = {
       params.push(options.status);
     }
 
+    // Use pre-aggregated subqueries to avoid multiplicative joins.
+    // Joining invoices to invoice_payments directly inflates SUM(i."TotalAmount"), etc.
+    // when an invoice has multiple partial payments.
     const query = `
+      WITH invoice_agg AS (
+        SELECT 
+          i."CustomerId" as customer_id,
+          COUNT(i."Id") as total_invoices,
+          SUM(i."TotalAmount") as total_invoiced,
+          SUM(i."AmountPaid") as total_paid,
+          SUM(i."OutstandingBalance") as total_outstanding,
+          SUM(CASE 
+            WHEN i."DueDate" < CURRENT_DATE AND i."OutstandingBalance" > 0 THEN i."OutstandingBalance" 
+            ELSE 0 
+          END) as overdue_amount
+        FROM invoices i
+        WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
+          ${filters}
+        GROUP BY i."CustomerId"
+      ),
+      payment_days AS (
+        SELECT 
+          i."CustomerId" as customer_id,
+          AVG(EXTRACT(EPOCH FROM (ip.payment_date - i."InvoiceDate")) / 86400) as average_payment_days
+        FROM invoices i
+        INNER JOIN invoice_payments ip ON ip.invoice_id = i."Id"
+        WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
+          ${filters}
+        GROUP BY i."CustomerId"
+      )
       SELECT 
         c.id as customer_id,
         c.customer_number as customer_number,
         c.name as customer_name,
-        COUNT(DISTINCT i."Id") as total_invoices,
-        SUM(i."TotalAmount") as total_invoiced,
-        SUM(i."AmountPaid") as total_paid,
-        SUM(i."OutstandingBalance") as total_outstanding,
-        SUM(CASE 
-          WHEN i."DueDate" < CURRENT_DATE AND i."OutstandingBalance" > 0 THEN i."OutstandingBalance" 
-          ELSE 0 
-        END) as overdue_amount,
-        AVG(EXTRACT(EPOCH FROM (ip.payment_date - i."InvoiceDate")) / 86400) as average_payment_days
+        ia.total_invoices,
+        ia.total_invoiced,
+        ia.total_paid,
+        ia.total_outstanding,
+        ia.overdue_amount,
+        pd.average_payment_days
       FROM customers c
-      INNER JOIN invoices i ON i."CustomerId" = c.id
-      LEFT JOIN invoice_payments ip ON ip.invoice_id = i."Id"
-      WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
-        ${filters}
-      GROUP BY c.id, c.customer_number, c.name
-      ORDER BY total_outstanding DESC
+      INNER JOIN invoice_agg ia ON ia.customer_id = c.id
+      LEFT JOIN payment_days pd ON pd.customer_id = c.id
+      ORDER BY ia.total_outstanding DESC
     `;
 
     const result = await pool.query(query, params);
@@ -773,14 +875,22 @@ export const reportsRepository = {
     }
 
     const query = `
+      WITH sale_costs AS (
+        SELECT 
+          si.sale_id,
+          SUM(si.quantity * si.unit_cost) as total_cost
+        FROM sale_items si
+        GROUP BY si.sale_id
+      )
       SELECT 
         ${dateGroup} as period,
         SUM(s.total_amount) as revenue,
-        SUM(si.quantity * si.unit_cost) as cost_of_goods_sold,
-        SUM(s.total_amount - (si.quantity * si.unit_cost)) as gross_profit
+        SUM(sc.total_cost) as cost_of_goods_sold,
+        SUM(s.total_amount - sc.total_cost) as gross_profit
       FROM sales s
-      INNER JOIN sale_items si ON si.sale_id = s.id
+      INNER JOIN sale_costs sc ON sc.sale_id = s.id
       WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+        AND s.status NOT IN ('VOID', 'REFUNDED')
       GROUP BY ${dateGroup}
       ORDER BY period
     `;
@@ -931,7 +1041,7 @@ export const reportsRepository = {
 
     if (options.startDate && options.endDate) {
       params.push(options.startDate, options.endDate);
-      filters.push(`po.created_at BETWEEN $${params.length - 1} AND $${params.length}`);
+      filters.push(`DATE(po.order_date) BETWEEN DATE($${params.length - 1}) AND DATE($${params.length})`);
     }
 
     if (options.status) {
@@ -1121,29 +1231,31 @@ export const reportsRepository = {
 
     const customer = customerResult.rows[0];
 
-    // Get transaction history
+    // Get transaction history with invoice-based balance (invoices track actual payments)
     const transactionsQuery = `
       SELECT 
         s.id as sale_id,
         s.sale_number,
         s.sale_date,
         s.total_amount,
-        s.amount_paid,
-        s.total_amount - s.amount_paid as balance_due,
-        s.status as payment_status,
+        COALESCE(i."AmountPaid", s.amount_paid) as amount_paid,
+        COALESCE(i."OutstandingBalance", s.total_amount - s.amount_paid) as balance_due,
+        COALESCE(i."Status", s.status::text) as payment_status,
         array_agg(
           json_build_object(
-            'product_name', p.name,
+            'product_name', COALESCE(p.name, si.product_name, 'Custom Item'),
             'quantity', si.quantity,
             'unit_price', si.unit_price,
             'subtotal', si.total_price
           )
         ) as items
       FROM sales s
+      LEFT JOIN invoices i ON i."SaleId" = s.id
       LEFT JOIN sale_items si ON si.sale_id = s.id
       LEFT JOIN products p ON p.id = si.product_id
       WHERE ${whereClause}
-      GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid, s.status
+      GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid, s.status,
+               i."AmountPaid", i."OutstandingBalance", i."Status"
       ORDER BY s.sale_date DESC
     `;
 
@@ -1223,7 +1335,7 @@ export const reportsRepository = {
       ${whereClause}
       GROUP BY p.id, p.name, p.sku, p.category
       HAVING SUM(si.quantity) > 0
-      ${options.minMarginPercent ? `AND ((SUM(si.profit) / SUM(si.total_price)) * 100) >= ${options.minMarginPercent}` : ''}
+      ${options.minMarginPercent !== undefined ? (() => { params.push(options.minMarginPercent); return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`; })() : ''}
       ORDER BY total_profit DESC
     `;
 
@@ -1283,6 +1395,7 @@ export const reportsRepository = {
             AVG(COALESCE(s.total_amount, 0)) as average_sale_value
           FROM sales s
           WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+            AND s.status NOT IN ('VOID', 'REFUNDED')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
           GROUP BY DATE(s.sale_date), s.payment_method
@@ -1398,20 +1511,32 @@ export const reportsRepository = {
     }
   ): Promise<any[]> {
     const params: any[] = [];
-    const filters: string[] = [];
+    const supplierFilters: string[] = [];
+    const invoiceFilters: string[] = ['deleted_at IS NULL'];
 
     if (options.supplierId) {
       params.push(options.supplierId);
-      filters.push(`po.supplier_id = $${params.length}`);
+      supplierFilters.push(`s."Id" = $${params.length}`);
     }
 
     if (options.status) {
-      params.push(options.status);
-      filters.push(`po.payment_status = $${params.length}`);
+      // Map report filter status to supplier_invoices status values
+      const statusMap: Record<string, string[]> = {
+        'PAID': ['Paid'],
+        'PARTIAL': ['PartiallyPaid'],
+        'PENDING': ['Unpaid', 'Overdue'],
+      };
+      const invoiceStatuses = statusMap[options.status] || [options.status];
+      params.push(invoiceStatuses);
+      invoiceFilters.push(`"Status" = ANY($${params.length})`);
     }
 
-    const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+    const supplierWhereClause = supplierFilters.length > 0 ? `WHERE ${supplierFilters.join(' AND ')}` : '';
+    const invoiceWhereClause = invoiceFilters.length > 0 ? `WHERE ${invoiceFilters.join(' AND ')}` : '';
 
+    // Use supplier_invoices as the source of truth for billing/payment amounts.
+    // purchase_orders.paid_amount is NOT synced when supplier_payments are recorded;
+    // supplier_invoices tracks AmountPaid/OutstandingBalance accurately via triggers.
     const query = `
       SELECT 
         s."Id" as supplier_id,
@@ -1419,23 +1544,42 @@ export const reportsRepository = {
         s."CompanyName" as supplier_name,
         s."Email" as email,
         s."Phone" as phone,
-        COUNT(po.id) as total_orders,
-        COALESCE(SUM(po.total_amount), 0) as total_amount,
-        COALESCE(SUM(po.paid_amount), 0) as total_paid,
-        COALESCE(SUM(po.total_amount - COALESCE(po.paid_amount, 0)), 0) as outstanding_balance,
-        MAX(po.order_date) as last_order_date,
+        COALESCE(po_agg.total_orders, 0) as total_orders,
+        COALESCE(inv_agg.total_amount, 0) as total_amount,
+        COALESCE(inv_agg.total_paid, 0) as total_paid,
+        COALESCE(inv_agg.outstanding_balance, 0) as outstanding_balance,
+        COALESCE(po_agg.last_order_date, inv_agg.last_invoice_date) as last_order_date,
         s."DefaultPaymentTerms" as payment_terms
       FROM suppliers s
-      LEFT JOIN purchase_orders po ON po.supplier_id = s."Id"
-      ${whereClause}
-      GROUP BY s."Id", s."SupplierCode", s."CompanyName", s."Email", s."Phone", s."DefaultPaymentTerms"
-      HAVING COALESCE(SUM(po.total_amount - COALESCE(po.paid_amount, 0)), 0) > 0
+      LEFT JOIN (
+        SELECT supplier_id,
+               COUNT(id) as total_orders,
+               MAX(order_date) as last_order_date
+        FROM purchase_orders
+        GROUP BY supplier_id
+      ) po_agg ON po_agg.supplier_id = s."Id"
+      LEFT JOIN (
+        SELECT "SupplierId",
+               SUM("TotalAmount") as total_amount,
+               SUM("AmountPaid") as total_paid,
+               SUM("OutstandingBalance") as outstanding_balance,
+               MAX("InvoiceDate") as last_invoice_date
+        FROM supplier_invoices
+        ${invoiceWhereClause}
+        GROUP BY "SupplierId"
+      ) inv_agg ON inv_agg."SupplierId" = s."Id"
+      ${supplierWhereClause}
       ORDER BY outstanding_balance DESC
     `;
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    // Filter out rows with no invoices (no billing activity)
+    const filtered = result.rows.filter(row =>
+      new Decimal(row.total_amount || 0).greaterThan(0)
+    );
+
+    return filtered.map(row => ({
       supplierId: row.supplier_id,
       supplierNumber: row.supplier_number,
       supplierName: row.supplier_name,
@@ -1461,17 +1605,23 @@ export const reportsRepository = {
       endDate: Date;
       limit?: number;
       minPurchaseAmount?: number;
+      sortBy?: 'REVENUE' | 'ORDERS' | 'PROFIT';
     }
   ): Promise<any[]> {
     const params: any[] = [options.startDate, options.endDate];
     const filters: string[] = ['s.sale_date BETWEEN $1 AND $2'];
 
     if (options.minPurchaseAmount) {
-      filters.push(`s.total_amount >= ${options.minPurchaseAmount}`);
+      params.push(options.minPurchaseAmount);
+      filters.push(`s.total_amount >= $${params.length}`);
     }
 
     const whereClause = filters.join(' AND ');
-    const limitClause = options.limit ? `LIMIT ${options.limit}` : '';
+    let limitClause = '';
+    if (options.limit) {
+      params.push(options.limit);
+      limitClause = `LIMIT $${params.length}`;
+    }
 
     const query = `
       SELECT 
@@ -1485,12 +1635,13 @@ export const reportsRepository = {
         SUM(s.profit) as total_profit,
         AVG(s.total_amount) as average_purchase_value,
         MAX(s.sale_date) as last_purchase_date,
-        SUM(s.total_amount - s.amount_paid) as outstanding_balance
+        COALESCE(c.balance, 0) as outstanding_balance
       FROM customers c
       INNER JOIN sales s ON s.customer_id = c.id
       WHERE ${whereClause}
-      GROUP BY c.id, c.customer_number, c.name, c.email, c.phone
-      ORDER BY total_revenue DESC
+        AND s.status NOT IN ('VOID', 'REFUNDED')
+      GROUP BY c.id, c.customer_number, c.name, c.email, c.phone, c.balance
+      ORDER BY ${options.sortBy === 'ORDERS' ? 'total_purchases' : options.sortBy === 'PROFIT' ? 'total_profit' : 'total_revenue'} DESC
       ${limitClause}
     `;
 
@@ -1623,7 +1774,8 @@ export const reportsRepository = {
     }
 
     if (options.minDaysInStock) {
-      filters.push(`CURRENT_DATE - b.received_date >= ${options.minDaysInStock}`);
+      params.push(options.minDaysInStock);
+      filters.push(`CURRENT_DATE - b.received_date >= $${params.length}`);
     }
 
     const whereClause = filters.join(' AND ');
@@ -1800,9 +1952,9 @@ export const reportsRepository = {
         END as days_until_stockout,
         p.cost_price as unit_cost,
         (
-          SELECT s.name
+          SELECT s."CompanyName"
           FROM suppliers s
-          INNER JOIN purchase_orders po ON po.supplier_id = s.id
+          INNER JOIN purchase_orders po ON po.supplier_id = s."Id"
           INNER JOIN goods_receipts gr ON gr.purchase_order_id = po.id
           INNER JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
           WHERE gri.product_id = p.id
@@ -1894,9 +2046,10 @@ export const reportsRepository = {
         AVG(si.total_price) as average_transaction_value
       FROM sales s
       INNER JOIN sale_items si ON si.sale_id = s.id
-      INNER JOIN products p ON p.id = si.product_id
+      LEFT JOIN products p ON p.id = si.product_id
       WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
-      GROUP BY p.category
+        AND s.status NOT IN ('VOID', 'REFUNDED')
+      GROUP BY COALESCE(p.category, 'Uncategorized')
       ORDER BY total_revenue DESC
     `;
 
@@ -1951,6 +2104,7 @@ export const reportsRepository = {
           AVG(s.total_amount) as average_transaction_value
         FROM sales s
         WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+          AND s.status NOT IN ('VOID', 'REFUNDED')
         GROUP BY s.payment_method
       ),
       grand_total AS (
@@ -2007,6 +2161,7 @@ export const reportsRepository = {
         MODE() WITHIN GROUP (ORDER BY to_char(s.sale_date, 'Day')) as peak_day
       FROM sales s
       WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+        AND s.status NOT IN ('VOID', 'REFUNDED')
       GROUP BY EXTRACT(HOUR FROM s.sale_date)
       ORDER BY hour
     `;
@@ -2077,6 +2232,7 @@ export const reportsRepository = {
           COUNT(s.id) as transaction_count
         FROM sales s
         WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+          AND s.status NOT IN ('VOID', 'REFUNDED')
         GROUP BY ${groupByClause}
       ),
       previous_period AS (
@@ -2086,6 +2242,7 @@ export const reportsRepository = {
           COUNT(s.id) as transaction_count
         FROM sales s
         WHERE DATE(s.sale_date) BETWEEN $3::date AND $4::date
+          AND s.status NOT IN ('VOID', 'REFUNDED')
         GROUP BY ${groupByClause}
       )
       SELECT 
@@ -2161,17 +2318,18 @@ export const reportsRepository = {
         s.sale_number,
         to_char(s.sale_date, 'YYYY-MM-DD HH24:MI:SS') as sale_date,
         s.total_amount,
-        s.amount_paid,
-        s.total_amount - s.amount_paid as outstanding_balance,
+        COALESCE(i."AmountPaid", s.amount_paid) as amount_paid,
+        COALESCE(i."OutstandingBalance", s.total_amount - s.amount_paid) as outstanding_balance,
         s.payment_method,
         COUNT(si.id) as item_count,
-        s.status
+        COALESCE(i."Status", s.status::text) as status
       FROM sales s
+      LEFT JOIN invoices i ON i."SaleId" = s.id
       LEFT JOIN sale_items si ON si.sale_id = s.id
       WHERE s.customer_id = $1
         AND DATE(s.sale_date) BETWEEN $2::date AND $3::date
-      GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid, 
-               s.payment_method, s.status
+      GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid,
+               s.payment_method, s.status, i."AmountPaid", i."OutstandingBalance", i."Status"
       ORDER BY s.sale_date DESC
     `;
 
@@ -2224,6 +2382,7 @@ export const reportsRepository = {
           SUM(s.total_amount - s.amount_paid) as credit_extended
         FROM sales s
         WHERE DATE(s.sale_date) = $1::date
+          AND s.status NOT IN ('VOID', 'REFUNDED')
       ),
       daily_collections AS (
         -- Today's debt collections
@@ -2239,21 +2398,21 @@ export const reportsRepository = {
       inventory_health AS (
         -- Current inventory position
         SELECT 
-          COUNT(p.id) as total_products,
-          SUM(CASE WHEN ib.quantity <= p.reorder_level THEN 1 ELSE 0 END) as low_stock_items,
-          SUM(CASE WHEN ib.expiry_date <= ($1::date + INTERVAL '30 days') THEN ib.quantity ELSE 0 END) as expiring_units,
-          SUM(ib.quantity * ib.unit_cost) as inventory_value
+          COUNT(DISTINCT p.id) as total_products,
+          SUM(CASE WHEN COALESCE(ib.remaining_quantity, 0) <= p.reorder_level THEN 1 ELSE 0 END) as low_stock_items,
+          SUM(CASE WHEN ib.expiry_date <= ($1::date + INTERVAL '30 days') THEN ib.remaining_quantity ELSE 0 END) as expiring_units,
+          SUM(ib.remaining_quantity * ib.cost_price) as inventory_value
         FROM products p
-        LEFT JOIN inventory_batches ib ON p.id = ib.product_id AND ib.quantity > 0
+        LEFT JOIN inventory_batches ib ON p.id = ib.product_id AND ib.remaining_quantity > 0
       ),
       customer_metrics AS (
         -- Customer base health
         SELECT 
           COUNT(c.id) as total_customers,
           COUNT(CASE WHEN c.created_at >= ($1::date - INTERVAL '30 days') THEN 1 END) as new_customers_30d,
-          SUM(CASE WHEN c.account_balance > 0 THEN c.account_balance ELSE 0 END) as total_receivables,
-          COUNT(CASE WHEN c.account_balance > 0 THEN 1 END) as customers_with_balance,
-          AVG(c.account_balance) as avg_customer_balance
+          SUM(CASE WHEN c.balance > 0 THEN c.balance ELSE 0 END) as total_receivables,
+          COUNT(CASE WHEN c.balance > 0 THEN 1 END) as customers_with_balance,
+          AVG(c.balance) as avg_customer_balance
         FROM customers c
       ),
       cash_position AS (

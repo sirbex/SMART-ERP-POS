@@ -181,9 +181,9 @@ export async function createSupplierPayment(
             const lineItems = lineItemsResult.rows.map(item => ({
                 productName: item.ProductName,
                 description: item.Description || null,
-                quantity: parseFloat(item.Quantity || 0),
-                unitCost: parseFloat(item.UnitCost || 0),
-                lineTotal: parseFloat(item.LineTotal || 0),
+                quantity: new Decimal(item.Quantity || 0).toNumber(),
+                unitCost: new Decimal(item.UnitCost || 0).toNumber(),
+                lineTotal: new Decimal(item.LineTotal || 0).toNumber(),
                 unitOfMeasure: item.UnitOfMeasure || null
             }));
 
@@ -272,6 +272,62 @@ export async function createSupplierPayment(
             allocatedAmount: totalAllocated.toNumber(),
             invoicesAffected: allocations.length
         });
+
+        // ============================================================
+        // POST-PAYMENT GL INTEGRITY VERIFICATION
+        // Verify the DB trigger posted GL correctly before committing
+        // ============================================================
+        const glCheck = await client.query(
+            `SELECT COUNT(*) as gl_count
+             FROM ledger_transactions 
+             WHERE "ReferenceType" = 'SUPPLIER_PAYMENT' AND "ReferenceId" = $1
+               AND "Status" = 'POSTED'`,
+            [payment.id]
+        );
+        const glCount = parseInt(glCheck.rows[0].gl_count, 10);
+
+        if (glCount === 0) {
+            await client.query('ROLLBACK');
+            throw new Error(
+                `GL INTEGRITY VIOLATION: Supplier payment ${payment.paymentNumber} was not posted to GL. ` +
+                `Transaction rolled back to prevent AP discrepancy.`
+            );
+        }
+
+        if (glCount > 1) {
+            await client.query('ROLLBACK');
+            throw new Error(
+                `GL INTEGRITY VIOLATION: Supplier payment ${payment.paymentNumber} was posted ${glCount} times. ` +
+                `Transaction rolled back to prevent duplicate GL entries.`
+            );
+        }
+
+        // Verify GL entry balance and amount
+        const balanceCheck = await client.query(
+            `SELECT SUM(le."DebitAmount") as total_dr, SUM(le."CreditAmount") as total_cr
+             FROM ledger_entries le
+             JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+             WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT' AND lt."ReferenceId" = $1`,
+            [payment.id]
+        );
+        const totalDr = new Decimal(balanceCheck.rows[0].total_dr || '0');
+        const totalCr = new Decimal(balanceCheck.rows[0].total_cr || '0');
+
+        if (totalDr.minus(totalCr).abs().greaterThan('0.01')) {
+            await client.query('ROLLBACK');
+            throw new Error(
+                `GL BALANCE VIOLATION: Supplier payment ${payment.paymentNumber} GL is imbalanced. ` +
+                `DR=${totalDr.toFixed(2)}, CR=${totalCr.toFixed(2)}. Transaction rolled back.`
+            );
+        }
+
+        if (totalDr.minus(paymentAmount).abs().greaterThan('0.01')) {
+            await client.query('ROLLBACK');
+            throw new Error(
+                `GL AMOUNT MISMATCH: Supplier payment ${payment.paymentNumber} amount=${paymentAmount.toNumber()} ` +
+                `but GL DR=${totalDr.toFixed(2)}. Transaction rolled back.`
+            );
+        }
 
         await client.query('COMMIT');
         return receiptData;
@@ -364,6 +420,14 @@ export async function getSupplierInvoiceById(pool: Pool, id: string) {
     return supplierPaymentRepository.findInvoiceById(pool, id);
 }
 
+export async function getSupplierInvoiceWithDetails(pool: Pool, id: string) {
+    return supplierPaymentRepository.findInvoiceWithDetails(pool, id);
+}
+
+export async function getSupplierInvoicesBySupplier(pool: Pool, supplierId: string) {
+    return supplierPaymentRepository.findInvoicesBySupplier(pool, supplierId);
+}
+
 export async function getOutstandingInvoices(pool: Pool, supplierId: string) {
     return supplierPaymentRepository.findOutstandingInvoices(pool, supplierId);
 }
@@ -395,6 +459,21 @@ export async function createSupplierInvoice(
             totalAmount: totalAmount.toNumber(),
             notes: data.notes
         });
+
+        // Persist line items into supplier_invoice_line_items
+        if (data.lineItems && data.lineItems.length > 0) {
+            const mappedLineItems = data.lineItems.map(item => ({
+                productId: '',
+                productName: item.productName,
+                description: item.description,
+                quantity: item.quantity,
+                unitOfMeasure: 'EA',
+                unitCost: item.unitPrice,
+                taxRate: 0,
+                taxAmount: 0,
+            }));
+            await supplierPaymentRepository.createInvoiceLineItems(client, invoice.id, mappedLineItems);
+        }
 
         logger.info('Supplier invoice created', {
             invoiceId: invoice.id,

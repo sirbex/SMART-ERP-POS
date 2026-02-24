@@ -7,11 +7,35 @@ import bcrypt from 'bcrypt';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantService } from './tenantService.js';
 import { tenantRepository } from './tenantRepository.js';
-import { CreateTenantSchema, UpdateTenantSchema, TenantListQuerySchema, TenantStatusUpdateSchema, SuperAdminLoginSchema } from '../../../../shared/zod/tenant.js';
+import { CreateTenantSchema, UpdateTenantSchema, TenantListQuerySchema, TenantStatusUpdateSchema, SuperAdminLoginSchema, CreateSuperAdminSchema, UpdateSuperAdminSchema, ChangePlanSchema, BillingPeriodSchema } from '../../../../shared/zod/tenant.js';
 import { billingService } from './billingService.js';
 import logger from '../../utils/logger.js';
 
 const PLATFORM_JWT_SECRET = process.env.PLATFORM_JWT_SECRET || process.env.JWT_SECRET || 'platform-secret-change-me';
+
+if (PLATFORM_JWT_SECRET === 'platform-secret-change-me') {
+  logger.warn('⚠️  PLATFORM_JWT_SECRET is using the default fallback — set PLATFORM_JWT_SECRET in .env for production!');
+}
+
+/** Scrub internal error details — never expose stack traces or SQL errors to clients */
+function safeErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    // Only allow known safe error messages through
+    const safePatterns = [
+      /^Tenant slug '.+' is already taken$/,
+      /^Tenant not found$/,
+      /^Admin not found$/,
+      /^Failed to provision tenant/,
+      /^An admin with this email already exists$/,
+      /^Cannot delete your own account$/,
+      /^Invalid credentials$/,
+    ];
+    if (safePatterns.some(p => p.test(error.message))) {
+      return error.message;
+    }
+  }
+  return fallback;
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -43,6 +67,7 @@ function getSuperAdmin(req: Request): { id: string; email: string } | null {
 
 /**
  * Middleware: require super admin authentication
+ * Verifies JWT token AND checks that the admin account is still active in the DB
  */
 export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
   const admin = getSuperAdmin(req);
@@ -50,9 +75,21 @@ export function requireSuperAdmin(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ success: false, error: 'Super admin authentication required' });
     return;
   }
-  // Attach to request for downstream use
-  (req as unknown as Record<string, unknown>).superAdmin = admin;
-  next();
+  // Verify the admin is still active in the database (prevent use of tokens after deactivation)
+  const masterPool = connectionManager.getMasterPool();
+  tenantRepository.findSuperAdminById(masterPool, admin.id)
+    .then((dbAdmin) => {
+      if (!dbAdmin || !dbAdmin.isActive) {
+        res.status(401).json({ success: false, error: 'Account has been deactivated' });
+        return;
+      }
+      // Attach to request for downstream use
+      (req as unknown as Record<string, unknown>).superAdmin = admin;
+      next();
+    })
+    .catch(() => {
+      res.status(500).json({ success: false, error: 'Authentication verification failed' });
+    });
 }
 
 export const platformController = {
@@ -103,7 +140,7 @@ export const platformController = {
       });
     } catch (error) {
       logger.error('Super admin login failed', { error });
-      res.status(500).json({ success: false, error: `Login failed: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Login failed. Please try again.' });
     }
   },
 
@@ -133,7 +170,7 @@ export const platformController = {
       });
     } catch (error) {
       logger.error('Failed to list tenants', { error });
-      res.status(500).json({ success: false, error: `Failed to list tenants: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to list tenants' });
     }
   },
 
@@ -151,7 +188,7 @@ export const platformController = {
       res.json({ success: true, data: tenant });
     } catch (error) {
       logger.error('Failed to get tenant', { error });
-      res.status(500).json({ success: false, error: `Failed to get tenant: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get tenant' });
     }
   },
 
@@ -175,7 +212,7 @@ export const platformController = {
       res.status(201).json({ success: true, data: tenant, message: 'Tenant provisioned successfully' });
     } catch (error) {
       logger.error('Failed to create tenant', { error });
-      const message = error instanceof Error ? error.message : 'Failed to create tenant';
+      const message = safeErrorMessage(error, 'Failed to create tenant');
       res.status(400).json({ success: false, error: message });
     }
   },
@@ -202,7 +239,7 @@ export const platformController = {
       res.json({ success: true, data: tenant });
     } catch (error) {
       logger.error('Failed to update tenant', { error });
-      res.status(500).json({ success: false, error: `Failed to update tenant: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to update tenant' });
     }
   },
 
@@ -233,7 +270,7 @@ export const platformController = {
       res.json({ success: true, data: tenant });
     } catch (error) {
       logger.error('Failed to update tenant status', { error });
-      res.status(500).json({ success: false, error: `Failed to update tenant status: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to update tenant status' });
     }
   },
 
@@ -249,7 +286,7 @@ export const platformController = {
       res.json({ success: true, data: usage });
     } catch (error) {
       logger.error('Failed to get tenant usage', { error });
-      res.status(500).json({ success: false, error: `Failed to get tenant usage: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get tenant usage' });
     }
   },
 
@@ -263,7 +300,7 @@ export const platformController = {
       res.json({ success: true, data: log });
     } catch (error) {
       logger.error('Failed to get tenant audit log', { error });
-      res.status(500).json({ success: false, error: `Failed to get audit log: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get audit log' });
     }
   },
 
@@ -301,13 +338,17 @@ export const platformController = {
   async getBillingEvents(req: Request, res: Response): Promise<void> {
     try {
       if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
+      const parsed = BillingPeriodSchema.safeParse(req.query);
+      if (!parsed.success) {
+        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+        return;
+      }
       const masterPool = connectionManager.getMasterPool();
-      const period = req.query.period as string | undefined;
-      const events = await tenantRepository.getBillingEvents(masterPool, req.params.id, period);
+      const events = await tenantRepository.getBillingEvents(masterPool, req.params.id, parsed.data.period);
       res.json({ success: true, data: events });
     } catch (error) {
       logger.error('Failed to get billing events', { error });
-      res.status(500).json({ success: false, error: `Failed to get billing events: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get billing events' });
     }
   },
 
@@ -319,27 +360,27 @@ export const platformController = {
       res.json({ success: true, data: info });
     } catch (error) {
       logger.error('Failed to get billing info', { error });
-      res.status(500).json({ success: false, error: `Failed to get billing info: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get billing info' });
     }
   },
 
   async changePlan(req: Request, res: Response): Promise<void> {
     try {
       if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const { plan } = req.body;
-      if (!plan || !['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'].includes(plan)) {
-        res.status(400).json({ success: false, error: 'Valid plan required (FREE, STARTER, PROFESSIONAL, ENTERPRISE)' });
+      const parsed = ChangePlanSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         return;
       }
 
       const admin = getSuperAdmin(req);
       const masterPool = connectionManager.getMasterPool();
-      await billingService.changePlan(masterPool, req.params.id, plan, admin?.email || 'system');
+      await billingService.changePlan(masterPool, req.params.id, parsed.data.plan, admin?.email || 'system');
 
-      res.json({ success: true, message: `Plan changed to ${plan}` });
+      res.json({ success: true, message: `Plan changed to ${parsed.data.plan}` });
     } catch (error) {
       logger.error('Failed to change plan', { error });
-      res.status(500).json({ success: false, error: `Failed to change plan: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to change plan' });
     }
   },
 
@@ -365,7 +406,7 @@ export const platformController = {
       res.json({ success: true, data: limits });
     } catch (error) {
       logger.error('Failed to check limits', { error });
-      res.status(500).json({ success: false, error: `Failed to check limits: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to check limits' });
     }
   },
 
@@ -414,7 +455,7 @@ export const platformController = {
       });
     } catch (error) {
       logger.error('Failed to get dashboard summary', { error });
-      res.status(500).json({ success: false, error: `Failed to get dashboard summary: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get dashboard summary' });
     }
   },
 
@@ -429,7 +470,7 @@ export const platformController = {
       res.json({ success: true, data: admins });
     } catch (error) {
       logger.error('Failed to list super admins', { error });
-      res.status(500).json({ success: false, error: `Failed to list admins: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to list admins' });
     }
   },
 
@@ -445,66 +486,63 @@ export const platformController = {
       res.json({ success: true, data: admin });
     } catch (error) {
       logger.error('Failed to get super admin', { error });
-      res.status(500).json({ success: false, error: `Failed to get admin: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to get admin' });
     }
   },
 
   async createAdmin(req: Request, res: Response): Promise<void> {
     try {
-      const { email, password, fullName } = req.body;
-      if (!email || !password || !fullName) {
-        res.status(400).json({ success: false, error: 'email, password, and fullName are required' });
-        return;
-      }
-      if (password.length < 8) {
-        res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+      const parsed = CreateSuperAdminSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
         return;
       }
 
       const masterPool = connectionManager.getMasterPool();
 
       // Check for duplicate email
-      const existing = await tenantRepository.findSuperAdminByEmail(masterPool, email);
+      const existing = await tenantRepository.findSuperAdminByEmail(masterPool, parsed.data.email);
       if (existing) {
         res.status(409).json({ success: false, error: 'An admin with this email already exists' });
         return;
       }
 
-      const passwordHash = await bcrypt.hash(password, 12);
-      const admin = await tenantRepository.createSuperAdmin(masterPool, { email, passwordHash, fullName });
+      const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+      const admin = await tenantRepository.createSuperAdmin(masterPool, {
+        email: parsed.data.email,
+        passwordHash,
+        fullName: parsed.data.fullName,
+      });
 
-      logger.info('Super admin created', { email, createdBy: (req as unknown as Record<string, unknown>).superAdmin });
+      logger.info('Super admin created', { email: parsed.data.email, createdBy: (req as unknown as Record<string, unknown>).superAdmin });
       res.status(201).json({ success: true, data: admin, message: 'Super admin created successfully' });
     } catch (error) {
       logger.error('Failed to create super admin', { error });
-      res.status(500).json({ success: false, error: `Failed to create admin: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to create admin' });
     }
   },
 
   async updateAdmin(req: Request, res: Response): Promise<void> {
     try {
       if (!validateUuidParam(res, req.params.id, 'admin ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const { email, fullName, isActive, password } = req.body;
 
-      const updateData: Record<string, unknown> = {};
-      if (email !== undefined) updateData.email = email;
-      if (fullName !== undefined) updateData.fullName = fullName;
-      if (isActive !== undefined) updateData.isActive = isActive;
-      if (password !== undefined) {
-        if (password.length < 8) {
-          res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
-          return;
-        }
-        updateData.passwordHash = await bcrypt.hash(password, 12);
+      const parsed = UpdateSuperAdminSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+        return;
       }
 
-      const admin = await tenantRepository.updateSuperAdmin(masterPool, req.params.id, updateData as {
-        email?: string;
-        fullName?: string;
-        isActive?: boolean;
-        passwordHash?: string;
-      });
+      const masterPool = connectionManager.getMasterPool();
+
+      const updateData: { email?: string; fullName?: string; isActive?: boolean; passwordHash?: string } = {};
+      if (parsed.data.email !== undefined) updateData.email = parsed.data.email;
+      if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName;
+      if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
+      if (parsed.data.password !== undefined) {
+        updateData.passwordHash = await bcrypt.hash(parsed.data.password, 12);
+      }
+
+      const admin = await tenantRepository.updateSuperAdmin(masterPool, req.params.id, updateData);
 
       if (!admin) {
         res.status(404).json({ success: false, error: 'Admin not found' });
@@ -515,7 +553,7 @@ export const platformController = {
       res.json({ success: true, data: admin, message: 'Super admin updated successfully' });
     } catch (error) {
       logger.error('Failed to update super admin', { error });
-      res.status(500).json({ success: false, error: `Failed to update admin: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to update admin' });
     }
   },
 
@@ -543,7 +581,7 @@ export const platformController = {
       res.json({ success: true, message: 'Super admin deactivated successfully' });
     } catch (error) {
       logger.error('Failed to deactivate super admin', { error });
-      res.status(500).json({ success: false, error: `Failed to delete admin: ${(error as Error).message}` });
+      res.status(500).json({ success: false, error: 'Failed to delete admin' });
     }
   },
 };

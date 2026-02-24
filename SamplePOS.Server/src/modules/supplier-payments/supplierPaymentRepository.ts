@@ -78,7 +78,7 @@ export async function findAllPayments(
     const { limit = 50, offset = 0, supplierId, paymentMethod, search, startDate, endDate } = options;
 
     let whereClause = 'WHERE sp.deleted_at IS NULL';
-    const params: any[] = [];
+    const params: (string | number)[] = [];
     let paramIndex = 1;
 
     if (supplierId) {
@@ -242,7 +242,7 @@ export async function updatePayment(
     }>
 ): Promise<SupplierPayment | null> {
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: (string | number)[] = [];
     let paramIndex = 1;
 
     if (data.paymentDate !== undefined) {
@@ -336,7 +336,7 @@ export async function findAllInvoices(
     const { limit = 50, offset = 0, supplierId, status, search, startDate, endDate } = options;
 
     let whereClause = 'WHERE si.deleted_at IS NULL';
-    const params: any[] = [];
+    const params: (string | number)[] = [];
     let paramIndex = 1;
 
     if (supplierId) {
@@ -472,6 +472,152 @@ export async function findOutstandingInvoices(pool: Pool, supplierId: string): P
 }
 
 /**
+ * Find supplier invoice by ID with line items and payment allocations
+ */
+export async function findInvoiceWithDetails(pool: Pool, id: string): Promise<{
+    invoice: SupplierInvoice & { supplierContactName?: string; supplierEmail?: string; supplierPhone?: string; supplierAddress?: string };
+    lineItems: Array<{
+        id: string;
+        lineNumber: number;
+        productId: string | null;
+        productName: string;
+        description: string | null;
+        quantity: number;
+        unitOfMeasure: string | null;
+        unitCost: number;
+        lineTotal: number;
+        taxRate: number;
+        taxAmount: number;
+        lineTotalIncludingTax: number;
+    }>;
+    allocations: Array<{
+        id: string;
+        paymentId: string;
+        paymentNumber: string;
+        amountAllocated: number;
+        allocationDate: string;
+        paymentMethod: string;
+    }>;
+} | null> {
+    // Get invoice with supplier details
+    const invoiceResult = await pool.query(
+        `SELECT 
+       si."Id" as id,
+       si."SupplierInvoiceNumber" as "invoiceNumber",
+       si."InternalReferenceNumber" as "supplierInvoiceNumber",
+       si."SupplierId" as "supplierId",
+       s."CompanyName" as "supplierName",
+       s."ContactName" as "supplierContactName",
+       s."Email" as "supplierEmail",
+       s."Phone" as "supplierPhone",
+       s."Address" as "supplierAddress",
+       si."InvoiceDate" as "invoiceDate",
+       si."DueDate" as "dueDate",
+       si."Subtotal" as subtotal,
+       si."TaxAmount" as "taxAmount",
+       si."TotalAmount" as "totalAmount",
+       COALESCE(si."AmountPaid", 0) as "amountPaid",
+       COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
+       si."Status" as status,
+       si."Notes" as notes,
+       si."CreatedAt" as "createdAt",
+       si."UpdatedAt" as "updatedAt"
+     FROM supplier_invoices si
+     LEFT JOIN suppliers s ON si."SupplierId" = s."Id"
+     WHERE si."Id" = $1 AND si.deleted_at IS NULL`,
+        [id]
+    );
+
+    if (invoiceResult.rows.length === 0) return null;
+
+    // Get line items
+    const lineItemsResult = await pool.query(
+        `SELECT 
+       "Id" as id,
+       "LineNumber" as "lineNumber",
+       "ProductId" as "productId",
+       "ProductName" as "productName",
+       "Description" as description,
+       "Quantity"::numeric as quantity,
+       "UnitOfMeasure" as "unitOfMeasure",
+       "UnitCost"::numeric as "unitCost",
+       "LineTotal"::numeric as "lineTotal",
+       COALESCE("TaxRate", 0)::numeric as "taxRate",
+       COALESCE("TaxAmount", 0)::numeric as "taxAmount",
+       COALESCE("LineTotalIncludingTax", "LineTotal")::numeric as "lineTotalIncludingTax"
+     FROM supplier_invoice_line_items
+     WHERE "SupplierInvoiceId" = $1
+     ORDER BY "LineNumber" ASC`,
+        [id]
+    );
+
+    // Get payment allocations
+    const allocationsResult = await pool.query(
+        `SELECT 
+       spa."Id" as id,
+       spa."PaymentId" as "paymentId",
+       sp."PaymentNumber" as "paymentNumber",
+       spa."AmountAllocated"::numeric as "amountAllocated",
+       spa."AllocationDate" as "allocationDate",
+       sp."PaymentMethod" as "paymentMethod"
+     FROM supplier_payment_allocations spa
+     LEFT JOIN supplier_payments sp ON spa."PaymentId" = sp."Id"
+     WHERE spa."SupplierInvoiceId" = $1 AND spa.deleted_at IS NULL
+     ORDER BY spa."AllocationDate" ASC`,
+        [id]
+    );
+
+    return {
+        invoice: invoiceResult.rows[0],
+        lineItems: lineItemsResult.rows.map(item => ({
+            ...item,
+            quantity: new Decimal(item.quantity || 0).toNumber(),
+            unitCost: new Decimal(item.unitCost || 0).toNumber(),
+            lineTotal: new Decimal(item.lineTotal || 0).toNumber(),
+            taxRate: new Decimal(item.taxRate || 0).toNumber(),
+            taxAmount: new Decimal(item.taxAmount || 0).toNumber(),
+            lineTotalIncludingTax: new Decimal(item.lineTotalIncludingTax || 0).toNumber(),
+        })),
+        allocations: allocationsResult.rows.map(a => ({
+            ...a,
+            amountAllocated: new Decimal(a.amountAllocated || 0).toNumber(),
+        })),
+    };
+}
+
+/**
+ * Find all invoices for a supplier with line items count
+ */
+export async function findInvoicesBySupplier(pool: Pool, supplierId: string): Promise<Array<SupplierInvoice & { lineItemCount: number }>> {
+    const result = await pool.query(
+        `SELECT 
+       si."Id" as id,
+       si."SupplierInvoiceNumber" as "invoiceNumber",
+       si."InternalReferenceNumber" as "supplierInvoiceNumber",
+       si."SupplierId" as "supplierId",
+       s."CompanyName" as "supplierName",
+       si."InvoiceDate" as "invoiceDate",
+       si."DueDate" as "dueDate",
+       si."Subtotal" as subtotal,
+       si."TaxAmount" as "taxAmount",
+       si."TotalAmount" as "totalAmount",
+       COALESCE(si."AmountPaid", 0) as "amountPaid",
+       COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
+       si."Status" as status,
+       si."Notes" as notes,
+       si."CreatedAt" as "createdAt",
+       si."UpdatedAt" as "updatedAt",
+       (SELECT COUNT(*) FROM supplier_invoice_line_items WHERE "SupplierInvoiceId" = si."Id")::int as "lineItemCount"
+     FROM supplier_invoices si
+     LEFT JOIN suppliers s ON si."SupplierId" = s."Id"
+     WHERE si."SupplierId" = $1 AND si.deleted_at IS NULL
+     ORDER BY si."InvoiceDate" DESC, si."CreatedAt" DESC`,
+        [supplierId]
+    );
+    return result.rows;
+}
+
+/**
  * Create supplier invoice
  */
 export async function createInvoice(
@@ -487,13 +633,15 @@ export async function createInvoice(
         notes?: string;
     }
 ): Promise<SupplierInvoice> {
-    // Generate invoice number
-    const year = new Date().getFullYear();
+    // Generate invoice number using SQL CURRENT_DATE for timezone consistency
     const seqResult = await client.query(
-        `SELECT COALESCE(MAX(CAST(SUBSTRING("SupplierInvoiceNumber" FROM 'SBILL-${year}-([0-9]+)') AS INTEGER)), 0) + 1 as next_num
-     FROM supplier_invoices
-     WHERE "SupplierInvoiceNumber" LIKE 'SBILL-${year}-%'`
+        `SELECT 
+           EXTRACT(YEAR FROM CURRENT_DATE)::int as current_year,
+           COALESCE(MAX(CAST(SUBSTRING("SupplierInvoiceNumber" FROM 'SBILL-' || EXTRACT(YEAR FROM CURRENT_DATE)::text || '-([0-9]+)') AS INTEGER)), 0) + 1 as next_num
+         FROM supplier_invoices
+         WHERE "SupplierInvoiceNumber" LIKE 'SBILL-' || EXTRACT(YEAR FROM CURRENT_DATE)::text || '-%'`
     );
+    const year = seqResult.rows[0].current_year;
     const nextNum = seqResult.rows[0].next_num;
     const invoiceNumber = `SBILL-${year}-${String(nextNum).padStart(4, '0')}`;
 
@@ -513,8 +661,8 @@ export async function createInvoice(
        "Subtotal" as subtotal,
        "TaxAmount" as "taxAmount",
        "TotalAmount" as "totalAmount",
-       "AmountPaid" as "paidAmount",
-       "OutstandingBalance" as "outstandingAmount",
+       "AmountPaid" as "amountPaid",
+       "OutstandingBalance" as "outstandingBalance",
        "Status" as status,
        "Notes" as notes,
        "CreatedAt" as "createdAt",
@@ -583,8 +731,8 @@ export async function updateInvoicePaidAmount(
        "Subtotal" as subtotal,
        "TaxAmount" as "taxAmount",
        "TotalAmount" as "totalAmount",
-       "AmountPaid" as "paidAmount",
-       "OutstandingBalance" as "outstandingAmount",
+       "AmountPaid" as "amountPaid",
+       "OutstandingBalance" as "outstandingBalance",
        "Status" as status,
        "Notes" as notes,
        "CreatedAt" as "createdAt",
@@ -763,4 +911,52 @@ export async function deleteAllocation(client: PoolClient, id: string): Promise<
     // DO NOT manually update here - it causes double-counting
 
     return true;
+}
+
+/**
+ * Insert line items for a supplier invoice
+ * Used when auto-creating invoices from Goods Receipts
+ */
+export async function createInvoiceLineItems(
+    client: PoolClient,
+    invoiceId: string,
+    lineItems: Array<{
+        productId: string;
+        productName: string;
+        description?: string;
+        quantity: number;
+        unitOfMeasure?: string;
+        unitCost: number;
+        taxRate?: number;
+        taxAmount?: number;
+    }>
+): Promise<void> {
+    for (let i = 0; i < lineItems.length; i++) {
+        const item = lineItems[i];
+        const lineTotal = new Decimal(item.quantity).times(item.unitCost).toNumber();
+        const taxAmt = item.taxAmount ?? 0;
+        const lineTotalIncTax = new Decimal(lineTotal).plus(taxAmt).toNumber();
+
+        await client.query(
+            `INSERT INTO supplier_invoice_line_items (
+                "Id", "SupplierInvoiceId", "LineNumber", "ProductId", "ProductName",
+                "Description", "Quantity", "UnitOfMeasure", "UnitCost", "LineTotal",
+                "TaxRate", "TaxAmount", "LineTotalIncludingTax"
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [
+                invoiceId,
+                i + 1,
+                item.productId,
+                item.productName,
+                item.description || null,
+                item.quantity,
+                item.unitOfMeasure || 'EA',
+                item.unitCost,
+                lineTotal,
+                item.taxRate ?? 0,
+                taxAmt,
+                lineTotalIncTax,
+            ]
+        );
+    }
 }

@@ -2,10 +2,13 @@
  * Open Register Dialog
  * 
  * Dialog for opening a new cash register session.
- * Shown when user needs to start a shift.
+ * Shows register availability status and handles:
+ * - Opening a fresh session on an available register
+ * - Auto-resuming if user already has a session on the selected register
+ * - Force-closing stale sessions (admin/manager only)
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -24,8 +27,9 @@ import {
     SelectTrigger,
     SelectValue,
 } from '../ui/select';
-import { useRegisters, useOpenSession } from '../../hooks/useCashRegister';
-import { Loader2, DollarSign } from 'lucide-react';
+import { useRegisters, useOpenSession, useForceCloseSession } from '../../hooks/useCashRegister';
+import { useAuth } from '../../hooks/useAuth';
+import { Loader2, DollarSign, AlertTriangle, User } from 'lucide-react';
 
 interface OpenRegisterDialogProps {
     open: boolean;
@@ -40,14 +44,31 @@ export function OpenRegisterDialog({
 }: OpenRegisterDialogProps) {
     const [registerId, setRegisterId] = useState<string>('');
     const [openingFloat, setOpeningFloat] = useState<string>('');
+    const [showForceCloseConfirm, setShowForceCloseConfirm] = useState(false);
 
     const { data: registers, isLoading: loadingRegisters } = useRegisters();
     const openSession = useOpenSession();
+    const forceCloseSession = useForceCloseSession();
+    const { user } = useAuth();
+
+    const activeRegisters = registers?.filter((r) => r.isActive) || [];
+
+    // Selected register's details
+    const selectedRegister = useMemo(
+        () => activeRegisters.find((r) => r.id === registerId) ?? null,
+        [activeRegisters, registerId]
+    );
+
+    // Determine register status for the selected register
+    const isOccupiedByOther = selectedRegister?.currentSessionId != null
+        && selectedRegister.currentSessionUserId !== user?.id;
+    const isOccupiedByMe = selectedRegister?.currentSessionId != null
+        && selectedRegister.currentSessionUserId === user?.id;
+    const isAvailable = selectedRegister != null && selectedRegister.currentSessionId == null;
+    const isManager = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-
-        // Only register is required - float can be 0 (empty field defaults to 0)
         if (!registerId) return;
 
         const floatAmount = openingFloat ? parseFloat(openingFloat) : 0;
@@ -66,7 +87,26 @@ export function OpenRegisterDialog({
         }
     };
 
-    const activeRegisters = registers?.filter((r) => r.isActive) || [];
+    const handleForceClose = async () => {
+        if (!selectedRegister?.currentSessionId) return;
+        try {
+            await forceCloseSession.mutateAsync(selectedRegister.currentSessionId);
+            setShowForceCloseConfirm(false);
+            // After force-close, the register is free — user can now open it
+        } catch (error) {
+            console.error('Failed to force-close session:', error);
+        }
+    };
+
+    // Format the opened-at time for display
+    const formatSessionTime = (dateStr: string | null | undefined): string => {
+        if (!dateStr) return '';
+        try {
+            return new Date(dateStr).toLocaleString();
+        } catch {
+            return dateStr;
+        }
+    };
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -90,38 +130,148 @@ export function OpenRegisterDialog({
                                 Loading registers...
                             </div>
                         ) : (
-                            <Select value={registerId} onValueChange={setRegisterId}>
+                            <Select value={registerId} onValueChange={(val) => {
+                                setRegisterId(val);
+                                setShowForceCloseConfirm(false);
+                                openSession.reset();
+                            }}>
                                 <SelectTrigger id="register">
                                     <SelectValue placeholder="Select a register" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {activeRegisters.map((register) => (
-                                        <SelectItem key={register.id} value={register.id}>
-                                            {register.name}
-                                            {register.location && ` - ${register.location}`}
-                                        </SelectItem>
-                                    ))}
+                                    {activeRegisters.map((register) => {
+                                        const occupied = register.currentSessionId != null;
+                                        const isMine = register.currentSessionUserId === user?.id;
+                                        return (
+                                            <SelectItem key={register.id} value={register.id}>
+                                                <span className="flex items-center gap-2">
+                                                    <span
+                                                        className={`inline-block w-2 h-2 rounded-full ${
+                                                            !occupied ? 'bg-green-500' :
+                                                            isMine ? 'bg-blue-500' :
+                                                            'bg-red-500'
+                                                        }`}
+                                                    />
+                                                    {register.name}
+                                                    {register.location && ` - ${register.location}`}
+                                                    {occupied && !isMine && (
+                                                        <span className="text-xs text-red-500 ml-1">
+                                                            (In use)
+                                                        </span>
+                                                    )}
+                                                    {isMine && (
+                                                        <span className="text-xs text-blue-500 ml-1">
+                                                            (Your session)
+                                                        </span>
+                                                    )}
+                                                </span>
+                                            </SelectItem>
+                                        );
+                                    })}
                                 </SelectContent>
                             </Select>
                         )}
                     </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="openingFloat">Opening Float (UGX)</Label>
-                        <Input
-                            id="openingFloat"
-                            type="number"
-                            min="0"
-                            step="100"
-                            placeholder="Enter opening cash amount"
-                            value={openingFloat}
-                            onChange={(e) => setOpeningFloat(e.target.value)}
-                            className="text-lg"
-                        />
-                        <p className="text-xs text-gray-500">
-                            Count the cash in the drawer before starting. Leave empty or 0 if no float.
-                        </p>
-                    </div>
+                    {/* Status message for occupied by me (auto-resume) */}
+                    {isOccupiedByMe && (
+                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-700">
+                            <div className="flex items-center gap-2 font-medium">
+                                <User className="h-4 w-4" />
+                                You have an open session on this register
+                            </div>
+                            <p className="mt-1 text-xs">
+                                Session {selectedRegister?.currentSessionNumber} — opened{' '}
+                                {formatSessionTime(selectedRegister?.currentSessionOpenedAt)}.
+                                Click &quot;Resume Session&quot; to continue.
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Status message for occupied by another user */}
+                    {isOccupiedByOther && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-700">
+                            <div className="flex items-center gap-2 font-medium">
+                                <AlertTriangle className="h-4 w-4" />
+                                Register in use by {selectedRegister?.currentSessionUserName || 'another user'}
+                            </div>
+                            <p className="mt-1 text-xs">
+                                Session {selectedRegister?.currentSessionNumber} — opened{' '}
+                                {formatSessionTime(selectedRegister?.currentSessionOpenedAt)}.
+                                {isManager
+                                    ? ' You can force-close this session as a manager.'
+                                    : ' Please select a different register or ask a manager to close this session.'}
+                            </p>
+                            {isManager && !showForceCloseConfirm && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-2 border-amber-300 text-amber-700 hover:bg-amber-100"
+                                    onClick={() => setShowForceCloseConfirm(true)}
+                                >
+                                    Force Close Session
+                                </Button>
+                            )}
+                            {isManager && showForceCloseConfirm && (
+                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                                    <p className="font-medium">
+                                        Are you sure? This will close {selectedRegister?.currentSessionUserName}&apos;s
+                                        session without a cash count.
+                                    </p>
+                                    <div className="flex gap-2 mt-2">
+                                        <Button
+                                            type="button"
+                                            variant="destructive"
+                                            size="sm"
+                                            disabled={forceCloseSession.isPending}
+                                            onClick={handleForceClose}
+                                        >
+                                            {forceCloseSession.isPending ? (
+                                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                            ) : null}
+                                            Confirm Force Close
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setShowForceCloseConfirm(false)}
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                    {forceCloseSession.error && (
+                                        <p className="mt-1 text-red-600">
+                                            {forceCloseSession.error instanceof Error
+                                                ? forceCloseSession.error.message
+                                                : 'Force-close failed'}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Opening float — only show for available registers or resume */}
+                    {(isAvailable || (!selectedRegister && registerId === '')) && (
+                        <div className="space-y-2">
+                            <Label htmlFor="openingFloat">Opening Float (UGX)</Label>
+                            <Input
+                                id="openingFloat"
+                                type="number"
+                                min="0"
+                                step="100"
+                                placeholder="Enter opening cash amount"
+                                value={openingFloat}
+                                onChange={(e) => setOpeningFloat(e.target.value)}
+                                className="text-lg"
+                            />
+                            <p className="text-xs text-gray-500">
+                                Count the cash in the drawer before starting. Leave empty or 0 if no float.
+                            </p>
+                        </div>
+                    )}
 
                     {openSession.error && (
                         <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-600">
@@ -139,20 +289,37 @@ export function OpenRegisterDialog({
                         >
                             Cancel
                         </Button>
-                        <Button
-                            type="submit"
-                            disabled={!registerId || openSession.isPending}
-                            className="bg-green-600 hover:bg-green-700"
-                        >
-                            {openSession.isPending ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Opening...
-                                </>
-                            ) : (
-                                'Open Register'
-                            )}
-                        </Button>
+                        {isOccupiedByMe ? (
+                            <Button
+                                type="submit"
+                                disabled={openSession.isPending}
+                                className="bg-blue-600 hover:bg-blue-700"
+                            >
+                                {openSession.isPending ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Resuming...
+                                    </>
+                                ) : (
+                                    'Resume Session'
+                                )}
+                            </Button>
+                        ) : (
+                            <Button
+                                type="submit"
+                                disabled={!registerId || isOccupiedByOther || openSession.isPending}
+                                className="bg-green-600 hover:bg-green-700"
+                            >
+                                {openSession.isPending ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Opening...
+                                    </>
+                                ) : (
+                                    'Open Register'
+                                )}
+                            </Button>
+                        )}
                     </DialogFooter>
                 </form>
             </DialogContent>

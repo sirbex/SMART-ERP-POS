@@ -20,6 +20,40 @@ const formatFieldValue = (key: string, value: any): string => {
     if (value === null || value === undefined) return '-';
 
     if (typeof value === 'number') {
+        // Count-like fields that happen to contain currency keywords (e.g., totalOrders, totalSuppliers)
+        const isCountField = (
+            lowerKey.endsWith('orders') ||
+            lowerKey.endsWith('suppliers') ||
+            lowerKey.endsWith('customers') ||
+            lowerKey.endsWith('products') ||
+            lowerKey.endsWith('items') ||
+            lowerKey.endsWith('transactions') ||
+            lowerKey.endsWith('batches') ||
+            lowerKey.endsWith('records') ||
+            lowerKey.endsWith('movements') ||
+            lowerKey.endsWith('entries') ||
+            lowerKey.endsWith('receipts') ||
+            lowerKey.endsWith('invoices') ||
+            lowerKey.endsWith('users') ||
+            lowerKey.endsWith('categories') ||
+            lowerKey.includes('count')
+        );
+        if (isCountField) {
+            return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        }
+
+        // Non-monetary fields (terms, method, status, type, days)
+        const isNonMonetaryField = (
+            lowerKey.endsWith('terms') ||
+            lowerKey.endsWith('method') ||
+            lowerKey.endsWith('status') ||
+            lowerKey.endsWith('type') ||
+            lowerKey.endsWith('days')
+        );
+        if (isNonMonetaryField) {
+            return value.toLocaleString();
+        }
+
         if (lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('average') || lowerKey.includes('value')) {
             return formatCurrency(value);
         }
@@ -277,7 +311,7 @@ const ExpenseReportsPage: React.FC = () => {
                 {Object.entries(data).map(([key, value]) => (
                     <div key={key} className="bg-white border rounded-lg p-4 shadow-sm">
                         <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                            {key.replace(/_/g, ' ')}
+                            {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim().replace(/^\w/, c => c.toUpperCase())}
                         </div>
                         <div className={`text-xl font-bold ${getFieldColorClass(key, value)}`}>
                             {formatFieldValue(key, value)}
@@ -303,7 +337,7 @@ const ExpenseReportsPage: React.FC = () => {
                         <tr>
                             {columns.map((col) => (
                                 <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                                    {col.replace(/_/g, ' ')}
+                                    {col.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim().replace(/^\w/, c => c.toUpperCase())}
                                 </th>
                             ))}
                         </tr>
@@ -346,8 +380,8 @@ const ExpenseReportsPage: React.FC = () => {
                                 key={option.value}
                                 onClick={() => setSelectedReport(option.value)}
                                 className={`p-4 rounded-lg border-2 text-left transition-all hover:shadow-md ${selectedReport === option.value
-                                        ? 'border-blue-500 bg-blue-50'
-                                        : 'border-gray-200 hover:border-blue-300'
+                                    ? 'border-blue-500 bg-blue-50'
+                                    : 'border-gray-200 hover:border-blue-300'
                                     }`}
                             >
                                 <div className="text-2xl mb-2">{option.icon}</div>

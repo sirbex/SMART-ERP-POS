@@ -331,6 +331,14 @@ export const salesService = {
         totalCost = totalCost.plus(itemCost);
         const profit = lineTotal.minus(itemCost);
 
+        // CRITICAL: costPrice must reflect cost per SELLING UoM unit, not per base unit.
+        // When selling 1 Box (12 pieces) at base cost 6,000/piece, costPrice = 72,000/box.
+        // The DB trigger fn_post_sale_to_ledger computes COGS as SUM(unit_cost * quantity),
+        // so storing base-unit cost with selling-UoM quantity understates COGS.
+        const costPerSellingUnit = parseFloat(
+          itemCost.dividedBy(new Decimal(item.quantity)).toFixed(2)
+        );
+
         // Look up the actual uom_id from product_uoms if provided
         let actualUomId: string | undefined = undefined;
         if (item.uomId) {
@@ -348,7 +356,7 @@ export const salesService = {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           lineTotal: parseFloat(lineTotal.toFixed(2)),
-          costPrice: unitCost,
+          costPrice: costPerSellingUnit,
           profit: parseFloat(profit.toFixed(2)),
           uomId: actualUomId, // Use the actual uom_id from uoms table
         });

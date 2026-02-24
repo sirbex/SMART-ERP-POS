@@ -176,6 +176,14 @@ export const cashRegisterService = {
         return register;
     },
 
+    /**
+     * Get active registers with current session status
+     * Shows which registers are available, occupied, and by whom
+     */
+    async getRegistersWithStatus() {
+        return cashRegisterRepository.getRegistersWithSessionStatus(globalPool);
+    },
+
     // ===========================================================================
     // SESSION MANAGEMENT
     // ===========================================================================
@@ -185,8 +193,9 @@ export const cashRegisterService = {
      * 
      * Business Rules:
      * - Register must exist and be active
-     * - Register must not have an existing open session
-     * - User must not have an open session on another register
+     * - Register must not have an existing open session BY ANOTHER USER
+     * - If the SAME user already has an open session on THIS register → auto-resume
+     * - User must not have an open session on a DIFFERENT register
      */
     async openSession(data: OpenSessionData): Promise<CashRegisterSession> {
         // Validate register exists and is active
@@ -204,10 +213,21 @@ export const cashRegisterService = {
         // Check if register already has open session
         const existingRegisterSession = await cashRegisterRepository.getOpenSession(globalPool, data.registerId);
         if (existingRegisterSession) {
+            // If the SAME user already has this session → auto-resume it
+            if (existingRegisterSession.userId === data.userId) {
+                logger.info('Auto-resuming existing session for same user', {
+                    sessionId: existingRegisterSession.id,
+                    sessionNumber: existingRegisterSession.sessionNumber,
+                    registerId: data.registerId,
+                    userId: data.userId
+                });
+                return existingRegisterSession;
+            }
+            // Different user has the register → blocked
             throw new RegisterBusyError(data.registerId, existingRegisterSession.sessionNumber);
         }
 
-        // Check if user already has an open session
+        // Check if user already has an open session on a DIFFERENT register
         const existingUserSession = await cashRegisterRepository.getUserOpenSession(globalPool, data.userId);
         if (existingUserSession) {
             throw new UserAlreadyHasSessionError(
@@ -397,6 +417,47 @@ export const cashRegisterService = {
             }
             throw error;
         }
+    },
+
+    /**
+     * Force-close a stale/abandoned session (admin/manager only)
+     * 
+     * Used when a cashier left without closing their session, blocking the register.
+     * Sets actual_closing = expected_closing (assumes expected amounts).
+     * Logged as administrative action for audit trail.
+     */
+    async forceCloseSession(sessionId: string, closedByUserId: string): Promise<CashRegisterSession> {
+        // Get and validate session
+        const session = await cashRegisterRepository.getSessionById(globalPool, sessionId);
+        if (!session) {
+            throw new SessionNotFoundError(sessionId);
+        }
+        if (session.status !== 'OPEN') {
+            throw new SessionNotOpenError(sessionId, session.status);
+        }
+
+        // Force close with expected = actual (zero variance)
+        const expectedClosing = session.expectedClosing ?? session.openingFloat;
+        const closedSession = await cashRegisterRepository.closeSession(
+            globalPool,
+            {
+                sessionId,
+                actualClosing: expectedClosing,
+                varianceReason: undefined,
+                notes: `Force-closed by administrator. Original cashier: ${session.userName || session.userId}`
+            }
+        );
+
+        logger.warn('Cash register session FORCE-CLOSED by admin', {
+            sessionId: closedSession.id,
+            sessionNumber: closedSession.sessionNumber,
+            originalUserId: session.userId,
+            originalUserName: session.userName,
+            closedByUserId,
+            expectedClosing,
+        });
+
+        return closedSession;
     },
 
     /**

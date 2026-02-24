@@ -26,7 +26,6 @@ export default function QuoteDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showStatusModal, setShowStatusModal] = useState(false);
-  const [newStatus, setNewStatus] = useState<QuotationStatus>('DRAFT');
   const [statusNotes, setStatusNotes] = useState('');
 
   const { data, isLoading, error } = useQuery({
@@ -56,17 +55,6 @@ export default function QuoteDetailPage() {
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || 'Failed to update status');
-    },
-  });
-
-  const deleteQuoteMutation = useMutation({
-    mutationFn: (id: string) => quotationApi.deleteQuotation(id),
-    onSuccess: () => {
-      toast.success('Quotation deleted successfully');
-      navigate('/quotations');
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || 'Failed to delete quotation');
     },
   });
 
@@ -107,20 +95,13 @@ export default function QuoteDetailPage() {
   const canEdit = isQuoteEditable(quotation.status);
   const canConvert = isQuoteConvertible(quotation.status, quotation.validUntil, quotation.convertedToSaleId);
 
-  const handleStatusChange = () => {
+  const handleCancelQuote = () => {
     if (!quotation.id) return;
     updateStatusMutation.mutate({
       id: quotation.id,
-      status: newStatus,
+      status: 'CANCELLED' as QuotationStatus,
       notes: statusNotes || undefined,
     });
-  };
-
-  const handleDelete = () => {
-    if (!quotation.id) return;
-    if (window.confirm('Are you sure you want to delete this quotation? This action cannot be undone.')) {
-      deleteQuoteMutation.mutate(quotation.id);
-    }
   };
 
   const handlePrint = () => {
@@ -361,19 +342,12 @@ export default function QuoteDetailPage() {
           >
             📄 Export PDF
           </button>
-          <button
-            onClick={() => setShowStatusModal(true)}
-            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            Change Status
-          </button>
-          {quotation.status === 'DRAFT' && (
+          {canEdit && (
             <button
-              onClick={handleDelete}
+              onClick={() => setShowStatusModal(true)}
               className="px-6 py-3 border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
-              disabled={deleteQuoteMutation.isPending}
             >
-              {deleteQuoteMutation.isPending ? 'Deleting...' : 'Delete'}
+              Cancel Quote
             </button>
           )}
         </div>
@@ -386,7 +360,7 @@ export default function QuoteDetailPage() {
           </div>
         )}
 
-        {daysUntilExpiry <= 0 && quotation.status !== 'EXPIRED' && (
+        {daysUntilExpiry <= 0 && quotation.status !== 'CONVERTED' && quotation.status !== 'CANCELLED' && (
           <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-red-800 font-semibold">❌ Expired</p>
             <p className="text-red-700 text-sm">This quotation has expired. Update validity dates to reactivate.</p>
@@ -579,35 +553,23 @@ export default function QuoteDetailPage() {
           )}
         </div>
 
-        {/* Status Change Modal */}
+        {/* Cancel Quote Modal */}
         {showStatusModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => { setShowStatusModal(false); setStatusNotes(''); }}>
             <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-xl font-semibold mb-4">Change Status</h3>
+              <h3 className="text-xl font-semibold mb-2 text-red-700">Cancel Quotation</h3>
+              <p className="text-gray-600 mb-4">
+                Are you sure you want to cancel <strong>{quotation.quoteNumber}</strong>? This cannot be undone.
+              </p>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">New Status</label>
-                  <select
-                    value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value as QuotationStatus)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    aria-label="Select new status"
-                  >
-                    <option value="DRAFT">Draft</option>
-                    <option value="SENT">Sent</option>
-                    <option value="ACCEPTED">Accepted</option>
-                    <option value="REJECTED">Rejected</option>
-                    <option value="CANCELLED">Cancelled</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason (Optional)</label>
                   <textarea
                     value={statusNotes}
                     onChange={(e) => setStatusNotes(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     rows={3}
-                    placeholder="Add a note about this status change..."
+                    placeholder="Why is this quote being cancelled?"
                   />
                 </div>
                 <div className="flex gap-3">
@@ -619,14 +581,14 @@ export default function QuoteDetailPage() {
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                     disabled={updateStatusMutation.isPending}
                   >
-                    Cancel
+                    Keep Open
                   </button>
                   <button
-                    onClick={handleStatusChange}
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    onClick={handleCancelQuote}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                     disabled={updateStatusMutation.isPending}
                   >
-                    {updateStatusMutation.isPending ? 'Updating...' : 'Update Status'}
+                    {updateStatusMutation.isPending ? 'Cancelling...' : 'Cancel Quote'}
                   </button>
                 </div>
               </div>

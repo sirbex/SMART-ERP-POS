@@ -226,6 +226,41 @@ export function useReconcileSession() {
     });
 }
 
+/**
+ * Force-close a stale/abandoned session (admin/manager only)
+ */
+export function useForceCloseSession() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (sessionId: string) => {
+            try {
+                const response = await api.post<{ success: boolean; data: CashRegisterSession; error?: string }>(
+                    `/cash-registers/sessions/${sessionId}/force-close`
+                );
+                if (!response.data.success) {
+                    throw new Error(response.data.error || 'Failed to force-close session');
+                }
+                return response.data.data;
+            } catch (error: unknown) {
+                if (error && typeof error === 'object' && 'response' in error) {
+                    const axiosError = error as { response?: { data?: { error?: string; message?: string } } };
+                    const errorMessage = axiosError.response?.data?.error
+                        || axiosError.response?.data?.message
+                        || 'Failed to force-close session';
+                    throw new Error(errorMessage);
+                }
+                throw error;
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.currentSession });
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.registers });
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sessions() });
+        },
+    });
+}
+
 // ============================================================================
 // MOVEMENT HOOKS
 // ============================================================================

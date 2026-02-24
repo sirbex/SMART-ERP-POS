@@ -430,7 +430,7 @@ export const quotationRepository = {
   async updateQuotationStatus(
     client: PoolClient,
     id: string,
-    status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CONVERTED' | 'CANCELLED',
+    status: string,
     notes?: string
   ): Promise<QuotationDbRow> {
     const result = await client.query<QuotationDbRow>(
@@ -554,7 +554,7 @@ export const quotationRepository = {
    * Check if quote can be converted
    * BR-QUOTE-001: Quote can only be converted once
    * BR-QUOTE-002: Expired quotes cannot be converted
-   * BR-QUOTE-003: Only ACCEPTED quotes can be converted (customer must accept terms)
+   * SIMPLIFIED: Any OPEN (non-CONVERTED, non-CANCELLED) quote can convert
    */
   async canConvertQuotation(pool: Pool, id: string): Promise<{ can: boolean; reason?: string }> {
     const result = await pool.query<QuotationDbRow>(
@@ -576,11 +576,7 @@ export const quotationRepository = {
       return { can: false, reason: 'Quote is cancelled' };
     }
 
-    if (quote.status !== 'ACCEPTED') {
-      return { can: false, reason: 'Quote must be accepted before conversion' };
-    }
-
-    // Check if quote has expired (only for ACCEPTED quotes)
+    // Check if quote has expired
     const validUntil = new Date(quote.valid_until);
     const now = new Date();
     if (validUntil < now) {

@@ -418,7 +418,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
 
   const statusColor: Record<string, string> = {
     ACTIVE: 'bg-emerald-100 text-emerald-700', SUSPENDED: 'bg-red-100 text-red-700',
-    PENDING: 'bg-amber-100 text-amber-700', PROVISIONING: 'bg-blue-100 text-blue-700',
+    PROVISIONING: 'bg-blue-100 text-blue-700',
     DEACTIVATED: 'bg-slate-100 text-slate-500',
   };
 
@@ -524,7 +524,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                       <div className="space-y-2">
                         <UsageBar label="Users" current={usage.userCount} max={tenant.maxUsers} />
                         <UsageBar label="Products" current={usage.productCount} max={tenant.maxProducts} />
-                        <UsageBar label="Sales (this month)" current={usage.salesThisMonth} max={tenant.maxTransactionsPerMonth} />
+                        <UsageBar label="Sales (this month)" current={usage.salesThisMonth} max={limits?.usage?.transactionsThisMonth?.max ?? 999999} />
                       </div>
                     </div>
                   </>
@@ -595,7 +595,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                     <div className="space-y-3">
                       <UsageBar label="Users" current={usage.userCount} max={tenant.maxUsers} />
                       <UsageBar label="Products" current={usage.productCount} max={tenant.maxProducts} />
-                      <UsageBar label="Sales (this month)" current={usage.salesThisMonth} max={tenant.maxTransactionsPerMonth} />
+                      <UsageBar label="Sales (this month)" current={usage.salesThisMonth} max={limits?.usage?.transactionsThisMonth?.max ?? 999999} />
                       <UsageBar label="Storage" current={usage.storageUsedMb} max={tenant.storageLimitMb || 100} unit="MB" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -789,7 +789,7 @@ export default function TenantsPage() {
 
   const statusBadge: Record<string, string> = {
     ACTIVE: 'bg-emerald-100 text-emerald-700', SUSPENDED: 'bg-red-100 text-red-700',
-    PENDING: 'bg-amber-100 text-amber-700', PROVISIONING: 'bg-blue-100 text-blue-700',
+    PROVISIONING: 'bg-blue-100 text-blue-700',
     DEACTIVATED: 'bg-slate-100 text-slate-500',
   };
   const planBadge: Record<string, string> = {

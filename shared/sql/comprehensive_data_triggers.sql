@@ -625,7 +625,7 @@ BEGIN
         v_movement_type := 'GOODS_RECEIPT'::movement_type;
         v_quantity_change := NEW.remaining_quantity;
         v_reference_type := COALESCE(NEW.source_type, 'GOODS_RECEIPT');
-        v_reference_id := NEW.source_id;
+        v_reference_id := NEW.source_reference_id;
     ELSIF TG_OP = 'UPDATE' THEN
         v_quantity_change := NEW.remaining_quantity - OLD.remaining_quantity;
         IF v_quantity_change > 0 THEN

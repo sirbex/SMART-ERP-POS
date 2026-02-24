@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import quotationApi from '../../api/quotations';
 import type { QuotationStatus } from '@shared/types/quotation';
-import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge } from '@shared/types/quotation';
+import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge, normalizeStatus } from '@shared/types/quotation';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 
@@ -53,18 +53,16 @@ export default function QuotationsPage() {
   });
   const totalPages = data?.totalPages || 1;
 
-  // Calculate stats (from all quotations, not filtered)
+  // Calculate stats using normalized 3-status model
   const allQuotations = data?.quotations || [];
-  const activeQuotations = allQuotations.filter(q => q.status !== 'CONVERTED' && q.status !== 'CANCELLED');
+  const openQuotations = allQuotations.filter(q => normalizeStatus(q.status) === 'OPEN');
   const stats = {
     total: allQuotations.length,
-    active: activeQuotations.length,
-    draft: allQuotations.filter(q => q.status === 'DRAFT').length,
-    sent: allQuotations.filter(q => q.status === 'SENT').length,
-    accepted: allQuotations.filter(q => q.status === 'ACCEPTED').length,
-    converted: allQuotations.filter(q => q.status === 'CONVERTED').length,
+    open: openQuotations.length,
+    converted: allQuotations.filter(q => normalizeStatus(q.status) === 'CONVERTED').length,
+    cancelled: allQuotations.filter(q => normalizeStatus(q.status) === 'CANCELLED').length,
     totalValue: allQuotations.reduce((sum, q) => sum + q.totalAmount, 0),
-    activeValue: activeQuotations.reduce((sum, q) => sum + q.totalAmount, 0),
+    openValue: openQuotations.reduce((sum, q) => sum + q.totalAmount, 0),
   };
 
   const getStatusColor = (status: QuotationStatus): string => {
@@ -97,27 +95,19 @@ export default function QuotationsPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+        <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
-            <p className="text-sm text-gray-600">Active</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.active}</p>
-            <p className="text-xs text-gray-500 mt-1">{formatCurrency(stats.activeValue)}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-gray-500">
-            <p className="text-sm text-gray-600">Draft</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.draft}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-yellow-500">
-            <p className="text-sm text-gray-600">Sent</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.sent}</p>
+            <p className="text-sm text-gray-600">Open</p>
+            <p className="text-2xl font-bold text-gray-900">{stats.open}</p>
+            <p className="text-xs text-gray-500 mt-1">{formatCurrency(stats.openValue)}</p>
           </div>
           <div className="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
-            <p className="text-sm text-gray-600">Accepted</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.accepted}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
             <p className="text-sm text-gray-600">Converted</p>
             <p className="text-2xl font-bold text-gray-900">{stats.converted}</p>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-gray-500">
+            <p className="text-sm text-gray-600">Cancelled</p>
+            <p className="text-2xl font-bold text-gray-900">{stats.cancelled}</p>
           </div>
           <div className="bg-white rounded-lg shadow p-4 border-l-4 border-indigo-500">
             <p className="text-sm text-gray-600">Total Value</p>
@@ -160,14 +150,9 @@ export default function QuotationsPage() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     aria-label="Filter by status"
                   >
-                    <option value="ACTIVE">Active (Pending Action)</option>
+                    <option value="ACTIVE">Open (Pending Action)</option>
                     <option value="ALL">All Status</option>
-                    <option value="DRAFT">Draft</option>
-                    <option value="SENT">Sent</option>
-                    <option value="ACCEPTED">Accepted</option>
-                    <option value="REJECTED">Rejected</option>
-                    <option value="EXPIRED">Expired</option>
-                    <option value="CONVERTED">Converted (Fulfilled)</option>
+                    <option value="CONVERTED">Converted</option>
                     <option value="CANCELLED">Cancelled</option>
                   </select>
                 </div>
@@ -388,7 +373,7 @@ export default function QuotationsPage() {
                         >
                           View
                         </button>
-                        {(quote.status === 'DRAFT' || quote.status === 'SENT' || quote.status === 'ACCEPTED') && daysUntilExpiry > 0 && (
+                        {normalizeStatus(quote.status) === 'OPEN' && daysUntilExpiry > 0 && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -402,7 +387,7 @@ export default function QuotationsPage() {
                             Open in POS
                           </button>
                         )}
-                        {quote.status === 'ACCEPTED' && daysUntilExpiry > 0 && (
+                        {normalizeStatus(quote.status) === 'OPEN' && daysUntilExpiry > 0 && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

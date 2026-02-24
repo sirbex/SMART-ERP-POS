@@ -31,6 +31,114 @@ type ViewMode = 'table' | 'cards';
 type SortField = 'name' | 'createdAt' | 'paymentTerms';
 type SortOrder = 'asc' | 'desc';
 
+// ============================================================
+// Typed Interfaces (No `any` policy)
+// ============================================================
+
+interface Supplier {
+  id: string;
+  supplierCode?: string;
+  name: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+  address: string;
+  paymentTerms: string;
+  creditLimit?: number;
+  outstandingBalance?: number;
+  notes?: string;
+  isActive?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SupplierPerformance {
+  totalOrders: number;
+  pendingOrders: number;
+  completedOrders: number;
+  uniqueProducts: number;
+  totalValue: number;
+  outstandingAmount: number;
+  lastOrderDate: string | null;
+  avgDeliveryDays: number;
+  onTimeDeliveryRate: number;
+}
+
+interface SupplierOrder {
+  id: string;
+  orderNumber: string;
+  poNumber: string;
+  orderDate: string;
+  expectedDelivery: string | null;
+  status: string;
+  totalAmount: number;
+  itemCount: number;
+  notes?: string;
+}
+
+interface SupplierProduct {
+  productId: string;
+  productName: string;
+  totalQuantity: number;
+  avgUnitCost: number;
+  minUnitCost: number;
+  maxUnitCost: number;
+  lastOrderDate: string;
+  orderCount: number;
+}
+
+interface SupplierInvoiceSummary {
+  id: string;
+  invoiceNumber: string;
+  supplierInvoiceNumber: string | null;
+  supplierId: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  amountPaid: number;
+  outstandingBalance: number;
+  status: string;
+  notes: string | null;
+  lineItemCount: number;
+}
+
+interface InvoiceLineItem {
+  id: string;
+  lineNumber: number;
+  productId: string;
+  productName: string;
+  description: string | null;
+  quantity: number;
+  unitOfMeasure: string;
+  unitCost: number;
+  lineTotal: number;
+  taxRate: number;
+  taxAmount: number;
+  lineTotalIncludingTax: number;
+}
+
+interface InvoiceAllocation {
+  id: string;
+  paymentId: string;
+  paymentNumber: string;
+  amountAllocated: number;
+  allocationDate: string;
+  paymentMethod: string;
+}
+
+interface InvoiceDetails {
+  invoice: SupplierInvoiceSummary & {
+    supplierName?: string;
+    supplierContactName?: string;
+    supplierEmail?: string;
+    supplierPhone?: string;
+  };
+  lineItems: InvoiceLineItem[];
+  allocations: InvoiceAllocation[];
+}
+
 interface SupplierFormData {
   name: string;
   contactPerson: string;
@@ -75,7 +183,7 @@ export default function SuppliersPage() {
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((supplier: any) =>
+      filtered = filtered.filter((supplier: Supplier) =>
         supplier.name?.toLowerCase().includes(query) ||
         supplier.contactPerson?.toLowerCase().includes(query) ||
         supplier.email?.toLowerCase().includes(query) ||
@@ -86,13 +194,13 @@ export default function SuppliersPage() {
 
     // Payment terms filter
     if (filterPaymentTerms) {
-      filtered = filtered.filter((supplier: any) =>
+      filtered = filtered.filter((supplier: Supplier) =>
         supplier.paymentTerms === filterPaymentTerms
       );
     }
 
     // Sorting
-    filtered.sort((a: any, b: any) => {
+    filtered.sort((a: Supplier, b: Supplier) => {
       let aVal, bVal;
 
       switch (sortField) {
@@ -123,10 +231,10 @@ export default function SuppliersPage() {
   // Calculate statistics
   const stats = useMemo(() => {
     const total = allSuppliers.length;
-    const active = allSuppliers.filter((s: any) => s.isActive).length;
+    const active = allSuppliers.filter((s: Supplier) => s.isActive).length;
 
     // Payment terms breakdown
-    const paymentTermsBreakdown = allSuppliers.reduce((acc: any, supplier: any) => {
+    const paymentTermsBreakdown = allSuppliers.reduce((acc: Record<string, number>, supplier: Supplier) => {
       const term = supplier.paymentTerms || 'NET30';
       acc[term] = (acc[term] || 0) + 1;
       return acc;
@@ -138,7 +246,7 @@ export default function SuppliersPage() {
   // Export to CSV
   const handleExportCSV = () => {
     const headers = ['Name', 'Contact Person', 'Email', 'Phone', 'Address', 'Payment Terms', 'Status', 'Created At'];
-    const rows = suppliers.map((s: any) => [
+    const rows = suppliers.map((s: Supplier) => [
       s.name || '',
       s.contactPerson || '',
       s.email || '',
@@ -301,7 +409,7 @@ export default function SuppliersPage() {
               {Object.keys(stats.paymentTermsBreakdown).length} types
             </div>
             <div className="text-xs text-gray-500 mt-1">
-              Most common: {Object.entries(stats.paymentTermsBreakdown).sort((a: any, b: any) => b[1] - a[1])[0]?.[0] || 'N/A'}
+              Most common: {Object.entries(stats.paymentTermsBreakdown).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] || 'N/A'}
             </div>
           </div>
         </div>
@@ -452,7 +560,7 @@ export default function SuppliersPage() {
                       </td>
                     </tr>
                   ) : (
-                    suppliers.map((supplier: any) => (
+                    suppliers.map((supplier: Supplier) => (
                       <tr key={supplier.id} className="hover:bg-gray-50">
                         {/* Supplier Name */}
                         <td className="px-4 py-4">
@@ -543,7 +651,7 @@ export default function SuppliersPage() {
                   : 'No suppliers yet. Add your first supplier to get started!'}
               </div>
             ) : (
-              suppliers.map((supplier: any) => (
+              suppliers.map((supplier: Supplier) => (
                 <div
                   key={supplier.id}
                   className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-5"
@@ -695,24 +803,29 @@ export default function SuppliersPage() {
 
 // Supplier Detail Modal Component
 interface SupplierDetailModalProps {
-  supplier: any;
+  supplier: Supplier;
   onClose: () => void;
   onEdit: () => void;
 }
 
 function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'performance' | 'orders' | 'products'>('info');
-  const [performance, setPerformance] = useState<any>(null);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'info' | 'performance' | 'orders' | 'products' | 'invoices'>('info');
+  const [performance, setPerformance] = useState<SupplierPerformance | null>(null);
+  const [orders, setOrders] = useState<SupplierOrder[]>([]);
+  const [products, setProducts] = useState<SupplierProduct[]>([]);
+  const [invoices, setInvoices] = useState<SupplierInvoiceSummary[]>([]);
+  const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
+  const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetails | null>(null);
+  const [loadingInvoiceDetails, setLoadingInvoiceDetails] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
+  const [loadingTab, setLoadingTab] = useState<string | null>(null);
 
   const paymentTermInfo = PAYMENT_TERMS.find(t => t.value === supplier.paymentTerms);
 
   // Load data when tabs change
   const loadPerformance = async () => {
     if (performance) return; // Already loaded
-    setLoading(true);
+    setLoadingTab('performance');
     try {
       const response = await fetch(`http://localhost:3001/api/suppliers/${supplier.id}/performance`, {
         headers: {
@@ -726,13 +839,13 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     } catch (error) {
       console.error('Failed to load performance:', error);
     } finally {
-      setLoading(false);
+      setLoadingTab(null);
     }
   };
 
   const loadOrders = async () => {
     if (orders.length > 0) return; // Already loaded
-    setLoading(true);
+    setLoadingTab('orders');
     try {
       const response = await fetch(`http://localhost:3001/api/suppliers/${supplier.id}/orders?limit=50`, {
         headers: {
@@ -746,13 +859,13 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     } catch (error) {
       console.error('Failed to load orders:', error);
     } finally {
-      setLoading(false);
+      setLoadingTab(null);
     }
   };
 
   const loadProducts = async () => {
     if (products.length > 0) return; // Already loaded
-    setLoading(true);
+    setLoadingTab('products');
     try {
       const response = await fetch(`http://localhost:3001/api/suppliers/${supplier.id}/products`, {
         headers: {
@@ -766,7 +879,72 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     } catch (error) {
       console.error('Failed to load products:', error);
     } finally {
-      setLoading(false);
+      setLoadingTab(null);
+    }
+  };
+
+  const loadInvoices = async () => {
+    setLoadingTab('invoices');
+    try {
+      const response = await fetch(`http://localhost:3001/api/supplier-payments/suppliers/${supplier.id}/invoices`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      });
+      const data = await response.json();
+      if (data.success) {
+        setInvoices(data.data);
+      }
+    } catch (error) {
+      console.error('Failed to load invoices:', error);
+    } finally {
+      setLoadingTab(null);
+    }
+  };
+
+  const loadInvoiceDetails = async (invoiceId: string) => {
+    setLoadingInvoiceDetails(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/supplier-payments/invoices/${invoiceId}/details`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      });
+      const data = await response.json();
+      if (data.success) {
+        setInvoiceDetails(data.data);
+        setSelectedInvoice(invoiceId);
+      }
+    } catch (error) {
+      console.error('Failed to load invoice details:', error);
+    } finally {
+      setLoadingInvoiceDetails(false);
+    }
+  };
+
+  const handleDownloadPdf = async (invoiceId: string, invoiceNumber: string) => {
+    setDownloadingPdf(invoiceId);
+    try {
+      const response = await fetch(`http://localhost:3001/api/supplier-payments/invoices/${invoiceId}/pdf`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      });
+      if (!response.ok) throw new Error('Failed to generate PDF');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `supplier-invoice-${invoiceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
+      setDownloadingPdf(null);
     }
   };
 
@@ -776,6 +954,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (tab === 'performance') loadPerformance();
     if (tab === 'orders') loadOrders();
     if (tab === 'products') loadProducts();
+    if (tab === 'invoices') loadInvoices();
   };
 
   const formatCurrency = (amount: number) => {
@@ -838,6 +1017,15 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               }`}
           >
             🏷️ Items Supplied
+          </button>
+          <button
+            onClick={() => handleTabChange('invoices')}
+            className={`px-4 py-2 font-medium ${activeTab === 'invoices'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            📄 Invoices
           </button>
         </div>
 
@@ -964,7 +1152,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
 
           {activeTab === 'performance' && (
             <div>
-              {loading ? (
+              {loadingTab === 'performance' ? (
                 <div className="text-center py-12">
                   <div className="text-gray-600">Loading performance data...</div>
                 </div>
@@ -1024,13 +1212,13 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
 
           {activeTab === 'orders' && (
             <div>
-              {loading ? (
+              {loadingTab === 'orders' ? (
                 <div className="text-center py-12">
                   <div className="text-gray-600">Loading orders...</div>
                 </div>
               ) : orders.length > 0 ? (
                 <div className="space-y-3">
-                  {orders.map((order: any) => (
+                  {orders.map((order: SupplierOrder) => (
                     <div key={order.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
                       <div className="flex justify-between items-start mb-2">
                         <div>
@@ -1074,7 +1262,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
 
           {activeTab === 'products' && (
             <div>
-              {loading ? (
+              {loadingTab === 'products' ? (
                 <div className="text-center py-12">
                   <div className="text-gray-600">Loading products...</div>
                 </div>
@@ -1092,7 +1280,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {products.map((product: any, idx: number) => (
+                      {products.map((product: SupplierProduct, idx: number) => (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-sm font-medium text-gray-900">{product.productName}</td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">{product.orderCount}</td>
@@ -1112,6 +1300,250 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               ) : (
                 <div className="text-center py-12 text-gray-500">
                   No products supplied yet
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'invoices' && (
+            <div>
+              {loadingTab === 'invoices' ? (
+                <div className="text-center py-12">
+                  <div className="text-gray-600">Loading invoices...</div>
+                </div>
+              ) : invoices.length > 0 ? (
+                <div className="space-y-3">
+                  {/* Invoice Summary Cards */}
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="bg-blue-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-blue-600 mb-1">Total Invoices</div>
+                      <div className="text-xl font-bold text-blue-900">{invoices.length}</div>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-green-600 mb-1">Total Amount</div>
+                      <div className="text-lg font-bold text-green-900">
+                        {formatCurrency(invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => sum + Number(inv.totalAmount || 0), 0))}
+                      </div>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-red-600 mb-1">Outstanding</div>
+                      <div className="text-lg font-bold text-red-900">
+                        {formatCurrency(invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => sum + Number(inv.outstandingBalance || 0), 0))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Invoice List */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {invoices.map((inv: SupplierInvoiceSummary) => {
+                          const total = Number(inv.totalAmount || 0);
+                          const paid = Number(inv.amountPaid || 0);
+                          const balance = Number(inv.outstandingBalance || 0);
+                          const statusColor = inv.status === 'Paid' ? 'bg-green-100 text-green-800'
+                            : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
+                              : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
+                                : 'bg-gray-100 text-gray-800';
+                          return (
+                            <tr key={inv.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>
+                                  {inv.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
+                              <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
+                              <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
+                                {balance > 0 ? formatCurrency(balance) : '-'}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => loadInvoiceDetails(inv.id)}
+                                    className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
+                                    title="View Details"
+                                  >
+                                    👁️ View
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
+                                    disabled={downloadingPdf === inv.id}
+                                    className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50"
+                                    title="Download PDF"
+                                  >
+                                    {downloadingPdf === inv.id ? '⏳' : '📄'} PDF
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Invoice Detail Panel */}
+                  {selectedInvoice && invoiceDetails && (
+                    <div className="mt-4 border-2 border-blue-200 rounded-lg overflow-hidden">
+                      <div className="bg-blue-50 px-6 py-4 flex justify-between items-center">
+                        <div>
+                          <h4 className="text-lg font-semibold text-gray-900">
+                            {invoiceDetails.invoice.invoiceNumber}
+                            {invoiceDetails.invoice.supplierInvoiceNumber && (
+                              <span className="ml-2 text-sm font-normal text-gray-500">
+                                (Ref: {invoiceDetails.invoice.supplierInvoiceNumber})
+                              </span>
+                            )}
+                          </h4>
+                          <p className="text-sm text-gray-600">
+                            {formatDisplayDate(invoiceDetails.invoice.invoiceDate)}
+                            {invoiceDetails.invoice.dueDate && ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => handleDownloadPdf(selectedInvoice, invoiceDetails.invoice.invoiceNumber)}
+                            disabled={downloadingPdf === selectedInvoice}
+                            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {downloadingPdf === selectedInvoice ? '⏳ Generating...' : '📄 Download PDF'}
+                          </button>
+                          <button
+                            onClick={() => { setSelectedInvoice(null); setInvoiceDetails(null); }}
+                            className="text-gray-400 hover:text-gray-600 text-xl"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+
+                      {loadingInvoiceDetails ? (
+                        <div className="p-6 text-center text-gray-600">Loading details...</div>
+                      ) : (
+                        <div className="p-6 space-y-6">
+                          {/* Line Items */}
+                          {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (
+                            <div>
+                              <h5 className="text-sm font-semibold text-gray-700 mb-3">Line Items</h5>
+                              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product/Service</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit Cost</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {invoiceDetails.lineItems.map((item: InvoiceLineItem, idx: number) => (
+                                    <tr key={item.id || idx} className="hover:bg-gray-50">
+                                      <td className="px-3 py-2 text-gray-500">{item.lineNumber || idx + 1}</td>
+                                      <td className="px-3 py-2 font-medium text-gray-900">{item.productName}</td>
+                                      <td className="px-3 py-2 text-gray-600">{item.description || '-'}</td>
+                                      <td className="px-3 py-2 text-right text-gray-900">
+                                        {item.quantity} {item.unitOfMeasure || ''}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-900">{formatCurrency(item.unitCost)}</td>
+                                      <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(item.lineTotal)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot className="bg-gray-50">
+                                  <tr>
+                                    <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Subtotal:</td>
+                                    <td className="px-3 py-2 text-right font-bold text-gray-900">
+                                      {formatCurrency(Number(invoiceDetails.invoice.subtotal || invoiceDetails.invoice.totalAmount || 0))}
+                                    </td>
+                                  </tr>
+                                  {Number(invoiceDetails.invoice.taxAmount || 0) > 0 && (
+                                    <tr>
+                                      <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Tax:</td>
+                                      <td className="px-3 py-2 text-right font-bold text-gray-900">
+                                        {formatCurrency(Number(invoiceDetails.invoice.taxAmount))}
+                                      </td>
+                                    </tr>
+                                  )}
+                                  <tr className="border-t-2 border-gray-300">
+                                    <td colSpan={5} className="px-3 py-2 text-right font-bold text-gray-900">Total:</td>
+                                    <td className="px-3 py-2 text-right font-bold text-blue-600 text-lg">
+                                      {formatCurrency(Number(invoiceDetails.invoice.totalAmount || 0))}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-500 italic">No line items recorded for this invoice.</div>
+                          )}
+
+                          {/* Payments */}
+                          {invoiceDetails.allocations && invoiceDetails.allocations.length > 0 && (
+                            <div>
+                              <h5 className="text-sm font-semibold text-gray-700 mb-3">Payment History</h5>
+                              <div className="space-y-2">
+                                {invoiceDetails.allocations.map((alloc: InvoiceAllocation) => (
+                                  <div key={alloc.id} className="flex justify-between items-center bg-green-50 rounded-lg px-4 py-3">
+                                    <div>
+                                      <span className="font-medium text-gray-900">{alloc.paymentNumber}</span>
+                                      <span className="ml-2 text-sm text-gray-500">{formatDisplayDate(alloc.allocationDate)}</span>
+                                      <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">{alloc.paymentMethod}</span>
+                                    </div>
+                                    <span className="font-bold text-green-700">{formatCurrency(alloc.amountAllocated)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-3 flex justify-between items-center pt-3 border-t border-gray-200">
+                                <span className="font-semibold text-gray-700">Total Paid:</span>
+                                <span className="font-bold text-green-600 text-lg">
+                                  {formatCurrency(Number(invoiceDetails.invoice.amountPaid || 0))}
+                                </span>
+                              </div>
+                              {Number(invoiceDetails.invoice.outstandingBalance || 0) > 0 && (
+                                <div className="flex justify-between items-center mt-1">
+                                  <span className="font-semibold text-gray-700">Balance Due:</span>
+                                  <span className="font-bold text-red-600 text-lg">
+                                    {formatCurrency(Number(invoiceDetails.invoice.outstandingBalance))}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Notes */}
+                          {invoiceDetails.invoice.notes && (
+                            <div>
+                              <h5 className="text-sm font-semibold text-gray-700 mb-1">Notes</h5>
+                              <p className="text-sm text-gray-600">{invoiceDetails.invoice.notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  No invoices from this supplier yet
                 </div>
               )}
             </div>
@@ -1140,7 +1572,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
 
 // Supplier Form Modal Component
 interface SupplierFormModalProps {
-  supplier: any | null;
+  supplier: Supplier | null;
   onClose: () => void;
   onSubmit: (data: SupplierFormData) => void;
 }

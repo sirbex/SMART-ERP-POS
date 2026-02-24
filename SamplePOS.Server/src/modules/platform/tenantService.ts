@@ -208,10 +208,11 @@ export const tenantService = {
     if (data.plan && typeof data.plan === 'string') {
       const limits = PLAN_LIMITS[data.plan as keyof typeof PLAN_LIMITS];
       if (limits) {
-        data.maxUsers = data.maxUsers || limits.maxUsers;
-        data.maxProducts = data.maxProducts || limits.maxProducts;
-        data.maxLocations = data.maxLocations || limits.maxLocations;
-        data.storageLimitMb = data.storageLimitMb || limits.storageLimitMb;
+        // Use plan defaults unless explicitly overridden in this request
+        data.maxUsers = data.maxUsers ?? limits.maxUsers;
+        data.maxProducts = data.maxProducts ?? limits.maxProducts;
+        data.maxLocations = data.maxLocations ?? limits.maxLocations;
+        data.storageLimitMb = data.storageLimitMb ?? limits.storageLimitMb;
       }
     }
 

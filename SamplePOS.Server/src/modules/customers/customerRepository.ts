@@ -400,7 +400,7 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
        SELECT COALESCE(SUM(ip.amount),0) AS amt
        FROM invoice_payments ip
        INNER JOIN invoices i ON i."Id" = ip.invoice_id
-       WHERE i."CustomerId" = $1 AND ip.payment_date < $2
+       WHERE i."CustomerId" = $1 AND ip.payment_date::date < $2
      )
      SELECT (d.amt - c.amt) AS opening
      FROM debits d, credits c`,
@@ -440,7 +440,7 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
         ip.amount as credit
       FROM invoice_payments ip
       INNER JOIN invoices i ON i."Id" = ip.invoice_id
-      WHERE i."CustomerId" = $1 AND ip.payment_date >= $2 AND ip.payment_date <= $3
+      WHERE i."CustomerId" = $1 AND ip.payment_date::date >= $2 AND ip.payment_date::date <= $3
     )
     UNION ALL
     (
@@ -452,7 +452,7 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
         CASE WHEN sm.amount > 0 THEN sm.amount ELSE 0 END as debit,
         CASE WHEN sm.amount < 0 THEN -sm.amount ELSE 0 END as credit
       FROM customer_balance_adjustments sm
-      WHERE sm.customer_id = $1 AND sm.created_at >= $2 AND sm.created_at <= $3
+      WHERE sm.customer_id = $1 AND sm.created_at::date >= $2 AND sm.created_at::date <= $3
     )
     ORDER BY date ASC`,
     [customerId, start, end]
@@ -476,7 +476,7 @@ export async function getDepositEntries(customerId: string, start: Date, end: Da
         d.amount as amount,
         d.status
       FROM pos_customer_deposits d
-      WHERE d.customer_id = $1 AND d.created_at >= $2 AND d.created_at <= $3
+      WHERE d.customer_id = $1 AND d.created_at::date >= $2 AND d.created_at::date <= $3
     )
     UNION ALL
     (
@@ -490,7 +490,7 @@ export async function getDepositEntries(customerId: string, start: Date, end: Da
       FROM pos_deposit_applications da
       INNER JOIN pos_customer_deposits d ON d.id = da.deposit_id
       INNER JOIN sales s ON s.id = da.sale_id
-      WHERE d.customer_id = $1 AND da.applied_at >= $2 AND da.applied_at <= $3
+      WHERE d.customer_id = $1 AND da.applied_at::date >= $2 AND da.applied_at::date <= $3
     )
     ORDER BY date ASC`,
     [customerId, start, end]

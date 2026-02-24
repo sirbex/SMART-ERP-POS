@@ -16,8 +16,7 @@ interface User {
   id: string;
   userNumber: string; // Human-readable ID (e.g., USR-0001)
   email: string;
-  firstName: string;
-  lastName: string;
+  fullName: string;
   role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
   isActive: boolean;
   createdAt: string;
@@ -55,15 +54,13 @@ interface UserStats {
 interface CreateUserData {
   email: string;
   password: string;
-  firstName: string;
-  lastName: string;
+  fullName: string;
   role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
 }
 
 interface UpdateUserData {
   email?: string;
-  firstName?: string;
-  lastName?: string;
+  fullName?: string;
   role?: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
   isActive?: boolean;
 }
@@ -252,8 +249,7 @@ export default function UserManagementTab() {
   const filteredUsers = users.filter((user) => {
     const matchesSearch =
       user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.firstName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.lastName?.toLowerCase().includes(searchQuery.toLowerCase());
+      user.fullName?.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesRole = roleFilter === 'ALL' || user.role === roleFilter;
     const matchesStatus =
@@ -453,13 +449,12 @@ export default function UserManagementTab() {
                       <div className="flex items-center">
                         <div className="h-10 w-10 flex-shrink-0">
                           <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold">
-                            {user.firstName?.[0]?.toUpperCase() || 'U'}
-                            {user.lastName?.[0]?.toUpperCase() || ''}
+                            {user.fullName?.[0]?.toUpperCase() || 'U'}
                           </div>
                         </div>
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">
-                            {user.firstName || ''} {user.lastName || ''}
+                            {user.fullName || 'Unnamed'}
                           </div>
                           <div className="text-sm text-gray-500">{user.userNumber || user.id.slice(0, 8)}</div>
                         </div>
@@ -606,8 +601,7 @@ function CreateUserModal({
   const [formData, setFormData] = useState<CreateUserData>({
     email: '',
     password: '',
-    firstName: '',
-    lastName: '',
+    fullName: '',
     role: 'STAFF',
   });
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -649,26 +643,14 @@ function CreateUserModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
             <input
               type="text"
               required
-              value={formData.firstName}
-              onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+              value={formData.fullName}
+              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="John"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.lastName}
-              onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Doe"
+              placeholder="John Doe"
             />
           </div>
 
@@ -751,8 +733,7 @@ function EditUserModal({
 }) {
   const [formData, setFormData] = useState<UpdateUserData>({
     email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
+    fullName: user.fullName,
     role: user.role,
     isActive: user.isActive,
   });
@@ -767,7 +748,7 @@ function EditUserModal({
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">
-            Edit User: {user.firstName} {user.lastName}
+            Edit User: {user.fullName}
           </h3>
         </div>
 
@@ -785,26 +766,14 @@ function EditUserModal({
           </div>
 
           <div>
-            <label htmlFor="editFirstName" className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+            <label htmlFor="editFullName" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
             <input
-              id="editFirstName"
+              id="editFullName"
               type="text"
-              value={formData.firstName}
-              onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+              value={formData.fullName}
+              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              aria-label="User first name"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="editLastName" className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-            <input
-              id="editLastName"
-              type="text"
-              value={formData.lastName}
-              onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              aria-label="User last name"
+              aria-label="User full name"
             />
           </div>
 
@@ -897,7 +866,7 @@ function ChangePasswordModal({
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">
-            Change Password: {user.firstName} {user.lastName}
+            Change Password: {user.fullName}
           </h3>
         </div>
 
@@ -994,7 +963,7 @@ function DeleteUserDialog({
         <div className="p-6">
           <div className="bg-gray-50 rounded-lg p-4 mb-4">
             <p className="text-sm text-gray-600">
-              <strong>Name:</strong> {user.firstName} {user.lastName}
+              <strong>Name:</strong> {user.fullName}
             </p>
             <p className="text-sm text-gray-600 mt-1">
               <strong>Email:</strong> {user.email}
@@ -1199,7 +1168,7 @@ function ManageRolesModal({
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900">Manage RBAC Roles</h3>
-              <p className="text-sm text-gray-600">{user.firstName} {user.lastName} ({user.email})</p>
+              <p className="text-sm text-gray-600">{user.fullName} ({user.email})</p>
             </div>
           </div>
         </div>

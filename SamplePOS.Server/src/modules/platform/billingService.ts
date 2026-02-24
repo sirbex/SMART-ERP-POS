@@ -6,8 +6,7 @@
 
 import type pg from 'pg';
 import { tenantRepository } from './tenantRepository.js';
-import { PLAN_LIMITS, type TenantPlan, type BillingInfo } from '../../../../shared/types/tenant.js';
-import { normalizeTenant } from '../../../../shared/types/tenant.js';
+import { PLAN_LIMITS, type TenantPlan, type BillingInfo, normalizeTenant } from '../../../../shared/types/tenant.js';
 import { invalidateTenantCache } from '../../middleware/tenantMiddleware.js';
 import logger from '../../utils/logger.js';
 
@@ -119,7 +118,10 @@ export const billingService = {
     const users = userCount.rows[0]?.count || 0;
     const products = productCount.rows[0]?.count || 0;
     const transactions = txnCount.rows[0]?.count || 0;
-    const maxTxn = (tenant as unknown as Record<string, unknown>).max_transactions_per_month as number || 999999;
+
+    // Transaction limits are derived from plan, not stored in the tenants table
+    const planLimits = PLAN_LIMITS[tenant.plan as keyof typeof PLAN_LIMITS];
+    const maxTxn = planLimits ? planLimits.maxProducts * 10 : 999999; // heuristic: 10x products as txn cap
 
     const usage = {
       users: { current: users, max: tenant.max_users, exceeded: users > tenant.max_users },

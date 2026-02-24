@@ -1,46 +1,17 @@
 import pkg from 'pg';
 const { Pool } = pkg;
+const pool = new Pool({ connectionString: 'postgresql://postgres:password@localhost:5432/pos_system' });
 
-async function checkUsers() {
-  console.log('\n=== Checking Users in Both Databases ===\n');
-  
-  // Check samplepos database
-  console.log('1. samplepos database:');
-  try {
-    const pool = new Pool({
-      connectionString: 'postgresql://postgres:postgres@localhost:5432/samplepos'
-    });
-    
-    const users = await pool.query('SELECT id, email, name FROM users LIMIT 5');
-    console.log(`   Found ${users.rows.length} users:`);
-    users.rows.forEach(user => {
-      console.log(`     - ${user.email} (${user.name})`);
-    });
-    
-    await pool.end();
-  } catch (error) {
-    console.log(`   ❌ Error: ${error.message}`);
-  }
-  
-  // Check pos_system database  
-  console.log('\n2. pos_system database:');
-  try {
-    const pool = new Pool({
-      connectionString: 'postgresql://postgres:password@localhost:5432/pos_system'
-    });
-    
-    const users = await pool.query('SELECT id, email, name FROM users LIMIT 5');
-    console.log(`   Found ${users.rows.length} users:`);
-    users.rows.forEach(user => {
-      console.log(`     - ${user.email} (${user.name})`);
-    });
-    
-    await pool.end();
-  } catch (error) {
-    console.log(`   ❌ Error: ${error.message}`);
-  }
-  
-  console.log('\n');
-}
+const cols = await pool.query(`SELECT column_name, data_type, column_default FROM information_schema.columns WHERE table_name = 'users' ORDER BY ordinal_position`);
+console.log('=== USERS TABLE COLUMNS ===');
+cols.rows.forEach(r => console.log(`  ${r.column_name} (${r.data_type}) default=${r.column_default || 'none'}`));
 
-checkUsers();
+const nameCheck = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name', 'full_name')`);
+console.log('\n=== NAME COLUMNS PRESENT ===');
+nameCheck.rows.forEach(r => console.log(`  ${r.column_name}`));
+
+const users = await pool.query(`SELECT email, full_name, role FROM users ORDER BY created_at`);
+console.log('\n=== ALL USERS ===');
+console.table(users.rows);
+
+await pool.end();

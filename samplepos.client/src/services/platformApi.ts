@@ -21,26 +21,25 @@ export interface Tenant {
   slug: string;
   name: string;
   plan: 'FREE' | 'STARTER' | 'PROFESSIONAL' | 'ENTERPRISE';
-  status: 'ACTIVE' | 'SUSPENDED' | 'PENDING' | 'PROVISIONING' | 'DEACTIVATED';
+  status: 'ACTIVE' | 'SUSPENDED' | 'PROVISIONING' | 'DEACTIVATED';
   databaseName: string;
   databaseHost: string;
   databasePort: number;
   maxUsers: number;
   maxProducts: number;
   maxLocations: number;
-  maxTransactionsPerMonth: number;
   storageLimitMb: number;
   billingEmail?: string;
+  ownerUserId?: string;
   country: string;
   currency: string;
   timezone: string;
   customDomain?: string;
   edgeEnabled: boolean;
-  settings: Record<string, unknown>;
+  lastSyncAt?: string;
+  syncStatus: string;
   createdAt: string;
   updatedAt: string;
-  suspendedAt?: string;
-  suspendedReason?: string;
   deactivatedAt?: string;
 }
 
@@ -50,7 +49,6 @@ export interface TenantUsage {
   productCount: number;
   locationCount: number;
   storageUsedMb: number;
-  transactionCount: number;
   salesThisMonth: number;
 }
 

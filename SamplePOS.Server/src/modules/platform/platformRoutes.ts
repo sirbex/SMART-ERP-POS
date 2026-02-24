@@ -6,19 +6,22 @@
 
 import { Router } from 'express';
 import { platformController, requireSuperAdmin } from './platformController.js';
-import { strictRateLimit } from '../../middleware/security.js';
+import { strictRateLimit, apiRateLimit } from '../../middleware/security.js';
 
 const router = Router();
+
+// Apply rate limiting to ALL platform routes (prevent brute-force enumeration)
+router.use(apiRateLimit);
 
 // ============================================================
 // PUBLIC (no auth required)
 // ============================================================
 
-// Super admin login (rate-limited to prevent brute force)
+// Super admin login (extra strict rate limit on top of global)
 router.post('/auth/login', strictRateLimit, platformController.login);
 
-// Platform health check
-router.get('/health', platformController.platformHealth);
+// Platform health check — auth-protected to prevent infrastructure probing
+router.get('/health', requireSuperAdmin, platformController.platformHealth);
 
 // ============================================================
 // PROTECTED (super admin required)

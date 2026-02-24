@@ -89,20 +89,43 @@ router.get('/health', (_req, res) => {
 
 /**
  * GET /api/cash-registers
- * Get all registers (admin/manager) or active registers (staff)
+ * Get all registers with current session status
+ * Managers/admins see all registers; staff see active only (with session info)
  */
 router.get('/', authenticate, async (req, res) => {
     try {
         const user = req.user as { role: string };
         const isManager = ['ADMIN', 'MANAGER'].includes(user.role);
 
+        // Always include session status so the Open Register dialog knows availability
+        const registersWithStatus = await cashRegisterService.getRegistersWithStatus();
+
+        // Staff only see active registers (already filtered in query)
+        // Managers see all (need to include inactive too)
         const registers = isManager
             ? await cashRegisterService.getAllRegisters()
-            : await cashRegisterService.getActiveRegisters();
+            : [];
+
+        // Merge: for managers, enrich all registers with session info
+        if (isManager && registers.length > 0) {
+            const statusMap = new Map(registersWithStatus.map(r => [r.id, r]));
+            const enriched = registers.map(reg => {
+                const status = statusMap.get(reg.id);
+                return {
+                    ...reg,
+                    currentSessionId: status?.currentSessionId || null,
+                    currentSessionNumber: status?.currentSessionNumber || null,
+                    currentSessionUserId: status?.currentSessionUserId || null,
+                    currentSessionUserName: status?.currentSessionUserName || null,
+                    currentSessionOpenedAt: status?.currentSessionOpenedAt || null,
+                };
+            });
+            return res.json({ success: true, data: enriched });
+        }
 
         res.json({
             success: true,
-            data: registers
+            data: registersWithStatus
         });
     } catch (error) {
         logger.error('Error getting registers:', error);
@@ -449,6 +472,43 @@ router.post(
             res.status(500).json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to reconcile session'
+            });
+        }
+    }
+);
+
+/**
+ * POST /api/cash-registers/sessions/:id/force-close
+ * Force-close a stale/abandoned session (admin/manager only)
+ * Used when a cashier left without closing, blocking the register
+ */
+router.post(
+    '/sessions/:id/force-close',
+    authenticate,
+    requirePermission('pos.approve'),
+    async (req, res) => {
+        try {
+            const user = req.user as { id: string };
+            const session = await cashRegisterService.forceCloseSession(req.params.id, user.id);
+
+            res.json({
+                success: true,
+                data: session,
+                message: 'Session force-closed successfully'
+            });
+        } catch (error) {
+            if (error instanceof Error &&
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => error.message.includes(code))) {
+                return res.status(400).json({
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            logger.error('Error force-closing session:', error);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to force-close session'
             });
         }
     }

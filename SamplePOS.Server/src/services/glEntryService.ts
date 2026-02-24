@@ -46,6 +46,7 @@ export const AccountCodes = {
   // Liabilities
   ACCOUNTS_PAYABLE: '2100',
   CUSTOMER_DEPOSITS: '2200',
+  TAX_PAYABLE: '2300',
 
   // Equity
   OWNERS_EQUITY: '3000',
@@ -81,6 +82,7 @@ export interface SaleData {
   costAmount: number;
   paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
   amountPaid?: number;  // Amount actually paid (for partial payment tracking)
+  taxAmount?: number;   // Tax amount (posted to Tax Payable liability)
   customerId?: string;
   customerName?: string;
   // NEW: Line items for proper revenue/cost classification
@@ -99,24 +101,27 @@ export interface SaleItemData {
  * Record a completed sale in the general ledger
  * 
  * Journal entries for a MIXED sale (inventory + service):
- *   DR Cash (1010)                    totalAmount
- *   CR Sales Revenue (4000)           inventoryRevenue
- *   CR Service Revenue (4100)         serviceRevenue
+ *   DR Cash (1010)                    totalAmount (tax-inclusive)
+ *   CR Sales Revenue (4000)           inventoryRevenue (pre-tax)
+ *   CR Service Revenue (4100)         serviceRevenue (pre-tax)
+ *   CR Tax Payable (2300)             taxAmount
  *   
  *   DR Cost of Goods Sold (5000)      inventoryCost (service items excluded)
  *   CR Inventory (1300)               inventoryCost (service items excluded)
  * 
  * Journal entries for a cash sale (inventory only):
- *   DR Cash (1010)              totalAmount
- *   CR Sales Revenue (4000)     totalAmount
+ *   DR Cash (1010)              totalAmount (tax-inclusive)
+ *   CR Sales Revenue (4000)     subtotal (pre-tax)
+ *   CR Tax Payable (2300)       taxAmount
  *   
  *   DR Cost of Goods Sold (5000) costAmount
  *   CR Inventory (1300)          costAmount
  * 
  * Journal entries for a credit sale:
- *   DR Accounts Receivable (1200) totalAmount
- *   CR Sales Revenue (4000)       inventoryRevenue
- *   CR Service Revenue (4100)     serviceRevenue
+ *   DR Accounts Receivable (1200) totalAmount (tax-inclusive)
+ *   CR Sales Revenue (4000)       inventoryRevenue (pre-tax)
+ *   CR Service Revenue (4100)     serviceRevenue (pre-tax)
+ *   CR Tax Payable (2300)         taxAmount
  *   
  *   DR Cost of Goods Sold (5000)  inventoryCost
  *   CR Inventory (1300)           inventoryCost
@@ -346,6 +351,18 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
           creditAmount: serviceRevenue
         });
       }
+    }
+
+    // CREDIT: Tax Payable (Account 2300) - Tax collected on sale
+    // Tax is the difference between tax-inclusive total_amount and pre-tax revenue
+    const taxAmount = sale.taxAmount ?? 0;
+    if (taxAmount > 0) {
+      ledgerLines.push({
+        accountCode: AccountCodes.TAX_PAYABLE,
+        description: `Tax collected on sale ${sale.saleNumber}`,
+        debitAmount: 0,
+        creditAmount: taxAmount
+      });
     }
 
     // Record inventory cost (excludes service items)

@@ -23,7 +23,7 @@ export interface CreateHoldOrderData {
 
 export interface CreateHoldOrderItemData {
     holdId: string;
-    productId: string;
+    productId: string | null; // Nullable for service/custom items
     productName: string;
     productSku?: string | null;
     productType: 'inventory' | 'consumable' | 'service';

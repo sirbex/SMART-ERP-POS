@@ -198,19 +198,14 @@ export default function NewQuotationPage() {
     }
 
     const quotationData = {
-      quoteType: 'standard',
+      quoteType: 'standard' as const,
       customerId: selectedCustomer?.id,
       customerName: customerName || selectedCustomer?.name,
       customerPhone: customerPhone || selectedCustomer?.phone,
       customerEmail: customerEmail || selectedCustomer?.email,
-      reference,
       validFrom: new Date().toISOString().split('T')[0],
       validUntil,
-      termsAndConditions,
-      paymentTerms,
-      deliveryTerms,
-      internalNotes,
-      requiresApproval,
+      notes: internalNotes || undefined,
       items: items.map((item) => ({
         ...item,
         uomId: item.uomId || undefined, // Convert null to undefined for Zod

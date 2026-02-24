@@ -514,16 +514,20 @@ export const goodsReceiptService = {
       // This creates a payable in the supplier payments module
       // IDEMPOTENCY: Check if invoice already exists for this GR
       // ============================================================
-      const totalAmount = items.reduce((sum: number, item: any) => {
-        const qty = Number(item.receivedQuantity ?? item.received_quantity ?? 0);
-        const cost = Number(item.unitCost ?? item.unit_cost ?? item.cost_price ?? 0);
-        return sum + (qty * cost);
-      }, 0);
+      const totalAmountDec = (items as Array<Record<string, unknown>>).reduce(
+        (sum: Decimal, item: Record<string, unknown>) => {
+          const qty = new Decimal(String(item.receivedQuantity ?? item.received_quantity ?? 0));
+          const cost = new Decimal(String(item.unitCost ?? item.unit_cost ?? item.cost_price ?? 0));
+          return sum.plus(qty.times(cost));
+        },
+        new Decimal(0)
+      );
+      const totalAmount = totalAmountDec.toNumber();
 
       if (totalAmount > 0) {
         const supplierId = gr.supplierId ?? gr.supplier_id;
         const grNumber = gr.grNumber ?? gr.gr_number ?? gr.receipt_number ?? id;
-        const receiptDate = gr.receiptDate ?? gr.receipt_date ?? new Date().toISOString().split('T')[0];
+        const receiptDate: string = gr.receiptDate ?? gr.receipt_date ?? '';
 
         // IDEMPOTENCY CHECK: Don't create duplicate invoice for same GR
         const existingInvoice = await client.query(
@@ -546,28 +550,58 @@ export const goodsReceiptService = {
           );
           const paymentTermsDays = supplierResult.rows[0]?.DefaultPaymentTerms ?? 30;
 
-          // Calculate due date based on payment terms
-          const invoiceDate = new Date(receiptDate);
-          const dueDate = new Date(invoiceDate);
-          dueDate.setDate(dueDate.getDate() + paymentTermsDays);
+          // Calculate invoice date and due date using SQL for timezone safety
+          // Avoids JS Date object construction which violates timezone strategy
+          const dateCalcResult = await client.query(
+            `SELECT 
+               COALESCE($1::date, CURRENT_DATE)::text as invoice_date,
+               (COALESCE($1::date, CURRENT_DATE) + ($2 || ' days')::interval)::date::text as due_date`,
+            [receiptDate || null, paymentTermsDays]
+          );
+          const invoiceDateStr = dateCalcResult.rows[0].invoice_date;
+          const dueDateStr = dateCalcResult.rows[0].due_date;
 
           try {
-            await supplierPaymentRepository.createInvoice(client as any, {
+            const createdInvoice = await supplierPaymentRepository.createInvoice(client as any, {
               supplierId,
               supplierInvoiceNumber: grNumber, // Use GR number as reference
-              invoiceDate: invoiceDate.toISOString().split('T')[0],
-              dueDate: dueDate.toISOString().split('T')[0],
+              invoiceDate: invoiceDateStr,
+              dueDate: dueDateStr,
               subtotal: totalAmount,
               taxAmount: 0,
               totalAmount,
               notes: `Auto-created from Goods Receipt ${grNumber}`,
             });
 
-            logger.info('Supplier invoice created from GR', {
+            // Insert line items from GR items into the invoice
+            const invoiceLineItems = (items as Array<Record<string, unknown>>).filter((raw) => {
+              const qty = Number(raw.receivedQuantity ?? raw.received_quantity ?? 0);
+              return qty > 0;
+            }).map((raw) => ({
+              productId: String(raw.productId ?? raw.product_id ?? ''),
+              productName: String(raw.productName ?? raw.product_name ?? 'Unknown product'),
+              description: `From GR ${grNumber}`,
+              quantity: new Decimal(String(raw.receivedQuantity ?? raw.received_quantity ?? 0)).toNumber(),
+              unitOfMeasure: String(raw.unitOfMeasure ?? raw.unit_of_measure ?? 'EA'),
+              unitCost: new Decimal(String(raw.unitCost ?? raw.unit_cost ?? raw.cost_price ?? 0)).toNumber(),
+              taxRate: 0,
+              taxAmount: 0,
+            }));
+
+            if (invoiceLineItems.length > 0) {
+              await supplierPaymentRepository.createInvoiceLineItems(
+                client as any,
+                createdInvoice.id,
+                invoiceLineItems
+              );
+            }
+
+            logger.info('Supplier invoice created from GR with line items', {
               grId: id,
               grNumber,
               supplierId,
               totalAmount,
+              lineItemCount: invoiceLineItems.length,
             });
           } catch (invoiceError: any) {
             logger.error('Failed to create supplier invoice from GR', {

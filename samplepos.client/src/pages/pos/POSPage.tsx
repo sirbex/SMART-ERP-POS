@@ -32,6 +32,7 @@ import ManagerApprovalDialog from '../../components/pos/ManagerApprovalDialog';
 import { ResumeHoldDialog } from '../../components/pos/ResumeHoldDialog';
 import { ServiceInfoBanner } from '../../components/pos/ServiceInfoBanner';
 import { ServiceBadge } from '../../components/pos/ServiceBadge';
+import AddServiceItemDialog from '../../components/pos/AddServiceItemDialog';
 import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/cash-register';
 import { useCurrentSession } from '../../hooks/useCashRegister';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
@@ -86,6 +87,9 @@ export default function POSPage() {
 
   // State for showing open register dialog when required
   const [showOpenRegisterDialog, setShowOpenRegisterDialog] = useState(false);
+
+  // Service item dialog state
+  const [showServiceItemDialog, setShowServiceItemDialog] = useState(false);
 
   // Check if register is open - sales blocked without this
   const hasOpenRegister = !!currentSession;
@@ -269,8 +273,19 @@ export default function POSPage() {
       if (savedCustomer && !selectedCustomer) {
         try {
           const customerData = JSON.parse(savedCustomer);
-          console.log('📋 Restoring previously loaded quote customer:', customerData);
-          setSelectedCustomer(customerData);
+          // Only restore if there's also a persisted cart (quote items) to go with it
+          const savedCart = localStorage.getItem('pos_persisted_cart_v1');
+          if (savedCart) {
+            const cartData = JSON.parse(savedCart);
+            if (cartData?.items?.length > 0) {
+              console.log('📋 Restoring previously loaded quote customer:', customerData);
+              setSelectedCustomer(customerData);
+            } else {
+              localStorage.removeItem('pos_loaded_quote_customer');
+            }
+          } else {
+            localStorage.removeItem('pos_loaded_quote_customer');
+          }
         } catch (error) {
           console.error('Failed to restore quote customer:', error);
           localStorage.removeItem('pos_loaded_quote_customer');
@@ -481,6 +496,13 @@ export default function POSPage() {
         return;
       }
 
+      // Ctrl+J: Add Service / Non-Inventory Item
+      if (e.ctrlKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setShowServiceItemDialog(true);
+        return;
+      }
+
       // Ctrl+Enter: Finalize sale (when payment modal open)
       if (e.ctrlKey && e.key === 'Enter') {
         e.preventDefault();
@@ -599,6 +621,7 @@ export default function POSPage() {
       localStorage.removeItem('pos_local_stock');
       localStorage.removeItem('pos_catalog_last_sync');
       localStorage.removeItem('inventory_items');
+      localStorage.removeItem('pos_loaded_quote_customer');
 
       toast.success('✅ All data cleared successfully');
       console.log('🗑️ All POS data cleared (cart + localStorage)');
@@ -936,22 +959,26 @@ export default function POSPage() {
         totalAmount: grandTotal,
         holdReason: undefined,
         notes: undefined,
-        items: items.map((item, index) => ({
-          productId: item.id,
-          productName: item.name,
-          productSku: item.sku,
-          uomId: item.selectedUomId,
-          uomName: item.uom,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          costPrice: item.costPrice,
-          subtotal: item.subtotal,
-          productType: item.productType || 'inventory',
-          discountAmount: item.discount || 0,
-          taxAmount: 0,
-          isTaxable: false,
-          lineOrder: index,
-        })),
+        items: items.map((item, index) => {
+          // Service/custom items have no real product in DB — send null productId
+          const isServiceOrCustom = item.productType === 'service' || item.id.startsWith('custom_');
+          return {
+            productId: isServiceOrCustom ? null : item.id,
+            productName: item.name,
+            productSku: item.sku,
+            uomId: item.selectedUomId,
+            uomName: item.uom,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            costPrice: item.costPrice,
+            subtotal: item.subtotal,
+            productType: item.productType || 'inventory',
+            discountAmount: item.discount || 0,
+            taxAmount: 0,
+            isTaxable: false,
+            lineOrder: index,
+          };
+        }),
       });
 
       if (response.data.success) {
@@ -993,22 +1020,30 @@ export default function POSPage() {
       const hold = response.data.data;
 
       // Restore cart from hold
-      setItems(hold.items.map((item: any) => ({
-        id: item.productId,
-        name: item.productName,
-        sku: item.productSku,
-        uom: item.uomName,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        costPrice: item.costPrice,
-        marginPct: item.unitPrice > 0 ? ((item.unitPrice - item.costPrice) / item.unitPrice) * 100 : 0,
-        subtotal: item.subtotal,
-        isTaxable: item.isTaxable,
-        taxRate: item.taxRate,
-        selectedUomId: item.uomId,
-        discount: item.discountAmount,
-        productType: item.productType || 'inventory',
-      })));
+      setItems(hold.items.map((item: any) => {
+        // Service/custom items have null productId — generate a unique custom ID
+        const isServiceItem = !item.productId || item.productType === 'service';
+        const itemId = isServiceItem
+          ? `custom_svc_${item.productName?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+          : item.productId;
+
+        return {
+          id: itemId,
+          name: item.productName,
+          sku: item.productSku,
+          uom: item.uomName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          costPrice: item.costPrice,
+          marginPct: item.unitPrice > 0 ? ((item.unitPrice - item.costPrice) / item.unitPrice) * 100 : 0,
+          subtotal: item.subtotal,
+          isTaxable: item.isTaxable,
+          taxRate: item.taxRate,
+          selectedUomId: item.uomId,
+          discount: item.discountAmount,
+          productType: item.productType || 'inventory',
+        };
+      }));
 
       if (hold.customerName) {
         toast(`Customer: ${hold.customerName}`, {
@@ -1078,20 +1113,24 @@ export default function POSPage() {
       setIsSavingQuote(true);
 
       // Convert cart items to quote items
-      const quoteItems: QuickQuoteItemInput[] = items.map(item => ({
-        productId: item.id,
-        itemType: item.productType === 'service' ? 'service' : 'product',
-        sku: item.sku,
-        description: item.name,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        isTaxable: item.isTaxable,
-        taxRate: item.taxRate,
-        uomId: item.selectedUomId || undefined, // Convert null to undefined for Zod
-        uomName: item.uom,
-        unitCost: item.costPrice,
-        productType: item.productType || 'inventory',
-      }));
+      const quoteItems: QuickQuoteItemInput[] = items.map(item => {
+        // Service/custom items have no real product in DB — send null productId
+        const isServiceOrCustom = item.productType === 'service' || item.id.startsWith('custom_');
+        return {
+          productId: isServiceOrCustom ? null : item.id,
+          itemType: isServiceOrCustom ? 'service' as const : 'product' as const,
+          sku: item.sku,
+          description: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          isTaxable: item.isTaxable,
+          taxRate: item.taxRate,
+          uomId: item.selectedUomId || undefined, // Convert null to undefined for Zod
+          uomName: item.uom,
+          unitCost: item.costPrice,
+          productType: item.productType || 'inventory',
+        };
+      });
 
       // Create quick quote
       const response = await quotationApi.createQuickQuote({
@@ -1180,22 +1219,31 @@ export default function POSPage() {
       setCartDiscount(null);
 
       // Load quote items into cart
-      const cartItems: LineItem[] = itemsToLoad.map((item: any) => ({
-        id: item.productId || `custom_${Date.now()}_${Math.random()}`,
-        name: item.description,
-        sku: item.sku || '',
-        unitPrice: parseFloat(item.unitPrice),
-        costPrice: item.unitCost ? parseFloat(item.unitCost) : 0,
-        quantity: parseFloat(item.quantity),
-        subtotal: parseFloat(item.lineTotal || item.quantity * item.unitPrice),
-        isTaxable: item.isTaxable,
-        taxRate: item.taxRate || 18,
-        uom: item.uomName || 'unit',
-        selectedUomId: item.uomId || undefined, // Convert null to undefined for Zod validation
-        productType: item.productType as any || 'inventory',
-        quantityInStock: 1000, // Placeholder
-        marginPct: 0,
-      }));
+      const cartItems: LineItem[] = itemsToLoad.map((item: any) => {
+        // Service/custom items have null productId — generate a unique custom ID
+        const isServiceItem = !item.productId || item.itemType === 'service' || item.itemType === 'custom';
+        const itemId = isServiceItem
+          ? `custom_svc_${item.description?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+          : item.productId;
+        const productType = isServiceItem ? 'service' : (item.productType || 'inventory');
+
+        return {
+          id: itemId,
+          name: item.description,
+          sku: item.sku || '',
+          unitPrice: parseFloat(item.unitPrice),
+          costPrice: item.unitCost ? parseFloat(item.unitCost) : 0,
+          quantity: parseFloat(item.quantity),
+          subtotal: parseFloat(item.lineTotal || item.quantity * item.unitPrice),
+          isTaxable: item.isTaxable,
+          taxRate: item.taxRate || 18,
+          uom: item.uomName || 'unit',
+          selectedUomId: item.uomId || undefined, // Convert null to undefined for Zod validation
+          productType: productType as LineItem['productType'],
+          quantityInStock: 1000, // Placeholder
+          marginPct: 0,
+        };
+      });
 
       setItems(cartItems);
 
@@ -1325,6 +1373,12 @@ export default function POSPage() {
 
   const grandTotal = new Decimal(subtotalAfterDiscount).plus(tax).toNumber();
   const avgMargin = items.length ? items.reduce((sum, i) => sum + i.marginPct, 0) / items.length : 0;
+
+  // Handler to add a service/non-inventory item to the cart
+  const handleAddServiceItem = useCallback((serviceItem: LineItem) => {
+    setItems(prev => [...prev, serviceItem]);
+    toast.success(`Added: ${serviceItem.name}`);
+  }, []);
 
   // Service items detection and revenue calculation
   const serviceItemsCount = useMemo(() => {
@@ -1682,8 +1736,11 @@ export default function POSPage() {
       calculation: `${subtotalAfterDiscount} + ${tax} = ${grandTotal}`
     });
 
+    // Strip temp_ customer IDs — they're placeholders for quotation customers with no DB record
+    const resolvedCustomerId = selectedCustomer?.id?.startsWith('temp_') ? undefined : selectedCustomer?.id;
+
     const saleData = {
-      customerId: selectedCustomer?.id,
+      customerId: resolvedCustomerId,
       quoteId: loadedQuoteId || undefined, // Pass quote ID for auto-conversion
       cashRegisterSessionId: currentSession?.id, // Link to cash register for drawer tracking
       lineItems: items.map(item => {
@@ -2100,111 +2157,84 @@ export default function POSPage() {
             />
           )}
 
-          <div className="flex gap-2 mb-2">
-            <POSButton
-              variant="secondary"
+          {/* Primary Action — Payment */}
+          <button
+            onClick={() => items.length > 0 && setShowPaymentModal(true)}
+            disabled={items.length === 0}
+            className="w-full py-3.5 mb-3 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-emerald-200 border border-emerald-400"
+          >
+            💳 Charge {items.length > 0 && formatCurrency(grandTotal)}
+            <span className="block text-[10px] font-normal opacity-70 mt-0.5">Shift + Enter</span>
+          </button>
+
+          {/* Quick Actions — 2×2 colored grid */}
+          <div className="grid grid-cols-2 gap-2.5 mb-3">
+            {/* Discount */}
+            <button
               onClick={() => handleOpenDiscountDialog('cart')}
               disabled={items.length === 0}
-              className="flex-1 text-sm py-2"
+              className="flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-amber-50 to-amber-100 border border-amber-200 text-amber-800 text-sm font-semibold hover:from-amber-100 hover:to-amber-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              title="Apply Discount (Ctrl+D)"
             >
-              Apply Discount (Ctrl+D)
-            </POSButton>
-            <POSButton
-              variant="danger"
-              onClick={handleClearAllData}
-              className="flex-1 text-sm py-2"
-              title="Clear cart and all offline data (Ctrl+Shift+C)"
+              <span className="text-lg">🏷️</span>
+              <span>Discount</span>
+              <span className="text-[9px] font-normal text-amber-500">Ctrl+D</span>
+            </button>
+
+            {/* Service Item */}
+            <button
+              onClick={() => setShowServiceItemDialog(true)}
+              className="flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-violet-50 to-violet-100 border border-violet-200 text-violet-800 text-sm font-semibold hover:from-violet-100 hover:to-violet-200 active:scale-[0.97] transition-all shadow-sm"
+              title="Add Service / Non-Inventory Item (Ctrl+J)"
             >
-              Clear All
-            </POSButton>
-          </div>
+              <span className="text-lg">🛠️</span>
+              <span>Service</span>
+              <span className="text-[9px] font-normal text-violet-500">Ctrl+J</span>
+            </button>
 
-          {/* Smart Hold/Retrieve Toggle Button (QuickBooks POS style) */}
-          <POSButton
-            variant={items.length > 0 ? "secondary" : (heldOrdersCount > 0 ? "primary" : "secondary")}
-            onClick={handleHoldRetrieveToggle}
-            disabled={items.length === 0 && heldOrdersCount === 0}
-            className="w-full py-3 mb-2 relative group transition-all"
-            title={
-              items.length > 0
-                ? "Hold current cart - Ctrl+H"
-                : heldOrdersCount > 0
-                  ? `Retrieve ${heldOrdersCount} held order(s) - Ctrl+H`
-                  : "No held orders"
-            }
-          >
-            <div className="flex items-center justify-center gap-3">
-              {/* Icon with animation */}
-              <span className="text-2xl transition-transform group-hover:scale-110">
-                {items.length > 0 ? '💾' : '📦'}
-              </span>
-
-              {/* Label */}
-              <div className="flex flex-col items-start">
-                <span className="font-semibold">
-                  {items.length > 0 ? 'Hold Cart' : 'Retrieve Holds'}
-                </span>
-                <span className="text-xs opacity-70">
-                  Ctrl+H
-                </span>
-              </div>
-
-              {/* Badge */}
+            {/* Hold / Retrieve */}
+            <button
+              onClick={handleHoldRetrieveToggle}
+              disabled={items.length === 0 && heldOrdersCount === 0}
+              className="relative flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-orange-50 to-orange-100 border border-orange-200 text-orange-800 text-sm font-semibold hover:from-orange-100 hover:to-orange-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              title={items.length > 0 ? 'Hold Cart (Ctrl+H)' : `Retrieve Holds (Ctrl+H)`}
+            >
+              <span className="text-lg">{items.length > 0 ? '💾' : '📦'}</span>
+              <span>{items.length > 0 ? 'Hold' : 'Retrieve'}</span>
+              <span className="text-[9px] font-normal text-orange-500">Ctrl+H</span>
               {heldOrdersCount > 0 && (
-                <span className="absolute -top-2 -right-2 min-w-[28px] h-7 px-2 bg-orange-500 text-white text-sm font-bold rounded-full shadow-lg flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-orange-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
                   {heldOrdersCount}
                 </span>
               )}
-            </div>
-          </POSButton>
+            </button>
 
-          {/* Smart Quote Toggle Button */}
-          <POSButton
-            variant={items.length > 0 ? "secondary" : (quotesCount > 0 ? "primary" : "secondary")}
-            onClick={handleQuoteToggle}
-            disabled={items.length === 0 && quotesCount === 0}
-            className="w-full py-3 mb-2 relative group transition-all"
-            title={
-              items.length > 0
-                ? "Save current cart as quote - Ctrl+Q"
-                : quotesCount > 0
-                  ? `Load saved quote (${quotesCount} available) - Ctrl+Q`
-                  : "No saved quotes"
-            }
-          >
-            <div className="flex items-center justify-center gap-3">
-              {/* Icon with animation */}
-              <span className="text-2xl transition-transform group-hover:scale-110">
-                {items.length > 0 ? '💼' : '📋'}
-              </span>
-
-              {/* Label */}
-              <div className="flex flex-col items-start">
-                <span className="font-semibold">
-                  {items.length > 0 ? 'Save as Quote' : 'Load Quote'}
-                </span>
-                <span className="text-xs opacity-70">
-                  Ctrl+Q
-                </span>
-              </div>
-
-              {/* Badge */}
+            {/* Quote */}
+            <button
+              onClick={handleQuoteToggle}
+              disabled={items.length === 0 && quotesCount === 0}
+              className="relative flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-sky-50 to-sky-100 border border-sky-200 text-sky-800 text-sm font-semibold hover:from-sky-100 hover:to-sky-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              title={items.length > 0 ? 'Save Quote (Ctrl+Q)' : 'Load Quote (Ctrl+Q)'}
+            >
+              <span className="text-lg">{items.length > 0 ? '📝' : '📋'}</span>
+              <span>{items.length > 0 ? 'Quote' : 'Load Quote'}</span>
+              <span className="text-[9px] font-normal text-sky-500">Ctrl+Q</span>
               {quotesCount > 0 && items.length === 0 && (
-                <span className="absolute -top-2 -right-2 min-w-[28px] h-7 px-2 bg-blue-500 text-white text-sm font-bold rounded-full shadow-lg flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-sky-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
                   {quotesCount}
                 </span>
               )}
-            </div>
-          </POSButton>
+            </button>
+          </div>
 
-          <POSButton
-            variant="primary"
-            onClick={() => items.length > 0 && setShowPaymentModal(true)}
-            disabled={items.length === 0}
-            className="w-full text-sm sm:text-base py-3"
+          {/* Clear — subtle danger button */}
+          <button
+            onClick={handleClearAllData}
+            className="w-full py-2 text-xs font-medium text-red-400 hover:text-white hover:bg-red-500 rounded-lg border border-transparent hover:border-red-500 transition-all"
+            title="Clear cart and all offline data (Ctrl+Shift+C)"
           >
-            Payment (Shift+Enter)
-          </POSButton>
+            🗑️ Clear All
+          </button>
         </section>
       </main>
       {/* Receipt Modal */}
@@ -3212,6 +3242,13 @@ export default function POSPage() {
           Barcode Scanner Ready
         </span>
       </footer>
+
+      {/* Add Service Item Dialog */}
+      <AddServiceItemDialog
+        open={showServiceItemDialog}
+        onOpenChange={setShowServiceItemDialog}
+        onAdd={handleAddServiceItem}
+      />
 
       {/* Open Register Dialog - shown when user tries to make sale without session */}
       <OpenRegisterDialog

@@ -7,6 +7,9 @@ import { Pool } from 'pg';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import * as supplierPaymentService from './supplierPaymentService.js';
+import { getSettings } from '../settings/invoiceSettingsService.js';
+import PDFDocument from 'pdfkit';
+import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 
 export function createSupplierPaymentRoutes(pool: Pool): Router {
@@ -44,7 +47,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
             res.json({
                 success: true,
-                ...result
+                data: result
             });
         } catch (error: any) {
             logger.error('Error fetching supplier payments', { error: error.message });
@@ -78,12 +81,19 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 });
             }
 
-            const userId = (req as any).user?.id;
+            // Use SQL CURRENT_DATE for timezone-safe default (avoids JS Date timezone issues)
+            let resolvedPaymentDate = paymentDate;
+            if (!resolvedPaymentDate) {
+                const dateResult = await pool.query("SELECT CURRENT_DATE::text as today");
+                resolvedPaymentDate = dateResult.rows[0].today;
+            }
+
+            const userId = req.user?.id;
             const payment = await supplierPaymentService.createSupplierPayment(pool, {
                 supplierId,
-                amount: parseFloat(amount),
+                amount: new Decimal(amount).toNumber(),
                 paymentMethod,
-                paymentDate: paymentDate || new Date().toISOString().split('T')[0],
+                paymentDate: resolvedPaymentDate,
                 reference,
                 notes
             }, userId);
@@ -137,7 +147,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     // Auto-allocate payment
     router.post('/payments/:id/auto-allocate', requirePermission('suppliers.create'), async (req: Request, res: Response) => {
         try {
-            const userId = (req as any).user?.id;
+            const userId = req.user?.id;
             const allocations = await supplierPaymentService.autoAllocatePayment(pool, req.params.id, userId);
             res.json({ success: true, data: allocations });
         } catch (error: any) {
@@ -175,11 +185,286 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
             res.json({
                 success: true,
-                ...result
+                data: result
             });
         } catch (error: any) {
             logger.error('Error fetching supplier invoices', { error: error.message });
             res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    // Get supplier invoice with full details (line items + allocations)
+    router.get('/invoices/:id/details', async (req: Request, res: Response) => {
+        try {
+            const details = await supplierPaymentService.getSupplierInvoiceWithDetails(pool, req.params.id);
+            if (!details) {
+                return res.status(404).json({ success: false, error: 'Invoice not found' });
+            }
+            res.json({ success: true, data: details });
+        } catch (error: any) {
+            logger.error('Error fetching supplier invoice details', { id: req.params.id, error: error.message });
+            res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    // Generate PDF for supplier invoice
+    router.get('/invoices/:id/pdf', async (req: Request, res: Response) => {
+        try {
+            const details = await supplierPaymentService.getSupplierInvoiceWithDetails(pool, req.params.id);
+            if (!details) {
+                return res.status(404).json({ success: false, error: 'Invoice not found' });
+            }
+
+            const { invoice, lineItems, allocations } = details;
+
+            // Get company settings for branding
+            const settings = await getSettings(pool);
+
+            const formatCurrency = (amount: number | string): string => {
+                const num = new Decimal(amount || 0).toNumber();
+                return new Intl.NumberFormat('en-UG', {
+                    style: 'currency',
+                    currency: 'UGX',
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
+                }).format(num);
+            };
+
+            const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename=supplier-invoice-${invoice.invoiceNumber}.pdf`);
+            doc.pipe(res);
+
+            const colors = {
+                primary: settings.primaryColor || '#1e40af',
+                dark: '#1f2937',
+                light: '#f9fafb',
+                border: '#e5e7eb',
+                success: '#10b981',
+                danger: '#ef4444',
+                warning: '#f59e0b',
+            };
+
+            const margin = 50;
+            const contentWidth = doc.page.width - 2 * margin;
+
+            const companyInfo = {
+                name: settings.companyName || 'SamplePOS',
+                address: settings.companyAddress || 'Kampala, Uganda',
+                phone: settings.companyPhone || '+256 700 000 000',
+                email: settings.companyEmail || 'info@samplepos.com',
+                tin: settings.companyTin || 'TIN: 1000000000',
+            };
+
+            // Header
+            doc.rect(0, 0, doc.page.width, 100).fill(colors.primary);
+            doc.fillColor('#ffffff')
+                .fontSize(24).font('Helvetica-Bold')
+                .text(companyInfo.name, margin, 20, { align: 'left' });
+            doc.fontSize(20).font('Helvetica-Bold')
+                .text('SUPPLIER INVOICE', margin, 20, { align: 'right', width: contentWidth });
+            doc.fontSize(8).font('Helvetica')
+                .text(companyInfo.address, margin, 48, { align: 'left' })
+                .text(companyInfo.phone, margin, 58, { align: 'left' })
+                .text(companyInfo.email, margin, 68, { align: 'left' })
+                .text(companyInfo.tin, margin, 78, { align: 'left' });
+            doc.fontSize(11).font('Helvetica-Bold')
+                .text(invoice.invoiceNumber, margin, 52, { align: 'right', width: contentWidth });
+
+            const invoiceDateStr = invoice.invoiceDate ? String(invoice.invoiceDate).split('T')[0] : 'N/A';
+            const dueDateStr = invoice.dueDate ? String(invoice.dueDate).split('T')[0] : 'N/A';
+
+            doc.fontSize(8).font('Helvetica')
+                .text(`Date: ${invoiceDateStr}`, margin, 68, { align: 'right', width: contentWidth })
+                .text(`Due: ${dueDateStr}`, margin, 78, { align: 'right', width: contentWidth });
+
+            // Supplier Info box
+            const boxY = 115;
+            doc.roundedRect(margin, boxY, contentWidth / 2 - 10, 85, 5)
+                .fillAndStroke(colors.light, colors.border);
+            doc.fillColor(colors.primary).fontSize(10).font('Helvetica-Bold')
+                .text('SUPPLIER', margin + 10, boxY + 10, { width: contentWidth / 2 - 30 });
+
+            doc.fillColor(colors.dark).fontSize(9).font('Helvetica');
+            let supplierY = boxY + 28;
+            if (invoice.supplierName) { doc.text(invoice.supplierName, margin + 10, supplierY, { width: contentWidth / 2 - 30 }); supplierY += 13; }
+            if (invoice.supplierContactName) { doc.text(`Contact: ${invoice.supplierContactName}`, margin + 10, supplierY, { width: contentWidth / 2 - 30 }); supplierY += 13; }
+            if (invoice.supplierEmail) { doc.text(invoice.supplierEmail, margin + 10, supplierY, { width: contentWidth / 2 - 30 }); supplierY += 13; }
+            if (invoice.supplierPhone) { doc.text(invoice.supplierPhone, margin + 10, supplierY, { width: contentWidth / 2 - 30 }); supplierY += 13; }
+
+            // Invoice Summary box
+            const infoX = margin + contentWidth / 2 + 10;
+            doc.roundedRect(infoX, boxY, contentWidth / 2 - 10, 85, 5)
+                .fillAndStroke(colors.light, colors.border);
+            doc.fillColor(colors.primary).fontSize(10).font('Helvetica-Bold')
+                .text('INVOICE SUMMARY', infoX + 10, boxY + 10, { width: contentWidth / 2 - 30 });
+
+            const totalAmount = new Decimal(invoice.totalAmount || 0).toNumber();
+            const amountPaid = new Decimal(invoice.amountPaid || 0).toNumber();
+            const outstandingBalance = new Decimal(invoice.outstandingBalance || 0).toNumber();
+
+            // Status with color
+            const statusColor = invoice.status === 'Paid' ? colors.success : (invoice.status === 'PartiallyPaid' ? colors.warning : colors.danger);
+            doc.fillColor(colors.dark).fontSize(8).font('Helvetica')
+                .text('Status: ', infoX + 10, boxY + 28, { continued: true, width: contentWidth / 2 - 30 })
+                .font('Helvetica-Bold').fillColor(statusColor)
+                .text(invoice.status);
+
+            if (invoice.supplierInvoiceNumber) {
+                doc.fillColor(colors.dark).fontSize(8).font('Helvetica')
+                    .text(`Supplier Ref: ${invoice.supplierInvoiceNumber}`, infoX + 10, boxY + 41, { width: contentWidth / 2 - 30 });
+            }
+            doc.fillColor(colors.dark).fontSize(8).font('Helvetica')
+                .text(`Total: ${formatCurrency(totalAmount)}`, infoX + 10, boxY + 54, { width: contentWidth / 2 - 30 })
+                .text(`Paid: ${formatCurrency(amountPaid)}`, infoX + 10, boxY + 67, { width: contentWidth / 2 - 30 });
+
+            const balanceColor = outstandingBalance > 0 ? colors.danger : colors.success;
+            doc.fillColor(balanceColor).fontSize(8).font('Helvetica-Bold')
+                .text(`Balance: ${formatCurrency(outstandingBalance)}`, infoX + 10, boxY + 80, { width: contentWidth / 2 - 30 });
+
+            // Line Items Table
+            const itemsY = 215;
+            doc.fillColor(colors.primary).fontSize(11).font('Helvetica-Bold')
+                .text('LINE ITEMS', margin, itemsY);
+
+            const tableTop = itemsY + 18;
+            doc.rect(margin, tableTop, contentWidth, 25).fillAndStroke(colors.primary, colors.primary);
+
+            const colWidths = [
+                contentWidth * 0.05, // #
+                contentWidth * 0.30, // Product
+                contentWidth * 0.15, // Qty
+                contentWidth * 0.15, // UoM
+                contentWidth * 0.15, // Unit Cost
+                contentWidth * 0.20, // Line Total
+            ];
+
+            let xPos = margin;
+            doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+            ['#', 'Product/Service', 'Qty', 'UoM', 'Unit Cost', 'Total'].forEach((header, i) => {
+                doc.text(header, xPos + 5, tableTop + 8, {
+                    width: colWidths[i] - 10,
+                    align: i >= 2 ? 'right' : 'left',
+                });
+                xPos += colWidths[i];
+            });
+
+            let currentY = tableTop + 28;
+
+            if (lineItems.length === 0) {
+                doc.fillColor(colors.dark).fontSize(9).font('Helvetica-Oblique')
+                    .text('No line items recorded', margin + 10, currentY);
+                currentY += 20;
+            } else {
+                lineItems.forEach((item, index) => {
+                    const rowHeight = 22;
+                    if (currentY > doc.page.height - 200) {
+                        doc.addPage();
+                        currentY = 50;
+                    }
+                    if (index % 2 === 0) {
+                        doc.rect(margin, currentY, contentWidth, rowHeight).fillAndStroke(colors.light, colors.border);
+                    }
+
+                    xPos = margin;
+                    doc.fillColor(colors.dark).fontSize(8).font('Helvetica');
+                    const rowData = [
+                        String(item.lineNumber || index + 1),
+                        item.productName || 'N/A',
+                        new Decimal(item.quantity).toFixed(2),
+                        item.unitOfMeasure || '-',
+                        formatCurrency(item.unitCost),
+                        formatCurrency(item.lineTotal),
+                    ];
+                    rowData.forEach((cell, i) => {
+                        doc.text(cell, xPos + 5, currentY + 6, {
+                            width: colWidths[i] - 10,
+                            align: i >= 2 ? 'right' : 'left',
+                            ellipsis: true,
+                        });
+                        xPos += colWidths[i];
+                    });
+                    currentY += rowHeight;
+                });
+            }
+
+            // Totals section
+            currentY += 10;
+            const totalsX = margin + contentWidth * 0.5;
+            const totalsW = contentWidth * 0.5;
+
+            doc.fillColor(colors.dark).fontSize(9).font('Helvetica');
+            doc.text('Subtotal:', totalsX, currentY, { width: totalsW * 0.6 });
+            doc.text(formatCurrency(new Decimal(invoice.subtotal || totalAmount).toNumber()), totalsX + totalsW * 0.6, currentY, { width: totalsW * 0.4, align: 'right' });
+            currentY += 15;
+
+            const taxAmt = new Decimal(invoice.taxAmount || 0).toNumber();
+            if (taxAmt > 0) {
+                doc.text('Tax:', totalsX, currentY, { width: totalsW * 0.6 });
+                doc.text(formatCurrency(taxAmt), totalsX + totalsW * 0.6, currentY, { width: totalsW * 0.4, align: 'right' });
+                currentY += 15;
+            }
+
+            doc.lineWidth(1).moveTo(totalsX, currentY).lineTo(totalsX + totalsW, currentY).stroke(colors.primary);
+            currentY += 5;
+            doc.fontSize(12).font('Helvetica-Bold').fillColor(colors.primary);
+            doc.text('TOTAL:', totalsX, currentY, { width: totalsW * 0.6 });
+            doc.text(formatCurrency(totalAmount), totalsX + totalsW * 0.6, currentY, { width: totalsW * 0.4, align: 'right' });
+            currentY += 20;
+
+            // Payment History
+            if (allocations.length > 0) {
+                if (currentY > doc.page.height - 180) {
+                    doc.addPage();
+                    currentY = 50;
+                }
+
+                doc.fillColor(colors.primary).fontSize(11).font('Helvetica-Bold')
+                    .text('PAYMENT HISTORY', margin, currentY);
+                currentY += 18;
+
+                doc.rect(margin, currentY, contentWidth, 22).fillAndStroke(colors.primary, colors.primary);
+                doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+                doc.text('Payment #', margin + 5, currentY + 6, { width: contentWidth * 0.3 - 10 });
+                doc.text('Date', margin + contentWidth * 0.3 + 5, currentY + 6, { width: contentWidth * 0.2 - 10 });
+                doc.text('Method', margin + contentWidth * 0.5 + 5, currentY + 6, { width: contentWidth * 0.2 - 10 });
+                doc.text('Amount', margin + contentWidth * 0.7 + 5, currentY + 6, { width: contentWidth * 0.3 - 10, align: 'right' });
+                currentY += 25;
+
+                for (const alloc of allocations) {
+                    doc.fillColor(colors.dark).fontSize(8).font('Helvetica');
+                    const allocDateStr = alloc.allocationDate ? String(alloc.allocationDate).split('T')[0] : 'N/A';
+                    doc.text(alloc.paymentNumber, margin + 5, currentY, { width: contentWidth * 0.3 - 10 });
+                    doc.text(allocDateStr, margin + contentWidth * 0.3 + 5, currentY, { width: contentWidth * 0.2 - 10 });
+                    doc.text(alloc.paymentMethod || '-', margin + contentWidth * 0.5 + 5, currentY, { width: contentWidth * 0.2 - 10 });
+                    doc.text(formatCurrency(alloc.amountAllocated), margin + contentWidth * 0.7 + 5, currentY, { width: contentWidth * 0.3 - 10, align: 'right' });
+                    currentY += 18;
+                }
+
+                currentY += 5;
+                doc.fillColor(colors.dark).fontSize(9).font('Helvetica');
+                doc.text('Total Paid:', totalsX, currentY, { width: totalsW * 0.6 });
+                doc.font('Helvetica-Bold').fillColor(colors.success)
+                    .text(formatCurrency(amountPaid), totalsX + totalsW * 0.6, currentY, { width: totalsW * 0.4, align: 'right' });
+                currentY += 15;
+
+                doc.fillColor(outstandingBalance > 0 ? colors.danger : colors.success)
+                    .fontSize(10).font('Helvetica-Bold');
+                doc.text('Balance Due:', totalsX, currentY, { width: totalsW * 0.6 });
+                doc.text(formatCurrency(outstandingBalance), totalsX + totalsW * 0.6, currentY, { width: totalsW * 0.4, align: 'right' });
+            }
+
+            // Footer
+            doc.fontSize(8).font('Helvetica').fillColor('#999999');
+            doc.text(`Generated on ${new Date().toLocaleString()}`, margin, doc.page.height - 40, { align: 'center', width: contentWidth });
+
+            doc.end();
+        } catch (error: any) {
+            logger.error('Error generating supplier invoice PDF', { id: req.params.id, error: error.message });
+            if (!res.headersSent) {
+                res.status(500).json({ success: false, error: error.message });
+            }
         }
     });
 
@@ -209,7 +494,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 });
             }
 
-            const userId = (req as any).user?.id;
+            const userId = req.user?.id;
             const invoice = await supplierPaymentService.createSupplierInvoice(pool, {
                 supplierId,
                 supplierInvoiceNumber,
@@ -251,6 +536,17 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         }
     });
 
+    // Get ALL invoices for a supplier (with line item counts)
+    router.get('/suppliers/:supplierId/invoices', async (req: Request, res: Response) => {
+        try {
+            const invoices = await supplierPaymentService.getSupplierInvoicesBySupplier(pool, req.params.supplierId);
+            res.json({ success: true, data: invoices });
+        } catch (error: any) {
+            logger.error('Error fetching supplier invoices', { supplierId: req.params.supplierId, error: error.message });
+            res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
     // ============================================================
     // PAYMENT ALLOCATIONS
     // ============================================================
@@ -267,11 +563,11 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 });
             }
 
-            const userId = (req as any).user?.id;
+            const userId = req.user?.id;
             const allocation = await supplierPaymentService.allocatePayment(pool, {
                 supplierPaymentId,
                 supplierInvoiceId,
-                amount: parseFloat(amount)
+                amount: new Decimal(amount).toNumber()
             }, userId);
 
             res.status(201).json({ success: true, data: allocation });

@@ -29,6 +29,12 @@ export interface CashRegister {
     isActive: boolean;
     createdAt: string;
     updatedAt: string;
+    // Session status (populated by GET /cash-registers)
+    currentSessionId?: string | null;
+    currentSessionNumber?: string | null;
+    currentSessionUserId?: string | null;
+    currentSessionUserName?: string | null;
+    currentSessionOpenedAt?: string | null;
 }
 
 export interface CashRegisterSession {

@@ -183,6 +183,9 @@ export default function CustomerDetailPage() {
   const [payDate, setPayDate] = useState<string>(() => new Date().toISOString().slice(0, 16)); // yyyy-MM-ddTHH:mm
   const [customerDepositBalance, setCustomerDepositBalance] = useState<number>(0);
   const [isLoadingDeposits, setIsLoadingDeposits] = useState(false);
+  const [showInvoicePicker, setShowInvoicePicker] = useState(false);
+  const [fetchedUnpaidInvoices, setFetchedUnpaidInvoices] = useState<any[]>([]);
+  const [isFetchingUnpaid, setIsFetchingUnpaid] = useState(false);
   const modalRef = useModalAccessibility(isPaymentOpen, () => setPaymentOpen(false));
   const recordPayment = useRecordInvoicePayment();
 
@@ -217,6 +220,7 @@ export default function CustomerDetailPage() {
     setPayReferenceNumber('');
     setPayNotes('');
     setPayDate(new Date().toISOString().slice(0, 16));
+    setShowInvoicePicker(false);
     setPaymentOpen(true);
   };
 
@@ -606,6 +610,89 @@ export default function CustomerDetailPage() {
 
         {customer && tab === 'transactions' ? (
           <div className="bg-white rounded-lg shadow border border-gray-200">
+            {/* Receive Payment button — always visible on transactions tab for customer with any invoices */}
+            <div className="px-6 pt-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Transaction Statement</h2>
+              <div className="relative">
+                <button
+                  disabled={isFetchingUnpaid}
+                  onClick={async () => {
+                    // Use already-loaded invoice data if available
+                    const cached = invoices.filter((inv: any) => inv.status !== 'PAID' && Number(inv.balance || 0) > 0);
+                    if (cached.length === 1) {
+                      openPaymentModal(cached[0]);
+                      return;
+                    }
+                    if (cached.length > 1) {
+                      setFetchedUnpaidInvoices(cached);
+                      setShowInvoicePicker(true);
+                      return;
+                    }
+                    // Invoices not loaded yet — fetch on demand
+                    setIsFetchingUnpaid(true);
+                    try {
+                      const resp = await api.invoices.list({ page: 1, limit: 50, customerId: id });
+                      const raw = resp.data?.data || [];
+                      const mapped = (Array.isArray(raw) ? raw : []).map((r: any) => ({
+                        id: r.id || r.Id,
+                        invoiceNumber: r.invoiceNumber ?? r.invoice_number ?? r.InvoiceNumber,
+                        customerId: r.customerId ?? r.customer_id ?? r.CustomerId,
+                        status: String(r.status || 'UNPAID').toUpperCase().includes('PARTIAL') ? 'PARTIALLY_PAID' : String(r.status || '').toUpperCase() === 'PAID' ? 'PAID' : 'UNPAID',
+                        balance: Number(r.balance ?? r.OutstandingBalance ?? 0),
+                        totalAmount: Number(r.totalAmount ?? r.total_amount ?? r.TotalAmount ?? 0),
+                        amountPaid: Number(r.amountPaid ?? r.amount_paid ?? r.AmountPaid ?? 0),
+                        issueDate: r.issueDate ?? r.issue_date ?? r.InvoiceDate,
+                      }));
+                      const unpaid = mapped.filter((inv: any) => inv.status !== 'PAID' && Number(inv.balance || 0) > 0);
+                      if (unpaid.length === 1) {
+                        openPaymentModal(unpaid[0]);
+                      } else if (unpaid.length > 1) {
+                        setFetchedUnpaidInvoices(unpaid);
+                        setShowInvoicePicker(true);
+                      } else {
+                        alert('No unpaid invoices found for this customer.');
+                      }
+                    } catch (err) {
+                      console.error('Failed to fetch unpaid invoices:', err);
+                      alert('Failed to load invoices. Please try again.');
+                    } finally {
+                      setIsFetchingUnpaid(false);
+                    }
+                  }}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium text-sm flex items-center gap-2"
+                  aria-label="Receive Payment"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+                  </svg>
+                  {isFetchingUnpaid ? 'Loading...' : 'Receive Payment'}
+                </button>
+                {showInvoicePicker && fetchedUnpaidInvoices.length > 0 && (
+                  <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                    <div className="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium uppercase">Select Invoice to Pay</div>
+                    {fetchedUnpaidInvoices.map((inv: any) => (
+                      <button
+                        key={inv.id}
+                        className="w-full px-3 py-2 hover:bg-gray-50 text-left flex items-center justify-between border-b border-gray-50 last:border-0"
+                        onClick={() => {
+                          setShowInvoicePicker(false);
+                          openPaymentModal(inv);
+                        }}
+                      >
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{inv.invoiceNumber}</div>
+                          <div className="text-xs text-gray-500">{inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : '-'}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-red-600">{formatCurrency(inv.balance)}</div>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${inv.status === 'PARTIALLY_PAID' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>{inv.status}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             {/* Prefer precision statement if available; fallback to transactions */}
             {statement ? (
               <>
@@ -628,6 +715,7 @@ export default function CustomerDetailPage() {
                         placeholder="End date"
                         minDate={stmtStart ? new Date(stmtStart) : undefined}
                       />
+
                     </div>
                     <button className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50" onClick={() => { setStmtStart(''); setStmtEnd(''); setStmtPage(1); }} aria-label="Reset Statement Filters">Reset</button>
                     <div className="flex gap-2 ml-auto">
@@ -881,7 +969,7 @@ export default function CustomerDetailPage() {
               </div>
               <div>
                 <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Amount</label>
-                <input id="amount" name="amount" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="0.00" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
+                <input id="amount" name="amount" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="0.00" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required autoFocus />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -913,7 +1001,7 @@ export default function CustomerDetailPage() {
               </div>
               <div>
                 <label htmlFor="notes" className="block text-sm font-medium text-gray-700">Notes</label>
-                <textarea id="notes" name="notes" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" rows={2} />
+                <textarea id="notes" name="notes" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" rows={2} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} />
               </div>
               {recordPayment.isError && (
                 <p className="text-sm text-red-600">Failed to record payment</p>

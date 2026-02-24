@@ -97,11 +97,7 @@ export default function QuoteConversionPage() {
 
     // Check if quotation can be converted
     if (!canConvert) {
-      if (quotation.status !== 'ACCEPTED') {
-        toast.error(`Cannot convert quotation. Status must be ACCEPTED (current: ${quotation.status})`);
-      } else {
-        toast.error(`Cannot convert quotation. Quotation has expired (valid until: ${new Date(quotation.validUntil).toLocaleDateString()})`);
-      }
+      toast.error('Cannot convert this quotation. It may be expired or cancelled.');
       return;
     }
 
@@ -186,11 +182,11 @@ export default function QuoteConversionPage() {
                 </svg>
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold text-red-900 mb-2">❌ Cannot Convert</h3>
+                <h3 className="text-lg font-semibold text-red-900 mb-2">Cannot Convert</h3>
                 <p className="text-red-800">
-                  {quotation.status !== 'ACCEPTED'
-                    ? `This quotation must be ACCEPTED before it can be converted. Current status: ${quotation.status}`
-                    : `This quotation has expired. Valid until: ${new Date(quotation.validUntil).toLocaleDateString()}`
+                  {quotation.status === 'CANCELLED'
+                    ? 'This quotation has been cancelled and cannot be converted.'
+                    : `This quotation has expired (valid until: ${new Date(quotation.validUntil).toLocaleDateString()}). Update validity dates to reactivate.`
                   }
                 </p>
               </div>

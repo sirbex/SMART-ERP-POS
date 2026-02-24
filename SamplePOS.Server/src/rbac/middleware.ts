@@ -196,7 +196,7 @@ export function requirePermission(permissionKey: string, options?: RequirePermis
         permissionKey,
         ipAddress ?? undefined,
         userAgent ?? undefined
-      ).catch(() => {}); // Don't fail the request if audit logging fails
+      ).catch(() => { }); // Don't fail the request if audit logging fails
 
       logger.debug(`RBAC DENIED: user=${req.user.id} permission=${permissionKey} role=${req.user.role}`);
       res.status(403).json({
@@ -285,7 +285,7 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
         permissionKeys.join(','),
         ipAddress ?? undefined,
         userAgent ?? undefined
-      ).catch(() => {});
+      ).catch(() => { });
 
       res.status(403).json({
         success: false,
@@ -362,7 +362,7 @@ export function requireAllPermissions(permissionKeys: string[], options?: Requir
             permissionKey,
             ipAddress ?? undefined,
             userAgent ?? undefined
-          ).catch(() => {});
+          ).catch(() => { });
 
           res.status(403).json({
             success: false,

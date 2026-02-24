@@ -100,7 +100,11 @@ export const tenantRepository = {
   async updateStatus(pool: pg.Pool, id: string, status: string): Promise<TenantDbRow | null> {
     const result = await pool.query<TenantDbRow>(
       `UPDATE tenants SET status = $2,
-       deactivated_at = CASE WHEN $2::varchar = 'DEACTIVATED' THEN NOW() ELSE deactivated_at END,
+       deactivated_at = CASE
+         WHEN $2::varchar = 'DEACTIVATED' THEN NOW()
+         WHEN $2::varchar = 'ACTIVE' THEN NULL
+         ELSE deactivated_at
+       END,
        updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [id, status]

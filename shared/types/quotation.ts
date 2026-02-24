@@ -1,23 +1,37 @@
 /**
  * Quotation System Types
  * Shared types for frontend and backend
+ * 
+ * SIMPLIFIED STATUS MODEL:
+ *   OPEN → can be edited, converted, or cancelled
+ *   CONVERTED → linked to a sale (locked)
+ *   CANCELLED → soft-deleted (locked)
+ * 
+ * Legacy statuses (DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED) are
+ * mapped to OPEN for backward compatibility with existing DB rows.
  */
 
 // ============================================================================
 // ENUMS
 // ============================================================================
 
-export type QuotationStatus =
-  | 'DRAFT'
-  | 'SENT'
-  | 'ACCEPTED'
-  | 'REJECTED'
-  | 'EXPIRED'
+/** Active statuses a user can work with */
+export type QuotationStatus = 'OPEN' | 'CONVERTED' | 'CANCELLED';
+
+/** Legacy statuses still in DB — treated as OPEN */
+export type QuotationDbStatus =
+  | 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
   | 'CONVERTED'
   | 'CANCELLED';
 
-export type QuoteType = 'quick' | 'standard';
+/** Normalize any DB status to the simplified 3-status model */
+export function normalizeStatus(dbStatus: string): QuotationStatus {
+  if (dbStatus === 'CONVERTED') return 'CONVERTED';
+  if (dbStatus === 'CANCELLED') return 'CANCELLED';
+  return 'OPEN'; // DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED → OPEN
+}
 
+export type QuoteType = 'quick' | 'standard';
 export type QuoteItemType = 'product' | 'service' | 'custom';
 
 // ============================================================================
@@ -28,90 +42,63 @@ export interface Quotation {
   id: string;
   quoteNumber: string;
   quoteType: QuoteType;
-
-  // Customer
   customerId: string | null;
   customerName: string | null;
   customerPhone: string | null;
   customerEmail: string | null;
-
-  // Details
   reference: string | null;
   description: string | null;
-
-  // Amounts
   subtotal: number;
   discountAmount: number;
   taxAmount: number;
   totalAmount: number;
-
-  // Status & Validity
   status: QuotationStatus;
-  validFrom: string; // YYYY-MM-DD
-  validUntil: string; // YYYY-MM-DD
-
-  // Conversion
+  validFrom: string;
+  validUntil: string;
   convertedToSaleId: string | null;
-  convertedToSaleNumber?: string | null; // Human-readable sale number (e.g., SALE-2025-0001)
+  convertedToSaleNumber?: string | null;
   convertedToInvoiceId: string | null;
-  convertedToInvoiceNumber?: string | null; // Human-readable invoice number (e.g., INV-00001)
+  convertedToInvoiceNumber?: string | null;
   convertedAt: Date | null;
-
-  // Workflow
   createdById: string | null;
-  assignedToId: string | null;
-  termsAndConditions: string | null;
-  paymentTerms: string | null;
-  deliveryTerms: string | null;
   internalNotes: string | null;
-  rejectionReason: string | null;
-
-  // Approval
-  requiresApproval: boolean;
-  approvedById: string | null;
-  approvedAt: Date | null;
-
-  // Revisions
-  parentQuoteId: string | null;
-  revisionNumber: number;
-
-  // Timestamps
   createdAt: Date;
   updatedAt: Date;
+
+  // Kept for backward compatibility but not used in new code
+  assignedToId?: string | null;
+  termsAndConditions?: string | null;
+  paymentTerms?: string | null;
+  deliveryTerms?: string | null;
+  rejectionReason?: string | null;
+  requiresApproval?: boolean;
+  approvedById?: string | null;
+  approvedAt?: Date | null;
+  parentQuoteId?: string | null;
+  revisionNumber?: number;
 }
 
 export interface QuotationItem {
   id: string;
   quotationId: string;
   lineNumber: number;
-
-  // Item Details
   productId: string | null;
   itemType: QuoteItemType;
   sku: string | null;
   description: string;
   notes: string | null;
-
-  // Pricing
   quantity: number;
   unitPrice: number;
   discountAmount: number;
   subtotal: number;
-
-  // Tax
   isTaxable: boolean;
   taxRate: number;
   taxAmount: number;
   lineTotal: number;
-
-  // UOM
   uomId: string | null;
   uomName: string | null;
-
-  // Cost
   unitCost: number | null;
   costTotal: number | null;
-
   productType: string;
   createdAt: Date;
 }
@@ -122,96 +109,49 @@ export interface QuotationDetail {
 }
 
 // ============================================================================
-// INPUT TYPES (for API calls)
+// INPUT TYPES
 // ============================================================================
 
+/** Create a quotation — used by both POS quick-quote and management page */
 export interface CreateQuotationInput {
-  // Customer (customerId OR customerName required)
   customerId?: string;
   customerName?: string;
   customerPhone?: string;
   customerEmail?: string;
-
-  // Details
-  reference?: string;
-  description?: string;
-  validFrom: string; // YYYY-MM-DD
-  validUntil: string; // YYYY-MM-DD
-
-  // Workflow
-  assignedToId?: string;
-  termsAndConditions?: string;
-  paymentTerms?: string;
-  deliveryTerms?: string;
-  internalNotes?: string;
-  requiresApproval?: boolean;
-
-  // Items
-  items: CreateQuotationItemInput[];
-}
-
-export interface CreateQuotationItemInput {
-  productId?: string;
-  itemType: QuoteItemType;
-  sku?: string;
-  description: string;
+  validityDays?: number;
   notes?: string;
-  quantity: number;
-  unitPrice: number;
-  discountAmount?: number;
-  isTaxable?: boolean;
-  taxRate?: number;
-  uomId?: string;
-  uomName?: string;
-  unitCost?: number;
-  productType?: string;
+  items: QuotationItemInput[];
 }
 
-export interface CreateQuickQuoteInput {
-  // Customer (optional for walk-ins)
-  customerId?: string;
-  customerName?: string;
-  customerPhone?: string;
-
-  // Items from cart
-  items: QuickQuoteItemInput[];
-
-  // Quick quote settings
-  validityDays?: number; // Default 30
-  notes?: string;
-}
-
-export interface QuickQuoteItemInput {
-  productId?: string;
+export interface QuotationItemInput {
+  productId?: string | null;
   itemType?: QuoteItemType;
-  sku?: string;
+  sku?: string | null;
   description: string;
   quantity: number;
   unitPrice: number;
   isTaxable?: boolean;
   taxRate?: number;
+  discountAmount?: number;
   uomId?: string;
   uomName?: string;
   unitCost?: number;
   productType?: string;
 }
+
+/** Backward-compat aliases for POS code */
+export type QuickQuoteItemInput = QuotationItemInput;
+export type CreateQuickQuoteInput = CreateQuotationInput;
 
 export interface UpdateQuotationInput {
   customerId?: string;
   customerName?: string;
   customerPhone?: string;
   customerEmail?: string;
-  reference?: string;
-  description?: string;
   validFrom?: string;
   validUntil?: string;
-  status?: QuotationStatus;
-  termsAndConditions?: string;
-  paymentTerms?: string;
-  deliveryTerms?: string;
-  internalNotes?: string;
-  rejectionReason?: string;
-  assignedToId?: string;
+  notes?: string;
+  items?: QuotationItemInput[];
 }
 
 export interface ConvertQuotationInput {
@@ -225,13 +165,11 @@ export interface QuotationFilters {
   page?: number;
   limit?: number;
   customerId?: string;
-  status?: QuotationStatus;
+  status?: string;
   quoteType?: QuoteType;
-  assignedToId?: string;
-  createdById?: string;
+  searchTerm?: string;
   fromDate?: string;
   toDate?: string;
-  searchTerm?: string;
 }
 
 // ============================================================================
@@ -247,13 +185,13 @@ export interface QuotationListResponse {
 }
 
 export interface ConvertQuotationResponse {
-  sale: any; // Sale type from existing sales module
-  invoice?: any; // Invoice type from existing invoices module
-  payment?: any; // Payment type
+  sale: Record<string, unknown>;
+  invoice?: Record<string, unknown>;
+  payment?: Record<string, unknown>;
 }
 
 // ============================================================================
-// UI HELPER TYPES
+// UI HELPERS
 // ============================================================================
 
 export interface QuoteStatusBadge {
@@ -261,74 +199,49 @@ export interface QuoteStatusBadge {
   color: 'gray' | 'blue' | 'green' | 'yellow' | 'red' | 'purple';
 }
 
-export const getQuoteStatusBadge = (status: QuotationStatus): QuoteStatusBadge => {
-  switch (status) {
-    case 'DRAFT':
-      return { label: 'Draft', color: 'gray' };
-    case 'SENT':
-      return { label: 'Sent', color: 'blue' };
-    case 'ACCEPTED':
-      return { label: 'Accepted', color: 'green' };
-    case 'REJECTED':
-      return { label: 'Rejected', color: 'red' };
-    case 'EXPIRED':
-      return { label: 'Expired', color: 'yellow' };
-    case 'CONVERTED':
-      return { label: 'Converted', color: 'purple' };
-    case 'CANCELLED':
-      return { label: 'Cancelled', color: 'gray' };
+export const getQuoteStatusBadge = (status: QuotationStatus | QuotationDbStatus | string): QuoteStatusBadge => {
+  const normalized = normalizeStatus(status);
+  switch (normalized) {
+    case 'OPEN': return { label: 'Open', color: 'blue' };
+    case 'CONVERTED': return { label: 'Converted', color: 'green' };
+    case 'CANCELLED': return { label: 'Cancelled', color: 'gray' };
   }
 };
 
-export const isQuoteEditable = (status: QuotationStatus): boolean => {
-  return status === 'DRAFT';
-};
+export const isQuoteEditable = (status: QuotationStatus | QuotationDbStatus | string): boolean =>
+  normalizeStatus(status) === 'OPEN';
 
+/**
+ * Conversion rules (SIMPLIFIED):
+ * - OPEN (any non-converted, non-cancelled status)
+ * - Not already linked to a sale
+ * - Not expired
+ */
 export const isQuoteConvertible = (
-  status: QuotationStatus,
+  status: QuotationStatus | QuotationDbStatus | string,
   validUntil: string,
   convertedToSaleId?: string | null
 ): boolean => {
-  // Business Rule: Only ACCEPTED quotations that haven't been converted can be converted
-  // - CONVERTED status means already processed
-  // - convertedToSaleId also indicates already processed (double-check)
-  // - This prevents duplicate orders and maintains clear workflow
-
-  if (status === 'CONVERTED' || status === 'CANCELLED') {
-    return false;
-  }
-
-  // Safety check: even if status isn't CONVERTED, check the sale ID
-  if (convertedToSaleId) {
-    return false;
-  }
-
+  if (normalizeStatus(status) !== 'OPEN') return false;
+  if (convertedToSaleId) return false;
   const today = new Date().toISOString().split('T')[0];
-  const isExpired = validUntil < today;
-
-  // Only ACCEPTED quotes can be converted - customer must explicitly accept terms
-  return !isExpired && status === 'ACCEPTED';
+  return validUntil >= today;
 };
 
-/**
- * Business Rule: Check if quotation is fulfilled (converted to sale)
- * Used to display "Fulfilled" badge and link to sale/invoice
- */
-export const isQuoteFulfilled = (status: QuotationStatus, convertedToSaleId?: string | null): boolean => {
-  return status === 'CONVERTED' || !!convertedToSaleId;
-};
+export const isQuoteFulfilled = (
+  status: QuotationStatus | QuotationDbStatus | string,
+  convertedToSaleId?: string | null
+): boolean => normalizeStatus(status) === 'CONVERTED' || !!convertedToSaleId;
 
 export const calculateQuoteAge = (createdAt: Date): number => {
   const now = new Date();
   const created = new Date(createdAt);
-  const diffMs = now.getTime() - created.getTime();
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
 };
 
 export const getDaysUntilExpiry = (validUntil: string): number => {
   const today = new Date().toISOString().split('T')[0];
   const expiry = new Date(validUntil);
   const now = new Date(today);
-  const diffMs = expiry.getTime() - now.getTime();
-  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  return Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 };

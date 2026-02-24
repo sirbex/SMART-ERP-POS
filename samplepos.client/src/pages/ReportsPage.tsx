@@ -18,6 +18,10 @@
 //
 // 💡 SUPPORTED FIELD TYPES (Auto-detected by keyword in field name):
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// - Count (PRIORITY): fields ending with orders, suppliers, customers, products, items,
+//     transactions, batches, records, movements, entries, receipts, invoices, users, categories
+//     or containing 'count' → plain number (NOT currency)
+// - Non-monetary (PRIORITY): fields ending with terms, method, status, type, days → plain number
 // - Currency: amount, value, cost, price, revenue, profit, discount, sales, payment, balance, total, subtotal
 // - Percentage: margin, rate, percentage, change, ratio
 // - Quantity: quantity, count, units, items
@@ -69,6 +73,41 @@ const formatFieldValue = (key: string, value: any): string => {
   if (value === null || value === undefined) return '-';
 
   if (typeof value === 'number') {
+    // Count-like fields that happen to contain currency keywords (e.g., totalOrders, totalSuppliers)
+    // These are entity counts, NOT monetary values — check BEFORE currency detection
+    const isCountField = (
+      lowerKey.endsWith('orders') ||
+      lowerKey.endsWith('suppliers') ||
+      lowerKey.endsWith('customers') ||
+      lowerKey.endsWith('products') ||
+      lowerKey.endsWith('items') ||
+      lowerKey.endsWith('transactions') ||
+      lowerKey.endsWith('batches') ||
+      lowerKey.endsWith('records') ||
+      lowerKey.endsWith('movements') ||
+      lowerKey.endsWith('entries') ||
+      lowerKey.endsWith('receipts') ||
+      lowerKey.endsWith('invoices') ||
+      lowerKey.endsWith('users') ||
+      lowerKey.endsWith('categories') ||
+      lowerKey.includes('count')
+    );
+    if (isCountField) {
+      return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+
+    // Non-monetary fields that contain currency-adjacent keywords (e.g., paymentTerms, paymentMethod)
+    const isNonMonetaryField = (
+      lowerKey.endsWith('terms') ||
+      lowerKey.endsWith('method') ||
+      lowerKey.endsWith('status') ||
+      lowerKey.endsWith('type') ||
+      lowerKey.endsWith('days')
+    );
+    if (isNonMonetaryField) {
+      return value.toLocaleString();
+    }
+
     // Currency fields (amount, value, cost, price, revenue, profit, discount, sales, payment, balance)
     if (
       lowerKey.includes('amount') ||
@@ -139,6 +178,40 @@ const getFieldColorClass = (key: string, value: any): string => {
   const lowerKey = key.toLowerCase();
 
   if (typeof value !== 'number') return 'text-gray-900';
+
+  // Count-like fields — neutral color, not monetary
+  const isCountField = (
+    lowerKey.endsWith('orders') ||
+    lowerKey.endsWith('suppliers') ||
+    lowerKey.endsWith('customers') ||
+    lowerKey.endsWith('products') ||
+    lowerKey.endsWith('items') ||
+    lowerKey.endsWith('transactions') ||
+    lowerKey.endsWith('batches') ||
+    lowerKey.endsWith('records') ||
+    lowerKey.endsWith('movements') ||
+    lowerKey.endsWith('entries') ||
+    lowerKey.endsWith('receipts') ||
+    lowerKey.endsWith('invoices') ||
+    lowerKey.endsWith('users') ||
+    lowerKey.endsWith('categories') ||
+    lowerKey.includes('count')
+  );
+  if (isCountField) {
+    return 'text-blue-600';
+  }
+
+  // Non-monetary fields (terms, method, status, type, days)
+  const isNonMonetaryField = (
+    lowerKey.endsWith('terms') ||
+    lowerKey.endsWith('method') ||
+    lowerKey.endsWith('status') ||
+    lowerKey.endsWith('type') ||
+    lowerKey.endsWith('days')
+  );
+  if (isNonMonetaryField) {
+    return 'text-gray-900';
+  }
 
   // Discount fields - always red
   if (lowerKey.includes('discount')) {
@@ -1368,7 +1441,7 @@ export default function ReportsPage() {
                   {Object.entries(reportData.summary).map(([key, value]) => (
                     <div key={key} className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-lg p-3 sm:p-4 hover:shadow-md transition-shadow">
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 sm:mb-2">
-                        {key.replace(/([A-Z])/g, ' $1').trim()}
+                        {key.replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase())}
                       </p>
                       <p className={`text-xl sm:text-2xl font-bold break-words ${getFieldColorClass(key, value)}`}>
                         {formatFieldValue(key, value)}
@@ -1564,7 +1637,7 @@ export default function ReportsPage() {
                         key={header}
                         className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap"
                       >
-                        {header.replace(/([A-Z])/g, ' $1').trim()}
+                        {header.replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase())}
                       </th>
                     ))}
                   </tr>
@@ -1629,7 +1702,7 @@ export default function ReportsPage() {
                             key={header}
                             className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap"
                           >
-                            {header.replace(/([A-Z])/g, ' $1').trim()}
+                            {header.replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase())}
                           </th>
                         ))}
                     </tr>
@@ -1821,10 +1894,17 @@ export default function ReportsPage() {
 
           {/* Selected Report Configuration */}
           {selectedReport && !reportData && (
-            <div className="space-y-4 sm:space-y-6">
+            <form
+              className="space-y-4 sm:space-y-6"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!isLoading) handleGenerateReport();
+              }}
+            >
               {/* Back Button & Report Title */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectedReport(null);
                     setError(null);
@@ -1854,7 +1934,7 @@ export default function ReportsPage() {
               {/* Generate Button */}
               <div className="flex gap-4">
                 <button
-                  onClick={handleGenerateReport}
+                  type="submit"
                   disabled={isLoading}
                   className="flex-1 flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white text-lg font-semibold rounded-xl hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all"
                 >
@@ -1883,7 +1963,7 @@ export default function ReportsPage() {
                   </div>
                 </div>
               )}
-            </div>
+            </form>
           )}
 
           {/* Report Results */}

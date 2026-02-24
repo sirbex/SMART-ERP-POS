@@ -6,7 +6,8 @@ import { z } from 'zod';
  */
 
 export const HoldOrderItemSchema = z.object({
-    productId: z.string().uuid(),
+    // Accept UUID or null for service/custom items
+    productId: z.string().uuid().nullable(),
     productName: z.string(),
     productSku: z.string().nullable().optional(),
     productType: z.enum(['inventory', 'consumable', 'service']).default('inventory'),

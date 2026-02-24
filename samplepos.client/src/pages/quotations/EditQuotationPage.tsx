@@ -69,9 +69,9 @@ export default function EditQuotationPage() {
   // Populate form when quote loads
   useEffect(() => {
     if (quotation) {
-      // Check if quote is editable (DRAFT only)
-      if (quotation.status !== 'DRAFT') {
-        toast.error('Only DRAFT quotes can be edited');
+      // Check if quote is editable (any OPEN status)
+      if (quotation.status === 'CONVERTED' || quotation.status === 'CANCELLED') {
+        toast.error('Cannot edit a converted or cancelled quote');
         navigate(`/quotations/${quoteNumber}`);
         return;
       }
@@ -272,15 +272,9 @@ export default function EditQuotationPage() {
       customerName: selectedCustomer ? selectedCustomer.name : customerName,
       customerPhone: selectedCustomer ? selectedCustomer.phone : customerPhone,
       customerEmail: selectedCustomer ? selectedCustomer.email : customerEmail,
-      reference: reference || undefined,
-      description: description || undefined,
       validFrom: validFrom,
       validUntil: validUntil,
-      termsAndConditions: termsAndConditions || undefined,
-      paymentTerms: paymentTerms || undefined,
-      deliveryTerms: deliveryTerms || undefined,
-      internalNotes: internalNotes || undefined,
-      requiresApproval: requiresApproval,
+      notes: internalNotes || undefined,
       items: items.map((item) => ({
         productId: item.productId,
         itemType: item.itemType,
@@ -336,7 +330,7 @@ export default function EditQuotationPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Edit Quotation</h1>
             <p className="mt-1 text-sm text-gray-600">
-              Editing {quotation?.quoteNumber} - Only DRAFT quotes can be edited
+              Editing {quotation?.quoteNumber}
             </p>
           </div>
           <button

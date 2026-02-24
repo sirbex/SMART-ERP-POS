@@ -170,6 +170,40 @@ export const cashRegisterRepository = {
   },
 
   /**
+   * Get all registers with current open session info (if any)
+   * Used by the Open Register dialog to show availability
+   */
+  async getRegistersWithSessionStatus(pool: Pool): Promise<Array<CashRegister & {
+    currentSessionId: string | null;
+    currentSessionNumber: string | null;
+    currentSessionUserId: string | null;
+    currentSessionUserName: string | null;
+    currentSessionOpenedAt: string | null;
+  }>> {
+    const result = await pool.query(`
+      SELECT 
+        r.id,
+        r.name,
+        r.location,
+        r.is_active as "isActive",
+        r.created_at as "createdAt",
+        r.updated_at as "updatedAt",
+        s.id as "currentSessionId",
+        s.session_number as "currentSessionNumber",
+        s.user_id as "currentSessionUserId",
+        u.full_name as "currentSessionUserName",
+        s.opened_at as "currentSessionOpenedAt"
+      FROM cash_registers r
+      LEFT JOIN cash_register_sessions s 
+        ON s.register_id = r.id AND s.status = 'OPEN'
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE r.is_active = true
+      ORDER BY r.name
+    `);
+    return result.rows;
+  },
+
+  /**
    * Get register by ID
    */
   async getRegisterById(pool: Pool, id: string): Promise<CashRegister | null> {

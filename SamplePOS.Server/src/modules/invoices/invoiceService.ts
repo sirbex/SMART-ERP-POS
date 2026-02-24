@@ -61,6 +61,8 @@ export const invoiceService = {
     let subtotal = 0;
     let taxAmount = 0;
     let totalAmount = 0;
+    let nonCreditPaymentLinesForInvoice: any[] = [];
+    let saleAmountPaid = 0;
 
     if (input.saleId) {
       const saleData = await salesRepository.getSaleById(pool, input.saleId);
@@ -103,6 +105,10 @@ export const invoiceService = {
         return sum.plus(new Decimal(line.amount || 0));
       }, new Decimal(0)).toNumber();
 
+      // Hoist for use after invoice creation (auto-record split payments)
+      nonCreditPaymentLinesForInvoice = nonCreditPaymentLines;
+      saleAmountPaid = amountPaid;
+
       logger.info('Invoice creation - Payment calculation', {
         saleId: input.saleId,
         saleSubtotal,
@@ -143,21 +149,23 @@ export const invoiceService = {
           invoiceTotalAmount: totalAmount,
         });
       } else {
-        // For regular credit sales, use the credit amount directly as the invoice amount
-        // Calculate proportional subtotal and tax for the credit amount
-        const creditRatio = new Decimal(creditAmount).dividedBy(saleTotalAmount).toNumber();
-        subtotal = new Decimal(saleSubtotal).times(creditRatio).toNumber();
-        taxAmount = new Decimal(saleTaxAmount).times(creditRatio).toNumber();
-        totalAmount = creditAmount;
+        // CRITICAL: Invoice must represent the FULL SALE amount (matching salesService Path A)
+        // This ensures consistency with:
+        //   1. Statement SQL which debits sales.total_amount (full amount)
+        //   2. DB trigger which sets customer.balance = SUM(invoices.OutstandingBalance)
+        //   3. Non-credit payments recorded below as invoice_payments
+        // Without this, statement balance, invoice outstanding, and customer.balance would diverge
+        subtotal = saleSubtotal;
+        taxAmount = saleTaxAmount;
+        totalAmount = saleTotalAmount;
       }
 
       if (!isQuoteLinkedSale) {
-        logger.info('Invoice amounts calculated from credit payment', {
+        logger.info('Invoice amounts set from full sale total (consistency with statement)', {
           saleId: input.saleId,
           saleTotalAmount,
           amountPaid,
           creditAmount,
-          creditRatio: new Decimal(creditAmount).dividedBy(saleTotalAmount).toNumber(),
           invoiceSubtotal: subtotal,
           invoiceTaxAmount: taxAmount,
           invoiceTotalAmount: totalAmount,
@@ -190,9 +198,10 @@ export const invoiceService = {
       createdById: input.createdById || null,
     });
 
-    // Optional initial payment
+    // Record initial payments: either from explicit amount OR from sale's non-credit payment lines
     let initialPayment: any = null;
     if (input.initialPaymentAmount && input.initialPaymentAmount > 0) {
+      // Explicit initial payment amount provided by caller
       initialPayment = await invoiceRepository.addPayment(pool, {
         invoiceId: invoice.id,
         amount: input.initialPaymentAmount,
@@ -202,6 +211,31 @@ export const invoiceService = {
         notes: 'Initial payment at invoice creation',
         processedById: input.createdById || null,
       });
+    } else if (input.saleId && saleAmountPaid > 0) {
+      // Auto-record non-credit payment lines from the linked sale
+      // This ensures split payments (e.g. CASH 50,000 + CREDIT 50,800) are reflected on the invoice
+      for (const payLine of nonCreditPaymentLinesForInvoice) {
+        const lineAmount = new Decimal(payLine.amount || 0).toNumber();
+        if (lineAmount > 0) {
+          const lineMethod = payLine.payment_method || payLine.paymentMethod || 'CASH';
+          await invoiceRepository.addPayment(pool, {
+            invoiceId: invoice.id,
+            amount: lineAmount,
+            paymentMethod: lineMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
+            paymentDate: new Date(),
+            referenceNumber: payLine.reference || null,
+            notes: 'Initial payment from sale',
+            processedById: input.createdById || null,
+          });
+
+          logger.info('Auto-recorded sale payment on invoice', {
+            invoiceId: invoice.id,
+            amount: lineAmount,
+            paymentMethod: lineMethod,
+            saleId: input.saleId,
+          });
+        }
+      }
     }
 
     // Refresh and recalc invoice after potential payment
@@ -551,7 +585,119 @@ export const invoiceService = {
         });
       }
 
+      // ============================================================
+      // POST-PAYMENT INTEGRITY VERIFICATION
+      // Verify GL was posted correctly before committing.
+      // The trigger fires within this transaction, so we can check.
+      // ============================================================
+      if (input.paymentMethod !== 'DEPOSIT') {
+        const glCheck = await client.query(
+          `SELECT COUNT(*) as gl_count
+           FROM ledger_transactions 
+           WHERE "ReferenceType" = 'INVOICE_PAYMENT' AND "ReferenceId" = $1
+             AND "Status" = 'POSTED'`,
+          [payment.id]
+        );
+        const glCount = parseInt(glCheck.rows[0].gl_count, 10);
+
+        if (glCount === 0) {
+          // GL trigger didn't fire or was skipped — check if it should have been skipped
+          const arCheck = await client.query(
+            `SELECT EXISTS (
+               SELECT 1 FROM ledger_entries le 
+               JOIN accounts a ON a."Id" = le."AccountId"
+               WHERE le."EntityId" = $1
+                 AND le."EntityType" = 'INVOICE'
+                 AND a."AccountCode" = '1200'
+                 AND le."DebitAmount" > 0
+             ) as has_ar`,
+            [invoiceId]
+          );
+
+          if (arCheck.rows[0].has_ar) {
+            // Invoice has AR entries but GL wasn't posted — this is a bug
+            await client.query('ROLLBACK');
+            throw new Error(
+              `GL INTEGRITY VIOLATION: Invoice payment ${payment.receipt_number} was not posted to GL. ` +
+              `Invoice ${inv.invoice_number} has AR entries that must be cleared. ` +
+              `Transaction rolled back to prevent AR discrepancy.`
+            );
+          }
+          // If no AR entry exists, the trigger correctly skipped GL posting
+          logger.info('Invoice payment GL correctly skipped (no AR entry to clear)', {
+            paymentId: payment.id,
+            receiptNumber: payment.receipt_number,
+          });
+        } else if (glCount > 1) {
+          // Multiple GL entries for same payment — duplicate prevention failed
+          await client.query('ROLLBACK');
+          throw new Error(
+            `GL INTEGRITY VIOLATION: Invoice payment ${payment.receipt_number} was posted ${glCount} times. ` +
+            `Transaction rolled back to prevent duplicate GL entries.`
+          );
+        }
+
+        // Verify GL entry is balanced (DR = CR)
+        if (glCount === 1) {
+          const balanceCheck = await client.query(
+            `SELECT SUM(le."DebitAmount") as total_dr, SUM(le."CreditAmount") as total_cr
+             FROM ledger_entries le
+             JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+             WHERE lt."ReferenceType" = 'INVOICE_PAYMENT' AND lt."ReferenceId" = $1`,
+            [payment.id]
+          );
+          const totalDr = parseFloat(balanceCheck.rows[0].total_dr || '0');
+          const totalCr = parseFloat(balanceCheck.rows[0].total_cr || '0');
+
+          if (Math.abs(totalDr - totalCr) > 0.01) {
+            await client.query('ROLLBACK');
+            throw new Error(
+              `GL BALANCE VIOLATION: Payment ${payment.receipt_number} GL entry is imbalanced. ` +
+              `DR=${totalDr}, CR=${totalCr}. Transaction rolled back.`
+            );
+          }
+
+          // Verify GL amount matches payment amount
+          if (Math.abs(totalDr - input.amount) > 0.01) {
+            await client.query('ROLLBACK');
+            throw new Error(
+              `GL AMOUNT MISMATCH: Payment ${payment.receipt_number} amount=${input.amount} but GL DR=${totalDr}. ` +
+              `Transaction rolled back to prevent reconciliation discrepancy.`
+            );
+          }
+        }
+      }
+
       await client.query('COMMIT');
+
+      // ============================================================
+      // GL POSTING: Handled by DB trigger trg_post_invoice_payment_to_ledger
+      // The trigger fires on INSERT to invoice_payments (within transaction)
+      // and posts: DR Cash/Card/Bank | CR Accounts Receivable
+      //
+      // DO NOT add explicit recordCustomerPaymentToGL() calls here —
+      // it would cause DOUBLE GL posting since the trigger uses
+      // ReferenceType='INVOICE_PAYMENT' and explicit code uses
+      // ReferenceType='CUSTOMER_PAYMENT', bypassing each other's
+      // idempotency checks.
+      //
+      // The trigger has proper error handling (failures abort the
+      // transaction, preventing payments without GL entries).
+      //
+      // Post-commit verification is done above to catch:
+      // - Missing GL entries (trigger skipped unexpectedly)
+      // - Duplicate GL entries (idempotency check failed)
+      // - Imbalanced GL entries (DR != CR)
+      // - Amount mismatches (GL amount != payment amount)
+      // ============================================================
+
+      logger.info('Invoice payment committed with GL verification', {
+        invoiceId,
+        paymentId: payment.id,
+        receiptNumber: payment.receipt_number,
+        amount: input.amount,
+        paymentMethod: input.paymentMethod,
+      });
 
       return { invoice: fresh, payment };
     } catch (error) {

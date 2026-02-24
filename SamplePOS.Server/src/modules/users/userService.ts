@@ -21,14 +21,14 @@ import logger from '../../utils/logger.js';
  * - Audit reports
  */
 export async function getAllUsers(pool: Pool): Promise<User[]> {
-  return userRepository.findAllUsers();
+  return userRepository.findAllUsers(pool);
 }
 
 /**
  * Get user by ID
  */
 export async function getUserById(pool: Pool, id: string): Promise<User> {
-  const user = await userRepository.findUserById(id);
+  const user = await userRepository.findUserById(id, pool);
 
   if (!user) {
     throw new Error('User not found');
@@ -68,7 +68,7 @@ export async function getUserById(pool: Pool, id: string): Promise<User> {
  */
 export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
   // Check if email already exists
-  const existingUser = await userRepository.findUserByEmail(data.email);
+  const existingUser = await userRepository.findUserByEmail(data.email, pool);
 
   if (existingUser) {
     throw new Error('Email already in use');
@@ -79,7 +79,7 @@ export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
   try {
     await client.query('BEGIN');
 
-    const user = await userRepository.createUser(data);
+    const user = await userRepository.createUser(data, client);
 
     // Future: Add role/permission assignments within transaction if needed
     // await assignUserRoles(client, user.id, data.roles);
@@ -131,7 +131,7 @@ export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
 export async function updateUser(pool: Pool, id: string, data: UpdateUser): Promise<User> {
   // If email is being changed, check it's not already in use
   if (data.email) {
-    const existingUser = await userRepository.findUserByEmail(data.email);
+    const existingUser = await userRepository.findUserByEmail(data.email, pool);
     if (existingUser && existingUser.id !== id) {
       throw new Error('Email already in use');
     }
@@ -142,7 +142,7 @@ export async function updateUser(pool: Pool, id: string, data: UpdateUser): Prom
   try {
     await client.query('BEGIN');
 
-    const user = await userRepository.updateUser(id, data);
+    const user = await userRepository.updateUser(id, data, client);
 
     if (!user) {
       throw new Error('User not found');
@@ -180,20 +180,20 @@ export async function changePassword(
   userId: string,
   data: ChangePassword
 ): Promise<void> {
-  const user = await userRepository.findUserById(userId);
+  const user = await userRepository.findUserById(userId, pool);
 
   if (!user) {
     throw new Error('User not found');
   }
 
   // Verify current password
-  const isValid = await userRepository.verifyUserPassword(user.email, data.currentPassword);
+  const isValid = await userRepository.verifyUserPassword(user.email, data.currentPassword, pool);
 
   if (!isValid) {
     throw new Error('Current password is incorrect');
   }
 
-  const success = await userRepository.changeUserPassword(userId, data.newPassword);
+  const success = await userRepository.changeUserPassword(userId, data.newPassword, pool);
 
   if (!success) {
     throw new Error('Failed to change password');
@@ -206,27 +206,27 @@ export async function changePassword(
  * Delete user (soft delete by default, hard delete if specified)
  */
 export async function deleteUser(pool: Pool, id: string, hardDelete: boolean = false): Promise<{ deleted: boolean; message: string }> {
-  const user = await userRepository.findUserById(id);
+  const user = await userRepository.findUserById(id, pool);
 
   if (!user) {
     throw new Error('User not found');
   }
 
   // Check if user has associated data
-  const hasData = await userRepository.userHasData(id);
+  const hasData = await userRepository.userHasData(id, pool);
 
   if (hardDelete) {
     if (hasData) {
       throw new Error('Cannot permanently delete user with associated transactions. Please deactivate instead.');
     }
-    const success = await userRepository.hardDeleteUser(id);
+    const success = await userRepository.hardDeleteUser(id, pool);
     if (!success) {
       throw new Error('Failed to delete user');
     }
     logger.info('User permanently deleted', { userId: id, email: user.email });
     return { deleted: true, message: 'User permanently deleted' };
   } else {
-    const success = await userRepository.deleteUser(id);
+    const success = await userRepository.deleteUser(id, pool);
     if (!success) {
       throw new Error('Failed to deactivate user');
     }
@@ -239,8 +239,8 @@ export async function deleteUser(pool: Pool, id: string, hardDelete: boolean = f
  * Get user statistics
  */
 export async function getUserStats(pool: Pool) {
-  const total = await userRepository.countUsers();
-  const users = await userRepository.findAllUsers();
+  const total = await userRepository.countUsers(pool);
+  const users = await userRepository.findAllUsers(pool);
 
   const roleCount = users.reduce((acc, user) => {
     acc[user.role] = (acc[user.role] || 0) + 1;
