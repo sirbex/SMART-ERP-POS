@@ -1,0 +1,25 @@
+ \r                                                                                                 +
+ DECLARE\r                                                                                          +
+     v_po_id UUID;\r                                                                                +
+ BEGIN\r                                                                                            +
+     IF TG_OP = 'DELETE' THEN\r                                                                     +
+         v_po_id := OLD.purchase_order_id;\r                                                        +
+     ELSE\r                                                                                         +
+         v_po_id := NEW.purchase_order_id;\r                                                        +
+         IF TG_OP = 'UPDATE' AND OLD.purchase_order_id IS DISTINCT FROM NEW.purchase_order_id THEN\r+
+             PERFORM fn_update_po_totals_internal(OLD.purchase_order_id);\r                         +
+         END IF;\r                                                                                  +
+     END IF;\r                                                                                      +
+     \r                                                                                             +
+     IF v_po_id IS NOT NULL THEN\r                                                                  +
+         PERFORM fn_update_po_totals_internal(v_po_id);\r                                           +
+     END IF;\r                                                                                      +
+     \r                                                                                             +
+     IF TG_OP = 'DELETE' THEN\r                                                                     +
+         RETURN OLD;\r                                                                              +
+     ELSE\r                                                                                         +
+         RETURN NEW;\r                                                                              +
+     END IF;\r                                                                                      +
+ END;\r                                                                                             +
+ 
+

@@ -1,0 +1,193 @@
+src/modules/customers/customerService.ts(384,22): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/customers/customerService.ts(396,48): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+src/modules/customers/customerService.ts(398,22): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/customers/customerService.ts(438,22): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/discounts/discountService.ts(306,5): error TS2322: Type 'string' is not assignable to type '"PERCENTAGE" | "FIXED_AMOUNT" | "BUY_X_GET_Y"'.
+src/modules/discounts/discountService.ts(307,5): error TS2322: Type 'string' is not assignable to type '"CUSTOMER" | "LINE_ITEM" | "CART"'.
+src/modules/inventory/stockCountService.ts(428,13): error TS2322: Type 'string' is not assignable to type 'StockMovementType'.
+src/modules/invoices/invoiceController.ts(161,23): error TS2352: Conversion of type 'InvoiceRecord' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Index signature for type 'string' is missing in type 'InvoiceRecord'.
+src/modules/invoices/invoiceController.ts(237,15): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+src/modules/invoices/invoiceController.ts(240,76): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/invoices/invoiceController.ts(241,70): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/invoices/invoiceController.ts(282,15): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(text: string, x?: number | undefined, y?: number | undefined, options?: TextOptions | undefined): PDFDocument', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string'.
+  Overload 2 of 2, '(text: string, options?: TextOptions | undefined): PDFDocument', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'string'.
+src/modules/invoices/invoiceController.ts(286,36): error TS2345: Argument of type '(p: Record<string, unknown>) => string' is not assignable to parameter of type '(value: InvoicePaymentRecord, index: number, array: InvoicePaymentRecord[]) => string'.
+  Types of parameters 'p' and 'value' are incompatible.
+    Type 'InvoicePaymentRecord' is not assignable to type 'Record<string, unknown>'.
+      Index signature for type 'string' is missing in type 'InvoicePaymentRecord'.
+src/modules/invoices/invoiceController.ts(291,40): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/invoices/invoiceController.ts(292,39): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string | number'.
+src/modules/invoices/invoiceController.ts(330,21): error TS2345: Argument of type '(item: Record<string, unknown>, index: number) => void' is not assignable to parameter of type '(value: InvoiceLineItem, index: number, array: InvoiceLineItem[]) => void'.
+  Types of parameters 'item' and 'value' are incompatible.
+    Type 'InvoiceLineItem' is not assignable to type 'Record<string, unknown>'.
+      Index signature for type 'string' is missing in type 'InvoiceLineItem'.
+src/modules/invoices/invoiceController.ts(357,20): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/invoices/invoiceController.ts(438,26): error TS2345: Argument of type '(payment: Record<string, unknown>, index: number) => void' is not assignable to parameter of type '(value: InvoicePaymentRecord, index: number, array: InvoicePaymentRecord[]) => void'.
+  Types of parameters 'payment' and 'value' are incompatible.
+    Type 'InvoicePaymentRecord' is not assignable to type 'Record<string, unknown>'.
+      Index signature for type 'string' is missing in type 'InvoicePaymentRecord'.
+src/modules/invoices/invoiceController.ts(462,36): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type 'string | number'.
+src/modules/invoices/invoiceController.ts(469,22): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/invoices/invoiceController.ts(489,18): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(92,39): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(114,34): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(115,35): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(116,40): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(117,37): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(123,33): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(145,41): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type 'string | number'.
+src/modules/pos/holdService.ts(156,34): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(157,35): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(158,40): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(159,37): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(165,20): error TS18046: 'hold.items' is of type 'unknown'.
+src/modules/pos/holdService.ts(171,38): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(172,39): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(173,39): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(174,38): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(176,37): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(177,39): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(179,65): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(180,44): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/pos/holdService.ts(184,78): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/products/productHistoryService.ts(108,23): error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type '{ type: "SALE" | "GOODS_RECEIPT" | "RETURN" | "ADJUSTMENT_IN" | "ADJUSTMENT_OUT" | "TRANSFER_IN" | "TRANSFER_OUT" | "DAMAGE" | "EXPIRY"; eventDate: string; quantityChange: number; ... 12 more ...; uomSymbol?: string | ... 1 more ... | undefined; }'.
+  Type 'Record<string, unknown>' is missing the following properties from type '{ type: "SALE" | "GOODS_RECEIPT" | "RETURN" | "ADJUSTMENT_IN" | "ADJUSTMENT_OUT" | "TRANSFER_IN" | "TRANSFER_OUT" | "DAMAGE" | "EXPIRY"; eventDate: string; quantityChange: number; ... 12 more ...; uomSymbol?: string | ... 1 more ... | undefined; }': type, eventDate, quantityChange
+src/modules/quotations/quotationService.ts(432,68): error TS2345: Argument of type '{ lineNumber: number; productId: {} | null; itemType: {}; sku: {} | null; description: unknown; notes: {} | null; quantity: unknown; unitPrice: unknown; discountAmount: number; subtotal: number; isTaxable: boolean; ... 7 more ...; productType: {}; }[]' is not assignable to parameter of type '{ lineNumber: number; productId?: string | null | undefined; itemType: "custom" | "product" | "service"; sku?: string | null | undefined; description: string; notes?: string | null | undefined; ... 12 more ...; productType?: string | undefined; }[]'.
+  Type '{ lineNumber: number; productId: {} | null; itemType: {}; sku: {} | null; description: unknown; notes: {} | null; quantity: unknown; unitPrice: unknown; discountAmount: number; subtotal: number; isTaxable: boolean; ... 7 more ...; productType: {}; }' is not assignable to type '{ lineNumber: number; productId?: string | null | undefined; itemType: "custom" | "product" | "service"; sku?: string | null | undefined; description: string; notes?: string | null | undefined; ... 12 more ...; productType?: string | undefined; }'.
+    Types of property 'productId' are incompatible.
+      Type '{} | null' is not assignable to type 'string | null | undefined'.
+        Type '{}' is not assignable to type 'string'.
+src/modules/quotations/quotationService.ts(821,9): error TS2322: Type 'InvoiceRecord' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'InvoiceRecord'.
+src/modules/reports/reportsController.ts(260,34): error TS2345: Argument of type 'SalesReportRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SalesReportRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SalesReportRow'.
+src/modules/reports/reportsController.ts(337,34): error TS2345: Argument of type 'ExpiringItemRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'ExpiringItemRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'ExpiringItemRow'.
+src/modules/reports/reportsController.ts(410,34): error TS2345: Argument of type 'LowStockItemRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'LowStockItemRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'LowStockItemRow'.
+src/modules/reports/reportsController.ts(489,34): error TS2345: Argument of type 'BestSellingProductRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'BestSellingProductRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'BestSellingProductRow'.
+src/modules/reports/reportsController.ts(566,34): error TS2345: Argument of type 'SupplierCostAnalysisRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SupplierCostAnalysisRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SupplierCostAnalysisRow'.
+src/modules/reports/reportsController.ts(648,34): error TS2345: Argument of type 'GoodsReceivedRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'GoodsReceivedRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'GoodsReceivedRow'.
+src/modules/reports/reportsController.ts(724,34): error TS2345: Argument of type 'PaymentReportRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'PaymentReportRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'PaymentReportRow'.
+src/modules/reports/reportsController.ts(806,34): error TS2345: Argument of type 'CustomerPaymentsRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'CustomerPaymentsRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'CustomerPaymentsRow'.
+src/modules/reports/reportsController.ts(882,34): error TS2345: Argument of type 'ProfitLossRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'ProfitLossRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'ProfitLossRow'.
+src/modules/reports/reportsController.ts(955,34): error TS2345: Argument of type 'DeletedItemRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'DeletedItemRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'DeletedItemRow'.
+src/modules/reports/reportsController.ts(1033,34): error TS2345: Argument of type 'InventoryAdjustmentRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'InventoryAdjustmentRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'InventoryAdjustmentRow'.
+src/modules/reports/reportsController.ts(1111,34): error TS2345: Argument of type 'PurchaseOrderSummaryRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'PurchaseOrderSummaryRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'PurchaseOrderSummaryRow'.
+src/modules/reports/reportsController.ts(1187,34): error TS2345: Argument of type 'StockMovementAnalysisRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'StockMovementAnalysisRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'StockMovementAnalysisRow'.
+src/modules/reports/reportsController.ts(1278,34): error TS2345: Argument of type 'CustomerStatementTransaction[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'CustomerStatementTransaction' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'CustomerStatementTransaction'.
+src/modules/reports/reportsController.ts(1356,34): error TS2345: Argument of type 'ProfitMarginByProductRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'ProfitMarginByProductRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'ProfitMarginByProductRow'.
+src/modules/reports/reportsController.ts(1431,34): error TS2345: Argument of type 'DailyCashFlowRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'DailyCashFlowRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'DailyCashFlowRow'.
+src/modules/reports/reportsController.ts(1501,34): error TS2345: Argument of type 'SupplierPaymentStatusRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SupplierPaymentStatusRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SupplierPaymentStatusRow'.
+src/modules/reports/reportsController.ts(1578,34): error TS2345: Argument of type 'TopCustomerRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'TopCustomerRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'TopCustomerRow'.
+src/modules/reports/reportsController.ts(1649,34): error TS2345: Argument of type 'CustomerAgingRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'CustomerAgingRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'CustomerAgingRow'.
+src/modules/reports/reportsController.ts(1722,34): error TS2345: Argument of type 'StockAgingRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'StockAgingRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'StockAgingRow'.
+src/modules/reports/reportsController.ts(1797,34): error TS2345: Argument of type 'WasteDamageRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'WasteDamageRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'WasteDamageRow'.
+src/modules/reports/reportsController.ts(1870,34): error TS2345: Argument of type 'ReorderRecommendationRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'ReorderRecommendationRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'ReorderRecommendationRow'.
+src/modules/reports/reportsController.ts(2121,34): error TS2345: Argument of type 'SalesByCategoryRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SalesByCategoryRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SalesByCategoryRow'.
+src/modules/reports/reportsController.ts(2194,34): error TS2345: Argument of type 'SalesByPaymentMethodRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SalesByPaymentMethodRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SalesByPaymentMethodRow'.
+src/modules/reports/reportsController.ts(2267,34): error TS2345: Argument of type 'HourlySalesAnalysisRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'HourlySalesAnalysisRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'HourlySalesAnalysisRow'.
+src/modules/reports/reportsController.ts(2343,34): error TS2345: Argument of type 'SalesComparisonRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SalesComparisonRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SalesComparisonRow'.
+src/modules/reports/reportsController.ts(2420,34): error TS2345: Argument of type 'CustomerPurchaseHistoryRow[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'CustomerPurchaseHistoryRow' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'CustomerPurchaseHistoryRow'.
+src/modules/sales/salesService.ts(136,44): error TS2345: Argument of type 'SaleItemInput[]' is not assignable to parameter of type 'Record<string, unknown>[]'.
+  Type 'SaleItemInput' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SaleItemInput'.
+src/modules/suppliers/supplierRepository.ts(65,5): error TS2322: Type '{}' is not assignable to type 'string'.
+src/rbac/controller.ts(274,9): error TS2322: Type 'string' is not assignable to type 'RbacAuditAction | undefined'.
+src/routes/erpAccountingRoutes.ts(473,37): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(predicate: (value: AccountingPeriod, index: number, obj: AccountingPeriod[]) => value is AccountingPeriod, thisArg?: any): AccountingPeriod | undefined', gave the following error.
+    Argument of type '(p: Record<string, unknown>) => boolean' is not assignable to parameter of type '(value: AccountingPeriod, index: number, obj: AccountingPeriod[]) => value is AccountingPeriod'.
+      Types of parameters 'p' and 'value' are incompatible.
+        Type 'AccountingPeriod' is not assignable to type 'Record<string, unknown>'.
+          Index signature for type 'string' is missing in type 'AccountingPeriod'.
+  Overload 2 of 2, '(predicate: (value: AccountingPeriod, index: number, obj: AccountingPeriod[]) => unknown, thisArg?: any): AccountingPeriod | undefined', gave the following error.
+    Argument of type '(p: Record<string, unknown>) => boolean' is not assignable to parameter of type '(value: AccountingPeriod, index: number, obj: AccountingPeriod[]) => unknown'.
+      Types of parameters 'p' and 'value' are incompatible.
+        Type 'AccountingPeriod' is not assignable to type 'Record<string, unknown>'.
+          Index signature for type 'string' is missing in type 'AccountingPeriod'.
+src/routes/health.ts(353,7): error TS18046: 'details.tables' is of type 'unknown'.
+src/routes/health.ts(376,7): error TS18046: 'details.columns' is of type 'unknown'.
+src/services/jobQueue.ts(121,21): error TS18046: 'data' is of type 'unknown'.
