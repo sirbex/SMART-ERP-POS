@@ -18,12 +18,12 @@ interface TestResult {
   name: string;
   passed: boolean;
   message: string;
-  details?: any;
+  details?: unknown;
 }
 
 const results: TestResult[] = [];
 
-function test(name: string, passed: boolean, message: string, details?: any) {
+function test(name: string, passed: boolean, message: string, details?: unknown) {
   results.push({ name, passed, message, details });
   const icon = passed ? '✅' : '❌';
   console.log(`${icon} ${name}: ${message}`);

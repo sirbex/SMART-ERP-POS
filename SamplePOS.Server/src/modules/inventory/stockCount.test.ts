@@ -167,7 +167,7 @@ describe('Stock Count API Integration Tests', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      res.body.data.counts.forEach((count: any) => {
+      res.body.data.counts.forEach((count: Record<string, unknown>) => {
         expect(count.state).toBe('counting');
       });
     });
@@ -197,7 +197,7 @@ describe('Stock Count API Integration Tests', () => {
       expect(Array.isArray(res.body.data.lines)).toBe(true);
 
       // Verify difference calculation
-      res.body.data.lines.forEach((line: any) => {
+      res.body.data.lines.forEach((line: Record<string, unknown>) => {
         expect(line).toHaveProperty('expected_qty_base');
         expect(line).toHaveProperty('difference');
         expect(line).toHaveProperty('differencePercentage');

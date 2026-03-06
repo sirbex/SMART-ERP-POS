@@ -1,5 +1,6 @@
 import { getCustomerStatement } from '../customerService.js';
 import * as customerRepository from '../customerRepository.js';
+import type { Customer } from '../../../../../shared/zod/customer.js';
 import Decimal from 'decimal.js';
 
 jest.mock('../customerRepository.js');
@@ -21,9 +22,9 @@ describe('getCustomerStatement', () => {
       balance: 0,
       creditLimit: 100000,
       isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as any);
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Customer);
   });
 
   test('no entries returns opening=closing and empty array', async () => {
@@ -67,7 +68,7 @@ describe('getCustomerStatement', () => {
 
   test('pagination slices entries correctly', async () => {
     mockRepo.getOpeningBalance.mockResolvedValue(0);
-    const entries = [] as any[];
+    const entries: Array<{ date: Date; type: string; reference: string; description: string; debit: number; credit: number }> = [];
     for (let i = 0; i < 25; i++) {
       entries.push({ date: new Date(Date.now() + i * 1000), type: 'INVOICE', reference: `SALE-${i}`, description: 'Sale', debit: 100, credit: 0 });
     }
