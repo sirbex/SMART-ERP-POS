@@ -1,6 +1,6 @@
 # SMART-ERP-POS - Copilot Instructions for All Modules
 
-**Date**: February 2026  
+**Date**: March 2026  
 **Architecture**: Modular Hybrid Monolith (No ORM)  
 **Project Type**: ERP System with POS  
 **Database**: `pos_system` (PostgreSQL) - ALWAYS use this database consistently
@@ -95,6 +95,10 @@ Controller → Service → Repository → Database
 11. All API responses must follow: `{ success, message?, data?, error? }` structure.
 12. Store Zod schemas in `shared/zod/` — never redefine validation in frontend.
 13. Use TypeScript types from `shared/types/` — never duplicate type definitions.
+14. **Zero `any` types** — enforced. Use explicit interfaces, generics, or `unknown`.
+15. **ErrorBoundary required** at root (`main.tsx`) and application (`App.tsx`) levels. Add page-level boundaries for major features.
+16. **Write tests** (Vitest) for new utilities, schemas, and validation logic.
+17. Frontend strict mode: `tsconfig.app.json` enforces `noUnusedLocals` and `noUnusedParameters`.
 
 ---
 
@@ -102,21 +106,28 @@ Controller → Service → Repository → Database
 
 1. Only generate Node.js/TypeScript code with Express framework.
 2. **Never use ORM** — use raw SQL with `pg` (Postgres) or `better-sqlite3` (SQLite).
-3. **All SQL must be parameterized** to prevent SQL injection.
+3. **All SQL must be parameterized** (`$1`, `$2`) — never use template literal `${}` interpolation in SQL strings.
 4. Follow strict layering: **Controller → Service → Repository → Database**.
-5. **Never access database directly** from controllers or services.
+5. **Never access database directly** from controllers, services, or route files. No `pool.query` outside repositories.
 6. Validate all incoming requests using Zod schemas from `shared/zod/`.
 7. Use Zod `.parse()` or `.safeParse()` — handle validation errors properly.
-8. **All responses must follow**: `{ success: boolean, message?: string, data?: any, error?: string }`.
-9. Use async/await for all database operations with try/catch error handling.
-10. **Never duplicate** existing routes, functions, or validations.
-11. Organize by module: `pos/`, `accounting/`, `inventory/`, `customers/`, `suppliers/`.
-12. Each module must have: `controller.ts`, `service.ts`, `repository.ts`.
-13. Repository layer contains **only SQL queries** — no business logic.
-14. Service layer contains **business logic** — orchestrates repositories.
-15. Controller layer handles **HTTP requests/responses** — calls services.
-16. Import types from `shared/types/` — never redefine types in backend.
-17. Log all errors with context but never log sensitive data (passwords, tokens).
+8. **All responses must follow**: `{ success: boolean, message?: string, data?: T, error?: string }` (no `any`).
+9. **All route handlers must be wrapped in `asyncHandler`** — never write manual try/catch in route definitions.
+10. **Throw typed error classes** (NotFoundError, ValidationError, ConflictError, ForbiddenError) — never throw raw `new Error()`.
+11. **Multi-table operations must use `withTransaction`** for atomicity.
+12. **Use `Money` utility** for all financial calculations (not raw `Decimal.js` or native numbers).
+13. **Use `PaginationHelper`** for all list/search endpoints.
+14. **Use `batchFetch`** when loading related data for lists — never query in a loop (N+1).
+15. **Never duplicate** existing routes, functions, or validations.
+16. Organize by module: `pos/`, `accounting/`, `inventory/`, `customers/`, `suppliers/`.
+17. Each module must have: `controller.ts`, `service.ts`, `repository.ts`.
+18. Repository layer contains **only SQL queries** — no business logic.
+19. Service layer contains **business logic** — orchestrates repositories.
+20. Controller layer handles **HTTP requests/responses** — calls services.
+21. Import types from `shared/types/` — never redefine types in backend.
+22. **Zero `any` types** — use explicit interfaces, union types, or `unknown`.
+23. **Write tests** for new utilities, schemas, and business logic (Jest with `--experimental-vm-modules`).
+24. Log all errors with context but never log sensitive data (passwords, tokens).
 
 ---
 
@@ -302,9 +313,16 @@ server/modules/customers/
 - Use environment variables for all secrets and API keys
 - Implement rate limiting on public endpoints
 
-### Testing
-- Write unit tests for all business logic
+### Testing (Mandatory for New Features)
+- **Backend**: Jest 30 with `ts-jest` ESM preset. Run with `--experimental-vm-modules`. Test command: `npm test`
+- **Frontend**: Vitest (uses `vite.config.ts`). Test command: `npx vitest run`
+- Write unit tests for all new utility functions, Zod schemas, and business logic
 - Write integration tests for API endpoints
+- Test edge cases: null, undefined, NaN, zero, negative, boundary values
+- Use `import { jest } from '@jest/globals'` for ESM-compatible mocking (backend)
+- Co-locate backend tests with source (`money.test.ts` next to `money.ts`)
+- Frontend tests in `src/__tests__/` directory
+- DB-dependent tests in separate files that can be excluded via `--testPathIgnorePatterns`
 - Use test fixtures and factories for test data
 - Mock external dependencies in tests
 

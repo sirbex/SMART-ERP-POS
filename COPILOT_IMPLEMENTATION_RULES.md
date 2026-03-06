@@ -503,9 +503,10 @@ CREATE INDEX idx_movements_product
 
 ### TypeScript Strict Mode
 - Follow strict TypeScript mode (`"strict": true` in `tsconfig.json`)
-- No `any` types unless absolutely necessary
+- **ZERO `any` types** — no exceptions. Use explicit interfaces, union types, or `unknown`
 - Use proper type inference
-- Define interfaces for all data structures
+- Define interfaces for all data structures in `shared/types/`
+- Frontend `tsconfig.app.json` enforces `noUnusedLocals` and `noUnusedParameters`
 
 ### Code Quality Rules
 1. **Descriptive variable names**
@@ -529,6 +530,239 @@ CREATE INDEX idx_movements_product
     * @requires Decimal.js for precision arithmetic
     */
    ```
+
+---
+
+## 🛠️ ESTABLISHED PATTERNS (MANDATORY)
+
+> These patterns are already implemented across the codebase (490+ usages of asyncHandler, 118 UnitOfWork, etc.).
+> ALL new code MUST use these patterns. Never introduce alternatives.
+
+### asyncHandler Wrapper (All Routes)
+Every route handler MUST be wrapped in `asyncHandler`. Never write manual try/catch in route definitions.
+
+```typescript
+import { asyncHandler } from '../middleware/errorHandler.js';
+
+// ✅ CORRECT: asyncHandler wraps the handler
+router.get('/products', asyncHandler(async (req, res) => {
+  const products = await productService.list(req.query);
+  res.json({ success: true, data: products });
+}));
+
+// ❌ WRONG: Manual try/catch in route
+router.get('/products', async (req, res) => {
+  try {
+    const products = await productService.list(req.query);
+    res.json({ success: true, data: products });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+```
+
+### Typed Error Classes (Not Raw Error)
+Throw typed errors from the AppError hierarchy. The global error handler maps them to HTTP status codes.
+
+```typescript
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError, UnauthorizedError } from '../middleware/errorHandler.js';
+
+// ✅ CORRECT: Typed errors with descriptive messages
+throw new NotFoundError('Product not found');         // 404
+throw new ValidationError('Invalid quantity');          // 400
+throw new ConflictError('Batch already exists');       // 409
+throw new ForbiddenError('Insufficient permissions');  // 403
+throw new UnauthorizedError('Token expired');          // 401
+
+// ❌ WRONG: Raw Error objects
+throw new Error('Product not found'); // Always returns 500
+```
+
+### UnitOfWork / withTransaction (Multi-Step DB Operations)
+All operations that touch multiple tables MUST use `withTransaction` for atomicity.
+
+```typescript
+import { withTransaction } from '../utils/unitOfWork.js';
+
+// ✅ CORRECT: Atomic multi-table operation
+async function completeSale(saleData: SaleInput) {
+  return withTransaction(async (client) => {
+    const sale = await saleRepo.create(client, saleData);
+    await inventoryRepo.deductStock(client, sale.items);
+    await ledgerRepo.postEntry(client, sale.journalEntry);
+    return sale;
+  });
+}
+
+// ❌ WRONG: Multiple independent pool.query calls without transaction
+async function completeSale(saleData: SaleInput) {
+  const sale = await pool.query('INSERT INTO sales...');
+  await pool.query('UPDATE inventory...');  // Orphaned if this fails!
+  await pool.query('INSERT INTO gl_entries...');
+}
+```
+
+### batchFetch (Prevent N+1 Queries)
+When loading related data for a list, use `batchFetch` instead of querying in a loop.
+
+```typescript
+import { batchFetch } from '../utils/batchFetch.js';
+
+// ✅ CORRECT: Single query for all related data
+const orders = await orderRepo.list();
+const orderItems = await batchFetch(
+  orders.map(o => o.id),
+  (ids) => orderItemRepo.findByOrderIds(ids)
+);
+
+// ❌ WRONG: N+1 query pattern
+const orders = await orderRepo.list();
+for (const order of orders) {
+  order.items = await orderItemRepo.findByOrderId(order.id); // N queries!
+}
+```
+
+### PaginationHelper (List Endpoints)
+All list/search endpoints MUST use `PaginationHelper` for consistent pagination.
+
+```typescript
+import { PaginationHelper } from '../utils/pagination.js';
+
+// ✅ CORRECT: Centralized pagination
+const { page, limit, offset } = PaginationHelper.fromQuery(req.query);
+const { rows, count } = await productRepo.list({ offset, limit });
+res.json({ success: true, data: PaginationHelper.envelope(rows, count, page, limit) });
+
+// ❌ WRONG: Manual pagination parsing
+const page = parseInt(req.query.page as string) || 1;
+const limit = Math.min(parseInt(req.query.limit as string) || 50, 500);
+```
+
+### Money Utility (Financial Calculations)
+Use the `Money` class for ALL financial operations. Never use raw `Decimal` or native numbers.
+
+```typescript
+import { Money } from '../utils/money.js';
+
+// ✅ CORRECT: Money utility
+const subtotal = Money.lineTotal(quantity, unitPrice);
+const discount = Money.applyDiscount(subtotal, discountPercent);
+const tax = Money.calculateTax(discount, taxRate);
+const total = Money.add(discount, tax);
+const margin = Money.grossMargin(sellingPrice, costPrice);
+
+// ❌ WRONG: Raw arithmetic
+const total = quantity * price * (1 - discount / 100);
+
+// ❌ WRONG: Direct Decimal.js usage instead of Money
+const total = new Decimal(quantity).times(price);
+```
+
+### No SQL in Route Files
+Route files define URL patterns and middleware chains ONLY. SQL queries belong in repositories.
+
+```typescript
+// ✅ CORRECT: Route → Controller/Service → Repository
+router.get('/products/:id', requireAuth, asyncHandler(productController.getById));
+
+// ❌ WRONG: pool.query in a route file
+router.get('/products/:id', asyncHandler(async (req, res) => {
+  const result = await pool.query('SELECT * FROM products WHERE id = $1', [req.params.id]);
+  res.json({ success: true, data: result.rows[0] });
+}));
+```
+
+### No Dynamic SQL (Template Literal Queries)
+Never use template literals with `${}` interpolation in SQL strings. Always use parameterized `$1, $2` placeholders.
+
+```typescript
+// ✅ CORRECT: Parameterized placeholders
+const result = await pool.query(
+  'SELECT * FROM products WHERE category_id = $1 AND status = $2',
+  [categoryId, status]
+);
+
+// ✅ CORRECT: Dynamic WHERE clauses with safe column whitelist
+const allowedColumns = ['name', 'category_id', 'status'] as const;
+const conditions: string[] = [];
+const values: unknown[] = [];
+if (filters.name) {
+  conditions.push(`name ILIKE $${values.length + 1}`);
+  values.push(`%${filters.name}%`);
+}
+
+// ❌ WRONG: Template literal SQL — SQL injection risk
+const result = await pool.query(`SELECT * FROM products WHERE ${column} = ${value}`);
+```
+
+### Frontend ErrorBoundary (Required)
+ErrorBoundary components MUST exist at two levels minimum:
+1. **Root level** (in `main.tsx`) — catches crashes in providers
+2. **Application level** (in `App.tsx`) — catches crashes in routes/pages
+
+```tsx
+// main.tsx — Root level
+<ErrorBoundary section="Root">
+  <QueryClientProvider client={queryClient}>
+    <App />
+  </QueryClientProvider>
+</ErrorBoundary>
+
+// App.tsx — Application level
+<ErrorBoundary section="Application">
+  <Routes>
+    {/* all routes */}
+  </Routes>
+</ErrorBoundary>
+```
+
+When adding major new pages/features, consider adding a page-level `<ErrorBoundary section="PageName">` to isolate crashes.
+
+---
+
+## 🧪 TESTING REQUIREMENTS (MANDATORY)
+
+### Test Infrastructure
+- **Backend**: Jest 30 with `ts-jest` ESM preset. Requires `--experimental-vm-modules` flag.
+- **Frontend**: Vitest (uses `vite.config.ts`, no separate config needed)
+- **Shared schemas**: `@shared` path alias mapped in `jest.config.cjs`
+
+### When to Write Tests
+Every new feature MUST include tests for:
+1. **New utility functions** — unit tests covering edge cases (null, NaN, boundary values)
+2. **New Zod schemas** — validation tests (valid, invalid, boundary, strict mode)
+3. **New business logic in services** — unit tests with mocked repositories
+4. **Error class usage** — verify correct HTTP status codes
+5. **New React components** — render tests for key states (loading, error, empty, data)
+
+### Test File Conventions
+```
+# Backend: Co-locate with source
+SamplePOS.Server/src/utils/money.test.ts        # Tests money.ts
+SamplePOS.Server/src/middleware/errorHandler.test.ts
+
+# Frontend: Centralized test directory
+samplepos.client/src/__tests__/currency.spec.ts
+samplepos.client/src/__tests__/validation.spec.ts
+```
+
+### Running Tests
+```powershell
+# Backend (excludes DB-dependent integration tests)
+cd SamplePOS.Server
+npm test -- --testPathIgnorePatterns="accounting-integrity|rbac/test|customerStatement|stockCount"
+
+# Frontend
+cd samplepos.client
+npx vitest run
+```
+
+### Test Quality Rules
+- Test edge cases: null, undefined, NaN, Infinity, empty strings, zero, negative numbers
+- Test boundary values: max page size, credit limits, decimal precision
+- Use `import { jest } from '@jest/globals'` for ESM-compatible mocks (backend)
+- Never mock what you don't own — prefer testing through public interfaces
+- DB-dependent tests go in separate files that can be excluded in CI
 
 ---
 
@@ -647,17 +881,24 @@ cd ../samplepos.client && npm run build # Must pass with zero TS errors
 ### Code Standards
 - [ ] Followed Controller → Service → Repository layering
 - [ ] Used Zod schemas from `shared/zod/`
-- [ ] All SQL queries are parameterized
+- [ ] All SQL queries are parameterized (no template literal `${}` in SQL)
 - [ ] No ORM code present
-- [ ] Used `Decimal.js` for all financial calculations
+- [ ] Used `Money` utility (not raw Decimal.js) for all financial calculations
 - [ ] API responses follow `{ success, data?, error? }` format
-- [ ] Error handling with try/catch
-- [ ] No business logic in controllers
+- [ ] All routes wrapped in `asyncHandler` (no manual try/catch in routes)
+- [ ] Typed error classes used (NotFoundError, ValidationError, etc. — not raw Error)
+- [ ] Multi-table operations wrapped in `withTransaction`
+- [ ] List endpoints use `PaginationHelper`
+- [ ] No `pool.query` in route or controller files
+- [ ] No `any` types — zero tolerance
+- [ ] No business logic in controllers or repositories
 - [ ] No database access outside repositories
-- [ ] JSDoc header on new files
-- [ ] ESLint + Prettier passing
-- [ ] TypeScript strict mode compliance
+- [ ] `batchFetch` used for related-data loading (no N+1 loops)
+- [ ] Tests written for new utilities, schemas, and business logic
+- [ ] Backend tests pass: `npm test`
+- [ ] Frontend tests pass: `npx vitest run`
 - [ ] Audit logging for critical operations
+- [ ] ErrorBoundary wrapping for new major pages (if frontend)
 - [ ] Product field changes propagated globally (if applicable)
 
 ---
@@ -672,6 +913,6 @@ cd ../samplepos.client && npm run build # Must pass with zero TS errors
 
 ---
 
-**Last Updated**: February 2026  
+**Last Updated**: March 2026  
 **Maintainer**: Architecture Team  
 **Status**: Mandatory — All implementations must comply

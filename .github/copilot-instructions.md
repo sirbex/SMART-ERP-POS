@@ -1,6 +1,6 @@
 # SMART-ERP-POS - AI Coding Agent Instructions
 
-**Architecture**: Modular Hybrid Monolith | **Status**: Active Development | **Date**: Feb 2026
+**Architecture**: Modular Hybrid Monolith | **Status**: Active Development | **Date**: March 2026
 
 > See also
 - **Copilot Implementation Rules (MANDATORY)**: `../COPILOT_IMPLEMENTATION_RULES.md`
@@ -87,9 +87,10 @@ HTTP Request → Controller (validation) → Service (business logic) → Reposi
 ```
 
 **Never**:
-- Query database from controllers/services
+- Query database from controllers/services/routes (`pool.query` only in repositories)
 - Put business logic in repositories
 - Mix HTTP handling with data access
+- Use template literal `${}` interpolation in SQL strings (SQL injection risk)
 
 ## Project Structure
 
@@ -599,19 +600,71 @@ const total = item.quantity * item.price; // WRONG - precision loss
 
 ## Common Patterns
 
-### Error Handling
+### Route Handlers (asyncHandler + Typed Errors)
 ```typescript
-// Controller
-try {
-  const data = await service.getUser(id);
-  res.json({ success: true, data });
-} catch (error) {
-  logger.error('Failed to get user', { id, error });
-  res.status(500).json({ 
-    success: false, 
-    error: error.message 
-  });
-}
+import { asyncHandler, NotFoundError, ValidationError } from '../middleware/errorHandler.js';
+
+// ✅ CORRECT: asyncHandler wraps every route, typed errors thrown
+router.get('/products/:id', requireAuth, asyncHandler(async (req, res) => {
+  const product = await productService.getById(req.params.id);
+  if (!product) throw new NotFoundError('Product not found');
+  res.json({ success: true, data: product });
+}));
+
+// ❌ WRONG: Manual try/catch in route, raw Error
+router.get('/products/:id', async (req, res) => {
+  try {
+    const product = await productService.getById(req.params.id);
+    if (!product) throw new Error('Product not found'); // Always 500!
+    res.json({ success: true, data: product });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+```
+
+**Error class hierarchy** (all extend AppError):
+- `NotFoundError` → 404 | `ValidationError` → 400 | `ConflictError` → 409
+- `ForbiddenError` → 403 | `UnauthorizedError` → 401
+
+### Multi-Table Operations (withTransaction)
+```typescript
+import { withTransaction } from '../utils/unitOfWork.js';
+
+// ✅ CORRECT: Atomic multi-table operation
+return withTransaction(async (client) => {
+  const sale = await saleRepo.create(client, data);
+  await inventoryRepo.deductStock(client, sale.items);
+  await ledgerRepo.postEntry(client, sale.journalEntry);
+  return sale;
+});
+```
+
+### Financial Calculations (Money Utility)
+```typescript
+import { Money } from '../utils/money.js';
+
+// ✅ CORRECT: Money utility for all financial math
+const subtotal = Money.lineTotal(quantity, unitPrice);
+const discount = Money.applyDiscount(subtotal, discountPercent);
+const tax = Money.calculateTax(discount, taxRate);
+const margin = Money.grossMargin(sellingPrice, costPrice);
+
+// ❌ WRONG: Raw arithmetic or direct Decimal.js
+const total = quantity * price;
+const total = new Decimal(quantity).times(price);
+```
+
+### List Endpoints (PaginationHelper + batchFetch)
+```typescript
+import { PaginationHelper } from '../utils/pagination.js';
+import { batchFetch } from '../utils/batchFetch.js';
+
+// ✅ Pagination
+const { page, limit, offset } = PaginationHelper.fromQuery(req.query);
+const { rows, count } = await repo.list({ offset, limit });
+res.json({ success: true, data: PaginationHelper.envelope(rows, count, page, limit) });
+
+// ✅ Prevent N+1 with batchFetch
+const items = await batchFetch(orders.map(o => o.id), orderItemRepo.findByOrderIds);
 ```
 
 ### Authentication (JWT)
@@ -630,17 +683,46 @@ formatCurrency(amount: number): string
 
 ## Testing Strategy
 
-### Backend Integration Tests
-Comprehensive PowerShell test suite exists:
+### Backend Tests (Jest 30 + ESM)
 ```powershell
+# Unit tests (excludes DB-dependent suites)
+cd SamplePOS.Server
+npm test -- --testPathIgnorePatterns="accounting-integrity|rbac/test|customerStatement|stockCount"
+
+# Integration tests (PowerShell, requires running server)
 .\SamplePOS.Server\test-api.ps1
 ```
 
-**Covers**: PO creation → GR finalization → batch tracking → FEFO allocation
+**Covers**: Money utility, pagination, error classes, RBAC permissions, Zod schemas, PO→GR→batch→FEFO
 
-### Frontend Testing (Planned)
-- Vitest configured in `package.json`
-- React Testing Library + MSW for API mocking
+**Test conventions**:
+- Co-locate with source: `money.test.ts` next to `money.ts`
+- Use `import { jest } from '@jest/globals'` for ESM-compatible mocks
+- DB-dependent tests in separate files (excluded from CI via `--testPathIgnorePatterns`)
+
+### Frontend Tests (Vitest)
+```powershell
+cd samplepos.client
+npx vitest run
+```
+
+**Covers**: Currency formatting, business rule validation, RBAC permissions, Zod schemas, ErrorBoundary
+
+**Test conventions**:
+- Tests in `src/__tests__/` directory
+- Test edge cases: null, undefined, NaN, zero, negative, boundary values
+- Test error states and empty states for components
+
+### When to Write Tests (Mandatory)
+- Every new utility function → unit tests
+- Every new Zod schema → validation tests (valid, invalid, boundary)
+- Every new business logic service → unit tests with mocked repos
+- Every new React component → render tests for key states
+
+### Frontend ErrorBoundary (Required)
+- Root level in `main.tsx`: `<ErrorBoundary section="Root">`
+- Application level in `App.tsx`: `<ErrorBoundary section="Application">`
+- Add page-level `<ErrorBoundary section="PageName">` for major new features
 
 ## Important Gotchas
 
@@ -699,34 +781,45 @@ npm run build
 - [ ] **TIMEZONE STRATEGY FOLLOWED** (Section 0 - Zero tolerance)
 - [ ] Followed Controller → Service → Repository layering
 - [ ] Used Zod schemas from `shared/zod/`
-- [ ] All SQL is parameterized (no string interpolation)
+- [ ] All SQL is parameterized (no template literal `${}` interpolation in SQL)
+- [ ] No `pool.query` in route or controller files
 - [ ] No ORM code (Prisma, Sequelize, TypeORM, etc.)
 - [ ] API responses follow `{ success, data?, error? }` format
-- [ ] Used `Decimal.js` for currency/quantity arithmetic
-- [ ] Error handling with try/catch
+- [ ] All routes wrapped in `asyncHandler` (no manual try/catch in routes)
+- [ ] Typed error classes used (NotFoundError, ValidationError, etc. — not raw Error)
+- [ ] Multi-table operations wrapped in `withTransaction`
+- [ ] Used `Money` utility for currency/quantity arithmetic (not raw Decimal.js or floats)
+- [ ] List endpoints use `PaginationHelper`
+- [ ] Related-data loading uses `batchFetch` (no N+1 loops)
 - [ ] No business logic in repositories
 - [ ] No database access outside repositories
-- [ ] Product field changes propagated across all Product views (UI forms, lists, selectors) and synchronized in schemas/types/migrations
+- [ ] Product field changes propagated across all Product views
 - [ ] **TypeScript interfaces defined in `shared/types/`**
 - [ ] **Zero `any` types - all variables explicitly typed**
 - [ ] **Database responses normalized from `snake_case` to `camelCase`**
 - [ ] **Consistent field names (totalAmount, profit, amountPaid, etc.)**
-- [ ] **Decimal.js used for ALL financial calculations**
 - [ ] **Enum/union types for status fields (not plain strings)**
 - [ ] **Human-readable IDs used in UI (SALE-2025-0001, not UUID or truncated IDs)**
 - [ ] **No Date object conversions on DATE columns (timezone violation)**
 - [ ] **No .toISOString() on date fields (timezone violation)**
 - [ ] **Dates sent as YYYY-MM-DD strings, not Date objects**
+- [ ] **Tests written** for new utilities, schemas, and business logic
+- [ ] **Backend tests pass**: `npm test`
+- [ ] **Frontend tests pass**: `npx vitest run`
+- [ ] **ErrorBoundary wrapping** for new major pages (if frontend)
 
 ## When Adding New Features
 
 1. **Define Zod schema** in `shared/zod/`
-2. **Create repository** with parameterized SQL
-3. **Build service** with business logic
-4. **Add controller** with validation + HTTP handling
-5. **Wire routes** in Express app
-6. **Add integration test** to PowerShell test suite (if backend)
-7. **Build React component** with React Query hooks (if frontend)
+2. **Define TypeScript interfaces** in `shared/types/`
+3. **Create repository** with parameterized SQL (no `pool.query` outside repo)
+4. **Build service** with business logic (use `Money` for financials, `withTransaction` for multi-table ops)
+5. **Add controller** with Zod validation + HTTP handling
+6. **Wire routes** with `asyncHandler` wrapper and `requireAuth` middleware
+7. **Use `PaginationHelper`** for list endpoints, `batchFetch` for related data
+8. **Write tests** — unit tests for utilities/schemas/services (Jest backend, Vitest frontend)
+9. **Build React component** with React Query hooks, `ErrorBoundary` wrapping (if frontend)
+10. **Run verification**: `npm test`, `npx vitest run`, `npm run build` (both projects)
 
 ## Useful Documentation References
 
@@ -749,15 +842,20 @@ npm run dev  # tsx watch src/server.ts
 cd samplepos.client
 npm run dev  # Vite on port 5173
 
-# Run backend tests (when implemented)
+# Run backend unit tests
 cd SamplePOS.Server
-npm test
+npm test -- --testPathIgnorePatterns="accounting-integrity|rbac/test|customerStatement|stockCount"
 
-# Database migrations (when using pg)
-# Manual SQL scripts in shared/sql/
+# Run frontend unit tests
+cd samplepos.client
+npx vitest run
+
+# Build verification (MUST pass before commit)
+cd SamplePOS.Server && npm run build
+cd ../samplepos.client && npm run build
 ```
 
 ---
 
-**Last Updated**: February 2026  
+**Last Updated**: March 2026  
 **Maintainer**: Architecture in transition - favor documented patterns over installed dependencies
