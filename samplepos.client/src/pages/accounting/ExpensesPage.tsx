@@ -112,7 +112,7 @@ const ExpensesPage: React.FC = () => {
     }
   };
 
-  const handleFilterChange = (key: keyof ExpenseFilter, value: any) => {
+  const handleFilterChange = (key: keyof ExpenseFilter, value: ExpenseFilter[keyof ExpenseFilter]) => {
     setFilter(prev => ({
       ...prev,
       [key]: value,
@@ -212,7 +212,7 @@ const ExpensesPage: React.FC = () => {
                 <div>
                   <p className="text-sm font-medium text-gray-600">Pending Approval</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {data.summary.byStatus['PENDING_APPROVAL']?.count || 0}
+                    {data.summary.byStatus?.['PENDING_APPROVAL']?.count || 0}
                   </p>
                 </div>
                 <FileText className="h-8 w-8 text-yellow-600" />
@@ -226,7 +226,7 @@ const ExpensesPage: React.FC = () => {
                 <div>
                   <p className="text-sm font-medium text-gray-600">Paid</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(data.summary.byStatus['PAID']?.total || 0)}
+                    {formatCurrency(data.summary.byStatus?.['PAID']?.total || 0)}
                   </p>
                 </div>
                 <FileText className="h-8 w-8 text-blue-600" />

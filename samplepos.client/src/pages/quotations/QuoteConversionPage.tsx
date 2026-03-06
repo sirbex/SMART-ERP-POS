@@ -13,6 +13,17 @@ import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import type { ConvertQuotationInput } from '@shared/types/quotation';
 import { getQuoteStatusBadge, isQuoteConvertible } from '@shared/types/quotation';
+import { AxiosError } from 'axios';
+
+interface ConversionResultData {
+  sale?: {
+    saleNumber?: string;
+  };
+  invoice?: {
+    invoiceNumber?: string;
+    status?: string;
+  };
+}
 
 export default function QuoteConversionPage() {
   const { quoteNumber } = useParams<{ quoteNumber: string }>();
@@ -22,7 +33,7 @@ export default function QuoteConversionPage() {
   const [paymentOption, setPaymentOption] = useState<'full' | 'partial' | 'none'>('full');
   const [depositAmount, setDepositAmount] = useState('');
   const [depositMethod, setDepositMethod] = useState<'CASH' | 'CARD' | 'MOBILE_MONEY'>('CASH');
-  const [conversionResult, setConversionResult] = useState<any>(null);
+  const [conversionResult, setConversionResult] = useState<ConversionResultData | null>(null);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [showAlreadyConvertedDialog, setShowAlreadyConvertedDialog] = useState(false);
 
@@ -39,12 +50,12 @@ export default function QuoteConversionPage() {
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       queryClient.invalidateQueries({ queryKey: ['quotation', quoteNumber] });
 
-      setConversionResult(response);
+      setConversionResult(response as ConversionResultData);
       setShowSuccessDialog(true);
       toast.success('Quotation converted successfully!');
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || 'Failed to convert quotation');
+    onError: (error: Error) => {
+      toast.error((error as AxiosError<{ error?: string }>).response?.data?.error || 'Failed to convert quotation');
     },
   });
 
@@ -65,7 +76,7 @@ export default function QuoteConversionPage() {
         <div className="p-8">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
             <p className="text-red-800 font-semibold">Failed to load quotation</p>
-            <p className="text-red-600 text-sm mt-2">{(error as any)?.message || 'Quotation not found'}</p>
+            <p className="text-red-600 text-sm mt-2">{(error as Error)?.message || 'Quotation not found'}</p>
             <button
               onClick={() => navigate('/quotations')}
               className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"

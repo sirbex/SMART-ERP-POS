@@ -1,13 +1,15 @@
 import { ProductCreateSchema } from '@shared/zod/product';
+import type { CostingMethod } from '@shared/zod/product';
 import type { ProductFormValues } from '@/components/products/ProductForm';
 
 export type ProductValidationErrors = Partial<Record<keyof ProductFormValues, string>>;
 
 // Convert form strings to proper types for Zod validation
 function coerceToSchemaInput(values: ProductFormValues) {
-  // Helper to safely convert any value to trimmed string
-  const toStr = (val: any): string => (val != null ? String(val).trim() : '');
-  const toStrOrUndefined = (val: any): string | undefined => {
+  // Helper to safely convert form values to trimmed string
+  const toStr = (val: string | boolean | undefined): string =>
+    val != null ? String(val).trim() : '';
+  const toStrOrUndefined = (val: string | boolean | undefined): string | undefined => {
     const s = val != null ? String(val).trim() : '';
     return s || undefined;
   };
@@ -18,15 +20,18 @@ function coerceToSchemaInput(values: ProductFormValues) {
     barcode: toStrOrUndefined(values.barcode),
     description: toStrOrUndefined(values.description),
     category: toStrOrUndefined(values.category),
+    genericName: toStrOrUndefined(values.genericName),
     conversionFactor: 1, // Always 1 for base unit
     costPrice: parseFloat(String(values.costPrice || '0')) || 0,
     sellingPrice: parseFloat(String(values.sellingPrice || '0')) || 0,
-    costingMethod: values.costingMethod as any,
+    costingMethod: values.costingMethod as CostingMethod,
+    isTaxable: !!values.isTaxable,
     taxRate: parseFloat(String(values.taxRate || '0')) || 0,
     pricingFormula: toStrOrUndefined(values.pricingFormula),
     autoUpdatePrice: !!values.autoUpdatePrice,
     reorderLevel: parseFloat(String(values.reorderLevel || '0')) || 0,
     trackExpiry: !!values.trackExpiry,
+    minDaysBeforeExpirySale: parseInt(String(values.minDaysBeforeExpirySale || '0'), 10) || 0,
     isActive: !!values.isActive,
   };
 }

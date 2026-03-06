@@ -89,6 +89,23 @@ interface Customer {
     name: string;
     email?: string;
     phone?: string;
+    balance?: number;
+    creditLimit?: number;
+}
+
+/** Raw deposit shape returned by the Node.js /deposits API */
+interface DepositApiRow {
+    id: string;
+    amount: number;
+    amountAvailable: number;
+    paymentMethod: string;
+    reference?: string;
+    createdAt: string;
+}
+
+/** Axios-style error with optional response payload */
+interface ApiError extends Error {
+    response?: { data?: { error?: string } };
 }
 
 // Create deposit request
@@ -168,13 +185,13 @@ const CustomerFinancialPage = () => {
             // Load customers using the authenticated API client
             const response = await customersApi.list(1, 100); // Get more customers for selection
             if (response.success) {
-                setCustomers(response.data || []);
+                setCustomers((response.data || []) as unknown as Customer[]);
             } else {
                 throw new Error(response.error || 'Failed to load customers');
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error loading customers:', error);
-            toast.error(`Failed to load customers: ${error.message}`);
+            toast.error(`Failed to load customers: ${error instanceof Error ? error.message : 'Unknown error'}`);
             setCustomers([]);
         } finally {
             setLoading(false);
@@ -195,7 +212,7 @@ const CustomerFinancialPage = () => {
                 ]);
 
                 if (depositsResponse.data?.success && depositsResponse.data?.data?.deposits) {
-                    deposits = depositsResponse.data.data.deposits.map((d: any) => ({
+                    deposits = depositsResponse.data.data.deposits.map((d: DepositApiRow) => ({
                         id: d.id,
                         amount: d.amount,
                         remainingAmount: d.amountAvailable,
@@ -230,8 +247,8 @@ const CustomerFinancialPage = () => {
                 id: customer.id,
                 customerId: customer.id,
                 customerName: customer.name,
-                outstandingBalance: (customer as any).balance || 0,
-                creditLimit: (customer as any).creditLimit || 0,
+                outstandingBalance: customer.balance || 0,
+                creditLimit: customer.creditLimit || 0,
                 totalDepositBalance: deposits.reduce((sum, d) => sum + d.amount, 0),
                 totalCreditBalance: credits.reduce((sum, c) => sum + c.amount, 0),
                 availableDepositBalance: depositBalance,
@@ -243,9 +260,9 @@ const CustomerFinancialPage = () => {
 
             setCustomerAccount(customerAccount);
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error loading customer account:', error);
-            toast.error(`Failed to load customer account: ${error.message}`);
+            toast.error(`Failed to load customer account: ${error instanceof Error ? error.message : 'Unknown error'}`);
             setCustomerAccount(null);
         } finally {
             setAccountLoading(false);
@@ -284,16 +301,17 @@ const CustomerFinancialPage = () => {
                 } else {
                     throw new Error(response.data.error || 'Failed to create deposit');
                 }
-            } catch (apiError: any) {
+            } catch (err: unknown) {
+                const apiError = err as ApiError;
                 console.error('Failed to create deposit via Node.js API:', apiError);
                 const errorMessage = apiError.response?.data?.error || apiError.message || 'Failed to create deposit';
                 toast.error(`Failed to record deposit: ${errorMessage}`);
                 return;
             }
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating deposit:', error);
-            toast.error(`Failed to record deposit: ${error.message}`);
+            toast.error(`Failed to record deposit: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
@@ -319,9 +337,9 @@ const CustomerFinancialPage = () => {
                 return;
             }
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating credit:', error);
-            toast.error(`Failed to record credit: ${error.message}`);
+            toast.error(`Failed to record credit: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
@@ -352,9 +370,9 @@ const CustomerFinancialPage = () => {
                 return;
             }
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating receivable:', error);
-            toast.error(`Failed to record debt: ${error.message}`);
+            toast.error(`Failed to record debt: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
@@ -482,9 +500,9 @@ const CustomerFinancialPage = () => {
                                             <div className="flex items-center justify-between">
                                                 <div className="font-medium text-gray-900">{customer.name}</div>
                                                 {/* Show balance indicator if customer has debt/balance */}
-                                                {(customer as any).balance && (customer as any).balance > 0 && (
+                                                {customer.balance && customer.balance > 0 && (
                                                     <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
-                                                        {formatCurrency((customer as any).balance)}
+                                                        {formatCurrency(customer.balance)}
                                                     </Badge>
                                                 )}
                                             </div>
@@ -492,9 +510,9 @@ const CustomerFinancialPage = () => {
                                                 {customer.email && <span>{customer.email}</span>}
                                                 {customer.phone && <span className="ml-2">{customer.phone}</span>}
                                                 {/* Credit limit indicator */}
-                                                {(customer as any).creditLimit && (customer as any).creditLimit > 0 && (
+                                                {customer.creditLimit && customer.creditLimit > 0 && (
                                                     <div className="mt-1 text-xs text-blue-600">
-                                                        Credit Limit: {formatCurrency((customer as any).creditLimit)}
+                                                        Credit Limit: {formatCurrency(customer.creditLimit)}
                                                     </div>
                                                 )}
                                             </div>

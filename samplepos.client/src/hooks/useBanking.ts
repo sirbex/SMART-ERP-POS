@@ -318,7 +318,7 @@ const bankingApi = {
         categoryId?: string;
         contraAccountId?: string;
         skipReason?: string;
-    }): Promise<any> => {
+    }): Promise<BankStatementLine> => {
         const response = await fetch(`${API_BASE}/statements/lines/${lineId}/process`, {
             method: 'POST',
             headers: {

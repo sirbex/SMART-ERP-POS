@@ -55,8 +55,8 @@ export default function AuditLogPage() {
     placeholderData: (previousData) => previousData,
   });
 
-  const auditLogs: AuditLog[] = (data as any)?.data || [];
-  const pagination = (data as any)?.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 };
+  const auditLogs: AuditLog[] = (data as { data?: AuditLog[]; pagination?: { page: number; limit: number; total: number; totalPages: number } })?.data || [];
+  const pagination = (data as { data?: AuditLog[]; pagination?: { page: number; limit: number; total: number; totalPages: number } })?.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 };
 
   // Severity badge colors
   const getSeverityBadge = (severity: string) => {

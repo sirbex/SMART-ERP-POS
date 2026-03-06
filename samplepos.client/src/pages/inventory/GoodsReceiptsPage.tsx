@@ -44,10 +44,138 @@ interface CostAlert {
   };
 }
 
+interface GRRow {
+  id: string;
+  receiptNumber?: string;
+  receipt_number?: string;
+  grNumber?: string;
+  gr_number?: string;
+  purchaseOrderId?: string;
+  purchase_order_id?: string;
+  poNumber?: string;
+  po_number?: string;
+  supplierName?: string;
+  supplier_name?: string;
+  status: string;
+  receivedDate?: string;
+  received_date?: string;
+  receivedByName?: string;
+  received_by_name?: string;
+  supplierDeliveryNote?: string;
+  supplier_delivery_note?: string;
+  deliveryNote?: string;
+  delivery_note?: string;
+  finalizedAt?: string;
+  finalized_at?: string;
+  notes?: string;
+  createdAt?: string;
+  created_at?: string;
+  items?: GRItemRow[];
+  totalValue?: number | string;
+}
+
+interface GRItemRow {
+  id: string;
+  productId?: string;
+  product_id?: string;
+  productName?: string;
+  product_name?: string;
+  orderedQuantity?: number | string;
+  ordered_quantity?: number | string;
+  receivedQuantity?: number | string;
+  received_quantity?: number | string;
+  unitCost?: number | string;
+  unit_cost?: number | string;
+  batchNumber?: string;
+  batch_number?: string;
+  expiryDate?: string;
+  expiry_date?: string;
+  notes?: string;
+  totalCost?: number | string;
+  isBonus?: boolean;
+  is_bonus?: boolean;
+  po_unit_price?: number | string;
+  poUnitPrice?: number | string;
+  product_cost_price?: number | string;
+  productCostPrice?: number | string;
+  uomSymbol?: string;
+  uom_symbol?: string;
+  uomName?: string;
+  uom_name?: string;
+  conversionFactor?: number | string;
+  conversion_factor?: number | string;
+}
+
+interface PORow {
+  id: string;
+  order_number?: string;
+  poNumber?: string;
+  po_number?: string;
+  supplier_name?: string;
+  supplierName?: string;
+  status: string;
+  order_date?: string;
+  orderDate?: string;
+  total_amount?: number | string;
+  totalAmount?: number | string;
+}
+
+interface POItemData {
+  id: string;
+  product_id?: string;
+  productId?: string;
+  product_name?: string;
+  productName?: string;
+  ordered_quantity?: number | string;
+  quantity?: number | string;
+  unit_price?: number | string;
+  unitCost?: number | string;
+  product_cost_price?: number | string;
+  productCostPrice?: number | string;
+}
+
+interface POData {
+  po: { id: string };
+  items: POItemData[];
+}
+
+interface EditItemState {
+  batchNumber?: string | null;
+  expiryDate?: string | null;
+  receivedQuantity?: number;
+  unitCost?: number;
+  isBonus?: boolean;
+  selectedUomId?: string;
+  receivedUomQty?: number;
+  receivedLooseQty?: number;
+}
+
+interface GRItemUpdatePayload {
+  receivedQuantity?: number;
+  unitCost?: number;
+  batchNumber?: string | null;
+  expiryDate?: string | null;
+  isBonus?: boolean;
+}
+
+interface GRDetailData {
+  gr?: GRRow;
+  items?: GRItemRow[];
+}
+
+interface StockLevelData {
+  totalQuantity?: number | string;
+  total_quantity?: number | string;
+  reorderLevel?: number | string;
+  reorder_level?: number | string;
+  needsReorder?: boolean;
+  needs_reorder?: boolean;
+}
+
 export default function GoodsReceiptsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [selectedGR, setSelectedGR] = useState<any>(null);
+  const [selectedGR, setSelectedGR] = useState<GRRow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAlertsModal, setShowAlertsModal] = useState(false);
@@ -59,14 +187,7 @@ export default function GoodsReceiptsPage() {
   const [focusedPoIndex, setFocusedPoIndex] = useState(0);
   const poRadioRefs = useRef<HTMLInputElement[]>([]);
   const [poQuickView, setPoQuickView] = useState<Record<string, { itemsCount: number }>>({});
-  const [editItems, setEditItems] = useState<Record<string, {
-    batchNumber?: string | null;
-    expiryDate?: string | null; // yyyy-mm-dd
-    receivedQuantity?: number;
-    unitCost?: number;
-    // UI-only fields
-    selectedUomId?: string; // chosen product_uom id
-  }>>({});
+  const [editItems, setEditItems] = useState<Record<string, EditItemState>>({});
   const [batchWarnings, setBatchWarnings] = useState<Record<string, string>>({});
   const validationTimeout = useRef<Record<string, NodeJS.Timeout>>({});
 
@@ -127,7 +248,7 @@ export default function GoodsReceiptsPage() {
   const finalizeMutation = useFinalizeGoodsReceipt();
 
   // PDF Export for Goods Receipt
-  const handleExportGRPDF = (gr: any, grItems: any[]) => {
+  const handleExportGRPDF = (gr: GRRow, grItems: GRItemRow[]) => {
     const doc = new jsPDF();
 
     // Header
@@ -176,16 +297,16 @@ export default function GoodsReceiptsPage() {
     doc.text(`Delivery Note: ${deliveryNote}`, 14, 86);
 
     // Items table
-    const tableData = grItems.map((item: any) => {
+    const tableData = grItems.map((item: GRItemRow) => {
       const productName = item.productName || item.product_name || 'Unknown';
       // Get UoM and conversion factor from item data
       const uomSymbol = item.uomSymbol || item.uom_symbol || item.uomName || item.uom_name || 'base';
-      const conversionFactor = parseFloat(item.conversionFactor || item.conversion_factor || 1);
+      const conversionFactor = parseFloat(String(item.conversionFactor || item.conversion_factor || 1));
 
       // Base quantities from database
-      const baseOrderedQty = parseFloat(item.orderedQuantity || item.ordered_quantity || 0);
-      const baseReceivedQty = parseFloat(item.receivedQuantity || item.received_quantity || 0);
-      const baseUnitCost = parseFloat(item.unitCost || item.unit_cost || 0);
+      const baseOrderedQty = parseFloat(String(item.orderedQuantity || item.ordered_quantity || 0));
+      const baseReceivedQty = parseFloat(String(item.receivedQuantity || item.received_quantity || 0));
+      const baseUnitCost = parseFloat(String(item.unitCost || item.unit_cost || 0));
 
       // Convert to ordering UoM quantities
       const orderedQty = conversionFactor > 0 ? new Decimal(baseOrderedQty).div(conversionFactor).toNumber() : baseOrderedQty;
@@ -236,14 +357,14 @@ export default function GoodsReceiptsPage() {
     });
 
     // Calculate total
-    const totalValue = grItems.reduce((sum: number, item: any) => {
-      const receivedQty = parseFloat(item.receivedQuantity || item.received_quantity || 0);
-      const unitCost = parseFloat(item.unitCost || item.unit_cost || 0);
+    const totalValue = grItems.reduce((sum: number, item: GRItemRow) => {
+      const receivedQty = parseFloat(String(item.receivedQuantity || item.received_quantity || 0));
+      const unitCost = parseFloat(String(item.unitCost || item.unit_cost || 0));
       return sum + new Decimal(receivedQty).times(unitCost).toNumber();
     }, 0);
 
     // Get final Y position after table
-    const finalY = (doc as any).lastAutoTable?.finalY || 150;
+    const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 150;
 
     // Total box
     doc.setFillColor(240, 240, 240);
@@ -279,21 +400,22 @@ export default function GoodsReceiptsPage() {
 
   // Load GR details when modal opens
   const detailsQuery = useGoodsReceipt(selectedGR?.id || '');
-  const grDetail = detailsQuery.data?.data?.data; // { gr, items }
+  const grDetail = detailsQuery.data?.data?.data as GRDetailData | undefined;
   const items = useMemo(() => grDetail?.items || [], [grDetail]);
 
   useEffect(() => {
     if (showDetailsModal && items.length > 0) {
       // initialize edit state with current values
-      const init: any = {};
-      items.forEach((it: any) => {
+      const init: Record<string, EditItemState> = {};
+      items.forEach((it: GRItemRow) => {
         init[it.id] = {
           batchNumber: it.batchNumber ?? it.batch_number ?? '',
-          expiryDate: (it.expiryDate ? new Date(it.expiryDate) : (it.expiry_date ? new Date(it.expiry_date) : null))
-            ? new Date(it.expiryDate || it.expiry_date).toISOString().slice(0, 10)
+          expiryDate: (it.expiryDate || it.expiry_date)
+            ? new Date(String(it.expiryDate || it.expiry_date)).toISOString().slice(0, 10)
             : '',
-          receivedQuantity: it.receivedQuantity ?? it.received_quantity ?? 0,
-          unitCost: it.unitCost ?? it.unit_cost ?? 0,
+          receivedQuantity: Number(it.receivedQuantity ?? it.received_quantity ?? 0),
+          unitCost: Number(it.unitCost ?? it.unit_cost ?? 0),
+          isBonus: !!(it.isBonus ?? it.is_bonus ?? false),
         };
       });
       setEditItems(init);
@@ -307,7 +429,7 @@ export default function GoodsReceiptsPage() {
 
     try {
       // Auto-save all pending edits before finalizing
-      const savePromises = items.map(async (item: any) => {
+      const savePromises = items.map(async (item: GRItemRow) => {
         const itemId = item.id;
         const edits = editItems[itemId];
 
@@ -317,14 +439,16 @@ export default function GoodsReceiptsPage() {
             (edits.batchNumber !== undefined && edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
             (edits.expiryDate !== undefined && edits.expiryDate !== (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
             (edits.receivedQuantity !== undefined && edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
-            (edits.unitCost !== undefined && edits.unitCost !== (item.unitCost || item.unit_cost));
+            (edits.unitCost !== undefined && edits.unitCost !== (item.unitCost || item.unit_cost)) ||
+            (edits.isBonus !== undefined && edits.isBonus !== !!(item.isBonus ?? item.is_bonus));
 
           if (hasChanges) {
-            const payload: any = {};
+            const payload: GRItemUpdatePayload = {};
             if (edits.receivedQuantity !== undefined) payload.receivedQuantity = Number(edits.receivedQuantity);
             if (edits.unitCost !== undefined) payload.unitCost = Number(edits.unitCost);
             if (edits.batchNumber !== undefined) payload.batchNumber = edits.batchNumber || null;
             if (edits.expiryDate !== undefined) payload.expiryDate = edits.expiryDate ? new Date(edits.expiryDate).toISOString() : null;
+            if (edits.isBonus !== undefined) payload.isBonus = !!edits.isBonus;
 
             await updateItemMutation.mutateAsync({ grId: id, itemId, data: payload });
           }
@@ -340,7 +464,7 @@ export default function GoodsReceiptsPage() {
 
       // Invalidate stock levels to refresh On Hand badges
       queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevels() });
-      items.forEach((it: any) => {
+      items.forEach((it: GRItemRow) => {
         const productId = it.productId || it.product_id;
         if (productId) {
           queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevelByProduct(productId) });
@@ -370,50 +494,53 @@ export default function GoodsReceiptsPage() {
       }
 
       setShowDetailsModal(false);
-    } catch (err: any) {
-      alert(`Failed to finalize: ${err.response?.data?.error || err.message}`);
+    } catch (err: unknown) {
+      const errObj = err as { response?: { data?: { error?: string } }; message?: string };
+      alert(`Failed to finalize: ${errObj.response?.data?.error || errObj.message || 'Unknown error'}`);
     }
   };
 
-  const handleViewDetails = (gr: any) => {
+  const handleViewDetails = (gr: GRRow) => {
     setSelectedGR(gr);
     setShowDetailsModal(true);
   };
 
-  const handleItemFieldChange = (itemId: string, field: string, value: any) => {
+  const handleItemFieldChange = (itemId: string, field: string, value: string | number | boolean | undefined) => {
     setEditItems(prev => ({
       ...prev,
       [itemId]: {
         ...(prev[itemId] || {}),
         [field]: value,
-      },
+      } as EditItemState,
     }));
   };
 
-  const saveItem = async (item: any) => {
+  const saveItem = async (item: GRItemRow) => {
     const id = item.id;
     const current = editItems[id] || {};
     const original = {
       batchNumber: item.batchNumber ?? item.batch_number ?? '',
-      expiryDate: (item.expiryDate ? new Date(item.expiryDate) : (item.expiry_date ? new Date(item.expiry_date) : null))
-        ? new Date(item.expiryDate || item.expiry_date).toISOString().slice(0, 10)
+      expiryDate: (item.expiryDate || item.expiry_date)
+        ? new Date(String(item.expiryDate || item.expiry_date)).toISOString().slice(0, 10)
         : '',
-      receivedQuantity: item.receivedQuantity ?? item.received_quantity ?? 0,
-      unitCost: item.unitCost ?? item.unit_cost ?? 0,
+      receivedQuantity: Number(item.receivedQuantity ?? item.received_quantity ?? 0),
+      unitCost: Number(item.unitCost ?? item.unit_cost ?? 0),
     };
 
-    const payload: any = {};
+    const payload: GRItemUpdatePayload = {};
     if (current.batchNumber !== undefined && current.batchNumber !== original.batchNumber) payload.batchNumber = current.batchNumber || null;
     if (current.expiryDate !== undefined && current.expiryDate !== original.expiryDate) payload.expiryDate = current.expiryDate || null;
     if (current.receivedQuantity !== undefined && current.receivedQuantity !== original.receivedQuantity) payload.receivedQuantity = Number(current.receivedQuantity);
     if (current.unitCost !== undefined && current.unitCost !== original.unitCost) payload.unitCost = Number(current.unitCost);
+    if (current.isBonus !== undefined) payload.isBonus = !!current.isBonus;
 
     if (Object.keys(payload).length === 0) return; // nothing to save
 
     try {
-      await updateItemMutation.mutateAsync({ grId: selectedGR.id, itemId: id, data: payload });
-    } catch (e: any) {
-      alert(e?.response?.data?.error || e.message);
+      await updateItemMutation.mutateAsync({ grId: selectedGR!.id, itemId: id, data: payload });
+    } catch (e: unknown) {
+      const errObj = e as { response?: { data?: { error?: string } }; message?: string };
+      alert(errObj?.response?.data?.error || errObj.message || 'Unknown error');
     }
   };
 
@@ -439,7 +566,7 @@ export default function GoodsReceiptsPage() {
     try {
       // Fetch PO to build items
       const poRes = await api.purchaseOrders.getById(poId);
-      const poData: any = poRes.data?.data;
+      const poData = poRes.data?.data as POData | undefined;
       if (!poData?.po || !poData?.items) {
         throw new Error('Purchase order not found');
       }
@@ -448,7 +575,7 @@ export default function GoodsReceiptsPage() {
         receiptDate: new Date().toISOString(),
         notes: null,
         receivedBy: user.id,
-        items: poData.items.map((it: any) => {
+        items: poData.items.map((it: POItemData) => {
           // Normalize unit cost to base units if PO unit_price looks like a UoM multiple
           const rawUnit = Number(it.unit_price ?? it.unitCost ?? 0);
           const baseCost = Number(it.product_cost_price ?? it.productCostPrice ?? 0);
@@ -463,7 +590,7 @@ export default function GoodsReceiptsPage() {
           }
           return ({
             poItemId: it.id,
-            productId: it.product_id || it.productId,
+            productId: it.product_id || it.productId || '',
             productName: it.product_name || it.productName,
             orderedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
             receivedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
@@ -484,8 +611,9 @@ export default function GoodsReceiptsPage() {
       setPoSearch('');
       setPoPage(1);
       setFocusedPoIndex(0);
-    } catch (e: any) {
-      alert(e?.response?.data?.error || e.message || 'Failed to create goods receipt');
+    } catch (e: unknown) {
+      const errObj = e as { response?: { data?: { error?: string } }; message?: string };
+      alert(errObj?.response?.data?.error || errObj.message || 'Failed to create goods receipt');
     }
   };
 
@@ -494,12 +622,12 @@ export default function GoodsReceiptsPage() {
     queryKey: ['purchase-orders', 'pending', poPage],
     queryFn: () => api.purchaseOrders.list({ status: 'PENDING', page: poPage, limit: 20 }),
   });
-  const pendingPOs = pendingPOsQuery.data?.data?.data || [];
+  const pendingPOs = (pendingPOsQuery.data?.data?.data || []) as PORow[];
   const poPagination = pendingPOsQuery.data?.data?.pagination;
   const filteredPOs = useMemo(() => {
     const q = poSearch.trim().toLowerCase();
     if (!q) return pendingPOs;
-    return pendingPOs.filter((po: any) => {
+    return pendingPOs.filter((po: PORow) => {
       const num = (po.order_number || po.poNumber || '').toString().toLowerCase();
       const supplier = (po.supplier_name || po.supplierName || '').toString().toLowerCase();
       return num.includes(q) || supplier.includes(q);
@@ -516,7 +644,8 @@ export default function GoodsReceiptsPage() {
     if (!poId || poQuickView[poId]) return;
     try {
       const res = await api.purchaseOrders.getById(poId);
-      const items = res.data?.data?.items || [];
+      const poDetail = res.data?.data as { items?: unknown[] } | undefined;
+      const items = poDetail?.items || [];
       setPoQuickView(prev => ({ ...prev, [poId]: { itemsCount: items.length } }));
     } catch {
       // ignore failures for quick-view
@@ -539,7 +668,7 @@ export default function GoodsReceiptsPage() {
     );
   };
 
-  const goodsReceipts = data?.data?.data || [];
+  const goodsReceipts = (data?.data?.data || []) as GRRow[];
   const pagination = data?.data?.pagination;
 
   return (
@@ -645,7 +774,7 @@ export default function GoodsReceiptsPage() {
                   </td>
                 </tr>
               ) : (
-                goodsReceipts.map((gr: any) => (
+                goodsReceipts.map((gr: GRRow) => (
                   <tr key={gr.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {gr.receiptNumber || gr.receipt_number}
@@ -783,6 +912,7 @@ export default function GoodsReceiptsPage() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch #</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
+                        <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" title="Bonus stock from supplier (zero cost)">Bonus</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty Var</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost Var</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -791,10 +921,10 @@ export default function GoodsReceiptsPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {items.length === 0 ? (
                         <tr>
-                          <td className="px-4 py-6 text-center text-gray-500" colSpan={11}>No items</td>
+                          <td className="px-4 py-6 text-center text-gray-500" colSpan={12}>No items</td>
                         </tr>
                       ) : (
-                        items.map((it: any) => (
+                        items.map((it: GRItemRow) => (
                           <GRItemRow
                             key={it.id}
                             item={it}
@@ -1018,7 +1148,7 @@ export default function GoodsReceiptsPage() {
                   <div className="p-3 text-sm text-gray-500">No pending POs found</div>
                 ) : (
                   <ul>
-                    {filteredPOs.map((po: any, idx: number) => {
+                    {filteredPOs.map((po: PORow, idx: number) => {
                       const orderNumber = po.order_number || po.poNumber;
                       const supplierName = po.supplier_name || po.supplierName;
                       const orderDate = formatDisplayDate(po.order_date || po.orderDate);
@@ -1102,25 +1232,25 @@ function GRItemRow({
   validationTimeout,
   checkBatchDuplicate,
 }: {
-  item: any;
+  item: GRItemRow;
   baseline: 'PO' | 'PRODUCT';
-  selectedGR: any;
-  editState: any;
-  onFieldChange: (itemId: string, field: string, value: any) => void;
-  onSave: (item: any) => void;
+  selectedGR: GRRow;
+  editState: EditItemState;
+  onFieldChange: (itemId: string, field: string, value: string | number | boolean | undefined) => void;
+  onSave: (item: GRItemRow) => void;
   updatePending: boolean;
   batchWarnings: Record<string, string>;
   validationTimeout: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
   checkBatchDuplicate: (itemId: string, batchNumber: string) => Promise<void>;
 }) {
   const es = editState || {};
-  const ordered = item.orderedQuantity ?? item.ordered_quantity ?? 0;
+  const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
   // For DRAFT GRs, default received to ordered quantity if not set
-  const baseReceived = es.receivedQuantity ?? item.receivedQuantity ?? item.received_quantity ?? (selectedGR.status === 'DRAFT' ? ordered : 0);
+  const baseReceived = Number(es.receivedQuantity ?? item.receivedQuantity ?? item.received_quantity ?? (selectedGR.status === 'DRAFT' ? ordered : 0));
   const disabled = selectedGR.status !== 'DRAFT';
-  const baseUnitCost = es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0;
-  const poBase = item.po_unit_price ?? item.poUnitPrice ?? 0;
-  const prodBase = item.product_cost_price ?? item.productCostPrice ?? 0;
+  const baseUnitCost = Number(es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0);
+  const poBase = Number(item.po_unit_price ?? item.poUnitPrice ?? 0);
+  const prodBase = Number(item.product_cost_price ?? item.productCostPrice ?? 0);
   const base = baseline === 'PO' ? poBase : prodBase;
   const productId = item.productId || item.product_id;
 
@@ -1133,8 +1263,8 @@ function GRItemRow({
   const factor = selectedUom ? new Decimal(selectedUom.conversionFactor).toNumber() : 1;
 
   // Fetch current stock level for this product
-  const { data: stockLevelData, isLoading: stockLoading } = useStockLevelByProduct(productId);
-  const stockLevel = stockLevelData?.data;
+  const { data: stockLevelData, isLoading: stockLoading } = useStockLevelByProduct(productId ?? '');
+  const stockLevel = stockLevelData?.data as StockLevelData | undefined;
   const onHandQty = Number(stockLevel?.totalQuantity ?? stockLevel?.total_quantity ?? 0);
   const reorderLevel = Number(stockLevel?.reorderLevel ?? stockLevel?.reorder_level ?? 0);
   const needsReorder = stockLevel?.needsReorder ?? stockLevel?.needs_reorder ?? false;
@@ -1369,6 +1499,21 @@ function GRItemRow({
           className={expiryError ? 'border-red-500' : ''}
         />
         {expiryError && <div className="text-xs text-red-600 mt-1">{expiryError}</div>}
+      </td>
+      <td className="px-4 py-2 text-sm text-center">
+        <label className="inline-flex items-center gap-1 cursor-pointer" title="Mark as bonus stock (zero cost)">
+          <input
+            type="checkbox"
+            checked={!!(es.isBonus ?? item.isBonus ?? item.is_bonus ?? false)}
+            disabled={disabled}
+            onChange={(e) => onFieldChange(item.id, 'isBonus', e.target.checked)}
+            className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+            aria-label={`Bonus stock for ${item.productName || item.product_name}`}
+          />
+          {!!(es.isBonus ?? item.isBonus ?? item.is_bonus) && (
+            <span className="text-xs text-green-700 font-medium">FREE</span>
+          )}
+        </label>
       </td>
       <td className="px-4 py-2 text-sm">
         {displayedOrdered > 0 ? (

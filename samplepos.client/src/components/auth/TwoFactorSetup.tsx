@@ -5,6 +5,7 @@
  */
 
 import React, { useState } from 'react';
+import { AxiosError } from 'axios';
 import { useSetup2FA, useVerify2FASetup, useDisable2FA, use2FAStatus, useRegenerateBackupCodes } from '../../hooks/use2FA';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -35,8 +36,11 @@ export function TwoFactorSetup() {
             const data = await setup2FA.mutateAsync();
             setSetupData(data);
             setStep('setup');
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to start 2FA setup');
+        } catch (err: unknown) {
+            const errMsg = err instanceof AxiosError
+                ? (err.response?.data as { error?: string })?.error
+                : err instanceof Error ? err.message : undefined;
+            setError(errMsg || 'Failed to start 2FA setup');
         }
     };
 
@@ -55,8 +59,11 @@ export function TwoFactorSetup() {
             setSetupData(null);
             setVerifyCode('');
             refetchStatus();
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Invalid code. Please try again.');
+        } catch (err: unknown) {
+            const errMsg = err instanceof AxiosError
+                ? (err.response?.data as { error?: string })?.error
+                : err instanceof Error ? err.message : undefined;
+            setError(errMsg || 'Invalid code. Please try again.');
         }
     };
 
@@ -69,8 +76,11 @@ export function TwoFactorSetup() {
             setStep('status');
             setDisableCode('');
             refetchStatus();
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to disable 2FA');
+        } catch (err: unknown) {
+            const errMsg = err instanceof AxiosError
+                ? (err.response?.data as { error?: string })?.error
+                : err instanceof Error ? err.message : undefined;
+            setError(errMsg || 'Failed to disable 2FA');
         }
     };
 
@@ -82,8 +92,11 @@ export function TwoFactorSetup() {
             const codes = await regenerateBackupCodes.mutateAsync(regenerateCode);
             setNewBackupCodes(codes);
             setRegenerateCode('');
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to regenerate backup codes');
+        } catch (err: unknown) {
+            const errMsg = err instanceof AxiosError
+                ? (err.response?.data as { error?: string })?.error
+                : err instanceof Error ? err.message : undefined;
+            setError(errMsg || 'Failed to regenerate backup codes');
         }
     };
 

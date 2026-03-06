@@ -75,7 +75,7 @@ export default function BatchManagementPage() {
     // Mock batches from stock levels (simplified for demo)
     // Filter out products with 0 stock - they have no batches
     return levels
-      .filter((level: any) => {
+      .filter((level: { total_stock?: number; total_quantity?: number }) => {
         const stock = Number(level.total_stock || level.total_quantity || 0);
         return stock > 0; // Only show products that have actual stock/batches
       })

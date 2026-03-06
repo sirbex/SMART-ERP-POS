@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Clock } from 'lucide-react';
+import { formatCurrency } from '../../utils/currency';
 
 interface HoldCartDialogProps {
     isOpen: boolean;
@@ -59,7 +60,7 @@ export function HoldCartDialog({
                         <div className="flex justify-between text-sm">
                             <span className="text-gray-600">Total Amount:</span>
                             <span className="font-medium">
-                                {new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX' }).format(totalAmount)}
+                                {formatCurrency(totalAmount)}
                             </span>
                         </div>
                     </div>

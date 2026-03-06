@@ -10,13 +10,13 @@ interface LogEntry {
     timestamp: string;
     level: LogLevel;
     message: string;
-    data?: any;
+    data?: unknown;
 }
 
 class Logger {
     private isDevelopment = import.meta.env.DEV;
 
-    private formatMessage(level: LogLevel, message: string, data?: any): LogEntry {
+    private formatMessage(level: LogLevel, message: string, data?: unknown): LogEntry {
         return {
             timestamp: new Date().toISOString(),
             level,
@@ -25,7 +25,7 @@ class Logger {
         };
     }
 
-    private log(level: LogLevel, message: string, data?: any) {
+    private log(level: LogLevel, message: string, data?: unknown) {
         const entry = this.formatMessage(level, message, data);
 
         // In production, only log warnings and errors
@@ -71,19 +71,19 @@ class Logger {
         }
     }
 
-    debug(message: string, data?: any) {
+    debug(message: string, data?: unknown) {
         this.log('debug', message, data);
     }
 
-    info(message: string, data?: any) {
+    info(message: string, data?: unknown) {
         this.log('info', message, data);
     }
 
-    warn(message: string, data?: any) {
+    warn(message: string, data?: unknown) {
         this.log('warn', message, data);
     }
 
-    error(message: string, data?: any) {
+    error(message: string, data?: unknown) {
         this.log('error', message, data);
     }
 

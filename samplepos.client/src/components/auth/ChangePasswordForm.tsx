@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import { AxiosError } from 'axios';
 import { useChangePassword } from '../../hooks/usePasswordPolicy';
 import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 
@@ -65,8 +66,12 @@ export function ChangePasswordForm({ onSuccess, onCancel, required = false, reas
             setNewPassword('');
             setConfirmPassword('');
             onSuccess?.();
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to change password');
+        } catch (err: unknown) {
+            if (err instanceof AxiosError) {
+                setError((err.response?.data as { error?: string })?.error || err.message || 'Failed to change password');
+            } else {
+                setError(err instanceof Error ? err.message : 'Failed to change password');
+            }
         }
     };
 

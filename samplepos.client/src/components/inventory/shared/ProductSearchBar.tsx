@@ -1,8 +1,17 @@
 import { useState, useMemo } from "react";
 import { useProducts } from "@/hooks/useProducts";
 
+export interface SearchableProduct {
+  id: string;
+  name: string;
+  sku?: string;
+  barcode?: string;
+  trackExpiry?: boolean;
+  [key: string]: unknown;
+}
+
 interface ProductSearchBarProps {
-  onProductSelect: (product: any) => void;
+  onProductSelect: (product: SearchableProduct) => void;
   disabled?: boolean;
   className?: string;
   placeholder?: string;
@@ -35,7 +44,7 @@ export function ProductSearchBar({
   const filteredProducts = useMemo(() => {
     if (!search) return allProducts;
     const query = search.toLowerCase();
-    return allProducts.filter((p: any) => {
+    return allProducts.filter((p: SearchableProduct) => {
       try {
         // Safely handle potential null/undefined/non-string values
         const name = p.name ? String(p.name).toLowerCase() : '';
@@ -50,7 +59,7 @@ export function ProductSearchBar({
     });
   }, [allProducts, search]);
 
-  const handleSelect = (product: any) => {
+  const handleSelect = (product: SearchableProduct) => {
     onProductSelect(product);
     setSearch("");
     setShowDropdown(false);
@@ -75,7 +84,7 @@ export function ProductSearchBar({
           {/* Product Dropdown */}
           {showDropdown && search && filteredProducts.length > 0 && (
             <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-              {filteredProducts.slice(0, 10).map((product: any) => (
+              {filteredProducts.slice(0, 10).map((product: SearchableProduct) => (
                 <button
                   key={product.id}
                   type="button"

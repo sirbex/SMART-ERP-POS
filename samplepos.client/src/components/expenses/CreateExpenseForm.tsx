@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CreateExpenseSchema } from '@shared/zod/expense';
-import { CreateExpenseData, EXPENSE_CATEGORIES, PAYMENT_METHODS } from '@shared/types/expense';
+import { CreateExpenseData, EXPENSE_CATEGORIES, PAYMENT_METHODS, Expense } from '@shared/types/expense';
 import { useCreateExpense, usePaymentAccounts } from '../../hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +17,7 @@ import { Loader2, Receipt, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CreateExpenseFormProps {
-  onSuccess?: (expense: any) => void;
+  onSuccess?: (expense: Expense) => void;
   onCancel?: () => void;
 }
 

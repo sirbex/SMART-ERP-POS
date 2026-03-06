@@ -46,7 +46,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
     });
 
     const { data: customersResponse } = useCustomers(1, 100);
-    const customers = customersResponse?.data || [];
+    const customers = (customersResponse?.data || []) as Array<{ id: string; name: string }>;
 
     useEffect(() => {
         loadCredits();
@@ -231,8 +231,9 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
     ).length;
 
     // Export function for use in POS
-    (window as any).getCustomerAvailableCredits = getCustomerAvailableCredits;
-    (window as any).useStoreCredit = useCredit;
+    const windowExports = window as unknown as Record<string, unknown>;
+    windowExports.getCustomerAvailableCredits = getCustomerAvailableCredits;
+    windowExports.useStoreCredit = useCredit;
 
     return (
         <div className={`bg-white rounded-lg shadow ${className}`}>
@@ -473,7 +474,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                                 <select
                                     id="credit-type-select"
                                     value={creditForm.type}
-                                    onChange={(e) => setCreditForm({ ...creditForm, type: e.target.value as any })}
+                                    onChange={(e) => setCreditForm({ ...creditForm, type: e.target.value as StoreCredit['type'] })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md"
                                 >
                                     <option value="MANUAL">Manual</option>

@@ -14,7 +14,7 @@ const expenseApi = {
   getExpenses: async (filter: ExpenseFilter = {}): Promise<{
     expenses: Expense[];
     total: number;
-    summary?: any;
+    summary?: { totalAmount: number; count: number; byStatus?: Record<string, { count: number; total: number }>; byCategory?: Record<string, { count: number; total: number }> };
     pagination: {
       total: number;
       page: number;
@@ -322,7 +322,7 @@ const expenseApi = {
 
     const result = await response.json();
     // Normalize snake_case to camelCase
-    return (result.data || []).map((acc: any) => ({
+    return (result.data || []).map((acc: { id: string; account_code?: string; code?: string; account_name?: string; name?: string; account_type?: string; type?: string }) => ({
       id: acc.id,
       code: acc.account_code || acc.code,
       name: acc.account_name || acc.name,

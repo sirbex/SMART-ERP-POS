@@ -58,7 +58,7 @@ export function ProtectedRoute({
 
     // Check if user has required role(s)
     const hasRequiredRole = requireAnyRole
-        ? requiredRoles.includes(user.role as UserRole) // User needs ANY of the roles
+        ? requiredRoles.includes(user.role) // User needs ANY of the roles
         : requiredRoles.every(role => user.role === role); // User needs ALL roles (typically just one)
 
     if (!hasRequiredRole) {
@@ -110,7 +110,7 @@ export function useCanAccess(requiredRoles?: UserRole[], requireAnyRole: boolean
     if (!requiredRoles || requiredRoles.length === 0) return true;
 
     return requireAnyRole
-        ? requiredRoles.includes(user.role as UserRole)
+        ? requiredRoles.includes(user.role)
         : requiredRoles.every(role => user.role === role);
 }
 

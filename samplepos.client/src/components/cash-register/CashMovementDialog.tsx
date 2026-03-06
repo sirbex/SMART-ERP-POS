@@ -136,7 +136,7 @@ export function CashMovementDialog({
             });
             onOpenChange(false);
             onSuccess?.();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Failed to record movement:', error);
         }
     };
@@ -252,7 +252,7 @@ export function CashMovementDialog({
                             {recordMovement.error instanceof Error
                                 ? recordMovement.error.message
                                 : typeof recordMovement.error === 'object' && recordMovement.error !== null
-                                    ? JSON.stringify((recordMovement.error as any).response?.data?.error || recordMovement.error)
+                                    ? JSON.stringify((recordMovement.error as unknown as { response?: { data?: { error?: string } } }).response?.data?.error || recordMovement.error)
                                     : 'Failed to record movement'}
                         </div>
                     )}

@@ -1,11 +1,13 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { storeTokens, clearTokens, setupAxiosInterceptors } from '../hooks/useTokenRefresh';
+import { useIdleTimeout } from '../hooks/useIdleTimeout';
+import type { UserRole } from '../types';
 
 interface User {
   id: string;
   email: string;
   fullName: string;
-  role: string;
+  role: UserRole;
 }
 
 interface AuthContextType {
@@ -76,43 +78,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = (userData: User, token: string, refreshToken?: string, expiresIn?: number) => {
-    try {
-      console.log('[AuthContext.login] Starting login process');
-      console.log('[AuthContext.login] Token:', token ? `${token.substring(0, 30)}... (length: ${token.length})` : 'NULL/UNDEFINED');
-
-      if (!token || token === 'undefined' || token.length < 20) {
-        console.error('[AuthContext.login] Invalid token received!');
-        throw new Error('Invalid token received from server');
-      }
-
-      // CRITICAL: Set state FIRST to ensure immediate UI updates
-      setUser(userData);
-      setIsAuthenticated(true);
-      console.log('[AuthContext.login] ✅ State set immediately - isAuthenticated = true');
-
-      // Then store tokens (storage operations are sync but state updates need to happen first)
-      if (refreshToken && expiresIn) {
-        storeTokens(token, refreshToken, expiresIn);
-      } else {
-        // Fallback for backward compatibility
-        localStorage.setItem('auth_token', token);
-      }
-      localStorage.setItem('user', JSON.stringify(userData));
-
-      // Verify it was saved correctly
-      const savedToken = localStorage.getItem('auth_token');
-      console.log('[AuthContext.login] ✅ Token saved to localStorage, verified:', savedToken === token);
-
-      // Notify other tabs/components about auth change
-      window.dispatchEvent(new Event('auth-changed'));
-      console.log('[AuthContext.login] ✅ Login complete, auth-changed event dispatched');
-    } catch (error) {
-      console.error('Error during login:', error);
-      throw new Error('Failed to save authentication data');
+    if (!token || token === 'undefined' || token.length < 20) {
+      throw new Error('Invalid token received from server');
     }
+
+    // Set state FIRST to ensure immediate UI updates
+    setUser(userData);
+    setIsAuthenticated(true);
+
+    // Store tokens
+    if (refreshToken && expiresIn) {
+      storeTokens(token, refreshToken, expiresIn);
+    } else {
+      localStorage.setItem('auth_token', token);
+    }
+    localStorage.setItem('user', JSON.stringify(userData));
+
+    // Notify other tabs/components
+    window.dispatchEvent(new Event('auth-changed'));
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     try {
       // Clear all tokens using the new system
       clearTokens();
@@ -125,7 +111,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch (error) {
       console.error('Error during logout:', error);
     }
-  };
+  }, []);
+
+  // ── Auto-logout on idle (15 minutes of inactivity) ────────
+  const idleLogout = useCallback(() => {
+    logout();
+    // Signal the login page to show "session expired" banner
+    sessionStorage.setItem('session_expired', '1');
+  }, [logout]);
+
+  useIdleTimeout({
+    timeoutMs: 5 * 60 * 1000, // 5 minutes
+    onIdle: idleLogout,
+    onWarning: () => {
+      // Could integrate with a toast/notification system
+      console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
+    },
+    enabled: isAuthenticated,
+  });
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, logout }}>

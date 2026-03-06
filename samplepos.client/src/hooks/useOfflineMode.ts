@@ -8,7 +8,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useOfflineContext } from '../contexts/OfflineContext';
 import { decrementLocalStock, restoreLocalStock } from '../services/offlineCatalogService';
+import type { AxiosInstance, AxiosError } from 'axios';
 
 // ── Storage ───────────────────────────────────────────────────
 const OFFLINE_SALES_KEY = 'pos_offline_sales';
@@ -78,21 +80,9 @@ function saveQueue(queue: OfflineSale[]): void {
 
 // ── Hook ──────────────────────────────────────────────────────
 export function useOfflineMode() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const { isOnline } = useOfflineContext();
   const [syncQueue, setSyncQueue] = useState<OfflineSale[]>(() => loadQueue());
   const isSyncingRef = useRef(false);
-
-  // Network events
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   // Keep localStorage in sync with state
   useEffect(() => {
@@ -159,7 +149,7 @@ export function useOfflineMode() {
    * which handles idempotency, stock re-validation, and accounting.
    */
   const syncPendingSales = useCallback(
-    async (apiClient: any) => {
+    async (apiClient: AxiosInstance) => {
       if (!navigator.onLine || isSyncingRef.current) return [];
 
       const currentQueue = loadQueue(); // Read fresh from localStorage
@@ -180,9 +170,10 @@ export function useOfflineMode() {
               saleData: sale.data,
               offlineTimestamp: sale.timestamp,
             });
-          } catch (syncErr: any) {
+          } catch (syncErr: unknown) {
             // If sync endpoint doesn't exist yet (404), fall back to regular sales.create
-            if (syncErr.response?.status === 404) {
+            const axiosErr = syncErr as AxiosError;
+            if (axiosErr.response?.status === 404) {
               response = await apiClient.post('/sales', sale.data);
             } else {
               throw syncErr;
@@ -201,14 +192,16 @@ export function useOfflineMode() {
             sale.syncError = response.data?.error || 'Unknown error';
             results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           // If server is still unreachable, leave as PENDING_SYNC
-          if (error.code === 'ERR_NETWORK' || !navigator.onLine) {
+          const axiosError = error as AxiosError;
+          const errMsg = axiosError.message || 'Unknown sync error';
+          if (axiosError.code === 'ERR_NETWORK' || !navigator.onLine) {
             results.push({ offlineId: sale.offlineId, success: false, error: 'Still offline' });
           } else {
             sale.status = 'FAILED';
-            sale.syncError = error.message;
-            results.push({ offlineId: sale.offlineId, success: false, error: error.message });
+            sale.syncError = errMsg;
+            results.push({ offlineId: sale.offlineId, success: false, error: errMsg });
           }
         }
       }

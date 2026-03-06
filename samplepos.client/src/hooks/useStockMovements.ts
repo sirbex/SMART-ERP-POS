@@ -5,6 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getErrorMessage } from '../utils/api';
+import type { RecordStockMovementInput } from '../types/inputs';
 
 /**
  * Query key factory for stock movements
@@ -13,7 +14,7 @@ import { api, getErrorMessage } from '../utils/api';
 export const stockMovementKeys = {
   all: ['stock-movements'] as const,
   lists: () => [...stockMovementKeys.all, 'list'] as const,
-  list: (filters: Record<string, any>) => [...stockMovementKeys.lists(), filters] as const,
+  list: (filters: Record<string, unknown>) => [...stockMovementKeys.lists(), filters] as const,
   byProduct: (productId: string) => [...stockMovementKeys.all, 'product', productId] as const,
   byBatch: (batchId: string) => [...stockMovementKeys.all, 'batch', batchId] as const,
   byUser: (userId: string) => [...stockMovementKeys.all, 'user', userId] as const,
@@ -94,7 +95,15 @@ export function useRecordStockMovement() {
       notes?: string;
       createdBy: string;
     }) => {
-      const response = await api.stockMovements.record(data);
+      const payload: RecordStockMovementInput = {
+        productId: data.productId,
+        batchId: data.batchId,
+        type: data.movementType,
+        quantity: data.quantity,
+        notes: data.notes,
+        createdBy: data.createdBy,
+      };
+      const response = await api.stockMovements.record(payload);
       return response.data;
     },
     onSuccess: () => {
@@ -142,7 +151,7 @@ export async function exportStockMovementsCSV(params?: {
 
     const csvRows = [
       headers.join(','),
-      ...movements.map((m: any) => [
+      ...movements.map((m: { createdAt?: string; productName?: string; batchNumber?: string; movementType?: string; quantity?: number; unitCost?: number; totalValue?: number; balanceAfter?: number; referenceType?: string; referenceId?: string; userName?: string; notes?: string }) => [
         m.createdAt,
         `"${m.productName || ''}"`,
         m.batchNumber || '',

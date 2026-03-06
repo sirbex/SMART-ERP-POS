@@ -4,6 +4,7 @@ import * as Label from '@radix-ui/react-label';
 import * as Switch from '@radix-ui/react-switch';
 import * as RadioGroup from '@radix-ui/react-radio-group';
 import Layout from '../../components/Layout';
+import { api } from '../../services/api';
 
 // Utility function to format dates without timezone conversion
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -37,7 +38,7 @@ interface InvoiceSettings {
   updatedAt: string;
 }
 
-const API_BASE = 'http://localhost:3001/api';
+// Removed hardcoded API_BASE — uses shared api client
 
 export default function InvoiceSettingsPage() {
   const queryClient = useQueryClient();
@@ -47,15 +48,7 @@ export default function InvoiceSettingsPage() {
   const { data: settingsData, isLoading } = useQuery({
     queryKey: ['invoice-settings'],
     queryFn: async () => {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API_BASE}/settings/invoice`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!response.ok) throw new Error('Failed to fetch settings');
-      const result = await response.json();
+      const { data: result } = await api.get('/settings/invoice');
       return result.data as InvoiceSettings;
     },
   });
@@ -63,20 +56,11 @@ export default function InvoiceSettingsPage() {
   // Update settings mutation
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<InvoiceSettings>) => {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API_BASE}/settings/invoice`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to update settings');
+      const { data: result } = await api.put('/settings/invoice', data);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update settings');
       }
-      return response.json();
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoice-settings'] });

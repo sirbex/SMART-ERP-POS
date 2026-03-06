@@ -2,14 +2,16 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './contexts/AuthContext';
+import { OfflineProvider } from './contexts/OfflineContext';
 import App from './App';
+import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 
 // Comprehensive browser extension error suppression
-const suppressExtensionErrors = (event: any) => {
-  const filename = event.filename || event.source || '';
-  const message = event.message || event.error?.message || String(event.reason || '');
-  const stack = event.error?.stack || event.stack || '';
+const suppressExtensionErrors = (event: ErrorEvent | PromiseRejectionEvent) => {
+  const filename = ('filename' in event ? event.filename : '') || '';
+  const message = ('message' in event ? event.message : '') || (event instanceof PromiseRejectionEvent ? String(event.reason || '') : '');
+  const stack = ('error' in event && event.error ? event.error.stack : '') || '';
 
   // Check for browser extension patterns
   const extensionPatterns = [
@@ -54,7 +56,7 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Override console.error to filter extension errors
 const originalConsoleError = console.error;
-console.error = (...args: any[]) => {
+console.error = (...args: unknown[]) => {
   const message = args.join(' ');
   const extensionKeywords = [
     'proxy.js',
@@ -81,16 +83,51 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
       retry: 1,
       staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 30 * 60 * 1000, // Keep unused cache for 30 min (helps offline)
+    },
+    mutations: {
+      // Mutations should not retry by default — offline queue handles retries
+      retry: 0,
     },
   },
 });
 
+// ── Service Worker Registration ─────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('./sw.js')
+      .then((registration) => {
+        console.log('[SW] Registered:', registration.scope);
+
+        // Listen for updates
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'activated') {
+                console.log('[SW] New service worker activated');
+              }
+            });
+          }
+        });
+      })
+      .catch((err) => {
+        console.warn('[SW] Registration failed:', err);
+      });
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary section="Root">
+      <QueryClientProvider client={queryClient}>
+        <OfflineProvider>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </OfflineProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

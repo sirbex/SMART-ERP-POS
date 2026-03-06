@@ -34,7 +34,7 @@ const CustomerAgingReport: React.FC<CustomerAgingReportProps> = ({ className = '
         }
     };
 
-    const toNumber = (value: any): number => {
+    const toNumber = (value: unknown): number => {
         if (typeof value === 'number') return value;
         return parseFloat(String(value) || '0') || 0;
     };

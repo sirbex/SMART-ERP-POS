@@ -13,6 +13,7 @@ export const CustomerSchema = z.object({
   customerGroupId: z.string().uuid().optional().nullable(),
   balance: z.number().default(0),
   creditLimit: z.number().nonnegative().default(0),
+  depositBalance: z.number().default(0).optional(),
   isActive: z.boolean().default(true),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

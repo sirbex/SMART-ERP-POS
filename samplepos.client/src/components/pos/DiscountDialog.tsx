@@ -18,10 +18,10 @@ interface DiscountDialogProps {
   }) => void;
   originalAmount: number;
   lineItemIndex?: number; // If provided, applies to line item
-  userRole: string;
+  userRole: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
 }
 
-const ROLE_LIMITS: Record<string, number> = {
+const ROLE_LIMITS: Record<'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF', number> = {
   ADMIN: 100,
   MANAGER: 50,
   CASHIER: 10,

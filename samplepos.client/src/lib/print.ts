@@ -3,6 +3,8 @@
  * Handles printing of POS receipts with various formats and options
  */
 
+import { formatCurrency } from '../utils/currency';
+
 export type PrintFormat = 'detailed' | 'compact';
 
 export interface PrintOptions {
@@ -313,16 +315,9 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
 }
 
 /**
- * Format currency for display
+ * Format currency for display — delegates to shared utility with 0 decimals
  */
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-UG', {
-    style: 'currency',
-    currency: 'UGX',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+// Removed duplicate formatCurrency — uses shared import from utils/currency
 
 /**
  * Generate compact HTML content for receipt (thermal printer optimized)

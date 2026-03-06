@@ -2,19 +2,31 @@
 // Centralized API communication with error handling and interceptors
 
 import axios, { AxiosError } from 'axios';
-import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
+import type { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
+import type {
+  CreateProductInput, UpdateProductInput,
+  CreateCustomerInput, UpdateCustomerInput,
+  CreateSupplierInput, UpdateSupplierInput,
+  CreateSaleInput,
+  CreatePurchaseOrderInput, CreatePOInvoiceInput, RecordPOPaymentInput,
+  CreateGoodsReceiptInput, UpdateGoodsReceiptItemInput,
+  RecordStockMovementInput,
+  CreateInvoiceInput,
+  SplitPaymentInput, RecordCustomerPaymentInput,
+  CreateHoldOrderInput, InvoiceSettingsInput,
+} from '../types/inputs';
 
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 const API_TIMEOUT = 30000; // 30 seconds
 
 // API Response Types
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   message?: string;
   error?: string;
-  summary?: any;
+  summary?: Record<string, unknown>;
   pagination?: {
     page: number;
     limit: number;
@@ -25,7 +37,7 @@ export interface ApiResponse<T = any> {
     type: string;
     severity: string;
     message: string;
-    details: any;
+    details: Record<string, unknown>;
   }>;
   alertSummary?: string;
 }
@@ -131,9 +143,9 @@ export const api = {
       apiClient.get<ApiResponse>('products', { params }),
     getById: (id: string, includeUoms: boolean = false) =>
       apiClient.get<ApiResponse>(`products/${id}`, { params: { includeUoms } }),
-    create: (data: any) =>
+    create: (data: CreateProductInput) =>
       apiClient.post<ApiResponse>('products', data),
-    update: (id: string, data: any) =>
+    update: (id: string, data: UpdateProductInput) =>
       apiClient.put<ApiResponse>(`products/${id}`, data),
     delete: (id: string) =>
       apiClient.delete<ApiResponse>(`products/${id}`),
@@ -169,9 +181,9 @@ export const api = {
       apiClient.get<ApiResponse>('customers', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`customers/${id}`),
-    create: (data: any) =>
+    create: (data: CreateCustomerInput) =>
       apiClient.post<ApiResponse>('customers', data),
-    update: (id: string, data: any) =>
+    update: (id: string, data: UpdateCustomerInput) =>
       apiClient.put<ApiResponse>(`customers/${id}`, data),
     toggleActive: (id: string, isActive: boolean) =>
       apiClient.patch<ApiResponse>(`customers/${id}/active`, { isActive }),
@@ -195,9 +207,9 @@ export const api = {
       apiClient.get<ApiResponse>('suppliers', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`suppliers/${id}`),
-    create: (data: any) =>
+    create: (data: CreateSupplierInput) =>
       apiClient.post<ApiResponse>('suppliers', data),
-    update: (id: string, data: any) =>
+    update: (id: string, data: UpdateSupplierInput) =>
       apiClient.put<ApiResponse>(`suppliers/${id}`, data),
     delete: (id: string) =>
       apiClient.delete<ApiResponse>(`suppliers/${id}`),
@@ -215,7 +227,7 @@ export const api = {
       apiClient.get<ApiResponse>('sales', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`sales/${id}`),
-    create: (data: any) =>
+    create: (data: CreateSaleInput) =>
       apiClient.post<ApiResponse>('sales', data),
     summary: (params?: { startDate?: string; endDate?: string; groupBy?: string }) =>
       apiClient.get<ApiResponse>('sales/summary', { params }),
@@ -234,7 +246,7 @@ export const api = {
       apiClient.get<ApiResponse>('invoices', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`invoices/${id}`),
-    create: (data: any) =>
+    create: (data: CreateInvoiceInput) =>
       apiClient.post<ApiResponse>('invoices', data),
     addPayment: (invoiceId: string, data: { amount: number; paymentMethod: string; paymentDate?: string; referenceNumber?: string; notes?: string }) =>
       apiClient.post<ApiResponse>(`invoices/${invoiceId}/payments`, data),
@@ -266,7 +278,7 @@ export const api = {
       apiClient.get<ApiResponse>('purchase-orders', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`purchase-orders/${id}`),
-    create: (data: any) =>
+    create: (data: CreatePurchaseOrderInput) =>
       apiClient.post<ApiResponse>('purchase-orders', data),
     updateStatus: (id: string, status: string) =>
       apiClient.put<ApiResponse>(`purchase-orders/${id}/status`, { status }),
@@ -278,9 +290,9 @@ export const api = {
       apiClient.post<ApiResponse>(`purchase-orders/${id}/cancel`),
     delete: (id: string) =>
       apiClient.delete<ApiResponse>(`purchase-orders/${id}`),
-    createInvoice: (data: any) =>
+    createInvoice: (data: CreatePOInvoiceInput) =>
       apiClient.post<ApiResponse>('purchase-orders/invoices', data),
-    recordPayment: (data: any) =>
+    recordPayment: (data: RecordPOPaymentInput) =>
       apiClient.post<ApiResponse>('purchase-orders/payments', data),
   },
 
@@ -290,11 +302,11 @@ export const api = {
       apiClient.get<ApiResponse>('goods-receipts', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`goods-receipts/${id}`),
-    create: (data: any) =>
+    create: (data: CreateGoodsReceiptInput) =>
       apiClient.post<ApiResponse>('goods-receipts', data),
     finalize: (id: string) =>
       apiClient.post<ApiResponse>(`goods-receipts/${id}/finalize`),
-    updateItem: (grId: string, itemId: string, data: any) =>
+    updateItem: (grId: string, itemId: string, data: UpdateGoodsReceiptItemInput) =>
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`, data),
     hydrateFromPO: (id: string) =>
       apiClient.post<ApiResponse>(`goods-receipts/${id}/hydrate-from-po`),
@@ -308,13 +320,13 @@ export const api = {
       apiClient.get<ApiResponse>(`stock-movements/product/${productId}`, { params }),
     byBatch: (batchId: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`stock-movements/batch/${batchId}`, { params }),
-    record: (data: any) =>
+    record: (data: RecordStockMovementInput) =>
       apiClient.post<ApiResponse>('stock-movements', data),
   },
 
   // Payments
   payments: {
-    processSplit: (data: { saleData: any; payments: any[]; customerId?: string }) =>
+    processSplit: (data: SplitPaymentInput) =>
       apiClient.post<ApiResponse>('payments/process-split', data),
     getMethods: () =>
       apiClient.get<ApiResponse>('payments/methods'),
@@ -324,13 +336,13 @@ export const api = {
       apiClient.get<ApiResponse>(`payments/customer/${customerId}/balance`),
     getCustomerHistory: (customerId: string, params?: { limit?: number }) =>
       apiClient.get<ApiResponse>(`payments/customer/${customerId}/history`, { params }),
-    recordCustomerPayment: (customerId: string, data: any) =>
+    recordCustomerPayment: (customerId: string, data: RecordCustomerPaymentInput) =>
       apiClient.post<ApiResponse>(`payments/customer/${customerId}/payment`, data),
   },
 
   // POS Hold Orders
   hold: {
-    create: (data: any) =>
+    create: (data: CreateHoldOrderInput) =>
       apiClient.post<ApiResponse>('pos/hold', data),
     list: (params?: { terminalId?: string }) =>
       apiClient.get<ApiResponse>('pos/hold', { params }),
@@ -358,20 +370,20 @@ export const api = {
   settings: {
     getInvoiceSettings: () =>
       apiClient.get<ApiResponse>('settings/invoice'),
-    updateInvoiceSettings: (data: any) =>
+    updateInvoiceSettings: (data: InvoiceSettingsInput) =>
       apiClient.put<ApiResponse>('settings/invoice', data),
   },
 
   // Generic HTTP methods for backward compatibility
-  get: <T = ApiResponse>(url: string, config?: any) =>
+  get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) =>
     apiClient.get<T>(url, config),
-  post: <T = ApiResponse>(url: string, data?: any, config?: any) =>
+  post: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     apiClient.post<T>(url, data, config),
-  put: <T = ApiResponse>(url: string, data?: any, config?: any) =>
+  put: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     apiClient.put<T>(url, data, config),
-  patch: <T = ApiResponse>(url: string, data?: any, config?: any) =>
+  patch: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     apiClient.patch<T>(url, data, config),
-  delete: <T = ApiResponse>(url: string, config?: any) =>
+  delete: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) =>
     apiClient.delete<T>(url, config),
 };
 

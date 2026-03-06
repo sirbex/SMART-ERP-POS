@@ -60,6 +60,45 @@ interface PhysicalCountItem {
   has_stock: boolean;
 }
 
+// Row shape returned by the stock movements API
+interface StockMovementRow {
+  id: string;
+  productId: string;
+  productName?: string;
+  movementType: string;
+  quantity: number | string;
+  unitCost: number | string;
+  balanceAfter: number | string;
+  batchNumber?: string;
+  referenceId?: string;
+  referenceType?: string;
+  notes?: string;
+  createdAt: string;
+  saleNumber?: string;
+  grNumber?: string;
+  userName?: string;
+}
+
+// Row shape from the stock levels API (snake_case)
+interface StockLevelRow {
+  product_id: string;
+  product_name: string;
+  sku?: string;
+  total_stock?: string | number;
+  total_quantity?: string | number;
+  nearest_expiry?: string | null;
+  average_cost?: string | number;
+}
+
+// Product row shape used in this page
+interface ProductRow {
+  id: string;
+  name: string;
+  sku?: string;
+  status?: string;
+  unitOfMeasure?: string;
+}
+
 // Date range preset options
 type DateRangePreset = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
 
@@ -208,8 +247,8 @@ export default function StockMovementsPage() {
 
   // Create product map for quick lookup
   const productMap = useMemo(() => {
-    const map = new Map();
-    products.forEach((p: any) => {
+    const map = new Map<string, ProductRow>();
+    products.forEach((p: ProductRow) => {
       map.set(p.id, p);
     });
     return map;
@@ -220,14 +259,14 @@ export default function StockMovementsPage() {
     if (!stockLevelsData?.data) return [];
     const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
 
-    return levels.map((level: any) => ({
+    return levels.map((level: StockLevelRow) => ({
       id: `batch-${level.product_id}`,
       product_id: level.product_id,
       product_name: level.product_name,
       batch_number: level.sku || 'MAIN',
-      remaining_quantity: parseFloat(level.total_stock || level.total_quantity || 0),
+      remaining_quantity: parseFloat(String(level.total_stock || level.total_quantity || 0)),
       expiry_date: level.nearest_expiry || null,
-      cost_price: parseFloat(level.average_cost || 0),
+      cost_price: parseFloat(String(level.average_cost || 0)),
       status: 'ACTIVE',
       created_at: new Date().toISOString(),
     }));
@@ -238,8 +277,8 @@ export default function StockMovementsPage() {
     const map = new Map<string, number>();
     if (stockLevelsData?.data) {
       const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
-      levels.forEach((level: any) => {
-        map.set(level.product_id, parseFloat(level.total_stock || level.total_quantity || 0));
+      levels.forEach((level: StockLevelRow) => {
+        map.set(level.product_id, parseFloat(String(level.total_stock || level.total_quantity || 0)));
       });
     }
     return map;
@@ -248,9 +287,9 @@ export default function StockMovementsPage() {
   // Create product-based list for physical counting (includes ALL active products, even with zero stock)
   const physicalCountItems = useMemo((): PhysicalCountItem[] => {
     // Filter only active products
-    const activeProducts = products.filter((p: any) => p.status === 'ACTIVE' || !p.status);
+    const activeProducts = products.filter((p: ProductRow) => p.status === 'ACTIVE' || !p.status);
 
-    return activeProducts.map((product: any) => {
+    return activeProducts.map((product: ProductRow) => {
       const currentStock = stockLevelMap.get(product.id) || 0;
       return {
         id: `product-${product.id}`,
@@ -279,7 +318,7 @@ export default function StockMovementsPage() {
     if (!searchTerm) return movements;
 
     const term = searchTerm.toLowerCase();
-    return movements.filter((m: any) => {
+    return movements.filter((m: StockMovementRow) => {
       const product = productMap.get(m.productId);
       return (
         m.productName?.toLowerCase().includes(term) ||
@@ -300,7 +339,7 @@ export default function StockMovementsPage() {
     let totalQuantityIn = new Decimal(0);
     let totalQuantityOut = new Decimal(0);
 
-    filteredMovements.forEach((m: any) => {
+    filteredMovements.forEach((m: StockMovementRow) => {
       const type = m.movementType as MovementType;
       byType[type] = (byType[type] || 0) + 1;
 
@@ -334,7 +373,7 @@ export default function StockMovementsPage() {
   const allMovementsByType = useMemo(() => {
     const byType: Record<string, number> = {};
 
-    movements.forEach((m: any) => {
+    movements.forEach((m: StockMovementRow) => {
       const type = m.movementType as MovementType;
       byType[type] = (byType[type] || 0) + 1;
     });
@@ -921,7 +960,7 @@ export default function StockMovementsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredMovements.map((movement: any) => {
+                filteredMovements.map((movement: StockMovementRow) => {
                   const product = productMap.get(movement.productId);
                   const movementConfig = MOVEMENT_TYPES[movement.movementType as MovementType] || {
                     label: movement.movementType,

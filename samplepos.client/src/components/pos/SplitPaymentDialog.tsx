@@ -149,7 +149,7 @@ export default function SplitPaymentDialog({
     }
 
     const newPayment: PaymentSegment = {
-      method: selectedMethod as any,
+      method: selectedMethod,
       amount,
       reference: reference.trim() || undefined,
       notes: notes.trim() || undefined,

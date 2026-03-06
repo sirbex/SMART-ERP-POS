@@ -2,9 +2,85 @@ import { useState, useEffect } from 'react';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
 import { formatCurrency } from '../../utils/currency';
+import { downloadFile } from '../../utils/download';
 import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
 import StoreCredits from './StoreCredits';
+import { AxiosError } from 'axios';
+
+interface CustomerData {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    creditLimit?: number | string;
+    credit_limit?: number | string;
+    currentBalance?: number | string;
+    current_balance?: number | string;
+    balance?: number | string;
+    isActive?: boolean;
+    is_active?: boolean;
+    groupName?: string;
+    group_name?: string;
+    customerNumber?: string;
+    createdAt?: string;
+}
+
+interface SummaryData {
+    totalPurchases?: number | string;
+    total_purchases?: number | string;
+    balance?: number | string;
+    currentBalance?: number | string;
+    current_balance?: number | string;
+    creditLimit?: number | string;
+    credit_limit?: number | string;
+    salesCount?: number | string;
+    invoiceCount?: number | string;
+    depositBalance?: number | string;
+    totalOrders?: number | string;
+    lifetimeValue?: number | string;
+    averageOrderValue?: number | string;
+    pendingInvoices?: number | string;
+}
+
+interface InvoiceRow {
+    id: string;
+    invoiceNumber?: string;
+    invoice_number?: string;
+    issueDate?: string;
+    issue_date?: string;
+    dueDate?: string;
+    due_date?: string;
+    status: string;
+    totalAmount?: number | string;
+    total_amount?: number | string;
+    amountPaid?: number | string;
+    amount_paid?: number | string;
+    balance?: number | string;
+    notes?: string;
+}
+
+interface StatementResponse {
+    openingBalance?: number | string;
+    closingBalance?: number | string;
+    periodStart?: string;
+    periodEnd?: string;
+    entries?: StatementEntry[];
+    page?: number;
+    totalPages?: number;
+}
+
+interface StatementEntry {
+    date: string;
+    type: string;
+    reference?: string;
+    description?: string;
+    debit?: number | string;
+    credit?: number | string;
+    balance?: number | string;
+    balanceAfter?: number | string;
+}
 
 type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
 
@@ -32,7 +108,7 @@ export default function CustomerDetailModal({
     // Invoice state
     const [invoicePage, setInvoicePage] = useState(1);
     const [paymentOpen, setPaymentOpen] = useState(false);
-    const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+    const [selectedInvoice, setSelectedInvoice] = useState<(InvoiceRow & { outstanding: number }) | null>(null);
     const [payAmount, setPayAmount] = useState('');
     const [payMethod, setPayMethod] = useState<string>('CASH');
     const [payRefNum, setPayRefNum] = useState('');
@@ -55,15 +131,15 @@ export default function CustomerDetailModal({
     });
 
     const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useInvoices(invoicePage, 20, customerId || undefined);
-    const invoices: any[] = Array.isArray(invoicesData) ? invoicesData : [];
+    const invoices: InvoiceRow[] = Array.isArray(invoicesData) ? invoicesData : [];
     const recordPayment = useRecordInvoicePayment();
 
     const updateCustomer = useUpdateCustomer();
     const toggleActiveM = useToggleCustomerActive();
     const deleteCustomerM = useDeleteCustomer();
 
-    const c = customer as any;
-    const sum = summary as any;
+    const c = customer as CustomerData;
+    const sum = summary as SummaryData;
 
     // Reset tab when modal opens with different customer
     useEffect(() => {
@@ -78,9 +154,9 @@ export default function CustomerDetailModal({
         }
     }, [isOpen, customerId, initialTab]);
 
-    const toNumber = (v: any): number => {
+    const toNumber = (v: unknown): number => {
         if (typeof v === 'number') return v;
-        const parsed = parseFloat(v ?? '0');
+        const parsed = parseFloat(String(v ?? '0'));
         return isNaN(parsed) ? 0 : parsed;
     };
 
@@ -89,7 +165,7 @@ export default function CustomerDetailModal({
         if (!customer || !customerId) return;
         const form = e.currentTarget;
         const formData = new FormData(form);
-        const payload: any = {
+        const payload: Record<string, unknown> = {
             name: formData.get('name')?.toString() || undefined,
             email: formData.get('email')?.toString() || undefined,
             phone: formData.get('phone')?.toString() || undefined,
@@ -102,8 +178,8 @@ export default function CustomerDetailModal({
             refetchCustomer();
             onCustomerUpdated?.();
             setTab('overview');
-        } catch (error: any) {
-            alert(`❌ Failed to update customer: ${error.message || 'Unknown error'}`);
+        } catch (error: unknown) {
+            alert(`❌ Failed to update customer: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
@@ -115,8 +191,9 @@ export default function CustomerDetailModal({
             alert(`Customer ${newStatus ? 'activated' : 'deactivated'} successfully`);
             refetchCustomer();
             onCustomerUpdated?.();
-        } catch (err: any) {
-            alert(err?.response?.data?.error || err?.message || 'Failed to update customer status');
+        } catch (err: unknown) {
+            const axErr = err instanceof AxiosError ? err.response?.data?.error : undefined;
+            alert(axErr || (err instanceof Error ? err.message : 'Failed to update customer status'));
         }
     };
 
@@ -128,40 +205,13 @@ export default function CustomerDetailModal({
             alert('Customer deleted successfully');
             onCustomerDeleted?.();
             onClose();
-        } catch (err: any) {
-            alert(err?.response?.data?.error || err?.message || 'Failed to delete customer');
+        } catch (err: unknown) {
+            const axErr = err instanceof AxiosError ? err.response?.data?.error : undefined;
+            alert(axErr || (err instanceof Error ? err.message : 'Failed to delete customer'));
         }
     };
 
-    // Helper to download authenticated files
-    const downloadFile = async (url: string, filename: string) => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
 
-            if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`Server returned ${response.status}: ${text || 'Download failed'}`);
-            }
-
-            const blob = await response.blob();
-            const downloadUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(downloadUrl);
-            document.body.removeChild(a);
-        } catch (error) {
-            console.error('Download error:', error);
-            alert(`❌ Failed to Download File\n\n${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-    };
 
     if (!isOpen || !customerId) return null;
 
@@ -366,7 +416,7 @@ export default function CustomerDetailModal({
                                                             </tr>
                                                         </thead>
                                                         <tbody className="bg-white divide-y divide-gray-200">
-                                                            {invoices.map((inv: any) => {
+                                                            {invoices.map((inv: InvoiceRow) => {
                                                                 const total = Number(inv.totalAmount || inv.total_amount || 0);
                                                                 const paid = Number(inv.amountPaid || inv.amount_paid || 0);
                                                                 const outstanding = total - paid;
@@ -376,7 +426,7 @@ export default function CustomerDetailModal({
                                                                 return (
                                                                     <tr key={inv.id} className="hover:bg-gray-50">
                                                                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{inv.invoiceNumber || inv.invoice_number}</td>
-                                                                        <td className="px-4 py-3 text-sm text-gray-600">{inv.issueDate || inv.issue_date ? new Date(inv.issueDate || inv.issue_date).toLocaleDateString() : '-'}</td>
+                                                                        <td className="px-4 py-3 text-sm text-gray-600">{inv.issueDate || inv.issue_date ? new Date(String(inv.issueDate || inv.issue_date)).toLocaleDateString() : '-'}</td>
                                                                         <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(total)}</td>
                                                                         <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(paid)}</td>
                                                                         <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">{formatCurrency(outstanding)}</td>
@@ -448,8 +498,9 @@ export default function CustomerDetailModal({
                                                             setSelectedInvoice(null);
                                                             refetchInvoices();
                                                             refetchCustomer();
-                                                        } catch (err: any) {
-                                                            alert(`❌ Payment failed: ${err?.response?.data?.error || err?.message || 'Unknown error'}`);
+                                                        } catch (err: unknown) {
+                                                            const axErr = err instanceof AxiosError ? err.response?.data?.error : undefined;
+                                                            alert(`❌ Payment failed: ${axErr || (err instanceof Error ? err.message : 'Unknown error')}`);
                                                         }
                                                     }}>
                                                         <div>
@@ -565,7 +616,7 @@ export default function CustomerDetailModal({
                                                             stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
                                                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                                                         ].filter(Boolean).join('&');
-                                                        const url = `http://localhost:3001/api/customers/${customerId}/statement/export.csv${params ? '?' + params : ''}`;
+                                                        const url = `/customers/${customerId}/statement/export.csv${params ? '?' + params : ''}`;
                                                         downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.csv`);
                                                     }}
                                                     className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
@@ -578,7 +629,7 @@ export default function CustomerDetailModal({
                                                             stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
                                                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                                                         ].filter(Boolean).join('&');
-                                                        const url = `http://localhost:3001/api/customers/${customerId}/statement/export.pdf${params ? '?' + params : ''}`;
+                                                        const url = `/customers/${customerId}/statement/export.pdf${params ? '?' + params : ''}`;
                                                         downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.pdf`);
                                                     }}
                                                     className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
@@ -593,17 +644,17 @@ export default function CustomerDetailModal({
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Opening Balance</div>
-                                                    <div className="text-lg font-semibold">{formatCurrency(Number((statement as any).openingBalance || 0))}</div>
+                                                    <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).openingBalance || 0))}</div>
                                                 </div>
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Closing Balance</div>
-                                                    <div className="text-lg font-semibold">{formatCurrency(Number((statement as any).closingBalance || 0))}</div>
+                                                    <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).closingBalance || 0))}</div>
                                                 </div>
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Period</div>
                                                     <div className="text-sm">
-                                                        {(statement as any).periodStart ? new Date((statement as any).periodStart).toLocaleDateString() : 'All time'} →{' '}
-                                                        {(statement as any).periodEnd ? new Date((statement as any).periodEnd).toLocaleDateString() : 'Now'}
+                                                        {(statement as StatementResponse).periodStart ? new Date(String((statement as StatementResponse).periodStart)).toLocaleDateString() : 'All time'} →{' '}
+                                                        {(statement as StatementResponse).periodEnd ? new Date(String((statement as StatementResponse).periodEnd)).toLocaleDateString() : 'Now'}
                                                     </div>
                                                 </div>
                                             </div>
@@ -624,13 +675,13 @@ export default function CustomerDetailModal({
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white divide-y divide-gray-200">
-                                                    {!statement || ((statement as any).entries || []).length === 0 ? (
+                                                    {!statement || ((statement as StatementResponse).entries || []).length === 0 ? (
                                                         <tr>
                                                             <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                                                                 No transactions in this period
                                                             </td>
                                                         </tr>
-                                                    ) : ((statement as any).entries || []).map((e: any, idx: number) => (
+                                                    ) : ((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => (
                                                         <tr key={idx} className="hover:bg-gray-50">
                                                             <td className="px-4 py-3 text-sm text-gray-600">{new Date(e.date).toLocaleDateString()}</td>
                                                             <td className="px-4 py-3 text-sm">

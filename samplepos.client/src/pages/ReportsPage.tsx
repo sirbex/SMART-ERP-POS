@@ -45,8 +45,9 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
+import { api } from '../services/api';
 import CustomerAgingReport from '../components/reports/CustomerAgingReport';
-import { DatePicker } from '../components/ui/date-picker';
+import { DateRangeFilter } from '../components/ui/DateRangeFilter';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -67,7 +68,7 @@ const formatDisplayDate = (dateString: string | null | undefined): string => {
  * Automatically detects field type and applies appropriate formatting
  * Supports: currency, percentages, dates, numbers, strings
  */
-const formatFieldValue = (key: string, value: any): string => {
+const formatFieldValue = (key: string, value: unknown): string => {
   const lowerKey = key.toLowerCase();
 
   if (value === null || value === undefined) return '-';
@@ -174,7 +175,7 @@ const formatFieldValue = (key: string, value: any): string => {
  * Get color class for field value based on field type
  * Returns appropriate Tailwind color class for visual distinction
  */
-const getFieldColorClass = (key: string, value: any): string => {
+const getFieldColorClass = (key: string, value: unknown): string => {
   const lowerKey = key.toLowerCase();
 
   if (typeof value !== 'number') return 'text-gray-900';
@@ -613,12 +614,51 @@ const REPORT_OPTIONS: ReportOption[] = [
   },
 ];
 
+// Dynamic report data interface - covers all report types
+interface ReportDataSummary {
+  totalCashIn?: number;
+  overallProfitMargin?: number;
+  salesRevenue?: number;
+  salesPercent?: number;
+  debtCollections?: number;
+  collectionsPercent?: number;
+  totalDays?: number;
+  totalSalesValue?: number;
+  grossProfit?: number;
+  totalTransactions?: number;
+  creditExtended?: number;
+  businessInsights?: string | string[];
+  [key: string]: unknown;
+}
+
+interface ReportDataCustomer {
+  customerNumber?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  creditLimit?: number;
+  currentBalance?: number;
+}
+
+interface ReportData {
+  reportName?: string;
+  reportType?: string;
+  generatedAt?: string;
+  recordCount?: number;
+  executionTimeMs?: number;
+  summary: ReportDataSummary;
+  data: Record<string, unknown>[];
+  customer?: ReportDataCustomer;
+  transactions?: Record<string, unknown>[];
+  [key: string]: unknown;
+}
+
 export default function ReportsPage() {
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-  const [reportData, setReportData] = useState<any>(null);
+  const [reportData, setReportData] = useState<ReportData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Filter states
@@ -664,7 +704,7 @@ export default function ReportsPage() {
 
     try {
       // Build request parameters based on report type
-      const params: any = {
+      const params: Record<string, string | number | undefined> = {
         reportType: selectedReport,
       };
 
@@ -716,25 +756,11 @@ export default function ReportsPage() {
         params.sessionId = sessionId;
       }
 
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://localhost:3001/api/reports/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(params),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to generate report');
-      }
+      const { data: result } = await api.post('/reports/generate', params);
 
       setReportData(result.data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to generate report');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to generate report');
     } finally {
       setIsLoading(false);
     }
@@ -885,9 +911,9 @@ export default function ReportsPage() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(downloadUrl);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('PDF export error:', err);
-      alert(err.message || 'Failed to export PDF. Please try again.');
+      alert(err instanceof Error ? err.message : 'Failed to export PDF. Please try again.');
     }
   };
 
@@ -905,7 +931,7 @@ export default function ReportsPage() {
       headers.join(',') +
       '\n' +
       reportData.data
-        .map((row: any) =>
+        .map((row: Record<string, unknown>) =>
           headers.map((header) => JSON.stringify(row[header] || '')).join(',')
         )
         .join('\n');
@@ -926,30 +952,15 @@ export default function ReportsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Date Range Filters */}
         {selectedReportOption.requiresDateRange && (
-          <>
-            <div>
-              <label htmlFor="startDate" className="block text-sm font-semibold text-gray-700 mb-2">
-                📅 Start Date
-              </label>
-              <DatePicker
-                value={startDate}
-                onChange={(date) => setStartDate(date)}
-                placeholder="Select start date"
-                maxDate={endDate ? new Date(endDate) : undefined}
-              />
-            </div>
-            <div>
-              <label htmlFor="endDate" className="block text-sm font-semibold text-gray-700 mb-2">
-                📅 End Date
-              </label>
-              <DatePicker
-                value={endDate}
-                onChange={(date) => setEndDate(date)}
-                placeholder="Select end date"
-                minDate={startDate ? new Date(startDate) : undefined}
-              />
-            </div>
-          </>
+          <div className="col-span-full">
+            <DateRangeFilter
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              defaultPreset="THIS_MONTH"
+            />
+          </div>
         )}
 
         {/* Valuation Method */}
@@ -961,7 +972,7 @@ export default function ReportsPage() {
             <select
               id="valuationMethod"
               value={valuationMethod}
-              onChange={(e) => setValuationMethod(e.target.value as any)}
+              onChange={(e) => setValuationMethod(e.target.value as 'FIFO' | 'AVCO' | 'LIFO')}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white"
               aria-label="Valuation method"
             >
@@ -981,7 +992,7 @@ export default function ReportsPage() {
             <select
               id="groupBy"
               value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value as any)}
+              onChange={(e) => setGroupBy(e.target.value as 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method')}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               aria-label="Group by"
             >
@@ -1065,7 +1076,7 @@ export default function ReportsPage() {
             <select
               id="sortBy"
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as 'REVENUE' | 'ORDERS' | 'PROFIT')}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               aria-label="Sort by"
             >
@@ -1187,30 +1198,16 @@ export default function ReportsPage() {
 
         {/* Sales Comparison - Previous Period Dates */}
         {selectedReport === 'SALES_COMPARISON' && (
-          <>
-            <div>
-              <label htmlFor="previousStartDate" className="block text-sm font-semibold text-gray-700 mb-2">
-                Previous Period Start
-              </label>
-              <DatePicker
-                value={previousStartDate}
-                onChange={(date) => setPreviousStartDate(date)}
-                placeholder="Select previous start date"
-                maxDate={previousEndDate ? new Date(previousEndDate) : undefined}
-              />
-            </div>
-            <div>
-              <label htmlFor="previousEndDate" className="block text-sm font-semibold text-gray-700 mb-2">
-                Previous Period End
-              </label>
-              <DatePicker
-                value={previousEndDate}
-                onChange={(date) => setPreviousEndDate(date)}
-                placeholder="Select previous end date"
-                minDate={previousStartDate ? new Date(previousStartDate) : undefined}
-              />
-            </div>
-          </>
+          <div className="col-span-full">
+            <DateRangeFilter
+              startDate={previousStartDate}
+              endDate={previousEndDate}
+              onStartDateChange={setPreviousStartDate}
+              onEndDateChange={setPreviousEndDate}
+              label="Previous Period"
+              defaultPreset="LAST_MONTH"
+            />
+          </div>
         )}
 
         {/* Customer Purchase History - Customer ID */}
@@ -1314,7 +1311,7 @@ export default function ReportsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="text-center">
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Total Cash In</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-green-600">{formatCurrency(reportData.summary.totalCashIn)}</p>
+                    <p className="text-2xl sm:text-3xl font-bold text-green-600">{formatCurrency(reportData.summary.totalCashIn ?? 0)}</p>
                   </div>
                   <div className="text-center">
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Profit Margin</p>
@@ -1332,7 +1329,7 @@ export default function ReportsPage() {
                         <span className="text-sm text-gray-600">Sales Revenue</span>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.salesRevenue)}</div>
+                        <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.salesRevenue ?? 0)}</div>
                         <div className="text-xs text-gray-500">{reportData.summary.salesPercent?.toFixed(1)}%</div>
                       </div>
                     </div>
@@ -1350,7 +1347,7 @@ export default function ReportsPage() {
                         <span className="text-sm text-gray-600">Collections</span>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.debtCollections)}</div>
+                        <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.debtCollections ?? 0)}</div>
                         <div className="text-xs text-gray-500">{reportData.summary.collectionsPercent?.toFixed(1)}%</div>
                       </div>
                     </div>
@@ -1379,11 +1376,11 @@ export default function ReportsPage() {
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Total Sales</p>
-                    <p className="text-lg font-bold text-green-600">{formatCurrency(reportData.summary.totalSalesValue)}</p>
+                    <p className="text-lg font-bold text-green-600">{formatCurrency(reportData.summary.totalSalesValue ?? 0)}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Gross Profit</p>
-                    <p className="text-lg font-bold text-green-600">{formatCurrency(reportData.summary.grossProfit)}</p>
+                    <p className="text-lg font-bold text-green-600">{formatCurrency(reportData.summary.grossProfit ?? 0)}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Transactions</p>
@@ -1391,7 +1388,7 @@ export default function ReportsPage() {
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Credit Extended</p>
-                    <p className="text-lg font-bold text-orange-600">{formatCurrency(reportData.summary.creditExtended)}</p>
+                    <p className="text-lg font-bold text-orange-600">{formatCurrency(reportData.summary.creditExtended ?? 0)}</p>
                   </div>
                 </div>
               </div>
@@ -1455,7 +1452,7 @@ export default function ReportsPage() {
         )}
 
         {/* Customer Account Statement - Special Layout */}
-        {reportData.reportType === 'CUSTOMER_ACCOUNT_STATEMENT' && reportData.data?.customer && (
+        {reportData.reportType === 'CUSTOMER_ACCOUNT_STATEMENT' && reportData.customer && (
           <div className="space-y-4 sm:space-y-6">
             {/* Customer Information Card */}
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
@@ -1466,28 +1463,28 @@ export default function ReportsPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Customer Number</p>
-                    <p className="text-base sm:text-lg font-bold text-blue-600 bg-blue-50 px-2 sm:px-3 py-1.5 sm:py-2 rounded break-all">{reportData.data.customer.customerNumber}</p>
+                    <p className="text-base sm:text-lg font-bold text-blue-600 bg-blue-50 px-2 sm:px-3 py-1.5 sm:py-2 rounded break-all">{reportData.customer.customerNumber}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Name</p>
-                    <p className="text-base sm:text-lg font-semibold text-gray-900 break-words">{reportData.data.customer.name}</p>
+                    <p className="text-base sm:text-lg font-semibold text-gray-900 break-words">{reportData.customer.name}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Email</p>
-                    <p className="text-xs sm:text-sm text-gray-700 break-all">{reportData.data.customer.email || 'N/A'}</p>
+                    <p className="text-xs sm:text-sm text-gray-700 break-all">{reportData.customer.email || 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Phone</p>
-                    <p className="text-xs sm:text-sm text-gray-700">{reportData.data.customer.phone || 'N/A'}</p>
+                    <p className="text-xs sm:text-sm text-gray-700">{reportData.customer.phone || 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Credit Limit</p>
-                    <p className="text-base sm:text-lg font-semibold text-gray-900">{formatCurrency(reportData.data.customer.creditLimit)}</p>
+                    <p className="text-base sm:text-lg font-semibold text-gray-900">{formatCurrency(reportData.customer.creditLimit ?? 0)}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Current Balance</p>
-                    <p className={`text-base sm:text-lg font-bold ${reportData.data.customer.currentBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatCurrency(reportData.data.customer.currentBalance)}
+                    <p className={`text-base sm:text-lg font-bold ${(reportData.customer.currentBalance ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {formatCurrency(reportData.customer.currentBalance ?? 0)}
                     </p>
                   </div>
                 </div>
@@ -1495,11 +1492,11 @@ export default function ReportsPage() {
             </div>
 
             {/* Transactions Table */}
-            {reportData.data.transactions && reportData.data.transactions.length > 0 ? (
+            {reportData.transactions && reportData.transactions.length > 0 ? (
               <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
                 <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <h4 className="text-base sm:text-lg font-semibold text-white">📋 Transaction History</h4>
-                  <span className="text-green-100 text-xs sm:text-sm">{reportData.data.transactions.length} transactions</span>
+                  <span className="text-green-100 text-xs sm:text-sm">{reportData.transactions.length} transactions</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-full">
@@ -1514,23 +1511,23 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {reportData.data.transactions.map((transaction: any, idx: number) => (
+                      {reportData.transactions.map((transaction: Record<string, unknown>, idx: number) => (
                         <tr key={idx} className="hover:bg-blue-50 transition-colors">
                           <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className="font-semibold text-indigo-600">{transaction.saleNumber}</span>
+                            <span className="font-semibold text-indigo-600">{String(transaction.saleNumber ?? '')}</span>
                           </td>
                           <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-900 whitespace-nowrap">
-                            {formatDisplayDate(transaction.saleDate)}
+                            {formatDisplayDate(transaction.saleDate as string | undefined)}
                           </td>
                           <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className="font-semibold text-gray-900">{formatCurrency(transaction.totalAmount)}</span>
+                            <span className="font-semibold text-gray-900">{formatCurrency(Number(transaction.totalAmount ?? 0))}</span>
                           </td>
                           <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className="font-semibold text-green-600">{formatCurrency(transaction.amountPaid)}</span>
+                            <span className="font-semibold text-green-600">{formatCurrency(Number(transaction.amountPaid ?? 0))}</span>
                           </td>
                           <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className={`font-bold ${transaction.balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {formatCurrency(transaction.balanceDue)}
+                            <span className={`font-bold ${Number(transaction.balanceDue ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                              {formatCurrency(Number(transaction.balanceDue ?? 0))}
                             </span>
                           </td>
                           <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
@@ -1540,7 +1537,7 @@ export default function ReportsPage() {
                                 ? 'bg-yellow-100 text-yellow-800'
                                 : 'bg-red-100 text-red-800'
                               }`}>
-                              {transaction.paymentStatus}
+                              {String(transaction.paymentStatus ?? '')}
                             </span>
                           </td>
                         </tr>
@@ -1585,12 +1582,12 @@ export default function ReportsPage() {
 
             {/* Mobile Card View */}
             <div className="block sm:hidden p-4 space-y-4">
-              {reportData.data.map((row: any, idx: number) => (
+              {reportData.data.map((row: Record<string, unknown>, idx: number) => (
                 <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <div className="font-semibold text-gray-900">{formatDisplayDate(row.transactionDate)}</div>
-                      <div className="text-sm text-gray-600 mt-1">{row.paymentMethod}</div>
+                      <div className="font-semibold text-gray-900">{formatDisplayDate(row.transactionDate as string | undefined)}</div>
+                      <div className="text-sm text-gray-600 mt-1">{String(row.paymentMethod ?? '')}</div>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-medium ${row.revenueType === 'SALES_REVENUE'
                       ? 'bg-green-100 text-green-800'
@@ -1603,11 +1600,11 @@ export default function ReportsPage() {
                   <div className="grid grid-cols-2 gap-4 mb-3">
                     <div>
                       <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Cash Amount</div>
-                      <div className="text-lg font-bold text-green-600">{formatCurrency(row.cashAmount)}</div>
+                      <div className="text-lg font-bold text-green-600">{formatCurrency(Number(row.cashAmount ?? 0))}</div>
                     </div>
                     <div>
                       <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Transactions</div>
-                      <div className="text-lg font-bold text-blue-600">{row.transactionCount}</div>
+                      <div className="text-lg font-bold text-blue-600">{String(row.transactionCount ?? '')}</div>
                     </div>
                   </div>
 
@@ -1615,11 +1612,11 @@ export default function ReportsPage() {
                     <div className="grid grid-cols-2 gap-4 pt-3 border-t border-gray-200">
                       <div>
                         <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Gross Profit</div>
-                        <div className="text-sm font-semibold text-green-600">{formatCurrency(row.grossProfit)}</div>
+                        <div className="text-sm font-semibold text-green-600">{formatCurrency(Number(row.grossProfit ?? 0))}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Profit Margin</div>
-                        <div className="text-sm font-semibold text-blue-600">{row.profitMargin?.toFixed(2)}%</div>
+                        <div className="text-sm font-semibold text-blue-600">{typeof row.profitMargin === 'number' ? row.profitMargin.toFixed(2) : '0.00'}%</div>
                       </div>
                     </div>
                   )}
@@ -1643,7 +1640,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {reportData.data.slice(0, 100).map((row: any, idx: number) => (
+                  {reportData.data.slice(0, 100).map((row: Record<string, unknown>, idx: number) => (
                     <tr key={idx} className="hover:bg-blue-50 transition-colors">
                       {Object.entries(row).map(([key, value], colIdx) => (
                         <td key={colIdx} className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm whitespace-nowrap">
@@ -1708,7 +1705,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {reportData.data.slice(0, 100).map((row: any, idx: number) => (
+                    {reportData.data.slice(0, 100).map((row: Record<string, unknown>, idx: number) => (
                       <tr key={idx} className="hover:bg-blue-50 transition-colors">
                         {Object.entries(row)
                           .filter(([key]) => {

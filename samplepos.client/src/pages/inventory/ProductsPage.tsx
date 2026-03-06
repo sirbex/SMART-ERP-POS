@@ -4,7 +4,9 @@ import { formatCurrency, parseCurrency } from '../../utils/currency';
 import { BUSINESS_RULES } from '../../utils/constants';
 // Zod-based form validation
 import { validateProductValues } from '@/validation/product';
-import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } from '../../hooks/useProducts';
+import { useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } from '../../hooks/useProducts';
+import { useOfflineProducts } from '../../hooks/useOfflineData';
+import { useOfflineContext } from '../../contexts/OfflineContext';
 import { getErrorMessage, api } from '../../utils/api';
 import Decimal from 'decimal.js';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
@@ -33,6 +35,27 @@ const formatDisplayDate = (dateString: string | null | undefined): string => {
   return dateString;
 };
 
+interface ProductUomRow {
+  id: string;
+  uomId: string;
+  uomName?: string;
+  uomSymbol?: string | null;
+  uom_name?: string;
+  uom_symbol?: string | null;
+  conversionFactor: number | string;
+  isDefault: boolean;
+  overrideCost?: number | string;
+  overridePrice?: number | string;
+  priceOverride?: number | string;
+  costOverride?: number | string;
+  uom?: { name?: string; symbol?: string | null };
+}
+
+interface ProductListItem extends ProductFormData {
+  productUoms?: ProductUomRow[];
+  product_uoms?: ProductUomRow[];
+}
+
 interface ProductFormData {
   id?: string;
   name: string;
@@ -40,6 +63,7 @@ interface ProductFormData {
   barcode: string;
   description: string;
   category: string;
+  genericName: string;
   conversionFactor: string;
   costPrice: string;
   sellingPrice: string;
@@ -54,6 +78,7 @@ interface ProductFormData {
   taxRate: string;
   isActive: boolean;
   trackExpiry: boolean;
+  minDaysBeforeExpirySale: string;
 }
 
 interface ProductUomFormData {
@@ -80,6 +105,7 @@ const initialFormData: ProductFormData = {
   barcode: '',
   description: '',
   category: '',
+  genericName: '',
   conversionFactor: '1',
   costPrice: '',
   sellingPrice: '',
@@ -94,12 +120,16 @@ const initialFormData: ProductFormData = {
   taxRate: '18',
   isActive: true,
   trackExpiry: false,
+  minDaysBeforeExpirySale: '0',
 };
 
 export default function ProductsPage() {
-  // API Hooks
+  // Offline-awareness
+  const { isOnline } = useOfflineContext();
+
+  // API Hooks — use offline-aware hook for reading, standard hooks for mutations
   const queryClient = useQueryClient();
-  const { data: productsResponse, isLoading, error, refetch } = useProducts({ includeUoms: true });
+  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true });
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();
@@ -191,7 +221,7 @@ export default function ProductsPage() {
   }, [productsResponse]);
 
   // Helper function to format quantity with multi-UOM breakdown
-  const formatMultiUomQuantity = (product: any): string => {
+  const formatMultiUomQuantity = (product: ProductListItem): string => {
     const baseQuantity = parseFloat(product.quantityOnHand) || 0;
 
     // Get product UOMs if available
@@ -204,12 +234,12 @@ export default function ProductsPage() {
 
     // Sort UOMs by conversion factor (descending) to show largest units first
     const sortedUoms = [...productUoms]
-      .filter((uom: any) => uom.conversionFactor > 1)
-      .sort((a: any, b: any) => parseFloat(b.conversionFactor) - parseFloat(a.conversionFactor));
+      .filter((uom: ProductUomRow) => Number(uom.conversionFactor) > 1)
+      .sort((a: ProductUomRow, b: ProductUomRow) => parseFloat(String(b.conversionFactor)) - parseFloat(String(a.conversionFactor)));
 
     if (sortedUoms.length === 0) {
       // Only base unit exists
-      const baseUom = productUoms.find((u: any) => u.isDefault) || productUoms[0];
+      const baseUom = productUoms.find((u: ProductUomRow) => u.isDefault) || productUoms[0];
       const uomSymbol = baseUom?.uomSymbol || baseUom?.uom_symbol || baseUom?.uomName || baseUom?.uom_name || 'PC';
       return `${baseQuantity} ${uomSymbol}`;
     }
@@ -219,7 +249,7 @@ export default function ProductsPage() {
     const breakdown: string[] = [];
 
     for (const uom of sortedUoms) {
-      const conversionFactor = parseFloat(uom.conversionFactor);
+      const conversionFactor = parseFloat(String(uom.conversionFactor));
       if (remainingQty >= conversionFactor) {
         const units = Math.floor(remainingQty / conversionFactor);
         remainingQty = remainingQty % conversionFactor;
@@ -230,7 +260,7 @@ export default function ProductsPage() {
 
     // Add remaining base units
     if (remainingQty > 0 || breakdown.length === 0) {
-      const baseUom = productUoms.find((u: any) => u.isDefault) || productUoms[0];
+      const baseUom = productUoms.find((u: ProductUomRow) => u.isDefault) || productUoms[0];
       const uomSymbol = baseUom?.uomSymbol || baseUom?.uom_symbol || baseUom?.uomName || baseUom?.uom_name || 'PC';
       breakdown.push(`${remainingQty} ${uomSymbol}`);
     }
@@ -254,7 +284,7 @@ export default function ProductsPage() {
       api.products.getMasterUoms()
         .then(response => {
           if (response.data.success && response.data.data) {
-            setMasterUoms(response.data.data);
+            setMasterUoms(response.data.data as MasterUom[]);
           }
         })
         .catch(error => {
@@ -269,7 +299,7 @@ export default function ProductsPage() {
       api.products.getProductUoms(formData.id)
         .then(response => {
           if (response.data.success && response.data.data) {
-            const uoms = response.data.data.map((uom: any) => ({
+            const uoms = (response.data.data as ProductUomRow[]).map((uom: ProductUomRow) => ({
               id: uom.id,
               uomId: uom.uomId,
               // Prefer flat fields from API; fall back to nested shape if present
@@ -319,7 +349,7 @@ export default function ProductsPage() {
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter((p: ProductFormData) =>
+      filtered = filtered.filter((p: ProductListItem) =>
         String(p.name ?? '').toLowerCase().includes(term) ||
         String(p.sku ?? '').toLowerCase().includes(term) ||
         String(p.barcode ?? '').toLowerCase().includes(term)
@@ -327,7 +357,7 @@ export default function ProductsPage() {
     }
 
     if (filterStatus !== 'all') {
-      filtered = filtered.filter((p: ProductFormData) =>
+      filtered = filtered.filter((p: ProductListItem) =>
         filterStatus === 'active' ? p.isActive : !p.isActive
       );
     }
@@ -352,7 +382,9 @@ export default function ProductsPage() {
       autoUpdatePrice: formData.autoUpdatePrice,
       reorderLevel: formData.reorderLevel,
       trackExpiry: formData.trackExpiry,
-      isActive: formData.isActive
+      isActive: formData.isActive,
+      genericName: formData.genericName,
+      minDaysBeforeExpirySale: formData.minDaysBeforeExpirySale,
     });
 
     const errors: Record<string, string> = { ...(z.valid ? {} : z.errors) };
@@ -386,32 +418,34 @@ export default function ProductsPage() {
   };
 
   // Handle edit
-  const handleEdit = (product: ProductFormData) => {
+  const handleEdit = (product: ProductListItem) => {
     setModalMode('edit');
     // Normalize possible null/undefined fields from API into safe defaults for controlled inputs
     // Use String() for all text fields as they may come from DB as non-string types
     setFormData({
       ...initialFormData,
       ...product,
-      name: String((product as any).name ?? ''),
-      sku: String((product as any).sku ?? ''),
-      barcode: String((product as any).barcode ?? ''),
-      description: String((product as any).description ?? ''),
-      category: String((product as any).category ?? ''),
-      conversionFactor: String((product as any).conversionFactor ?? initialFormData.conversionFactor),
-      costPrice: String((product as any).costPrice ?? ''),
-      sellingPrice: String((product as any).sellingPrice ?? ''),
-      costingMethod: (product as any).costingMethod ?? initialFormData.costingMethod,
-      averageCost: String((product as any).averageCost ?? initialFormData.averageCost),
-      lastCost: String((product as any).lastCost ?? initialFormData.lastCost),
-      pricingFormula: String((product as any).pricingFormula ?? ''),
-      autoUpdatePrice: (product as any).autoUpdatePrice ?? initialFormData.autoUpdatePrice,
-      quantityOnHand: String((product as any).quantityOnHand ?? initialFormData.quantityOnHand),
-      reorderLevel: String((product as any).reorderLevel ?? initialFormData.reorderLevel),
-      isTaxable: (product as any).isTaxable ?? false,
-      taxRate: String((product as any).taxRate ?? initialFormData.taxRate),
-      isActive: (product as any).isActive ?? true,
-      trackExpiry: (product as any).trackExpiry ?? false,
+      name: String(product.name ?? ''),
+      sku: String(product.sku ?? ''),
+      barcode: String(product.barcode ?? ''),
+      description: String(product.description ?? ''),
+      category: String(product.category ?? ''),
+      genericName: String(product.genericName ?? ''),
+      conversionFactor: String(product.conversionFactor ?? initialFormData.conversionFactor),
+      costPrice: String(product.costPrice ?? ''),
+      sellingPrice: String(product.sellingPrice ?? ''),
+      costingMethod: product.costingMethod ?? initialFormData.costingMethod,
+      averageCost: String(product.averageCost ?? initialFormData.averageCost),
+      lastCost: String(product.lastCost ?? initialFormData.lastCost),
+      pricingFormula: String(product.pricingFormula ?? ''),
+      autoUpdatePrice: product.autoUpdatePrice ?? initialFormData.autoUpdatePrice,
+      quantityOnHand: String(product.quantityOnHand ?? initialFormData.quantityOnHand),
+      reorderLevel: String(product.reorderLevel ?? initialFormData.reorderLevel),
+      isTaxable: product.isTaxable ?? false,
+      taxRate: String(product.taxRate ?? initialFormData.taxRate),
+      isActive: product.isActive ?? true,
+      trackExpiry: product.trackExpiry ?? false,
+      minDaysBeforeExpirySale: String(product.minDaysBeforeExpirySale ?? '0'),
     });
     setValidationErrors({});
     setShowModal(true);
@@ -452,13 +486,16 @@ export default function ProductsPage() {
         quantityOnHand: parseFloat(formData.quantityOnHand) || 0,
         reorderLevel: parseFloat(formData.reorderLevel) || 0,
         trackExpiry: !!formData.trackExpiry,
+        genericName: formData.genericName || undefined,
+        minDaysBeforeExpirySale: parseInt(formData.minDaysBeforeExpirySale) || 0,
       };
 
       let productId: string;
 
       if (modalMode === 'create') {
         const createResponse = await createProductMutation.mutateAsync(productData);
-        productId = createResponse.data?.data?.id || createResponse.data?.id || '';
+        const createdProduct = createResponse.data as { id: string } | undefined;
+        productId = createdProduct?.id || '';
 
         // Save product UoMs for new product
         if (productUoms.length > 0 && productId) {
@@ -493,7 +530,7 @@ export default function ProductsPage() {
         try {
           const existingUoms = await api.products.getProductUoms(productId);
           const existingUomIds = existingUoms.data.success && existingUoms.data.data
-            ? existingUoms.data.data.map((u: any) => u.id)
+            ? (existingUoms.data.data as ProductUomRow[]).map((u: ProductUomRow) => u.id)
             : [];
 
           // Delete removed UoMs
@@ -599,7 +636,7 @@ export default function ProductsPage() {
   }, [selectedProductForHistory, products]);
 
   // Handle form field change
-  const handleFieldChange = (field: keyof ProductFormData, value: any) => {
+  const handleFieldChange = (field: keyof ProductFormData, value: string | boolean) => {
     setFormData({ ...formData, [field]: value });
     // Clear validation error for this field
     if (validationErrors[field]) {
@@ -740,10 +777,10 @@ export default function ProductsPage() {
           });
 
           // Update local state with returned ID
-          const responseData = response.data?.data || response.data;
+          const addedUomData = response.data?.data as { id?: string } | undefined;
           const newUomWithId = {
             ...uomWithDetails,
-            id: responseData?.id,
+            id: addedUomData?.id,
           };
           setProductUoms([...productUoms, newUomWithId]);
 
@@ -823,15 +860,29 @@ export default function ProductsPage() {
 
   return (
     <div className="p-6">
+      {/* Offline notice */}
+      {!isOnline && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          Offline — showing cached products (read-only). Create/edit/delete require an internet connection.
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Products Management</h2>
-          <p className="text-gray-600 mt-1">Manage product catalog with bank-grade precision</p>
+          <p className="text-gray-600 mt-1">
+            {isOnline ? 'Manage product catalog with bank-grade precision' : 'Viewing cached product catalog (offline)'}
+          </p>
         </div>
         <button
           onClick={handleCreate}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          disabled={!isOnline}
+          className={`px-4 py-2 rounded-lg transition-colors ${isOnline
+            ? 'bg-blue-600 text-white hover:bg-blue-700'
+            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
         >
           ➕ Add Product
         </button>
@@ -893,7 +944,7 @@ export default function ProductsPage() {
             <select
               id="filter-status"
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
+              onChange={(e) => setFilterStatus(e.target.value as 'all' | 'active' | 'inactive')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="all">All Products</option>
@@ -929,7 +980,7 @@ export default function ProductsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((product: ProductFormData) => {
+                filteredProducts.map((product: ProductListItem) => {
                   const margin = calculateMargin(product.costPrice, product.sellingPrice);
                   return (
                     <tr key={product.id} className="hover:bg-gray-50">
@@ -1041,10 +1092,12 @@ export default function ProductsPage() {
                   autoUpdatePrice: formData.autoUpdatePrice,
                   reorderLevel: formData.reorderLevel,
                   trackExpiry: formData.trackExpiry,
-                  isActive: formData.isActive
+                  isActive: formData.isActive,
+                  genericName: formData.genericName,
+                  minDaysBeforeExpirySale: formData.minDaysBeforeExpirySale,
                 }}
-                onChange={(field: ProductFormField, value: any) => handleFieldChange(field as keyof ProductFormData, value)}
-                validationErrors={validationErrors as any}
+                onChange={(field: ProductFormField, value: string | boolean) => handleFieldChange(field as keyof ProductFormData, value)}
+                validationErrors={validationErrors as Partial<Record<ProductFormField, string>>}
               />
 
               {/* Cost Tracking (Read-only for AVCO/FIFO) */}
@@ -1555,7 +1608,7 @@ export default function ProductsPage() {
 
                             {/* Enhanced Details by Type */}
                             {item.reference && item.type === 'GOODS_RECEIPT' && (() => {
-                              const defaultUom = selectedProductWithUom?.productUoms?.find((u: any) => u.isDefault);
+                              const defaultUom = selectedProductWithUom?.productUoms?.find((u: ProductUomRow) => u.isDefault);
                               const fallbackUom = defaultUom?.uomSymbol || defaultUom?.uomName || '';
 
                               return (
@@ -1615,7 +1668,7 @@ export default function ProductsPage() {
 
                           {/* Quantity Display */}
                           {(() => {
-                            const defaultUom = selectedProductWithUom?.productUoms?.find((u: any) => u.isDefault);
+                            const defaultUom = selectedProductWithUom?.productUoms?.find((u: ProductUomRow) => u.isDefault);
                             const fallbackUom = defaultUom?.uomSymbol || defaultUom?.uomName || '';
 
                             return (

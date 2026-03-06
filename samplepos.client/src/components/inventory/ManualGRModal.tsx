@@ -8,7 +8,11 @@ import { api } from "@/utils/api";
 import { Loader2, Trash2, Plus } from "lucide-react";
 import Decimal from "decimal.js";
 import ProductForm, { ProductFormValues, ProductFormField } from "@/components/products/ProductForm";
-import { validateProductValues } from "@/validation/product";
+import { validateProductValues, ProductValidationErrors } from "@/validation/product";
+import type { CreateProductInput } from "@/types/inputs";
+import type { Product } from "@/types/business";
+import type { ApiResponse } from "@/types/api";
+import { AxiosError } from "axios";
 import { UomSelector } from "./UomSelector";
 import { convertQtyToBase, convertCostToBase } from "@/utils/uom";
 import {
@@ -17,6 +21,7 @@ import {
   ProductSearchBar,
   BusinessRulesInfo,
   GOODS_RECEIPT_RULES,
+  type SearchableProduct,
 } from "./shared";
 
 interface ManualGRItem {
@@ -57,31 +62,34 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     autoUpdatePrice: false,
     reorderLevel: "10",
     trackExpiry: false,
-    isActive: true
+    isActive: true,
+    genericName: "",
+    minDaysBeforeExpirySale: "0",
   });
-  const [productValidationErrors, setProductValidationErrors] = useState<Record<string, string>>({});
+  const [productValidationErrors, setProductValidationErrors] = useState<ProductValidationErrors>({});
 
   const createGRMutation = useCreateGoodsReceipt();
   const queryClient = useQueryClient();
 
   // Create product mutation
   const createProductMutation = useMutation({
-    mutationFn: (productData: any) => api.products.create(productData),
+    mutationFn: (productData: CreateProductInput) => api.products.create(productData),
     onSuccess: (response) => {
       // Invalidate products query to refresh the list
       queryClient.invalidateQueries({ queryKey: ["products"] });
 
       // Add the newly created product to selected items
-      const product = (response.data as any)?.data ?? (response.data as any);
+      const responseData = response.data as ApiResponse<Product>;
+      const product = responseData?.data ?? (responseData as unknown as Product);
       const newItem: ManualGRItem = {
         productId: product.id,
         productName: product.name,
         receivedQuantity: 1,
-        unitCost: Number(product.costPrice || product.cost_price || 0),
-        productCostPrice: Number(product.costPrice || product.cost_price || 0),
+        unitCost: Number(product.costPrice || 0),
+        productCostPrice: Number(product.costPrice || 0),
         batchNumber: "",
         expiryDate: "",
-        trackExpiry: product.trackExpiry || product.track_expiry || false,
+        trackExpiry: product.trackExpiry || false,
         selectedUomId: null,
       };
       setSelectedItems((prev) => [...prev, newItem]);
@@ -102,38 +110,41 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
         autoUpdatePrice: false,
         reorderLevel: "10",
         trackExpiry: false,
-        isActive: true
+        isActive: true,
+        genericName: "",
+        minDaysBeforeExpirySale: "0",
       });
       setShowCreateProductModal(false);
     },
-    onError: (error: any) => {
-      console.error("Failed to create product:", error?.response?.data?.error || error.message);
+    onError: (error: Error) => {
+      console.error("Failed to create product:", error.message);
     }
   });
 
-  const handleAddProduct = (product: any) => {
+  const handleAddProduct = (product: SearchableProduct) => {
     // Check if already added
     if (selectedItems.some(item => item.productId === product.id)) {
       console.warn("Product already added");
       return;
     }
 
+    const costPrice = product.costPrice ?? product.cost_price ?? 0;
     const newItem: ManualGRItem = {
       productId: product.id,
       productName: product.name,
       receivedQuantity: 1,
-      unitCost: Number((product.costPrice ?? product.cost_price ?? 0)),
-      productCostPrice: Number((product.costPrice ?? product.cost_price ?? 0)),
+      unitCost: Number(costPrice),
+      productCostPrice: Number(costPrice),
       batchNumber: "",
       expiryDate: "",
-      trackExpiry: !!(product.trackExpiry ?? product.track_expiry ?? false),
+      trackExpiry: !!(product.trackExpiry ?? false),
       selectedUomId: null,
     };
 
     setSelectedItems((prev) => [...prev, newItem]);
   };
 
-  const updateItem = (index: number, field: keyof ManualGRItem, value: any) => {
+  const updateItem = (index: number, field: keyof ManualGRItem, value: ManualGRItem[keyof ManualGRItem]) => {
     setSelectedItems((prev) =>
       prev.map((item, i) =>
         i === index ? { ...item, [field]: value } : item
@@ -196,7 +207,7 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     }
 
     try {
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const user = JSON.parse(localStorage.getItem("user") || "{}") as { id?: string };
 
       const payload = {
         supplierId: supplierId, // Send supplierId instead of purchaseOrderId
@@ -215,14 +226,14 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
           }
 
           return {
-            poItemId: null,
+            poItemId: undefined,
             productId: String(item.productId),
             productName: item.productName,
             orderedQuantity: baseQuantity,
             receivedQuantity: baseQuantity,
             unitCost: baseUnitCost,
-            batchNumber: item.batchNumber || null,
-            expiryDate: item.expiryDate && item.expiryDate.trim() !== "" ? item.expiryDate : null,
+            batchNumber: item.batchNumber || undefined,
+            expiryDate: item.expiryDate && item.expiryDate.trim() !== "" ? item.expiryDate : undefined,
           };
         }),
       };
@@ -237,10 +248,11 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
       setNotes("");
 
       onClose();
-    } catch (err: any) {
-      console.error("Failed to create goods receipt:", err?.response?.data?.error || err.message);
-      if (err?.response?.data?.details) {
-        console.error("Validation details:", err.response.data.details);
+    } catch (err: unknown) {
+      const axiosErr = err as AxiosError<ApiResponse>;
+      console.error("Failed to create goods receipt:", axiosErr?.response?.data?.error || axiosErr.message);
+      if (axiosErr?.response?.data) {
+        console.error("Validation details:", axiosErr.response.data);
       }
     }
   };
@@ -249,7 +261,7 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     // Zod validation using shared schema
     const z = validateProductValues(newProduct);
     if (!z.valid) {
-      setProductValidationErrors(z.errors as any);
+      setProductValidationErrors(z.errors);
       return;
     }
     setProductValidationErrors({});
@@ -257,9 +269,10 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     const productData = z.data;
 
     try {
-      await createProductMutation.mutateAsync(productData as any);
-    } catch (err: any) {
-      console.error("Failed to create product:", err?.response?.data?.error || err.message);
+      await createProductMutation.mutateAsync(productData as CreateProductInput);
+    } catch (err: unknown) {
+      const axiosErr = err as AxiosError<ApiResponse>;
+      console.error("Failed to create product:", axiosErr?.response?.data?.error || axiosErr.message);
     }
   };
 
@@ -476,8 +489,8 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
           <div className="p-1 space-y-4">
             <ProductForm
               values={newProduct}
-              onChange={(field: ProductFormField, value: any) => setNewProduct({ ...newProduct, [field]: value })}
-              validationErrors={productValidationErrors as any}
+              onChange={(field: ProductFormField, value: ProductFormValues[ProductFormField]) => setNewProduct({ ...newProduct, [field]: value })}
+              validationErrors={productValidationErrors}
             />
 
             <div className="flex justify-end gap-3 pt-3 border-t">
@@ -502,7 +515,9 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
                     autoUpdatePrice: false,
                     reorderLevel: "10",
                     trackExpiry: false,
-                    isActive: true
+                    isActive: true,
+                    genericName: "",
+                    minDaysBeforeExpirySale: "0",
                   });
                 }}
               >

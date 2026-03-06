@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
+import type { CreatePurchaseOrderInput, CreatePOInvoiceInput, RecordPOPaymentInput } from '../types/inputs';
 
 /**
  * Query key factory for purchase orders
@@ -11,7 +12,7 @@ import { api } from '../utils/api';
 export const purchaseOrderKeys = {
   all: ['purchase-orders'] as const,
   lists: () => [...purchaseOrderKeys.all, 'list'] as const,
-  list: (filters: Record<string, any>) => [...purchaseOrderKeys.lists(), filters] as const,
+  list: (filters: Record<string, unknown>) => [...purchaseOrderKeys.lists(), filters] as const,
   detail: (id: string) => [...purchaseOrderKeys.all, 'detail', id] as const,
 };
 
@@ -56,7 +57,7 @@ export function useCreatePurchaseOrder() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: CreatePurchaseOrderInput) => {
       const response = await api.purchaseOrders.create(data);
       return response.data;
     },
@@ -162,7 +163,7 @@ export function useCreateInvoice() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: CreatePOInvoiceInput) => {
       const response = await api.purchaseOrders.createInvoice(data);
       return response.data;
     },
@@ -179,7 +180,7 @@ export function useRecordPayment() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: RecordPOPaymentInput) => {
       const response = await api.purchaseOrders.recordPayment(data);
       return response.data;
     },

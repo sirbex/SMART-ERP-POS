@@ -89,7 +89,7 @@ const AccountingIntegrationDashboard: React.FC = () => {
       } else {
         throw new Error(response.data?.error || 'Failed to load dashboard');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading dashboard data:', error);
       toast.error('Failed to load dashboard data');
 

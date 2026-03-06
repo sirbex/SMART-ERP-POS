@@ -1,11 +1,37 @@
 import { useState, useMemo } from 'react';
-import { useStockLevels } from '../../hooks/useInventory';
-import { useProducts } from '../../hooks/useProducts';
+import { useOfflineStockLevels, useOfflineProducts } from '../../hooks/useOfflineData';
+import { useOfflineContext } from '../../contexts/OfflineContext';
 import { formatMultiUomQuantity } from '../../utils/formatQuantity';
+import { formatCurrency } from '../../utils/currency';
+
+interface StockLevelItem {
+  product_id: string;
+  product_name: string;
+  total_stock?: string | number;
+  total_quantity?: string | number;
+  reorder_level: string | number;
+  needs_reorder: boolean;
+  selling_price: string | number;
+}
+
+interface ProductItem {
+  id: string;
+  sku?: string;
+  name?: string;
+  baseUom?: string;
+  additionalUoms?: Array<{ unitName: string; conversionFactor: number }>;
+  // Fields used by formatMultiUomQuantity
+  product_uoms?: Array<{ conversionFactor: number; isDefault?: boolean; uomSymbol?: string; uom_symbol?: string; uomName?: string; uom_name?: string }>;
+  productUoms?: Array<{ conversionFactor: number; isDefault?: boolean; uomSymbol?: string; uom_symbol?: string; uomName?: string; uom_name?: string }>;
+  unitOfMeasure?: string;
+}
 
 export default function StockLevelsPage() {
-  const { data: stockLevelsData, isLoading, error, refetch } = useStockLevels();
-  const { data: productsData } = useProducts();
+  const { isOnline } = useOfflineContext();
+
+  // Use offline-aware hooks that cache to IndexedDB and fall back when offline
+  const { data: stockLevelsData, isLoading, error, refetch } = useOfflineStockLevels();
+  const { data: productsData } = useOfflineProducts();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'low'>('all');
@@ -29,8 +55,8 @@ export default function StockLevelsPage() {
 
   // Create product map for quick lookup
   const productMap = useMemo(() => {
-    const map = new Map();
-    products.forEach((p: any) => {
+    const map = new Map<string, ProductItem>();
+    products.forEach((p: ProductItem) => {
       map.set(p.id, p);
     });
     return map;
@@ -42,14 +68,14 @@ export default function StockLevelsPage() {
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter((item: any) =>
+      filtered = filtered.filter((item: StockLevelItem) =>
         item.product_name?.toLowerCase().includes(term) ||
         item.product_id?.toLowerCase().includes(term)
       );
     }
 
     if (filterStatus === 'low') {
-      filtered = filtered.filter((item: any) => item.needs_reorder === true);
+      filtered = filtered.filter((item: StockLevelItem) => item.needs_reorder === true);
     }
 
     return filtered;
@@ -68,8 +94,12 @@ export default function StockLevelsPage() {
   if (error) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">Failed to load stock levels. Please try again.</p>
+        <div className={`${!isOnline ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'} border rounded-lg p-4`}>
+          <p className={!isOnline ? 'text-amber-800' : 'text-red-800'}>
+            {!isOnline
+              ? 'No cached data available. Please connect to the internet and load this page at least once.'
+              : 'Failed to load stock levels. Please try again.'}
+          </p>
           <button onClick={() => refetch()} className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
             Retry
           </button>
@@ -80,11 +110,21 @@ export default function StockLevelsPage() {
 
   return (
     <div className="p-6">
+      {/* Offline notice */}
+      {!isOnline && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          Offline — showing cached stock levels. Data may not reflect the latest changes.
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Stock Levels</h2>
-          <p className="text-gray-600 mt-1">Real-time inventory from database</p>
+          <p className="text-gray-600 mt-1">
+            {isOnline ? 'Real-time inventory from database' : 'Cached inventory data (offline)'}
+          </p>
         </div>
         <button onClick={() => refetch()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
           🔄 Refresh
@@ -141,13 +181,13 @@ export default function StockLevelsPage() {
                 </td>
               </tr>
             ) : (
-              filteredStockLevels.map((item: any) => {
+              filteredStockLevels.map((item: StockLevelItem) => {
                 const product = productMap.get(item.product_id);
                 // Backend returns total_stock, not total_quantity
-                const totalQty = parseFloat(item.total_stock || item.total_quantity) || 0;
-                const reorderLevel = parseFloat(item.reorder_level) || 0;
+                const totalQty = parseFloat(String(item.total_stock || item.total_quantity || 0)) || 0;
+                const reorderLevel = parseFloat(String(item.reorder_level)) || 0;
                 const needsReorder = item.needs_reorder === true;
-                const sellingPrice = parseFloat(item.selling_price) || 0;
+                const sellingPrice = parseFloat(String(item.selling_price)) || 0;
 
                 return (
                   <tr key={item.product_id} className="hover:bg-gray-50 transition-colors">
@@ -173,12 +213,7 @@ export default function StockLevelsPage() {
                     </td>
                     <td className="px-4 py-4 text-right whitespace-nowrap">
                       <div className="text-sm font-semibold text-gray-900">
-                        {new Intl.NumberFormat('en-UG', {
-                          style: 'currency',
-                          currency: 'UGX',
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0,
-                        }).format(sellingPrice)}
+                        {formatCurrency(sellingPrice)}
                       </div>
                     </td>
                     <td className="px-4 py-4 text-center whitespace-nowrap">
@@ -209,7 +244,7 @@ export default function StockLevelsPage() {
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Low Stock Items</div>
           <div className="text-2xl font-bold text-yellow-600 mt-1">
-            {stockLevels.filter((item: any) => item.needs_reorder).length}
+            {stockLevels.filter((item: StockLevelItem) => item.needs_reorder).length}
           </div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">

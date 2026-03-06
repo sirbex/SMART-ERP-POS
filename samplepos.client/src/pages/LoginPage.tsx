@@ -1,19 +1,54 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../utils/api';
 import { TwoFactorVerifyModal } from '../components/auth/TwoFactorVerifyModal';
-import { Shield } from 'lucide-react';
+import type { UserRole } from '../types';
+import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store } from 'lucide-react';
+
+/** Shape returned by POST /auth/login inside `data.data` */
+interface LoginResponseData {
+  isSuperAdmin?: boolean;
+  redirectTo?: string;
+  requires2FA?: boolean;
+  userId?: string;
+  requires2FASetup?: boolean;
+  user: { id: string; email: string; fullName: string; role: UserRole };
+  token: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [requires2FA, setRequires2FA] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Where to go after login — honours ProtectedRoute's "from" state
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+
+  // Redirect if already authenticated
+  if (isAuthenticated) {
+    return <Navigate to={from} replace />;
+  }
+
+  // Show idle-logout message if redirected from session timeout
+  const sessionExpired = (() => {
+    const flag = sessionStorage.getItem('session_expired');
+    if (flag) {
+      sessionStorage.removeItem('session_expired'); // one-time display
+      return true;
+    }
+    return (location.state as { sessionExpired?: boolean })?.sessionExpired === true;
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,71 +59,76 @@ export default function LoginPage() {
       const response = await api.auth.login({ email, password });
 
       if (response.data.success && response.data.data) {
+        const loginData = response.data.data as LoginResponseData;
+
         // Super admin detected — redirect to platform portal
-        if (response.data.data.isSuperAdmin && response.data.data.redirectTo) {
-          navigate(response.data.data.redirectTo);
+        if (loginData.isSuperAdmin && loginData.redirectTo) {
+          navigate(loginData.redirectTo);
           return;
         }
 
         // Check if 2FA is required
-        if (response.data.data.requires2FA) {
-          setPendingUserId(response.data.data.userId);
+        if (loginData.requires2FA) {
+          setPendingUserId(loginData.userId ?? null);
           setRequires2FA(true);
           setLoading(false);
           return;
         }
 
         // Check if 2FA setup is required (role requires it but not set up)
-        if (response.data.data.requires2FASetup) {
-          const { user, token, accessToken, refreshToken, expiresIn } = response.data.data;
+        if (loginData.requires2FASetup) {
+          const { user, token, accessToken, refreshToken, expiresIn } = loginData;
           login(user, accessToken || token, refreshToken, expiresIn);
-          // Redirect to security settings to set up 2FA
           navigate('/settings/security', {
             state: { message: '2FA setup is required for your role. Please set it up now.' }
           });
           return;
         }
 
-        const { user, token, accessToken, refreshToken, expiresIn } = response.data.data;
+        const { user, token, accessToken, refreshToken, expiresIn } = loginData;
         login(user, accessToken || token, refreshToken, expiresIn);
-        navigate('/dashboard');
+        navigate(from, { replace: true });
       } else {
         setError(response.data.error || 'Login failed');
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+    } catch (err: unknown) {
+      if (err instanceof Error && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { error?: string } } };
+        setError(axiosErr.response?.data?.error || 'Login failed. Please try again.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handle2FASuccess = (data: { user: any; token: string; accessToken?: string; refreshToken?: string; expiresIn?: number }) => {
-    console.log('[LoginPage] 2FA Success - Full data:', data);
-    console.log('[LoginPage] 2FA Success - User:', data.user);
-    console.log('[LoginPage] 2FA Success - Token:', data.token ? `${data.token.substring(0, 30)}...` : 'MISSING');
-
+  const handle2FASuccess = (data: {
+    user: { id: string; email: string; fullName: string; role: string };
+    token: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresIn?: number;
+  }): void => {
     const token = data.accessToken || data.token;
 
     if (!token) {
-      console.error('[LoginPage] 2FA Success - NO TOKEN FOUND!');
       setError('Authentication failed: No token received');
       setRequires2FA(false);
       setPendingUserId(null);
       return;
     }
 
-    console.log('[LoginPage] 2FA Success - Calling login with token:', token.substring(0, 30) + '...');
-
     // Clear 2FA state BEFORE login to prevent any rendering issues
     setRequires2FA(false);
     setPendingUserId(null);
 
-    // Login sets state synchronously now (fixed in AuthContext)
-    login(data.user, token, data.refreshToken, data.expiresIn);
-
-    console.log('[LoginPage] 2FA Success - Login complete, navigating immediately');
-    // Navigate immediately - AuthContext sets state synchronously now
-    navigate('/dashboard', { replace: true });
+    const authUser = {
+      ...data.user,
+      role: data.user.role as UserRole,
+    };
+    login(authUser, token, data.refreshToken, data.expiresIn);
+    navigate(from, { replace: true });
   };
 
   const handle2FACancel = () => {
@@ -99,7 +139,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4">
       {requires2FA && pendingUserId && (
         <TwoFactorVerifyModal
           userId={pendingUserId}
@@ -108,79 +148,123 @@ export default function LoginPage() {
         />
       )}
 
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-lg">
-        <div>
-          <h2 className="text-center text-3xl font-bold text-gray-900">
-            SamplePOS
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Sign in to your account
+      <div className="max-w-md w-full">
+        {/* Logo / Branding */}
+        <div className="text-center mb-8">
+          <div className="mx-auto w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg mb-4">
+            <Store className="w-9 h-9 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
+            SMART ERP
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Point of Sale &amp; Inventory Management
           </p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
-              {error}
+        {/* Card */}
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-6">
+            Sign in to your account
+          </h2>
+
+          {/* Session-expired banner */}
+          {sessionExpired && !error && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Your session expired due to inactivity. Please sign in again.</span>
             </div>
           )}
 
-          <div className="space-y-4">
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            {/* Error alert */}
+            {error && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700"
+              >
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Email */}
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
                 Email address
               </label>
               <input
                 id="email"
                 name="email"
                 type="email"
+                autoComplete="email"
+                autoFocus
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="admin@samplepos.com"
+                className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="you@company.com"
               />
             </div>
 
+            {/* Password with visibility toggle */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                 Password
               </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="block w-full px-3 py-2.5 pr-10 border border-gray-300 rounded-lg text-sm shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div>
+            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Signing in…
+                </>
+              ) : (
+                'Sign in'
+              )}
             </button>
-          </div>
+          </form>
 
-          <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
-            <Shield className="w-3 h-3" />
+          {/* Footer */}
+          <div className="mt-6 flex items-center justify-center gap-1.5 text-xs text-gray-400">
+            <Shield className="w-3.5 h-3.5" />
             <span>Protected by Two-Factor Authentication</span>
           </div>
+        </div>
 
-          <div className="text-sm text-center text-gray-600">
-            <p>Test credentials:</p>
-            <p className="font-mono text-xs mt-1">
-              test.admin@samplepos.com / TestAdmin123!
-            </p>
-          </div>
-        </form>
+        {/* Copyright */}
+        <p className="mt-6 text-center text-xs text-gray-400">
+          &copy; {new Date().getFullYear()} SMART ERP. All rights reserved.
+        </p>
       </div>
     </div>
   );

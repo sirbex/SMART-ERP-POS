@@ -11,9 +11,18 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Shield, Loader2, AlertCircle } from 'lucide-react';
 
+/** Shape returned by 2FA verify endpoint */
+interface AuthLoginResponse {
+    user: { id: string; email: string; fullName: string; role: string };
+    token: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresIn?: number;
+}
+
 interface TwoFactorVerifyModalProps {
     userId: string;
-    onSuccess: (data: { user: any; token: string }) => void;
+    onSuccess: (data: AuthLoginResponse) => void;
     onCancel: () => void;
 }
 
@@ -43,9 +52,13 @@ export function TwoFactorVerifyModal({ userId, onSuccess, onCancel }: TwoFactorV
             console.log('[TwoFactorVerifyModal] Verification successful, result:', result);
             // Success - onSuccess will handle navigation
             onSuccess(result);
-        } catch (err: any) {
-            const errorMessage = err.response?.data?.error || 'Invalid code. Please try again.';
-            setError(errorMessage);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error && 'response' in err
+                ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+                : err instanceof Error
+                    ? err.message
+                    : undefined;
+            setError(errorMessage || 'Invalid code. Please try again.');
             // Clear the input field on error to allow fresh retry
             setCode('');
             // Refocus the input

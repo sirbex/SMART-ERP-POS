@@ -57,7 +57,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
     const [isSaving, setIsSaving] = useState(false);
 
     const { data: customersResponse } = useCustomers(1, 100);
-    const customers = customersResponse?.data || [];
+    const customers = (customersResponse?.data || []) as Array<{ id: string; name: string }>;
 
     const loadDeposits = useCallback(async () => {
         if (!selectedCustomer) {
@@ -141,9 +141,9 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
             } else {
                 throw new Error(response.data?.error || 'Failed to create deposit');
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Error saving deposit:', err);
-            alert(`❌ Failed to save deposit: ${err.message || 'Unknown error'}`);
+            alert(`❌ Failed to save deposit: ${err instanceof Error ? err.message : 'Unknown error'}`);
         } finally {
             setIsSaving(false);
         }
@@ -166,9 +166,9 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
             } else {
                 throw new Error(response.data?.error || 'Failed to refund deposit');
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Error refunding deposit:', err);
-            alert(`❌ Failed to refund deposit: ${err.message || 'Unknown error'}`);
+            alert(`❌ Failed to refund deposit: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
     };
 
@@ -405,7 +405,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
                                 <select
                                     id="payment-method"
                                     value={depositForm.paymentMethod}
-                                    onChange={(e) => setDepositForm({ ...depositForm, paymentMethod: e.target.value as any })}
+                                    onChange={(e) => setDepositForm({ ...depositForm, paymentMethod: e.target.value as CustomerDeposit['paymentMethod'] })}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md"
                                 >
                                     <option value="CASH">Cash</option>

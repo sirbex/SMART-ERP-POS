@@ -2,12 +2,193 @@ import { useMemo, useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { formatCurrency } from '../../utils/currency';
+import { downloadFile } from '../../utils/download';
 import { useCustomer, useCustomerSummary, useCustomerTransactions, useUpdateCustomer, useInvoices, useRecordInvoicePayment, useInvoicePayments, useCreateInvoice, useCustomerSales, useInvoice, useCustomerStatement, useToggleCustomerActive, useDeleteCustomer } from '../../hooks/useApi';
 import { api } from '../../utils/api';
+import { AxiosError } from 'axios';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import CustomerDeposits from '../../components/customers/CustomerDeposits';
 import StoreCredits from '../../components/customers/StoreCredits';
 import { DatePicker } from '../../components/ui/date-picker';
+
+// ── Local interfaces for Customer Detail page ──────────────────
+
+/** Raw invoice row from API (supports camelCase, snake_case, PascalCase keys) */
+interface InvoiceRow {
+  id?: string;
+  Id?: string;
+  invoiceNumber?: string;
+  invoice_number?: string;
+  InvoiceNumber?: string;
+  customerId?: string;
+  customer_id?: string;
+  CustomerId?: string;
+  saleId?: string;
+  sale_id?: string;
+  issueDate?: string;
+  issue_date?: string;
+  InvoiceDate?: string;
+  dueDate?: string;
+  due_date?: string;
+  status?: string;
+  paymentMethod?: string;
+  payment_method?: string;
+  subtotal?: number | string;
+  taxAmount?: number | string;
+  tax_amount?: number | string;
+  totalAmount?: number | string;
+  total_amount?: number | string;
+  TotalAmount?: number | string;
+  amountPaid?: number | string;
+  amount_paid?: number | string;
+  AmountPaid?: number | string;
+  balance?: number | string;
+  OutstandingBalance?: number | string;
+  notes?: string | null;
+  createdById?: string | null;
+  created_by_id?: string | null;
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+}
+
+/** Normalized invoice after mapping raw API data to consistent camelCase */
+interface NormalizedInvoice {
+  id: string | undefined;
+  invoiceNumber: string | undefined;
+  customerId: string | undefined;
+  saleId: string | undefined;
+  issueDate: string | undefined;
+  dueDate: string | undefined;
+  status: string | undefined;
+  paymentMethod: string;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  amountPaid: number;
+  balance: number;
+  notes: string | null | undefined;
+  createdById: string | null | undefined;
+  createdAt: string | undefined;
+  updatedAt: string | undefined;
+}
+
+interface CustomerDetailData {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  balance: number | string;
+  creditLimit: number | string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface CustomerSummaryData {
+  totalInvoices?: number | string;
+  totalSpent?: number | string;
+  lastPurchaseDate?: string;
+}
+
+interface StatementResponse {
+  openingBalance: number | string;
+  closingBalance: number | string;
+  periodStart?: string;
+  periodEnd?: string;
+  entries?: StatementEntry[];
+  deposits?: {
+    summary?: {
+      totalDeposited: number;
+      totalUsed: number;
+      availableBalance: number;
+      depositCount?: number;
+    };
+    entries?: DepositEntry[];
+  };
+  page?: number;
+  totalPages?: number;
+}
+
+interface StatementEntry {
+  date?: string;
+  type?: string;
+  paymentMethod?: string;
+  payment_method?: string;
+  description?: string;
+  reference?: string;
+  balanceAfter?: number | string;
+  debit?: number | string;
+  credit?: number | string;
+}
+
+interface DepositEntry {
+  date?: string;
+  type?: string;
+  reference?: string;
+  description?: string;
+  amount?: number | string;
+  runningBalance?: number | string;
+}
+
+interface TransactionRow {
+  id: string;
+  transactionDate: string;
+  type: string;
+  amount: number | string;
+  referenceNumber?: string;
+  description?: string;
+}
+
+interface InvoiceDetailData {
+  id?: string;
+  invoiceNumber?: string;
+  status?: string;
+  totalAmount?: number | string;
+  amountPaid?: number | string;
+  balance?: number | string;
+  issueDate?: string;
+  dueDate?: string;
+  items?: InvoiceItemRow[];
+  payments?: PaymentHistoryRow[];
+}
+
+interface InvoiceItemRow {
+  id?: string;
+  productName?: string;
+  productId?: string;
+  product_id?: string;
+  productCode?: string;
+  sku?: string;
+  quantity?: number | string;
+  unitPrice?: number | string;
+  unit_price?: number | string;
+  lineTotal?: number | string;
+  line_total?: number | string;
+}
+
+interface PaymentHistoryRow {
+  id: string;
+  receiptNumber?: string;
+  receipt_number?: string;
+  paymentDate?: string;
+  payment_date?: string;
+  paymentMethod?: string;
+  payment_method?: string;
+  amount: number | string;
+  referenceNumber?: string;
+  reference_number?: string;
+}
+
+interface SaleRow {
+  id: string;
+  saleNumber?: string;
+  saleDate?: string;
+  totalAmount?: number | string;
+  paymentMethod?: string;
+}
 
 type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
 
@@ -17,45 +198,6 @@ export default function CustomerDetailPage() {
   const location = useLocation();
 
   const [tab, setTab] = useState<Tab>('overview');
-
-  // Helper to download authenticated files
-  const downloadFile = async (url: string, filename: string) => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('Download failed:', response.status, text);
-        throw new Error(`Server returned ${response.status}: ${text || 'Download failed'}`);
-      }
-
-      // Check if response is actually a PDF
-      const contentType = response.headers.get('content-type');
-      if (filename.endsWith('.pdf') && (!contentType || !contentType.includes('pdf'))) {
-        const text = await response.text();
-        console.error('Expected PDF but got:', contentType, text);
-        throw new Error(`Server did not return a PDF file. Content-Type: ${contentType || 'unknown'}`);
-      }
-
-      const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(downloadUrl);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Download error:', error);
-      alert(`❌ Failed to Download File\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\n💡 Please check:\n• Internet connection\n• Server is running\n• You have permission to access this file`);
-    }
-  };
 
   // Initialize tab from hash or query (?tab=)
   useEffect(() => {
@@ -87,8 +229,8 @@ export default function CustomerDetailPage() {
   const { data: invoiceData, isLoading: isLoadingInvoices } = useInvoices(invoicePage, pageSize, id);
   // Normalize invoice data (snake_case → camelCase) for consistent rendering
   const invoices = useMemo(() => {
-    if (!Array.isArray(invoiceData)) return [] as any[];
-    return (invoiceData as any[]).map((r: any) => ({
+    if (!Array.isArray(invoiceData)) return [] as NormalizedInvoice[];
+    return (invoiceData as InvoiceRow[]).map((r: InvoiceRow) => ({
       id: r.id,
       invoiceNumber: r.invoiceNumber ?? r.invoice_number,
       customerId: r.customerId ?? r.customer_id,
@@ -148,13 +290,13 @@ export default function CustomerDetailPage() {
 
   const updateCustomer = useUpdateCustomer();
 
-  const c = customer as any;
-  const sum = summary as any;
+  const c = customer as CustomerDetailData;
+  const sum = summary as CustomerSummaryData | undefined;
   const title = useMemo(() => (c ? c.name : 'Customer'), [c]);
 
-  const toNumber = (v: any): number => {
+  const toNumber = (v: unknown): number => {
     if (typeof v === 'number') return v;
-    const parsed = parseFloat(v ?? '0');
+    const parsed = parseFloat(String(v ?? '0'));
     return isNaN(parsed) ? 0 : parsed;
   };
 
@@ -163,7 +305,7 @@ export default function CustomerDetailPage() {
     if (!customer) return;
     const form = e.currentTarget;
     const formData = new FormData(form);
-    const payload: any = {
+    const payload: Record<string, unknown> = {
       name: formData.get('name')?.toString() || undefined,
       email: formData.get('email')?.toString() || undefined,
       phone: formData.get('phone')?.toString() || undefined,
@@ -175,7 +317,7 @@ export default function CustomerDetailPage() {
 
   // Record Payment Modal state
   const [isPaymentOpen, setPaymentOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<NormalizedInvoice | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('CASH');
   const [payReferenceNumber, setPayReferenceNumber] = useState('');
@@ -184,7 +326,7 @@ export default function CustomerDetailPage() {
   const [customerDepositBalance, setCustomerDepositBalance] = useState<number>(0);
   const [isLoadingDeposits, setIsLoadingDeposits] = useState(false);
   const [showInvoicePicker, setShowInvoicePicker] = useState(false);
-  const [fetchedUnpaidInvoices, setFetchedUnpaidInvoices] = useState<any[]>([]);
+  const [fetchedUnpaidInvoices, setFetchedUnpaidInvoices] = useState<NormalizedInvoice[]>([]);
   const [isFetchingUnpaid, setIsFetchingUnpaid] = useState(false);
   const modalRef = useModalAccessibility(isPaymentOpen, () => setPaymentOpen(false));
   const recordPayment = useRecordInvoicePayment();
@@ -198,8 +340,9 @@ export default function CustomerDetailPage() {
       setIsLoadingDeposits(true);
       try {
         const response = await api.deposits.getCustomerBalance(id);
-        if (response.data?.success && response.data?.data) {
-          setCustomerDepositBalance(response.data.data.availableBalance || 0);
+        const depositData = response.data?.data as { availableBalance?: number } | undefined;
+        if (response.data?.success && depositData) {
+          setCustomerDepositBalance(depositData.availableBalance || 0);
         } else {
           setCustomerDepositBalance(0);
         }
@@ -213,7 +356,7 @@ export default function CustomerDetailPage() {
     fetchDepositBalance();
   }, [isPaymentOpen, id]);
 
-  const openPaymentModal = (invoice: any) => {
+  const openPaymentModal = (invoice: NormalizedInvoice) => {
     setSelectedInvoice(invoice);
     setPayAmount('');
     setPayMethod('CASH');
@@ -290,21 +433,22 @@ export default function CustomerDetailPage() {
       }
 
       alert(`✅ Payment Recorded\n\nAmount: ${formatCurrency(amountNum)}\nMethod: ${payMethod}${payMethod === 'DEPOSIT' ? '\n\n🏦 Deposit balance updated.' : ''}\n\nInvoice updated successfully!`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Payment recording error:', error);
-      const errorMsg = error.response?.data?.error || error.message || 'Unknown error';
+      const axErr = error instanceof AxiosError ? error.response?.data?.error : undefined;
+      const errorMsg = axErr || (error instanceof Error ? error.message : 'Unknown error');
       alert(`❌ Payment Recording Failed\n\n${errorMsg}\n\n💡 Please:\n• Check your internet connection\n• Verify payment details\n• Try again\n\nIf error persists, contact support.`);
     }
   };
 
   // Invoice Details Drawer (payments history)
   const [isDetailsOpen, setDetailsOpen] = useState(false);
-  const [detailsInvoice, setDetailsInvoice] = useState<any | null>(null);
+  const [detailsInvoice, setDetailsInvoice] = useState<NormalizedInvoice | null>(null);
   const detailsRef = useModalAccessibility(isDetailsOpen, () => setDetailsOpen(false));
   const { data: paymentHistory, isLoading: isLoadingPayments } = useInvoicePayments(detailsInvoice?.id || '',);
   // Fetch full invoice detail (includes items + payments)
   const { data: invoiceDetail } = useInvoice(detailsInvoice?.id || '');
-  const openDetails = (invoice: any) => {
+  const openDetails = (invoice: NormalizedInvoice) => {
     setDetailsInvoice(invoice);
     setDetailsOpen(true);
   };
@@ -323,12 +467,12 @@ export default function CustomerDetailPage() {
   // Filter out sales that already have invoices
   const salesWithoutInvoices = useMemo(() => {
     if (!customerSales || !Array.isArray(customerSales)) return [];
-    const salesArray = customerSales as any[];
+    const salesArray = customerSales as SaleRow[];
 
     // Create a Set of saleIds that have invoices
     const invoicedSaleIds = new Set<string>();
     if (Array.isArray(invoices)) {
-      invoices.forEach((inv: any) => {
+      invoices.forEach((inv: NormalizedInvoice) => {
         if (inv.saleId) {
           invoicedSaleIds.add(String(inv.saleId));
         }
@@ -351,8 +495,9 @@ export default function CustomerDetailPage() {
     try {
       await toggleActiveM.mutateAsync({ id, isActive: newStatus });
       alert(`Customer ${newStatus ? 'activated' : 'deactivated'} successfully`);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err?.message || 'Failed to update customer status');
+    } catch (err: unknown) {
+      const axErr = err instanceof AxiosError ? err.response?.data?.error : undefined;
+      alert(axErr || (err instanceof Error ? err.message : 'Failed to update customer status'));
     }
   };
 
@@ -362,8 +507,9 @@ export default function CustomerDetailPage() {
       setDeleteConfirmOpen(false);
       alert('Customer deleted successfully');
       navigate('/customers');
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err?.message || 'Failed to delete customer');
+    } catch (err: unknown) {
+      const axErr = err instanceof AxiosError ? err.response?.data?.error : undefined;
+      alert(axErr || (err instanceof Error ? err.message : 'Failed to delete customer'));
     }
   };
 
@@ -388,9 +534,10 @@ export default function CustomerDetailPage() {
         notes: createNotes || undefined,
       });
       setCreateOpen(false);
-    } catch (err: any) {
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.error || err?.message || 'Failed to create invoice';
+    } catch (err: unknown) {
+      const axiosErr = err instanceof AxiosError ? err : undefined;
+      const status = axiosErr?.response?.status;
+      const msg = axiosErr?.response?.data?.error || (err instanceof Error ? err.message : 'Failed to create invoice');
       if (status === 409) {
         setCreateError('An invoice already exists for this sale. You cannot create another.');
       } else {
@@ -618,7 +765,7 @@ export default function CustomerDetailPage() {
                   disabled={isFetchingUnpaid}
                   onClick={async () => {
                     // Use already-loaded invoice data if available
-                    const cached = invoices.filter((inv: any) => inv.status !== 'PAID' && Number(inv.balance || 0) > 0);
+                    const cached = invoices.filter((inv: NormalizedInvoice) => inv.status !== 'PAID' && Number(inv.balance || 0) > 0);
                     if (cached.length === 1) {
                       openPaymentModal(cached[0]);
                       return;
@@ -633,17 +780,26 @@ export default function CustomerDetailPage() {
                     try {
                       const resp = await api.invoices.list({ page: 1, limit: 50, customerId: id });
                       const raw = resp.data?.data || [];
-                      const mapped = (Array.isArray(raw) ? raw : []).map((r: any) => ({
+                      const mapped: NormalizedInvoice[] = (Array.isArray(raw) ? raw : []).map((r: InvoiceRow) => ({
                         id: r.id || r.Id,
                         invoiceNumber: r.invoiceNumber ?? r.invoice_number ?? r.InvoiceNumber,
                         customerId: r.customerId ?? r.customer_id ?? r.CustomerId,
+                        saleId: r.saleId ?? r.sale_id,
+                        issueDate: r.issueDate ?? r.issue_date ?? r.InvoiceDate,
+                        dueDate: r.dueDate ?? r.due_date,
                         status: String(r.status || 'UNPAID').toUpperCase().includes('PARTIAL') ? 'PARTIALLY_PAID' : String(r.status || '').toUpperCase() === 'PAID' ? 'PAID' : 'UNPAID',
-                        balance: Number(r.balance ?? r.OutstandingBalance ?? 0),
+                        paymentMethod: r.paymentMethod ?? r.payment_method ?? 'CREDIT',
+                        subtotal: 0,
+                        taxAmount: 0,
                         totalAmount: Number(r.totalAmount ?? r.total_amount ?? r.TotalAmount ?? 0),
                         amountPaid: Number(r.amountPaid ?? r.amount_paid ?? r.AmountPaid ?? 0),
-                        issueDate: r.issueDate ?? r.issue_date ?? r.InvoiceDate,
+                        balance: Number(r.balance ?? r.OutstandingBalance ?? 0),
+                        notes: r.notes ?? null,
+                        createdById: null,
+                        createdAt: r.createdAt ?? r.created_at,
+                        updatedAt: r.updatedAt ?? r.updated_at,
                       }));
-                      const unpaid = mapped.filter((inv: any) => inv.status !== 'PAID' && Number(inv.balance || 0) > 0);
+                      const unpaid = mapped.filter((inv) => inv.status !== 'PAID' && Number(inv.balance || 0) > 0);
                       if (unpaid.length === 1) {
                         openPaymentModal(unpaid[0]);
                       } else if (unpaid.length > 1) {
@@ -670,7 +826,7 @@ export default function CustomerDetailPage() {
                 {showInvoicePicker && fetchedUnpaidInvoices.length > 0 && (
                   <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
                     <div className="px-3 py-2 border-b border-gray-100 text-xs text-gray-500 font-medium uppercase">Select Invoice to Pay</div>
-                    {fetchedUnpaidInvoices.map((inv: any) => (
+                    {fetchedUnpaidInvoices.map((inv) => (
                       <button
                         key={inv.id}
                         className="w-full px-3 py-2 hover:bg-gray-50 text-left flex items-center justify-between border-b border-gray-50 last:border-0"
@@ -725,7 +881,7 @@ export default function CustomerDetailPage() {
                             stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
-                          const url = `http://localhost:3001/api/customers/${id}/statement/export.csv${params ? '?' + params : ''}`;
+                          const url = `/customers/${id}/statement/export.csv${params ? '?' + params : ''}`;
                           downloadFile(url, `statement-${id}-${new Date().toISOString().slice(0, 10)}.csv`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
@@ -739,7 +895,7 @@ export default function CustomerDetailPage() {
                             stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
-                          const url = `http://localhost:3001/api/customers/${id}/statement/export.pdf${params ? '?' + params : ''}`;
+                          const url = `/customers/${id}/statement/export.pdf${params ? '?' + params : ''}`;
                           downloadFile(url, `statement-${id}-${new Date().toISOString().slice(0, 10)}.pdf`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
@@ -752,15 +908,15 @@ export default function CustomerDetailPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Opening Balance</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as any).openingBalance || 0))}</div>
+                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).openingBalance || 0))}</div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Closing Balance</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as any).closingBalance || 0))}</div>
+                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).closingBalance || 0))}</div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Period</div>
-                      <div className="text-sm">{new Date((statement as any).periodStart).toLocaleDateString()} → {new Date((statement as any).periodEnd).toLocaleDateString()}</div>
+                      <div className="text-sm">{new Date((statement as StatementResponse).periodStart || '').toLocaleDateString()} → {new Date((statement as StatementResponse).periodEnd || '').toLocaleDateString()}</div>
                     </div>
                   </div>
                 </div>
@@ -779,7 +935,7 @@ export default function CustomerDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {((statement as any).entries || []).map((e: any, idx: number) => {
+                      {((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => {
                         try {
                           // Extract payment method from description or metadata
                           const paymentMethod = e.paymentMethod || e.payment_method ||
@@ -798,9 +954,13 @@ export default function CustomerDetailPage() {
                                 <span className={`px-2 py-1 rounded text-xs ${e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
                                   e.type === 'SALE' ? 'bg-blue-100 text-blue-800' :
                                     e.type === 'INVOICE' ? 'bg-yellow-100 text-yellow-800' :
-                                      'bg-gray-100 text-gray-800'
+                                      e.type === 'DEPOSIT' ? 'bg-amber-100 text-amber-800' :
+                                        e.type === 'DEPOSIT_APPLIED' ? 'bg-purple-100 text-purple-800' :
+                                          'bg-gray-100 text-gray-800'
                                   }`}>
-                                  {e.type || 'UNKNOWN'}
+                                  {e.type === 'DEPOSIT' ? 'DEPOSIT' :
+                                    e.type === 'DEPOSIT_APPLIED' ? 'DEPOSIT APPLIED' :
+                                      e.type || 'UNKNOWN'}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-sm font-medium text-gray-700">
@@ -839,12 +999,96 @@ export default function CustomerDetailPage() {
                   </table>
                 </div>
                 <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between mt-2">
-                  <div className="text-sm text-gray-700">Page {(statement as any)?.page || stmtPage}</div>
+                  <div className="text-sm text-gray-700">Page {(statement as StatementResponse)?.page || stmtPage}</div>
                   <div className="flex gap-2">
-                    <button className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50 disabled:opacity-50" onClick={() => setStmtPage(Math.max(1, stmtPage - 1))} disabled={((statement as any)?.page || stmtPage) === 1}>Previous</button>
+                    <button className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50 disabled:opacity-50" onClick={() => setStmtPage(Math.max(1, stmtPage - 1))} disabled={((statement as StatementResponse)?.page || stmtPage) === 1}>Previous</button>
                     <button className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50" onClick={() => setStmtPage(stmtPage + 1)}>Next</button>
                   </div>
                 </div>
+
+                {/* Deposit Activity Section */}
+                {(() => {
+                  const stmtTyped = statement as StatementResponse;
+                  const depositData = stmtTyped?.deposits;
+                  const depositEntries = depositData?.entries || [];
+                  const depositSummary = depositData?.summary;
+                  if (depositEntries.length === 0 && !depositSummary) return null;
+
+                  return (
+                    <div className="mt-6 px-6 pb-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-3">💰 Deposit Activity</h3>
+
+                      {/* Deposit Summary Cards */}
+                      {depositSummary && (
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                          <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                            <div className="text-xs text-amber-700">Total Deposited</div>
+                            <div className="text-lg font-semibold text-amber-900">{formatCurrency(Number(depositSummary.totalDeposited || 0))}</div>
+                          </div>
+                          <div className="bg-blue-50 border border-blue-200 rounded p-3">
+                            <div className="text-xs text-blue-700">Total Used</div>
+                            <div className="text-lg font-semibold text-blue-900">{formatCurrency(Number(depositSummary.totalUsed || 0))}</div>
+                          </div>
+                          <div className="bg-green-50 border border-green-200 rounded p-3">
+                            <div className="text-xs text-green-700">Available Balance</div>
+                            <div className="text-lg font-semibold text-green-900">{formatCurrency(Number(depositSummary.availableBalance || 0))}</div>
+                          </div>
+                          <div className="bg-gray-50 border border-gray-200 rounded p-3">
+                            <div className="text-xs text-gray-600">Active Deposits</div>
+                            <div className="text-lg font-semibold text-gray-900">{depositSummary.depositCount || 0}</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Deposit Entries Table */}
+                      {depositEntries.length > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-amber-50">
+                              <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-amber-700 uppercase tracking-wider">Date</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-amber-700 uppercase tracking-wider">Type</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-amber-700 uppercase tracking-wider">Reference</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-amber-700 uppercase tracking-wider">Description</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-amber-700 uppercase tracking-wider">Amount</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-amber-700 uppercase tracking-wider">Running Balance</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {depositEntries.map((de: DepositEntry, idx: number) => (
+                                <tr key={idx} className="hover:bg-amber-50/50">
+                                  <td className="px-6 py-4 text-sm text-gray-600">
+                                    {de.date ? new Date(de.date).toLocaleString() : '-'}
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <span className={`px-2 py-1 rounded text-xs ${de.type === 'DEPOSIT_IN' ? 'bg-green-100 text-green-800' :
+                                      de.type === 'DEPOSIT_OUT' ? 'bg-red-100 text-red-800' :
+                                        'bg-gray-100 text-gray-800'
+                                      }`}>
+                                      {de.type === 'DEPOSIT_IN' ? 'Deposit Received' :
+                                        de.type === 'DEPOSIT_OUT' ? 'Deposit Applied' :
+                                          de.type || 'UNKNOWN'}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-gray-600">{de.reference || '-'}</td>
+                                  <td className="px-6 py-4 text-sm text-gray-600">{de.description || '-'}</td>
+                                  <td className="px-6 py-4 text-sm text-right">
+                                    <span className={`font-semibold ${Number(de.amount || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      {Number(de.amount || 0) >= 0 ? '+' : ''}{formatCurrency(Number(de.amount || 0))}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-sm text-right font-bold text-gray-900">
+                                    {formatCurrency(Number(de.runningBalance || 0))}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             ) : isLoadingTx ? (
               <div className="text-center py-10 text-gray-500">Loading transactions…</div>
@@ -864,7 +1108,7 @@ export default function CustomerDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {(txData as any[]).map((t) => (
+                      {(txData as TransactionRow[]).map((t) => (
                         <tr key={t.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 text-sm text-gray-600">{new Date(t.transactionDate).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{t.type}</td>
@@ -1026,7 +1270,7 @@ export default function CustomerDetailPage() {
                 {detailsInvoice && (
                   <button
                     onClick={() => downloadFile(
-                      `http://localhost:3001/api/invoices/${detailsInvoice.id}/export.pdf`,
+                      `/invoices/${detailsInvoice.id}/export.pdf`,
                       `invoice-${detailsInvoice.invoiceNumber}.pdf`
                     )}
                     className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -1077,7 +1321,7 @@ export default function CustomerDetailPage() {
                     <h4 className="text-md font-semibold">Items</h4>
                   </div>
                   {(() => {
-                    const items = (invoiceDetail as any)?.items as any[] | undefined;
+                    const items = (invoiceDetail as InvoiceDetailData)?.items as InvoiceItemRow[] | undefined;
                     if (!items || items.length === 0) {
                       return <div className="text-gray-500">No items</div>;
                     }
@@ -1125,7 +1369,7 @@ export default function CustomerDetailPage() {
                   {isLoadingPayments ? (
                     <div className="text-gray-500">Loading payments…</div>
                   ) : (() => {
-                    const payments = ((invoiceDetail as any)?.payments as any[]) || (paymentHistory as any[]);
+                    const payments = ((invoiceDetail as InvoiceDetailData)?.payments as PaymentHistoryRow[]) || (paymentHistory as PaymentHistoryRow[]);
                     if (!payments || payments.length === 0) {
                       return <div className="text-gray-500">No payments recorded</div>;
                     }
@@ -1142,7 +1386,7 @@ export default function CustomerDetailPage() {
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
-                            {(payments as any[]).map((p) => (
+                            {payments.map((p) => (
                               <tr key={p.id} className="hover:bg-gray-50">
                                 <td className="px-4 py-2 text-sm text-gray-700">{p.receiptNumber ?? p.receipt_number}</td>
                                 <td className="px-4 py-2 text-sm text-gray-600">{p.paymentDate ? new Date(p.paymentDate).toLocaleString() : (p.payment_date ? new Date(p.payment_date).toLocaleString() : '-')}</td>
@@ -1211,8 +1455,8 @@ export default function CustomerDetailPage() {
                               />
                             </td>
                             <td className="px-4 py-2 text-sm text-gray-700">{s.saleNumber}</td>
-                            <td className="px-4 py-2 text-sm text-gray-600">{new Date(s.saleDate).toLocaleString()}</td>
-                            <td className="px-4 py-2 font-semibold">{formatCurrency(s.totalAmount)}</td>
+                            <td className="px-4 py-2 text-sm text-gray-600">{s.saleDate ? new Date(s.saleDate).toLocaleString() : '-'}</td>
+                            <td className="px-4 py-2 font-semibold">{formatCurrency(s.totalAmount ?? 0)}</td>
                             <td className="px-4 py-2">
                               <span className={`px-2 py-1 rounded text-xs ${s.paymentMethod === 'CREDIT' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
                                 {s.paymentMethod}

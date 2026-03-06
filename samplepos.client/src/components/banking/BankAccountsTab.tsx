@@ -337,8 +337,8 @@ export const BankAccountsTab: React.FC = () => {
                                 </SelectTrigger>
                                 <SelectContent>
                                     {glAccounts
-                                        .filter((acc: any) => acc.Id && acc.Id !== '') // Filter out empty IDs
-                                        .map((acc: any) => (
+                                        .filter((acc: { Id: string; AccountCode: string; AccountName: string }) => acc.Id && acc.Id !== '') // Filter out empty IDs
+                                        .map((acc: { Id: string; AccountCode: string; AccountName: string }) => (
                                             <SelectItem key={acc.Id} value={acc.Id}>
                                                 {acc.AccountCode} - {acc.AccountName}
                                             </SelectItem>

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
@@ -11,7 +11,7 @@ import { Upload, File, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { formatBytes } from '../../utils/format';
 
 export interface DocumentUploadProps {
-  onUploadSuccess?: (document: any) => void;
+  onUploadSuccess?: (document: Record<string, unknown>) => void;
   onUploadError?: (error: string) => void;
   entityType?: string;
   entityId?: string;
@@ -26,7 +26,7 @@ interface UploadFile {
   progress: number;
   status: 'pending' | 'uploading' | 'success' | 'error';
   error?: string;
-  result?: any;
+  result?: Record<string, unknown>;
 }
 
 export const DocumentUpload: React.FC<DocumentUploadProps> = ({
@@ -53,11 +53,11 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [tags, setTags] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
 
-  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
     // Handle rejected files
     if (rejectedFiles.length > 0) {
       const errors = rejectedFiles.map(({ file, errors }) =>
-        `${file.name}: ${errors.map((e: any) => e.message).join(', ')}`
+        `${file.name}: ${errors.map((e) => e.message).join(', ')}`
       );
       onUploadError?.(errors.join('; '));
     }

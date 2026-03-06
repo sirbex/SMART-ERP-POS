@@ -22,9 +22,8 @@ export function SupplierSelector({
 }: SupplierSelectorProps) {
   const { data: suppliersData, isLoading } = useSuppliers();
 
-  const suppliers = suppliersData?.data?.data || 
-                   (suppliersData?.data && Array.isArray(suppliersData.data) ? suppliersData.data : []) ||
-                   (Array.isArray(suppliersData) ? suppliersData : []);
+  const rawData = suppliersData?.data;
+  const suppliers = (Array.isArray(rawData) ? rawData : []) as Array<{ id: string; name: string }>;
 
   return (
     <div className={className}>
@@ -42,7 +41,7 @@ export function SupplierSelector({
         <option value="">
           {isLoading ? "Loading suppliers..." : "Select a supplier..."}
         </option>
-        {suppliers.map((supplier: any) => (
+        {suppliers.map((supplier: { id: string; name: string }) => (
           <option key={supplier.id} value={supplier.id}>
             {supplier.name}
           </option>

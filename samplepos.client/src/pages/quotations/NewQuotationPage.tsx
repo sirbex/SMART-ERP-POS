@@ -10,6 +10,8 @@ import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
 import type { Customer } from '@shared/zod/customer';
+import type { CreateQuotationInput } from '@shared/types/quotation';
+import { AxiosError } from 'axios';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import CustomerSelector from '../../components/pos/CustomerSelector';
@@ -28,6 +30,16 @@ interface QuoteItem {
   discountAmount: number;
   isTaxable: boolean;
   taxRate: number;
+  uomId?: string;
+  uomName?: string;
+}
+
+interface ProductListItem {
+  id: string;
+  name: string;
+  sku?: string;
+  sellingPrice?: number;
+  trackExpiry?: boolean;
   uomId?: string;
   uomName?: string;
 }
@@ -65,10 +77,10 @@ export default function NewQuotationPage() {
     queryFn: async () => {
       const res = await api.products.list();
       if (!res.data.success) return [];
-      const all = res.data.data || [];
+      const all = (res.data.data ?? []) as ProductListItem[];
       if (!productSearch) return all;
       const term = productSearch.toLowerCase();
-      return all.filter((p: any) =>
+      return all.filter((p: ProductListItem) =>
         String(p.name ?? '').toLowerCase().includes(term) ||
         (p.sku && String(p.sku).toLowerCase().includes(term))
       );
@@ -77,15 +89,15 @@ export default function NewQuotationPage() {
   });
 
   const createQuoteMutation = useMutation({
-    mutationFn: (data: any) => quotationApi.createQuotation(data),
+    mutationFn: (data: CreateQuotationInput) => quotationApi.createQuotation(data),
     onSuccess: (response) => {
       // Invalidate quotations cache to refresh the list immediately
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       toast.success(`Quotation ${response.quotation.quoteNumber} created successfully!`);
       navigate('/quotations');
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || 'Failed to create quotation');
+    onError: (error: Error) => {
+      toast.error((error as AxiosError<{ error?: string }>).response?.data?.error || 'Failed to create quotation');
     },
   });
 
@@ -114,7 +126,7 @@ export default function NewQuotationPage() {
     ]);
   };
 
-  const addProductToItems = (product: any) => {
+  const addProductToItems = (product: ProductListItem) => {
     const existing = items.find((item) => item.productId === product.id);
     if (existing) {
       updateItem(items.indexOf(existing), 'quantity', existing.quantity + 1);
@@ -142,7 +154,7 @@ export default function NewQuotationPage() {
     setProductSearch('');
   };
 
-  const updateItem = (index: number, field: keyof QuoteItem, value: any) => {
+  const updateItem = (index: number, field: keyof QuoteItem, value: string | number | boolean) => {
     const updated = [...items];
     updated[index] = { ...updated[index], [field]: value };
     setItems(updated);
@@ -201,8 +213,8 @@ export default function NewQuotationPage() {
       quoteType: 'standard' as const,
       customerId: selectedCustomer?.id,
       customerName: customerName || selectedCustomer?.name,
-      customerPhone: customerPhone || selectedCustomer?.phone,
-      customerEmail: customerEmail || selectedCustomer?.email,
+      customerPhone: (customerPhone || selectedCustomer?.phone) || undefined,
+      customerEmail: (customerEmail || selectedCustomer?.email) || undefined,
       validFrom: new Date().toISOString().split('T')[0],
       validUntil,
       notes: internalNotes || undefined,
@@ -434,7 +446,7 @@ export default function NewQuotationPage() {
                 />
                 {productSearch && productsData && productsData.length > 0 && (
                   <div className="mt-2 border border-gray-300 rounded-lg max-h-64 overflow-y-auto bg-white shadow-lg">
-                    {productsData.slice(0, 10).map((product: any) => (
+                    {productsData.slice(0, 10).map((product: ProductListItem) => (
                       <button
                         key={product.id}
                         type="button"

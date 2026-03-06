@@ -1,6 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { useSuppliers, useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../hooks/useSuppliers';
+import { supplierInvoiceService } from '../services/comprehensive-accounting';
+import { formatCurrency } from '../utils/currency';
+import { api } from '../services/api';
+import { downloadFile } from '../utils/download';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -152,8 +156,8 @@ interface SupplierFormData {
 export default function SuppliersPage() {
   // State
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingSupplier, setEditingSupplier] = useState<any>(null);
-  const [viewingSupplier, setViewingSupplier] = useState<any>(null);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [sortField, setSortField] = useState<SortField>('name');
@@ -162,6 +166,9 @@ export default function SuppliersPage() {
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [page, setPage] = useState(1);
   const limit = 20;
+
+  // Invoice summary stats for top cards
+  const [invoiceSummary, setInvoiceSummary] = useState<{ totalInvoices: number; unpaidInvoices: number; totalOutstanding: number }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
   // API queries
   const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit });
@@ -228,20 +235,28 @@ export default function SuppliersPage() {
     return filtered;
   }, [allSuppliers, searchQuery, filterPaymentTerms, sortField, sortOrder]);
 
+  // Fetch invoice summary on mount
+  useEffect(() => {
+    supplierInvoiceService.getInvoiceSummary()
+      .then(setInvoiceSummary)
+      .catch(() => { /* keep defaults */ });
+  }, []);
+
   // Calculate statistics
   const stats = useMemo(() => {
     const total = allSuppliers.length;
     const active = allSuppliers.filter((s: Supplier) => s.isActive).length;
 
-    // Payment terms breakdown
-    const paymentTermsBreakdown = allSuppliers.reduce((acc: Record<string, number>, supplier: Supplier) => {
-      const term = supplier.paymentTerms || 'NET30';
-      acc[term] = (acc[term] || 0) + 1;
-      return acc;
-    }, {});
+    // Total outstanding across all suppliers
+    const totalOutstanding = allSuppliers.reduce((sum: number, s: Supplier) => {
+      return sum + Number(s.outstandingBalance || 0);
+    }, 0);
 
-    return { total, active, paymentTermsBreakdown };
+    return { total, active, totalOutstanding };
   }, [allSuppliers]);
+
+  // Currency formatter for summary cards — uses shared formatCurrency
+  const formatCurrencyTop = (amount: number): string => formatCurrency(amount, true, 0);
 
   // Export to CSV
   const handleExportCSV = () => {
@@ -399,18 +414,20 @@ export default function SuppliersPage() {
             <div className="text-xs text-gray-500 mt-1">Available for POs</div>
           </div>
           <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-600">Filtered Results</div>
-            <div className="text-2xl font-bold text-blue-600 mt-1">{suppliers.length}</div>
-            <div className="text-xs text-gray-500 mt-1">Current view</div>
+            <div className="text-sm text-gray-600">Total Invoices</div>
+            <div className="text-2xl font-bold text-blue-600 mt-1">{invoiceSummary.totalInvoices}</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {invoiceSummary.unpaidInvoices > 0
+                ? `${invoiceSummary.unpaidInvoices} unpaid`
+                : 'All paid'}
+            </div>
           </div>
           <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-600">Payment Terms</div>
-            <div className="text-lg font-bold text-purple-600 mt-1">
-              {Object.keys(stats.paymentTermsBreakdown).length} types
+            <div className="text-sm text-gray-600">Total Outstanding</div>
+            <div className="text-2xl font-bold text-red-600 mt-1">
+              {formatCurrencyTop(stats.totalOutstanding)}
             </div>
-            <div className="text-xs text-gray-500 mt-1">
-              Most common: {Object.entries(stats.paymentTermsBreakdown).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] || 'N/A'}
-            </div>
+            <div className="text-xs text-gray-500 mt-1">Across all suppliers</div>
           </div>
         </div>
 
@@ -820,6 +837,16 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
 
+  // Payment modal state
+  const [payingInvoice, setPayingInvoice] = useState<SupplierInvoiceSummary | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('BANK_TRANSFER');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
+
   const paymentTermInfo = PAYMENT_TERMS.find(t => t.value === supplier.paymentTerms);
 
   // Load data when tabs change
@@ -827,12 +854,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (performance) return; // Already loaded
     setLoadingTab('performance');
     try {
-      const response = await fetch(`http://localhost:3001/api/suppliers/${supplier.id}/performance`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      const data = await response.json();
+      const { data } = await api.get(`/suppliers/${supplier.id}/performance`);
       if (data.success) {
         setPerformance(data.data);
       }
@@ -847,12 +869,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (orders.length > 0) return; // Already loaded
     setLoadingTab('orders');
     try {
-      const response = await fetch(`http://localhost:3001/api/suppliers/${supplier.id}/orders?limit=50`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      const data = await response.json();
+      const { data } = await api.get(`/suppliers/${supplier.id}/orders`, { params: { limit: 50 } });
       if (data.success) {
         setOrders(data.data);
       }
@@ -867,12 +884,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (products.length > 0) return; // Already loaded
     setLoadingTab('products');
     try {
-      const response = await fetch(`http://localhost:3001/api/suppliers/${supplier.id}/products`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      const data = await response.json();
+      const { data } = await api.get(`/suppliers/${supplier.id}/products`);
       if (data.success) {
         setProducts(data.data);
       }
@@ -886,12 +898,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const loadInvoices = async () => {
     setLoadingTab('invoices');
     try {
-      const response = await fetch(`http://localhost:3001/api/supplier-payments/suppliers/${supplier.id}/invoices`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      const data = await response.json();
+      const { data } = await api.get(`/supplier-payments/suppliers/${supplier.id}/invoices`);
       if (data.success) {
         setInvoices(data.data);
       }
@@ -905,12 +912,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const loadInvoiceDetails = async (invoiceId: string) => {
     setLoadingInvoiceDetails(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/supplier-payments/invoices/${invoiceId}/details`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      const data = await response.json();
+      const { data } = await api.get(`/supplier-payments/invoices/${invoiceId}/details`);
       if (data.success) {
         setInvoiceDetails(data.data);
         setSelectedInvoice(invoiceId);
@@ -925,21 +927,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const handleDownloadPdf = async (invoiceId: string, invoiceNumber: string) => {
     setDownloadingPdf(invoiceId);
     try {
-      const response = await fetch(`http://localhost:3001/api/supplier-payments/invoices/${invoiceId}/pdf`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      if (!response.ok) throw new Error('Failed to generate PDF');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `supplier-invoice-${invoiceNumber}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      await downloadFile(
+        `/supplier-payments/invoices/${invoiceId}/pdf`,
+        `supplier-invoice-${invoiceNumber}.pdf`
+      );
     } catch (error) {
       console.error('Failed to download PDF:', error);
       alert('Failed to generate PDF. Please try again.');
@@ -957,14 +948,61 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (tab === 'invoices') loadInvoices();
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-UG', {
-      style: 'currency',
-      currency: 'UGX',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
+  const openPayModal = (inv: SupplierInvoiceSummary) => {
+    const balance = Number(inv.outstandingBalance || 0);
+    setPayingInvoice(inv);
+    setPaymentAmount(balance.toString());
+    setPaymentMethod('BANK_TRANSFER');
+    setPaymentReference('');
+    setPaymentNotes('');
+    setPaymentError(null);
+    setPaymentSuccess(null);
   };
+
+  const handleSubmitPayment = async () => {
+    if (!payingInvoice) return;
+    const amount = Number(paymentAmount);
+    if (!amount || amount <= 0) {
+      setPaymentError('Amount must be greater than zero');
+      return;
+    }
+    const balance = Number(payingInvoice.outstandingBalance || 0);
+    if (amount > balance) {
+      setPaymentError(`Amount cannot exceed outstanding balance of ${formatCurrency(balance, true, 0)}`);
+      return;
+    }
+    setSubmittingPayment(true);
+    setPaymentError(null);
+    try {
+      const { data } = await api.post('/supplier-payments/payments', {
+        supplierId: supplier.id,
+        amount,
+        paymentMethod,
+        reference: paymentReference || undefined,
+        notes: paymentNotes || undefined,
+        targetInvoiceId: payingInvoice.id,
+      });
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to record payment');
+      }
+      setPaymentSuccess(`Payment of ${formatCurrency(amount, true, 0)} recorded successfully (${data.data?.paymentNumber || ''})`);
+      // Refresh invoices after short delay
+      setTimeout(() => {
+        setPayingInvoice(null);
+        setPaymentSuccess(null);
+        // Force reload invoices
+        setInvoices([]);
+        loadInvoices();
+      }, 2000);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Payment failed';
+      setPaymentError(message);
+    } finally {
+      setSubmittingPayment(false);
+    }
+  };
+
+  // Removed inline formatCurrency — using shared import from utils/currency
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
@@ -1328,7 +1366,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-red-600 mb-1">Outstanding</div>
                       <div className="text-lg font-bold text-red-900">
-                        {formatCurrency(invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => sum + Number(inv.outstandingBalance || 0), 0))}
+                        {formatCurrency(Math.max(0, invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => sum + Number(inv.outstandingBalance || 0), 0)))}
                       </div>
                     </div>
                   </div>
@@ -1372,7 +1410,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                               <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
                               <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
                               <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
-                                {balance > 0 ? formatCurrency(balance) : '-'}
+                                {balance > 0 ? formatCurrency(balance) : (balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>)}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
@@ -1391,6 +1429,15 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                   >
                                     {downloadingPdf === inv.id ? '⏳' : '📄'} PDF
                                   </button>
+                                  {balance > 0 && (
+                                    <button
+                                      onClick={() => openPayModal(inv)}
+                                      className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold"
+                                      title="Record Payment"
+                                    >
+                                      💰 Pay
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -1549,6 +1596,150 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
             </div>
           )}
         </div>
+
+        {/* Supplier Payment Modal */}
+        {payingInvoice && (
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60]" onClick={() => !submittingPayment && setPayingInvoice(null)}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h4 className="text-lg font-bold text-gray-900">💰 Record Payment</h4>
+                <button
+                  onClick={() => !submittingPayment && setPayingInvoice(null)}
+                  className="text-gray-400 hover:text-gray-600 text-xl"
+                  disabled={submittingPayment}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Invoice Info */}
+              <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Invoice</span>
+                  <span className="font-semibold text-gray-900">{payingInvoice.invoiceNumber}</span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-gray-600">Total</span>
+                  <span className="text-gray-900">{formatCurrency(Number(payingInvoice.totalAmount || 0))}</span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-gray-600">Paid</span>
+                  <span className="text-green-600">{formatCurrency(Number(payingInvoice.amountPaid || 0))}</span>
+                </div>
+                <div className="flex justify-between mt-1 pt-1 border-t border-gray-200">
+                  <span className="font-semibold text-gray-700">Outstanding</span>
+                  <span className="font-bold text-red-600">{formatCurrency(Number(payingInvoice.outstandingBalance || 0))}</span>
+                </div>
+              </div>
+
+              {paymentSuccess && (
+                <div className="bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg text-sm mb-4">
+                  ✅ {paymentSuccess}
+                </div>
+              )}
+              {paymentError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm mb-4">
+                  ❌ {paymentError}
+                </div>
+              )}
+
+              {/* Payment Form */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+                  <input
+                    type="number"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="0"
+                    min="0"
+                    max={Number(payingInvoice.outstandingBalance || 0)}
+                    disabled={submittingPayment || !!paymentSuccess}
+                  />
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentAmount(Number(payingInvoice.outstandingBalance || 0).toString())}
+                      className="text-xs text-purple-600 hover:text-purple-800 underline"
+                      disabled={submittingPayment || !!paymentSuccess}
+                    >
+                      Pay Full Balance
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    disabled={submittingPayment || !!paymentSuccess}
+                  >
+                    <option value="CASH">Cash</option>
+                    <option value="BANK_TRANSFER">Bank Transfer</option>
+                    <option value="CHECK">Check</option>
+                    <option value="CARD">Card</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
+                  <input
+                    type="text"
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="e.g., Cheque #, Transfer ref"
+                    disabled={submittingPayment || !!paymentSuccess}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <textarea
+                    value={paymentNotes}
+                    onChange={(e) => setPaymentNotes(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    rows={2}
+                    placeholder="Optional notes"
+                    disabled={submittingPayment || !!paymentSuccess}
+                  />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+                <button
+                  onClick={() => setPayingInvoice(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+                  disabled={submittingPayment}
+                >
+                  {paymentSuccess ? 'Close' : 'Cancel'}
+                </button>
+                {!paymentSuccess && (
+                  <button
+                    onClick={handleSubmitPayment}
+                    disabled={submittingPayment || !paymentAmount || Number(paymentAmount) <= 0}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {submittingPayment ? (
+                      <>
+                        <span className="animate-spin">⏳</span> Processing...
+                      </>
+                    ) : (
+                      <>
+                        💰 Record Payment
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-6">

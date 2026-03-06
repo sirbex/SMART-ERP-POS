@@ -53,8 +53,20 @@ export function formatCurrency(
   showSymbol = true,
   precision = CURRENCY_CONFIG.decimals
 ): string {
-  // Convert to Decimal for consistent handling
-  const decimal = new Decimal(amount || 0);
+  // Safely coerce to a finite number before passing to Decimal.
+  // Guards against NaN, Infinity, null, undefined, and empty strings.
+  let safe: number | string;
+  if (amount == null || amount === '') {
+    safe = 0;
+  } else if (amount instanceof Decimal) {
+    // Decimal instances: convert to number first for finality check
+    const n = amount.toNumber();
+    safe = Number.isFinite(n) ? n : 0;
+  } else {
+    const n = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+    safe = Number.isFinite(n) ? n : 0;
+  }
+  const decimal = new Decimal(safe);
 
   // Format to specified decimal places
   const formatted = decimal.toFixed(precision);
@@ -65,8 +77,10 @@ export function formatCurrency(
   // Add thousands separators
   const withSeparators = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, CURRENCY_CONFIG.thousandsSeparator);
 
-  // Reconstruct the number
-  const fullAmount = `${withSeparators}${CURRENCY_CONFIG.decimalSeparator}${decimalPart}`;
+  // Reconstruct the number (skip decimal when precision is 0)
+  const fullAmount = decimalPart != null
+    ? `${withSeparators}${CURRENCY_CONFIG.decimalSeparator}${decimalPart}`
+    : withSeparators;
 
   // Add currency symbol if requested
   if (showSymbol) {

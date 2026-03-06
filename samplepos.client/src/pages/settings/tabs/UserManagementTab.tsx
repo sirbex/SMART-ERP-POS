@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, Key, RefreshCw, Shield } from 'lucide-react';
+import { api } from '../../../services/api';
 
 // Utility function to format dates without timezone conversion
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -95,14 +96,7 @@ export default function UserManagementTab() {
     try {
       setLoading(true);
       setError(null);
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://localhost:3001/api/users', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.get('/users');
       if (result.success) {
         setUsers(result.data);
       } else {
@@ -118,14 +112,7 @@ export default function UserManagementTab() {
 
   const fetchStats = async () => {
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://localhost:3001/api/users/stats', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.get('/users/stats');
       if (result.success) {
         setStats(result.data);
       }
@@ -136,17 +123,7 @@ export default function UserManagementTab() {
 
   const handleCreateUser = async (data: CreateUserData) => {
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://localhost:3001/api/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.post('/users', data);
       if (result.success) {
         setIsCreateModalOpen(false);
         fetchUsers();
@@ -162,17 +139,7 @@ export default function UserManagementTab() {
 
   const handleUpdateUser = async (userId: string, data: UpdateUserData) => {
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`http://localhost:3001/api/users/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.put(`/users/${userId}`, data);
       if (result.success) {
         setIsEditModalOpen(false);
         setSelectedUser(null);
@@ -189,17 +156,7 @@ export default function UserManagementTab() {
 
   const handleChangePassword = async (userId: string, data: ChangePasswordData) => {
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`http://localhost:3001/api/users/${userId}/change-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.post(`/users/${userId}/change-password`, data);
       if (result.success) {
         setIsPasswordModalOpen(false);
         setSelectedUser(null);
@@ -215,19 +172,11 @@ export default function UserManagementTab() {
 
   const handleDeleteUser = async (userId: string, permanent: boolean = false) => {
     try {
-      const token = localStorage.getItem('auth_token');
       const url = permanent
-        ? `http://localhost:3001/api/users/${userId}?permanent=true`
-        : `http://localhost:3001/api/users/${userId}`;
+        ? `/users/${userId}?permanent=true`
+        : `/users/${userId}`;
 
-      const response = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.delete(url);
       if (result.success) {
         setIsDeleteDialogOpen(false);
         setSelectedUser(null);
@@ -260,7 +209,7 @@ export default function UserManagementTab() {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  const getRoleBadgeColor = (role: string) => {
+  const getRoleBadgeColor = (role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF') => {
     switch (role) {
       case 'ADMIN':
         return 'bg-red-100 text-red-800';
@@ -1069,14 +1018,6 @@ function ManageRolesModal({
   const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    };
-  };
-
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -1084,18 +1025,15 @@ function ManageRolesModal({
 
       // Fetch all available roles and user's current roles in parallel
       const [rolesRes, userRolesRes] = await Promise.all([
-        fetch('http://localhost:3001/api/rbac/roles', { headers: getAuthHeaders() }),
-        fetch(`http://localhost:3001/api/rbac/users/${user.id}/roles`, { headers: getAuthHeaders() }),
+        api.get('/rbac/roles'),
+        api.get(`/rbac/users/${user.id}/roles`),
       ]);
 
-      const rolesData = await rolesRes.json();
-      const userRolesData = await userRolesRes.json();
-
-      if (rolesData.success) {
-        setAllRoles(rolesData.data);
+      if (rolesRes.data.success) {
+        setAllRoles(rolesRes.data.data);
       }
-      if (userRolesData.success) {
-        setUserRoles(userRolesData.data);
+      if (userRolesRes.data.success) {
+        setUserRoles(userRolesRes.data.data);
       }
     } catch (err) {
       setError('Failed to load roles data');
@@ -1112,13 +1050,7 @@ function ManageRolesModal({
   const handleAssignRole = async (roleId: string) => {
     try {
       setAssigning(true);
-      const response = await fetch('http://localhost:3001/api/rbac/users/roles', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ userId: String(user.id), roleId }),
-      });
-
-      const result = await response.json();
+      const { data: result } = await api.post('/rbac/users/roles', { userId: String(user.id), roleId });
       if (result.success) {
         await fetchData();
       } else {
@@ -1135,13 +1067,9 @@ function ManageRolesModal({
   const handleRemoveRole = async (roleId: string) => {
     try {
       setAssigning(true);
-      const response = await fetch('http://localhost:3001/api/rbac/users/roles', {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ userId: String(user.id), roleId }),
+      const { data: result } = await api.delete('/rbac/users/roles', {
+        data: { userId: String(user.id), roleId },
       });
-
-      const result = await response.json();
       if (result.success) {
         await fetchData();
       } else {

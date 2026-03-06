@@ -5,6 +5,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryOptions, UseMutationOptions } from '@tanstack/react-query';
 import type { AxiosResponse, AxiosError } from 'axios';
 import { api, getErrorMessage, getSuccessMessage, hasAlerts, type ApiResponse } from '../utils/api';
+import type {
+  CreateProductInput, UpdateProductInput,
+  CreateCustomerInput, UpdateCustomerInput,
+  CreateSaleInput,
+  CreatePurchaseOrderInput,
+  CreateGoodsReceiptInput,
+} from '../types/inputs';
 
 // Query Keys for React Query
 export const queryKeys = {
@@ -75,26 +82,23 @@ export const queryKeys = {
 };
 
 // Generic Hooks
-export function useApiQuery<TData = any>(
+export function useApiQuery<TData = unknown>(
   queryKey: readonly unknown[],
   queryFn: () => Promise<AxiosResponse<ApiResponse<TData>>>,
   options?: Omit<UseQueryOptions<AxiosResponse<ApiResponse<TData>>, AxiosError<ApiResponse>, TData>, 'queryKey' | 'queryFn'>
 ) {
   // Allow callers to override select; default selects response.data.data
-  const base: any = {
+  const defaultSelect = (data: AxiosResponse<ApiResponse<TData>>) => data.data.data as TData;
+
+  return useQuery<AxiosResponse<ApiResponse<TData>>, AxiosError<ApiResponse>, TData>({
     queryKey,
     queryFn,
+    select: defaultSelect,
     ...options,
-  };
-
-  if (!base.select) {
-    base.select = (data: AxiosResponse<ApiResponse<TData>>) => data.data.data as TData;
-  }
-
-  return useQuery(base);
+  });
 }
 
-export function useApiMutation<TData = any, TVariables = any>(
+export function useApiMutation<TData = unknown, TVariables = unknown>(
   mutationFn: (variables: TVariables) => Promise<AxiosResponse<ApiResponse<TData>>>,
   options?: UseMutationOptions<AxiosResponse<ApiResponse<TData>>, AxiosError<ApiResponse>, TVariables>
 ) {
@@ -133,7 +137,7 @@ export function useCreateProduct() {
   const queryClient = useQueryClient();
 
   return useApiMutation(
-    (data: any) => api.products.create(data),
+    (data: CreateProductInput) => api.products.create(data),
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
@@ -146,7 +150,7 @@ export function useUpdateProduct() {
   const queryClient = useQueryClient();
 
   return useApiMutation(
-    ({ id, data }: { id: string; data: any }) => api.products.update(id, data),
+    ({ id, data }: { id: string; data: UpdateProductInput }) => api.products.update(id, data),
     {
       onSuccess: (_, variables) => {
         queryClient.invalidateQueries({ queryKey: queryKeys.products.detail(variables.id) });
@@ -175,8 +179,8 @@ export function useCustomers(page = 1, limit = 50) {
   return useQuery({
     queryKey: queryKeys.customers.list(page, limit),
     queryFn: () => api.customers.list({ page, limit }),
-    select: (resp: AxiosResponse<ApiResponse<any[]>>) => ({
-      data: resp.data.data || [],
+    select: (resp) => ({
+      data: (resp.data.data ?? []) as unknown[],
       pagination: resp.data.pagination,
     }),
     staleTime: 30000,
@@ -195,7 +199,7 @@ export function useCreateCustomer() {
   const queryClient = useQueryClient();
 
   return useApiMutation(
-    (data: any) => api.customers.create(data),
+    (data: CreateCustomerInput) => api.customers.create(data),
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
@@ -207,7 +211,7 @@ export function useCreateCustomer() {
 export function useUpdateCustomer() {
   const queryClient = useQueryClient();
   return useApiMutation(
-    ({ id, data }: { id: string; data: any }) => api.customers.update(id, data),
+    ({ id, data }: { id: string; data: UpdateCustomerInput }) => api.customers.update(id, data),
     {
       onSuccess: (_resp, variables) => {
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.detail(variables.id) });
@@ -283,8 +287,8 @@ export function useSales(page = 1, limit = 50, filters?: { startDate?: string; e
   return useQuery({
     queryKey: [...queryKeys.sales.list(page, limit), filters?.startDate, filters?.endDate],
     queryFn: () => api.sales.list({ page, limit, ...filters }),
-    select: (resp: AxiosResponse<ApiResponse<any[]>>) => ({
-      data: resp.data.data || [],
+    select: (resp) => ({
+      data: (resp.data.data ?? []) as unknown[],
       pagination: resp.data.pagination,
     }),
     staleTime: 10000, // 10 seconds
@@ -303,7 +307,7 @@ export function useCreateSale() {
   const queryClient = useQueryClient();
 
   return useApiMutation(
-    (data: any) => api.sales.create(data),
+    (data: CreateSaleInput) => api.sales.create(data),
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.sales.all });
@@ -404,7 +408,7 @@ export function useCreatePurchaseOrder() {
   const queryClient = useQueryClient();
 
   return useApiMutation(
-    (data: any) => api.purchaseOrders.create(data),
+    (data: CreatePurchaseOrderInput) => api.purchaseOrders.create(data),
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
@@ -448,7 +452,7 @@ export function useCreateGoodsReceipt() {
   const queryClient = useQueryClient();
 
   return useApiMutation(
-    (data: any) => api.goodsReceipts.create(data),
+    (data: CreateGoodsReceiptInput) => api.goodsReceipts.create(data),
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.goodsReceipts.all });

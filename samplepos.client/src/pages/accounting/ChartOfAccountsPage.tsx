@@ -50,6 +50,14 @@ interface CreateAccountRequest {
   isActive: boolean;
 }
 
+/** Raw account shape returned by the C# accounting API */
+interface RawApiAccount extends Account {
+  currentBalance?: number;
+}
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const ACCOUNT_TYPES = [
   { value: 'ASSET', label: 'Assets', color: 'bg-blue-100 text-blue-800' },
   { value: 'LIABILITY', label: 'Liabilities', color: 'bg-red-100 text-red-800' },
@@ -89,7 +97,7 @@ const ChartOfAccountsPage = () => {
       const result = response.data;
       if (result.success) {
         // Map API response to frontend interface (currentBalance -> balance)
-        const mappedAccounts = (result.data || []).map((acc: any) => ({
+        const mappedAccounts = (result.data || []).map((acc: RawApiAccount) => ({
           ...acc,
           balance: acc.currentBalance ?? acc.balance ?? 0
         }));
@@ -97,9 +105,9 @@ const ChartOfAccountsPage = () => {
       } else {
         throw new Error(result.error || 'Failed to load accounts');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading accounts:', error);
-      toast.error(`Failed to load accounts: ${error.message}`);
+      toast.error(`Failed to load accounts: ${getErrorMessage(error)}`);
       setAccounts([]);
     } finally {
       setLoading(false);
@@ -117,9 +125,9 @@ const ChartOfAccountsPage = () => {
       } else {
         throw new Error(result.data?.error || 'Failed to create account');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating account:', error);
-      toast.error(`Failed to create account: ${error.message}`);
+      toast.error(`Failed to create account: ${getErrorMessage(error)}`);
     }
   };
 
@@ -136,9 +144,9 @@ const ChartOfAccountsPage = () => {
       } else {
         throw new Error(result.data?.error || 'Failed to update account');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error updating account:', error);
-      toast.error(`Failed to update account: ${error.message}`);
+      toast.error(`Failed to update account: ${getErrorMessage(error)}`);
     }
   };
 
@@ -155,9 +163,9 @@ const ChartOfAccountsPage = () => {
       } else {
         throw new Error(result.data?.error || 'Failed to delete account');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error deleting account:', error);
-      toast.error(`Failed to delete account: ${error.message}`);
+      toast.error(`Failed to delete account: ${getErrorMessage(error)}`);
     }
   };
 
@@ -317,7 +325,7 @@ const ChartOfAccountsPage = () => {
                       </div>
                       <div>
                         <Label htmlFor="accountType">Account Type *</Label>
-                        <Select value={formData.accountType} onValueChange={(value: any) => setFormData({ ...formData, accountType: value })}>
+                        <Select value={formData.accountType} onValueChange={(value: string) => setFormData({ ...formData, accountType: value as Account['accountType'] })}>
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
@@ -492,7 +500,7 @@ const ChartOfAccountsPage = () => {
                 </div>
                 <div>
                   <Label htmlFor="edit-accountType">Account Type *</Label>
-                  <Select value={formData.accountType} onValueChange={(value: any) => setFormData({ ...formData, accountType: value })}>
+                  <Select value={formData.accountType} onValueChange={(value: string) => setFormData({ ...formData, accountType: value as Account['accountType'] })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>

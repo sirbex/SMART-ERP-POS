@@ -41,6 +41,7 @@ export interface CachedProduct {
     nearestExpiry?: string;
     uoms: CachedProductUom[];
     productType?: 'inventory' | 'consumable' | 'service';
+    genericName?: string;
 }
 
 export interface LocalStockMap {
@@ -132,11 +133,27 @@ export function clearPersistedCart(): void {
 export async function syncProductCatalog(): Promise<CachedProduct[]> {
     try {
         const res = await apiClient.get('/inventory/stock-levels');
-        const stockLevels: any[] = res.data?.data || [];
+        interface StockLevelRow {
+            product_id: string;
+            product_name: string;
+            sku?: string;
+            barcode?: string;
+            selling_price?: string;
+            average_cost?: string;
+            total_stock?: string;
+            nearest_expiry?: string;
+            is_taxable?: boolean;
+            tax_rate?: string;
+            product_type?: string;
+            generic_name?: string;
+            uoms?: CachedProductUom[];
+        }
+
+        const stockLevels: StockLevelRow[] = res.data?.data || [];
 
         const products: CachedProduct[] = stockLevels
-            .filter((item: any) => item.total_stock > 0 || item.product_type === 'service')
-            .map((item: any) => {
+            .filter((item: StockLevelRow) => Number(item.total_stock || 0) > 0 || item.product_type === 'service')
+            .map((item: StockLevelRow) => {
                 const sellingPrice = parseFloat(item.selling_price || '0');
                 const averageCost = parseFloat(item.average_cost || '0');
 
@@ -165,7 +182,8 @@ export async function syncProductCatalog(): Promise<CachedProduct[]> {
                     stockOnHand: parseFloat(item.total_stock || '0'),
                     nearestExpiry: item.nearest_expiry || undefined,
                     uoms,
-                    productType: item.product_type || 'inventory',
+                    productType: (item.product_type || 'inventory') as CachedProduct['productType'],
+                    genericName: item.generic_name || undefined,
                 };
             });
 
@@ -208,7 +226,8 @@ export function searchCachedProducts(query: string): CachedProduct[] {
             return (
                 p.name.toLowerCase().includes(term) ||
                 p.sku.toLowerCase().includes(term) ||
-                p.barcode.toLowerCase().includes(term)
+                p.barcode.toLowerCase().includes(term) ||
+                (p.genericName?.toLowerCase().includes(term) ?? false)
             );
         })
         .map((p) => ({

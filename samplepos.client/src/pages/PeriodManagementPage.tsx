@@ -70,6 +70,13 @@ interface Period {
     lockedBy?: string;
 }
 
+interface PeriodHistoryEntry {
+    action: 'OPENED' | 'CLOSED' | 'REOPENED' | 'LOCKED';
+    changedAt: string;
+    changedBy?: string;
+    notes?: string;
+}
+
 const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
@@ -108,7 +115,7 @@ export default function PeriodManagementPage() {
             setCloseNotes('');
             setError(null);
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err.message);
         }
     });
@@ -121,7 +128,7 @@ export default function PeriodManagementPage() {
             setReopenReason('');
             setError(null);
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err.message);
         }
     });
@@ -133,7 +140,7 @@ export default function PeriodManagementPage() {
             setShowLockModal(null);
             setError(null);
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err.message);
         }
     });
@@ -532,7 +539,7 @@ export default function PeriodManagementPage() {
                                 <p className="text-center text-gray-500 py-8">No history available</p>
                             ) : (
                                 <div className="space-y-4">
-                                    {history.map((entry: any, idx: number) => (
+                                    {history.map((entry: PeriodHistoryEntry, idx: number) => (
                                         <div key={idx} className="border-l-2 border-blue-300 pl-4 py-2">
                                             <div className="flex items-center space-x-2">
                                                 <span className={`px-2 py-1 rounded text-xs font-medium ${entry.action === 'OPENED' ? 'bg-green-100 text-green-800' :

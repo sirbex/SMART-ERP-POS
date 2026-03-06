@@ -20,6 +20,17 @@ import {
   isQuoteConvertible,
 } from '@shared/types/quotation';
 import type { QuotationStatus } from '@shared/types/quotation';
+import { AxiosError } from 'axios';
+
+interface InvoiceSettings {
+  companyName?: string;
+  companyAddress?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  companyTin?: string;
+  footerText?: string;
+  paymentInstructions?: string;
+}
 
 export default function QuoteDetailPage() {
   const { quoteNumber } = useParams<{ quoteNumber: string }>();
@@ -37,9 +48,9 @@ export default function QuoteDetailPage() {
   // Fetch invoice settings for company info on quote print
   const { data: settingsData } = useQuery({
     queryKey: ['invoice-settings'],
-    queryFn: async () => {
+    queryFn: async (): Promise<InvoiceSettings | undefined> => {
       const response = await api.settings.getInvoiceSettings();
-      return response.data?.data;
+      return response.data?.data as InvoiceSettings | undefined;
     },
   });
 
@@ -53,8 +64,8 @@ export default function QuoteDetailPage() {
       setShowStatusModal(false);
       setStatusNotes('');
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || 'Failed to update status');
+    onError: (error: Error) => {
+      toast.error((error as AxiosError<{ error?: string }>).response?.data?.error || 'Failed to update status');
     },
   });
 
@@ -75,7 +86,7 @@ export default function QuoteDetailPage() {
         <div className="p-8">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
             <p className="text-red-800 font-semibold">Failed to load quotation</p>
-            <p className="text-red-600 text-sm mt-2">{(error as any)?.message || 'Quotation not found'}</p>
+            <p className="text-red-600 text-sm mt-2">{(error as Error)?.message || 'Quotation not found'}</p>
             <button
               onClick={() => navigate('/quotations')}
               className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"

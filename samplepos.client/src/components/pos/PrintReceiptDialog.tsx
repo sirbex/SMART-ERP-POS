@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { printReceipt, type ReceiptData, PrintFormat, PrintOptions } from '@/lib/print';
+import { formatCurrency } from '@/utils/currency';
 import { Printer, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface PrintReceiptDialogProps {
@@ -246,12 +247,7 @@ export default function PrintReceiptDialog({
                                     <div className="flex justify-between text-sm">
                                         <span className="text-gray-600">Subtotal:</span>
                                         <span>
-                                            {new Intl.NumberFormat('en-UG', {
-                                                style: 'currency',
-                                                currency: 'UGX',
-                                                minimumFractionDigits: 0,
-                                                maximumFractionDigits: 0,
-                                            }).format(receiptData.subtotal)}
+                                            {formatCurrency(receiptData.subtotal)}
                                         </span>
                                     </div>
                                 )}
@@ -259,12 +255,7 @@ export default function PrintReceiptDialog({
                                     <div className="flex justify-between text-sm text-red-600">
                                         <span>Discount:</span>
                                         <span>
-                                            -{new Intl.NumberFormat('en-UG', {
-                                                style: 'currency',
-                                                currency: 'UGX',
-                                                minimumFractionDigits: 0,
-                                                maximumFractionDigits: 0,
-                                            }).format(receiptData.discountAmount)}
+                                            -{formatCurrency(receiptData.discountAmount)}
                                         </span>
                                     </div>
                                 )}
@@ -272,24 +263,14 @@ export default function PrintReceiptDialog({
                                     <div className="flex justify-between text-sm">
                                         <span className="text-gray-600">Tax:</span>
                                         <span>
-                                            {new Intl.NumberFormat('en-UG', {
-                                                style: 'currency',
-                                                currency: 'UGX',
-                                                minimumFractionDigits: 0,
-                                                maximumFractionDigits: 0,
-                                            }).format(receiptData.taxAmount)}
+                                            {formatCurrency(receiptData.taxAmount)}
                                         </span>
                                     </div>
                                 )}
                                 <div className="flex justify-between text-base font-bold border-t pt-2">
                                     <span>Total:</span>
                                     <span>
-                                        {new Intl.NumberFormat('en-UG', {
-                                            style: 'currency',
-                                            currency: 'UGX',
-                                            minimumFractionDigits: 0,
-                                            maximumFractionDigits: 0,
-                                        }).format(receiptData.totalAmount)}
+                                        {formatCurrency(receiptData.totalAmount)}
                                     </span>
                                 </div>
                             </div>
@@ -302,12 +283,7 @@ export default function PrintReceiptDialog({
                                                 {payment.method === 'CREDIT' ? 'Balance' : payment.method}:
                                             </span>
                                             <span>
-                                                {new Intl.NumberFormat('en-UG', {
-                                                    style: 'currency',
-                                                    currency: 'UGX',
-                                                    minimumFractionDigits: 0,
-                                                    maximumFractionDigits: 0,
-                                                }).format(payment.amount)}
+                                                {formatCurrency(payment.amount)}
                                             </span>
                                         </div>
                                     ))}

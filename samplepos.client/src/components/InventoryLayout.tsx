@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Layout from './Layout';
+import { useOfflineContext } from '../contexts/OfflineContext';
 
 interface InventoryLayoutProps {
   children: ReactNode;
@@ -9,6 +10,7 @@ interface InventoryLayoutProps {
 export default function InventoryLayout({ children }: InventoryLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isOnline } = useOfflineContext();
 
   const tabs = [
     { id: 'stock-levels', label: 'Stock Levels', path: '/inventory', icon: '📦' },
@@ -18,6 +20,7 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
     { id: 'purchase-orders', label: 'Purchase Orders', path: '/inventory/purchase-orders', icon: '📝' },
     { id: 'goods-receipts', label: 'Goods Receipts', path: '/inventory/goods-receipts', icon: '📥' },
     { id: 'uoms', label: 'Units of Measure', path: '/inventory/uoms', icon: '📐' },
+    { id: 'barcode-lookup', label: 'Barcode Lookup', path: '/inventory/barcode-lookup', icon: '📡' },
   ];
 
   const isActiveTab = (path: string) => {
@@ -38,6 +41,12 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
               <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
               <p className="text-sm text-gray-600">Manage stock, products, orders, and movements</p>
             </div>
+            {!isOnline && (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Offline Mode
+              </span>
+            )}
           </div>
 
           {/* Tab Navigation */}
@@ -47,8 +56,8 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
                 key={tab.id}
                 onClick={() => navigate(tab.path)}
                 className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${isActiveTab(tab.path)
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
               >
                 <span>{tab.icon}</span>

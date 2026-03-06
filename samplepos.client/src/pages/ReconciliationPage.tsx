@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 import {
@@ -39,6 +40,13 @@ const fetchDiscrepancyDetails = async (accountCode: string, asOfDate?: string) =
     return response.json();
 };
 
+const fetchActiveAccounts = async (): Promise<ChartAccount[]> => {
+    const response = await fetch('/api/accounting/chart-of-accounts?isPostingAccount=true&isActive=true');
+    if (!response.ok) throw new Error('Failed to fetch accounts');
+    const data = await response.json();
+    return data.data || [];
+};
+
 type AccountType = 'cash' | 'accounts-receivable' | 'inventory' | 'accounts-payable';
 
 interface ReconciliationAccount {
@@ -50,7 +58,21 @@ interface ReconciliationAccount {
     recommendation: string;
 }
 
+interface ChartAccount {
+    id: string;
+    accountNumber: string;
+    accountName: string;
+    accountType: string;
+    isPostingAccount: boolean;
+    isActive: boolean;
+    currentBalance: number;
+}
+
+/** Key used to pass pre-fill data from Reconciliation → Journal Entries page */
+const ADJUST_PREFILL_KEY = 'recon_adjust_prefill';
+
 export default function ReconciliationPage() {
+    const navigate = useNavigate();
     const [asOfDate, setAsOfDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [selectedAccount, setSelectedAccount] = useState<AccountType | null>(null);
     const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
@@ -85,8 +107,71 @@ export default function ReconciliationPage() {
         staleTime: 0
     });
 
+    // Accounts for resolving account codes → UUIDs for pre-fill
+    const { data: accountsData } = useQuery({
+        queryKey: ['chart-accounts-posting'],
+        queryFn: fetchActiveAccounts
+    });
+    const chartAccounts: ChartAccount[] = accountsData || [];
+
     const summary = summaryData?.data;
     const accountDetail = accountData?.data;
+
+    /**
+     * Navigate to Journal Entries page with pre-filled adjusting entry data.
+     * Uses sessionStorage to pass complex form data without URL params.
+     */
+    const openAdjustingEntry = (account: ReconciliationAccount) => {
+        const code = accountCodes[account.accountName] || '';
+        const diff = account.difference; // GL - Subledger
+
+        // Find the account UUID from chart of accounts
+        const targetAccount = chartAccounts.find(a => a.accountNumber === code);
+        const targetAccountId = targetAccount?.id || '';
+
+        // Pre-fill logic:
+        // If GL > Subledger (positive difference), we need to REDUCE GL
+        //   For asset accounts (1xxx): Credit the account to reduce it
+        //   For liability accounts (2xxx): Debit the account to reduce it  
+        // If GL < Subledger (negative difference), we need to INCREASE GL
+        //   For asset accounts (1xxx): Debit the account to increase it
+        //   For liability accounts (2xxx): Credit the account to increase it
+        const isLiability = code.startsWith('2');
+        const absDiff = Math.abs(diff);
+
+        let line1Debit = 0;
+        let line1Credit = 0;
+        if (isLiability) {
+            line1Debit = diff > 0 ? absDiff : 0;
+            line1Credit = diff < 0 ? absDiff : 0;
+        } else {
+            line1Debit = diff < 0 ? absDiff : 0;
+            line1Credit = diff > 0 ? absDiff : 0;
+        }
+
+        const prefill = {
+            transactionDate: asOfDate,
+            description: `Reconciliation adjustment: ${account.accountName} — ${diff > 0 ? 'reduce' : 'increase'} GL by ${formatCurrency(absDiff)}`,
+            referenceNumber: `RECON-ADJ-${code}-${asOfDate}`,
+            lines: [
+                {
+                    accountId: targetAccountId,
+                    debitAmount: line1Debit,
+                    creditAmount: line1Credit,
+                    description: `Adjustment for ${account.accountName} reconciliation discrepancy`
+                },
+                {
+                    accountId: '',
+                    debitAmount: line1Credit,
+                    creditAmount: line1Debit,
+                    description: `Contra entry for ${account.accountName} reconciliation`
+                }
+            ]
+        };
+
+        sessionStorage.setItem(ADJUST_PREFILL_KEY, JSON.stringify(prefill));
+        navigate('/accounting/journal-entries');
+    };
 
     const toggleExpanded = (code: string) => {
         setExpandedAccounts(prev => {
@@ -258,6 +343,18 @@ export default function ReconciliationPage() {
                                                 >
                                                     Details
                                                 </button>
+                                                {account.status === 'DISCREPANCY' && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            openAdjustingEntry(account);
+                                                        }}
+                                                        className="px-3 py-1 text-sm bg-amber-100 text-amber-800 hover:bg-amber-200 rounded font-medium flex items-center space-x-1"
+                                                    >
+                                                        <FileText className="h-3 w-3" />
+                                                        <span>Adjust</span>
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                         {account.recommendation && account.status === 'DISCREPANCY' && (
@@ -281,7 +378,7 @@ export default function ReconciliationPage() {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y">
-                                                    {discrepancies.map((d: any, dIdx: number) => (
+                                                    {discrepancies.map((d: { entityName: string; glBalance: number; subledgerBalance: number; difference: number }, dIdx: number) => (
                                                         <tr key={dIdx}>
                                                             <td className="py-2">{d.entityName}</td>
                                                             <td className="py-2 text-right">{formatCurrency(d.glBalance)}</td>
@@ -354,7 +451,7 @@ export default function ReconciliationPage() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">
-                                            {accountDetail.items?.map((item: any, idx: number) => (
+                                            {accountDetail.items?.map((item: { source: string; description: string; amount: number; difference: number; status: string }, idx: number) => (
                                                 <tr key={idx} className="hover:bg-gray-50">
                                                     <td className="px-4 py-3 font-mono text-xs">{item.source}</td>
                                                     <td className="px-4 py-3">{item.description}</td>

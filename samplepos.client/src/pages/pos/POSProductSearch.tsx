@@ -64,6 +64,29 @@ export interface POSProductSearchHandle {
   clearSearch: () => void;
 }
 
+interface StockLevelItem {
+  product_id: string;
+  product_name: string;
+  sku?: string;
+  barcode?: string;
+  generic_name?: string;
+  total_stock: number | string;
+  selling_price: number | string;
+  average_cost: number | string;
+  nearest_expiry?: string;
+  is_taxable?: boolean;
+  tax_rate?: number | string;
+  uoms?: Array<{
+    uomId: string;
+    name: string;
+    symbol?: string;
+    conversionFactor: number;
+    price: number;
+    cost: number;
+    isDefault: boolean;
+  }>;
+}
+
 const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProps>(({ onSelect, isOnline = true }, ref) => {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<ProductSearchResult | null>(null);
@@ -120,23 +143,24 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       const stockRes = await api.inventory.stockLevels();
       if (!stockRes.data.success) return [];
 
-      const stockLevels = stockRes.data.data || [];
+      const stockLevels = (stockRes.data.data || []) as StockLevelItem[];
 
       // Filter products with available stock that match search term
       const term = search.toLowerCase();
-      return stockLevels.filter((item: any) => {
+      return stockLevels.filter((item: StockLevelItem) => {
         // Only show products with stock > 0
-        if (!item.total_stock || item.total_stock <= 0) return false;
+        if (!item.total_stock || Number(item.total_stock) <= 0) return false;
 
-        // Match search term against product name, SKU, or barcode
+        // Match search term against product name, SKU, barcode, or generic name
         return (
           item.product_name?.toLowerCase().includes(term) ||
           item.sku?.toLowerCase().includes(term) ||
-          item.barcode?.toLowerCase().includes(term)
+          item.barcode?.toLowerCase().includes(term) ||
+          item.generic_name?.toLowerCase().includes(term)
         );
-      }).map((item: any) => {
-        const sellingPrice = parseFloat(item.selling_price || 0);
-        const averageCost = parseFloat(item.average_cost || 0);
+      }).map((item: StockLevelItem) => {
+        const sellingPrice = parseFloat(String(item.selling_price || 0));
+        const averageCost = parseFloat(String(item.average_cost || 0));
         const marginPct = sellingPrice > 0
           ? ((sellingPrice - averageCost) / sellingPrice * 100)
           : 0;
@@ -158,7 +182,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
         }
 
         // Get default UOM for display
-        const defaultUom = uoms.find((u: any) => u.isDefault) || uoms[0];
+        const defaultUom = uoms.find((u: { isDefault?: boolean }) => u.isDefault) || uoms[0];
 
         return {
           id: item.product_id,
@@ -167,13 +191,13 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
           barcode: item.barcode || '',
           unitOfMeasure: defaultUom?.symbol || defaultUom?.name || 'PIECE',
           uoms: uoms,
-          stockOnHand: parseFloat(item.total_stock || 0),
+          stockOnHand: parseFloat(String(item.total_stock || 0)),
           expiryDate: item.nearest_expiry,
           costPrice: averageCost,
           sellingPrice: sellingPrice,
           marginPct: marginPct,
           isTaxable: item.is_taxable ?? false,
-          taxRate: parseFloat(item.tax_rate || 0)
+          taxRate: parseFloat(String(item.tax_rate || 0))
         };
       });
     },

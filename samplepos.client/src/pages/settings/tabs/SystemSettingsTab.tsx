@@ -76,7 +76,7 @@ export default function SystemSettingsTab() {
             setSaveMessage('Settings saved successfully!');
             setTimeout(() => setSaveMessage(''), 3000);
         },
-        onError: (error: any) => {
+        onError: (error: Error) => {
             setIsSaving(false);
             setSaveMessage(`Error: ${error.message}`);
             setTimeout(() => setSaveMessage(''), 5000);

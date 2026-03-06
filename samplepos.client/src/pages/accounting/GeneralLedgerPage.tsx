@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Eye, Search, Download, ArrowUpDown } from 'lucide-react';
+import { AxiosError } from 'axios';
 import { DatePicker } from '../../components/ui/date-picker';
 import {
   Button,
@@ -135,7 +136,7 @@ const GeneralLedgerPage = () => {
       if (result.success) {
         setAccounts(result.data || []);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading accounts:', error);
       toast.error('Failed to load accounts');
     }
@@ -164,9 +165,9 @@ const GeneralLedgerPage = () => {
       } else {
         throw new Error(result.error || 'Failed to load ledger entries');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading ledger entries:', error);
-      toast.error(`Failed to load ledger entries: ${error.message}`);
+      toast.error(`Failed to load ledger entries: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setEntries([]);
     } finally {
       setLoading(false);
@@ -182,12 +183,12 @@ const GeneralLedgerPage = () => {
       } else {
         throw new Error(result.error || 'Failed to load transaction details');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading transaction details:', error);
 
       // TEMPORARY FIX: Create mock transaction details from existing ledger entries
       // This handles the 404 error until the C# API transaction endpoint is properly deployed
-      if (error.response?.status === 404) {
+      if (error instanceof AxiosError && error.response?.status === 404) {
         const mockTransaction = createMockTransactionFromLedger(transactionId);
         if (mockTransaction) {
           setSelectedTransaction(mockTransaction);
@@ -254,9 +255,9 @@ const GeneralLedgerPage = () => {
       URL.revokeObjectURL(url);
 
       toast.success('General ledger exported successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error exporting:', error);
-      toast.error(`Failed to export: ${error.message}`);
+      toast.error(`Failed to export: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 

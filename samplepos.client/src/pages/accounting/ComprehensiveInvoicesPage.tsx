@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { AxiosError } from 'axios';
 import { Plus, Search, Eye, FileText, DollarSign, AlertTriangle } from 'lucide-react';
 import {
     Button,
@@ -207,9 +208,12 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                 resetInvoiceForm();
                 loadInvoices();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating invoice:', error);
-            toast.error(error.response?.data?.error || 'Failed to create invoice');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to create invoice');
         }
     };
 
@@ -231,9 +235,12 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                 resetPaymentForm();
                 loadInvoices();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error recording payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to record payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to record payment');
         }
     };
 
@@ -245,9 +252,12 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                 toast.success('Invoice voided successfully');
                 loadInvoices();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error voiding invoice:', error);
-            toast.error(error.response?.data?.error || 'Failed to void invoice');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to void invoice');
         }
     };
 
@@ -804,7 +814,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                             <div className="col-span-3">
                                 <Select
                                     value={paymentFormData.paymentMethod}
-                                    onValueChange={(value: any) => setPaymentFormData(prev => ({ ...prev, paymentMethod: value }))}
+                                    onValueChange={(value: string) => setPaymentFormData(prev => ({ ...prev, paymentMethod: value as CreateCustomerPaymentRequest['paymentMethod'] }))}
                                 >
                                     <SelectTrigger>
                                         <SelectValue />

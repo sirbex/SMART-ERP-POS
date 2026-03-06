@@ -3,11 +3,51 @@ import Layout from '../components/Layout';
 import IdDisplay from '../components/IdDisplay';
 import { useCustomers, useCustomerStatement } from '../hooks/useApi';
 import { formatCurrency } from '../utils/currency';
+import { downloadFile } from '../utils/download';
 import { DatePicker } from '../components/ui/date-picker';
 import type { Customer } from '@shared/zod/customer';
 import QuickAddCustomerModal from '../components/customers/QuickAddCustomerModal';
 import CustomerDetailModal from '../components/customers/CustomerDetailModal';
 import { useModalAccessibility } from '../hooks/useFocusTrap';
+
+interface StatementResponse {
+  openingBalance: number | string;
+  closingBalance: number | string;
+  periodStart?: string;
+  periodEnd?: string;
+  entries?: StatementEntry[];
+  deposits?: {
+    summary?: {
+      totalDeposited: number;
+      totalUsed: number;
+      availableBalance: number;
+    };
+    entries?: DepositEntry[];
+  };
+  page?: number;
+  totalPages?: number;
+}
+
+interface StatementEntry {
+  date: string;
+  type: string;
+  reference?: string;
+  description?: string;
+  debit?: number | string;
+  credit?: number | string;
+  balance?: number | string;
+  balanceAfter?: number | string;
+}
+
+interface DepositEntry {
+  date: string;
+  type: string;
+  amount: number | string;
+  reference?: string;
+  description?: string;
+  notes?: string;
+  runningBalance?: number | string;
+}
 
 type TabType = 'overview' | 'list' | 'groups';
 type CustomerModalTab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
@@ -39,53 +79,16 @@ export default function CustomersPage() {
     limit: stmtLimit,
   });
 
-  // Helper to download authenticated files
-  const downloadFile = async (url: string, filename: string) => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('Download failed:', response.status, text);
-        throw new Error(`Server returned ${response.status}: ${text || 'Download failed'}`);
-      }
-
-      // Check if response is actually the expected file type
-      const contentType = response.headers.get('content-type');
-      if (filename.endsWith('.pdf') && (!contentType || !contentType.includes('pdf'))) {
-        const text = await response.text();
-        console.error('Expected PDF but got:', contentType, text);
-        throw new Error(`Server did not return a PDF file. Content-Type: ${contentType || 'unknown'}`);
-      }
-
-      const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(downloadUrl);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Download error:', error);
-      alert(`❌ Failed to Download File\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\n💡 Please check:\n• Internet connection\n• Server is running\n• You have permission to access this file`);
-    }
-  };
+  // downloadFile imported from shared utils/download — no duplicate needed
 
   const { data: customersResponse, isLoading, error } = useCustomers(page, 50);
-  const customers = customersResponse?.data || [];
+  const customers = (customersResponse?.data || []) as Customer[];
   const pagination = customersResponse?.pagination;
 
   // Helper to safely coerce numeric-like values (pg numeric may arrive as string)
-  const toNumber = (v: any): number => {
+  const toNumber = (v: unknown): number => {
     if (typeof v === 'number') return v;
-    const parsed = parseFloat(v ?? '0');
+    const parsed = parseFloat(String(v ?? '0'));
     return isNaN(parsed) ? 0 : parsed;
   };
 
@@ -238,6 +241,9 @@ export default function CustomersPage() {
                           Balance
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Deposits
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Credit Limit
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -268,6 +274,11 @@ export default function CustomersPage() {
                                 }`}
                             >
                               {formatCurrency(typeof customer.balance === 'string' ? customer.balance : Number(customer.balance))}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`font-medium ${toNumber(customer.depositBalance) > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                              {formatCurrency(toNumber(customer.depositBalance))}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-600">
@@ -349,6 +360,9 @@ export default function CustomersPage() {
                             Balance
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Deposits
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Credit Limit
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -392,6 +406,11 @@ export default function CustomersPage() {
                               >
                                 {formatCurrency(typeof customer.balance === 'string' ? customer.balance : Number(customer.balance))}
                               </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`font-semibold ${toNumber(customer.depositBalance) > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                {formatCurrency(toNumber(customer.depositBalance))}
+                              </span>
                             </td>
                             <td className="px-6 py-4 text-sm text-gray-600">
                               {formatCurrency(customer.creditLimit)}
@@ -514,7 +533,7 @@ export default function CustomersPage() {
                             stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
-                          const url = `http://localhost:3001/api/customers/${statementCustomerId}/statement/export.csv${params ? '?' + params : ''}`;
+                          const url = `/customers/${statementCustomerId}/statement/export.csv${params ? '?' + params : ''}`;
                           downloadFile(url, `statement-${statementCustomerId}-${new Date().toISOString().slice(0, 10)}.csv`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
@@ -528,7 +547,7 @@ export default function CustomersPage() {
                             stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
-                          const url = `http://localhost:3001/api/customers/${statementCustomerId}/statement/export.pdf${params ? '?' + params : ''}`;
+                          const url = `/customers/${statementCustomerId}/statement/export.pdf${params ? '?' + params : ''}`;
                           downloadFile(url, `statement-${statementCustomerId}-${new Date().toISOString().slice(0, 10)}.pdf`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
@@ -543,34 +562,34 @@ export default function CustomersPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Opening Balance (Owed)</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as any).openingBalance || 0))}</div>
+                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).openingBalance || 0))}</div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Closing Balance (Owed)</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as any).closingBalance || 0))}</div>
+                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).closingBalance || 0))}</div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Period</div>
-                      <div className="text-sm">{new Date((statement as any).periodStart).toLocaleDateString()} → {new Date((statement as any).periodEnd).toLocaleDateString()}</div>
+                      <div className="text-sm">{new Date((statement as StatementResponse).periodStart ?? '').toLocaleDateString()} → {new Date((statement as StatementResponse).periodEnd ?? '').toLocaleDateString()}</div>
                     </div>
                   </div>
 
                   {/* Deposit Summary Card (if customer has deposits) */}
-                  {(statement as any).deposits?.summary?.totalDeposited > 0 && (
+                  {(statement as StatementResponse).deposits?.summary?.totalDeposited != null && (statement as StatementResponse).deposits!.summary!.totalDeposited > 0 && (
                     <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
                       <h4 className="text-sm font-semibold text-emerald-800 mb-2">💰 Customer Deposits (Prepayments)</h4>
                       <div className="grid grid-cols-3 gap-4 text-sm">
                         <div>
                           <span className="text-emerald-600">Total Deposited:</span>
-                          <span className="ml-2 font-semibold">{formatCurrency((statement as any).deposits.summary.totalDeposited)}</span>
+                          <span className="ml-2 font-semibold">{formatCurrency((statement as StatementResponse).deposits!.summary!.totalDeposited)}</span>
                         </div>
                         <div>
                           <span className="text-emerald-600">Used:</span>
-                          <span className="ml-2 font-semibold">{formatCurrency((statement as any).deposits.summary.totalUsed)}</span>
+                          <span className="ml-2 font-semibold">{formatCurrency((statement as StatementResponse).deposits!.summary!.totalUsed)}</span>
                         </div>
                         <div>
                           <span className="text-emerald-600">Available:</span>
-                          <span className="ml-2 font-bold text-emerald-700">{formatCurrency((statement as any).deposits.summary.availableBalance)}</span>
+                          <span className="ml-2 font-bold text-emerald-700">{formatCurrency((statement as StatementResponse).deposits!.summary!.availableBalance)}</span>
                         </div>
                       </div>
                       <p className="text-xs text-emerald-600 mt-2 italic">
@@ -595,13 +614,13 @@ export default function CustomersPage() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {((statement as any).entries || []).length === 0 ? (
+                        {((statement as StatementResponse).entries || []).length === 0 ? (
                           <tr>
                             <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                               No invoice transactions in this period
                             </td>
                           </tr>
-                        ) : ((statement as any).entries || []).map((e: any, idx: number) => (
+                        ) : ((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-6 py-4 text-sm text-gray-600">{new Date(e.date).toLocaleString()}</td>
                             <td className="px-6 py-4 text-sm">
@@ -624,7 +643,7 @@ export default function CustomersPage() {
                   </div>
 
                   {/* Deposit Activity Section (if any deposits exist) */}
-                  {(statement as any).deposits?.entries?.length > 0 && (
+                  {((statement as StatementResponse).deposits?.entries?.length ?? 0) > 0 && (
                     <>
                       <h4 className="text-sm font-semibold text-gray-700 mt-6 mb-2">💰 Deposit Activity</h4>
                       <div className="overflow-x-auto border border-emerald-200 rounded-lg">
@@ -640,7 +659,7 @@ export default function CustomersPage() {
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-emerald-100">
-                            {((statement as any).deposits.entries || []).map((d: any, idx: number) => (
+                            {((statement as StatementResponse).deposits!.entries || []).map((d: DepositEntry, idx: number) => (
                               <tr key={idx} className="hover:bg-emerald-50">
                                 <td className="px-6 py-4 text-sm text-gray-600">{new Date(d.date).toLocaleString()}</td>
                                 <td className="px-6 py-4 text-sm">
@@ -651,8 +670,8 @@ export default function CustomersPage() {
                                 </td>
                                 <td className="px-6 py-4 text-sm text-gray-600">{d.reference || '-'}</td>
                                 <td className="px-6 py-4 text-sm text-gray-600">{d.description || '-'}</td>
-                                <td className={`px-6 py-4 text-sm text-right font-medium ${d.amount >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                  {d.amount >= 0 ? '+' : ''}{formatCurrency(Number(d.amount))}
+                                <td className={`px-6 py-4 text-sm text-right font-medium ${Number(d.amount) >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                  {Number(d.amount) >= 0 ? '+' : ''}{formatCurrency(Number(d.amount))}
                                 </td>
                                 <td className="px-6 py-4 text-sm text-right font-semibold text-emerald-700">{formatCurrency(Number(d.runningBalance || 0))}</td>
                               </tr>
@@ -664,9 +683,9 @@ export default function CustomersPage() {
                   )}
 
                   <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between mt-4 rounded-b-lg">
-                    <div className="text-sm text-gray-700">Page {(statement as any)?.page || stmtPage}</div>
+                    <div className="text-sm text-gray-700">Page {(statement as StatementResponse)?.page || stmtPage}</div>
                     <div className="flex gap-2">
-                      <button className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50 disabled:opacity-50" onClick={() => setStmtPage(Math.max(1, stmtPage - 1))} disabled={((statement as any)?.page || stmtPage) === 1}>Previous</button>
+                      <button className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50 disabled:opacity-50" onClick={() => setStmtPage(Math.max(1, stmtPage - 1))} disabled={((statement as StatementResponse)?.page || stmtPage) === 1}>Previous</button>
                       <button className="px-3 py-1 border border-gray-300 rounded bg-white hover:bg-gray-50" onClick={() => setStmtPage(stmtPage + 1)}>Next</button>
                     </div>
                   </div>

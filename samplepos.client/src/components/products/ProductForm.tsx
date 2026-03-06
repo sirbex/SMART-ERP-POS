@@ -6,6 +6,7 @@ export interface ProductFormValues {
   barcode: string;
   description: string;
   category: string;
+  genericName: string;
   costPrice: string;
   sellingPrice: string;
   costingMethod: string; // 'FIFO' | 'AVCO' | 'STANDARD'
@@ -15,6 +16,7 @@ export interface ProductFormValues {
   autoUpdatePrice: boolean;
   reorderLevel: string;
   trackExpiry: boolean;
+  minDaysBeforeExpirySale: string;
   isActive: boolean;
 }
 
@@ -22,7 +24,7 @@ export type ProductFormField = keyof ProductFormValues;
 
 export interface ProductFormProps {
   values: ProductFormValues;
-  onChange: (field: ProductFormField, value: any) => void;
+  onChange: (field: ProductFormField, value: string | boolean) => void;
   validationErrors?: Partial<Record<ProductFormField, string>>;
   disabled?: boolean;
 }
@@ -98,6 +100,22 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="e.g., Electronics, Beverages"
           />
+        </div>
+
+        <div>
+          <label htmlFor="generic-name" className="block text-sm font-medium text-gray-700 mb-1">
+            Generic Name
+          </label>
+          <input
+            id="generic-name"
+            type="text"
+            value={values.genericName}
+            onChange={(e) => onChange("genericName", e.target.value)}
+            disabled={disabled}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="e.g., Amoxicillin, Paracetamol"
+          />
+          <p className="text-xs text-gray-500 mt-1">Common/generic drug name for search grouping</p>
         </div>
 
         <div className="md:col-span-2">
@@ -316,6 +334,29 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
             </div>
           </div>
         </div>
+
+        {/* Expiry Enforcement (shown when Track Expiry is enabled) */}
+        {values.trackExpiry && (
+          <div className="mt-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
+            <label htmlFor="min-days-expiry" className="block text-sm font-medium text-gray-700 mb-1">
+              Minimum Days Before Expiry to Allow Sale
+            </label>
+            <input
+              id="min-days-expiry"
+              type="number"
+              min="0"
+              step="1"
+              value={values.minDaysBeforeExpirySale}
+              onChange={(e) => onChange("minDaysBeforeExpirySale", e.target.value)}
+              disabled={disabled}
+              className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="90"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Batches expiring within this many days cannot be sold (NDA compliance). Set to 0 to disable.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

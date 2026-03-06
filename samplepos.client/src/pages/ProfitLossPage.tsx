@@ -38,6 +38,37 @@ const fetchComparativePL = async (periods: number) => {
 
 type ViewTab = 'summary' | 'by-customer' | 'by-product' | 'comparative';
 
+interface PLLineItem {
+    accountCode: string;
+    accountName: string;
+    amount: number;
+}
+
+interface CustomerProfitability {
+    customerName: string;
+    revenue: number;
+    cogs: number;
+    grossProfit: number;
+    marginPercent: number;
+}
+
+interface ProductProfitability {
+    productName: string;
+    revenue: number;
+    cogs: number;
+    grossProfit: number;
+    marginPercent: number;
+}
+
+interface ComparativePeriod {
+    periodLabel: string;
+    revenue: number;
+    cogs: number;
+    grossProfit: number;
+    expenses: number;
+    netProfit: number;
+}
+
 export default function ProfitLossPage() {
     const today = new Date();
     const [dateFrom, setDateFrom] = useState(format(startOfMonth(today), 'yyyy-MM-dd'));
@@ -210,7 +241,7 @@ export default function ProfitLossPage() {
                                     {/* Revenue Section */}
                                     <div className="mb-6">
                                         <h3 className="font-semibold text-gray-900 mb-2">Revenue</h3>
-                                        {report.sections?.revenue?.map((item: any, idx: number) => (
+                                        {report.sections?.revenue?.map((item: PLLineItem, idx: number) => (
                                             <div key={idx} className="flex justify-between py-1 text-sm">
                                                 <span className="text-gray-600">{item.accountCode} - {item.accountName}</span>
                                                 <span className="text-green-600">{formatCurrency(item.amount)}</span>
@@ -225,7 +256,7 @@ export default function ProfitLossPage() {
                                     {/* COGS Section */}
                                     <div className="mb-6">
                                         <h3 className="font-semibold text-gray-900 mb-2">Cost of Goods Sold</h3>
-                                        {report.sections?.cogs?.map((item: any, idx: number) => (
+                                        {report.sections?.cogs?.map((item: PLLineItem, idx: number) => (
                                             <div key={idx} className="flex justify-between py-1 text-sm">
                                                 <span className="text-gray-600">{item.accountCode} - {item.accountName}</span>
                                                 <span className="text-red-600">({formatCurrency(item.amount)})</span>
@@ -246,7 +277,7 @@ export default function ProfitLossPage() {
                                     {/* Expenses Section */}
                                     <div className="mb-6 mt-6">
                                         <h3 className="font-semibold text-gray-900 mb-2">Operating Expenses</h3>
-                                        {report.sections?.expenses?.map((item: any, idx: number) => (
+                                        {report.sections?.expenses?.map((item: PLLineItem, idx: number) => (
                                             <div key={idx} className="flex justify-between py-1 text-sm">
                                                 <span className="text-gray-600">{item.accountCode} - {item.accountName}</span>
                                                 <span className="text-red-600">({formatCurrency(item.amount)})</span>
@@ -296,7 +327,7 @@ export default function ProfitLossPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {customerData?.data?.customers?.map((cust: any, idx: number) => (
+                                {customerData?.data?.customers?.map((cust: CustomerProfitability, idx: number) => (
                                     <tr key={idx} className="hover:bg-gray-50">
                                         <td className="px-6 py-4 font-medium">{cust.customerName || 'Walk-in'}</td>
                                         <td className="px-6 py-4 text-right text-green-600">{formatCurrency(cust.revenue)}</td>
@@ -337,7 +368,7 @@ export default function ProfitLossPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {productData?.data?.products?.map((prod: any, idx: number) => (
+                                {productData?.data?.products?.map((prod: ProductProfitability, idx: number) => (
                                     <tr key={idx} className="hover:bg-gray-50">
                                         <td className="px-6 py-4 font-medium">{prod.productName}</td>
                                         <td className="px-6 py-4 text-right text-green-600">{formatCurrency(prod.revenue)}</td>
@@ -397,7 +428,7 @@ export default function ProfitLossPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y">
-                                        {comparativeData?.data?.periods?.map((period: any, idx: number) => (
+                                        {comparativeData?.data?.periods?.map((period: ComparativePeriod, idx: number) => (
                                             <tr key={idx} className="hover:bg-gray-50">
                                                 <td className="px-6 py-4 font-medium">{period.periodLabel}</td>
                                                 <td className="px-6 py-4 text-right text-green-600">{formatCurrency(period.revenue)}</td>

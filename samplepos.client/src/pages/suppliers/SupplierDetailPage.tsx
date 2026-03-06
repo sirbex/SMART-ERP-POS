@@ -3,6 +3,42 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSupplier, useSupplierPerformance, useSupplierOrders, useSupplierProducts } from '../../hooks/useSuppliers';
 import { formatCurrency } from '../../utils/currency';
 import Decimal from 'decimal.js';
+import { api } from '../../services/api';
+import type { Supplier } from '../../types/business';
+
+/** Performance metrics returned by GET /suppliers/:id/performance */
+interface SupplierPerformanceData {
+  totalOrders: number;
+  completedOrders: number;
+  draftOrders: number;
+  pendingOrders: number;
+  totalValue: number | string;
+  outstandingAmount: number | string;
+  uniqueProducts: number;
+  lastOrderDate: string | null;
+}
+
+/** Order row returned by GET /suppliers/:id/orders */
+interface SupplierOrderRow {
+  id: string;
+  poNumber: string;
+  orderDate: string;
+  expectedDelivery?: string;
+  status: 'DRAFT' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
+  totalAmount: number;
+  notes?: string;
+}
+
+/** PO line-item returned by GET /purchase-orders/:id/items */
+interface POItemRow {
+  id: string;
+  productName: string;
+  sku: string;
+  orderedQuantity: number | string;
+  receivedQuantity: number | string;
+  unitPrice: number;
+  totalPrice: number | string;
+}
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -31,9 +67,9 @@ export default function SupplierDetailPage() {
   const { data: ordersData, isLoading: ordersLoading } = useSupplierOrders(id!, { page: 1, limit: 20 });
   const { data: productsData, isLoading: productsLoading } = useSupplierProducts(id!);
 
-  const supplier = supplierData?.data;
-  const performance = performanceData?.data;
-  const orders = ordersData?.data;
+  const supplier = supplierData?.data as Supplier | undefined;
+  const performance = performanceData?.data as SupplierPerformanceData | undefined;
+  const orders = ordersData?.data as SupplierOrderRow[] | undefined;
   const products = productsData?.data;
 
   if (supplierLoading) {
@@ -136,7 +172,7 @@ export default function SupplierDetailPage() {
 }
 
 // Information Tab Component
-function InformationTab({ supplier }: { supplier: any }) {
+function InformationTab({ supplier }: { supplier: Supplier }) {
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Supplier Information</h3>
@@ -175,8 +211,8 @@ function InformationTab({ supplier }: { supplier: any }) {
           <label className="block text-sm font-medium text-gray-600 mb-1">Status</label>
           <span
             className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
-                ? 'bg-green-100 text-green-800'
-                : 'bg-gray-100 text-gray-800'
+              ? 'bg-green-100 text-green-800'
+              : 'bg-gray-100 text-gray-800'
               }`}
           >
             {supplier.isActive ? 'Active' : 'Inactive'}
@@ -202,7 +238,7 @@ function InformationTab({ supplier }: { supplier: any }) {
 }
 
 // Performance Tab Component
-function PerformanceTab({ performance, loading }: { performance: any; loading: boolean }) {
+function PerformanceTab({ performance, loading }: { performance: SupplierPerformanceData | undefined; loading: boolean }) {
   if (loading) {
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -308,7 +344,7 @@ function PerformanceTab({ performance, loading }: { performance: any; loading: b
 }
 
 // Orders Tab Component
-function OrdersTab({ orders, loading }: { orders: any; loading: boolean }) {
+function OrdersTab({ orders, loading }: { orders: SupplierOrderRow[] | undefined; loading: boolean }) {
   if (loading) {
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -359,7 +395,7 @@ function OrdersTab({ orders, loading }: { orders: any; loading: boolean }) {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {orders.map((order: any) => (
+            {orders.map((order) => (
               <tr key={order.id} className="hover:bg-gray-50">
                 <td className="px-4 py-4 whitespace-nowrap">
                   <div className="text-sm font-medium text-blue-600">{order.poNumber}</div>
@@ -405,28 +441,23 @@ function OrdersTab({ orders, loading }: { orders: any; loading: boolean }) {
 }
 
 // Products Tab Component - Shows Purchase Orders with View Items
-function ProductsTab({ supplierId, loading }: { supplierId: string; products: any; loading: boolean }) {
-  const [selectedPO, setSelectedPO] = useState<any>(null);
-  const [poItems, setPOItems] = useState<any[]>([]);
+function ProductsTab({ supplierId, loading }: { supplierId: string; products: unknown; loading: boolean }) {
+  const [selectedPO, setSelectedPO] = useState<SupplierOrderRow | null>(null);
+  const [poItems, setPOItems] = useState<POItemRow[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
 
   // Fetch orders data instead
   const { data: ordersData, isLoading: ordersLoading } = useSupplierOrders(supplierId, { page: 1, limit: 100 });
-  const orders = ordersData?.data;
+  const orders = ordersData?.data as SupplierOrderRow[] | undefined;
 
   const loadPOItems = async (poId: string) => {
     setLoadingItems(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/purchase-orders/${poId}/items`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-        },
-      });
-      const data = await response.json();
+      const { data } = await api.get(`/purchase-orders/${poId}/items`);
       if (data.success) {
         setPOItems(data.data);
-        const po = orders?.find((o: any) => o.id === poId);
-        setSelectedPO(po);
+        const po = orders?.find((o) => o.id === poId);
+        setSelectedPO(po ?? null);
       }
     } catch (error) {
       console.error('Failed to load PO items:', error);
@@ -488,7 +519,7 @@ function ProductsTab({ supplierId, loading }: { supplierId: string; products: an
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {orders.map((order: any) => (
+              {orders.map((order) => (
                 <tr key={order.id} className="hover:bg-gray-50">
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-blue-600">{order.poNumber}</div>
@@ -582,7 +613,7 @@ function ProductsTab({ supplierId, loading }: { supplierId: string; products: an
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {poItems.map((item: any) => (
+                  {poItems.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50">
                       <td className="px-4 py-4">
                         <div className="text-sm font-medium text-gray-900">{item.productName}</div>
@@ -620,7 +651,7 @@ function ProductsTab({ supplierId, loading }: { supplierId: string; products: an
                       <div className="text-sm font-bold text-gray-900">
                         {formatCurrency(
                           poItems.reduce((sum, item) =>
-                            sum + parseFloat(item.totalPrice || 0), 0
+                            sum + parseFloat(String(item.totalPrice || 0)), 0
                           )
                         )}
                       </div>

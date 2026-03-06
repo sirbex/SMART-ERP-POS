@@ -611,6 +611,19 @@ DECLARE
     v_reference_id UUID;
     v_movement_number VARCHAR;  -- Required NOT NULL field
 BEGIN
+    -- GUARD: Skip if the application is already handling stock movements.
+    -- App code (StockMovementHandler, salesService, inventoryRepository) creates
+    -- proper MOV- stock_movements alongside batch updates. Without this guard,
+    -- the trigger creates duplicate SM- movements that also get GL-posted via
+    -- trg_post_stock_movement_to_ledger, causing double ledger entries.
+    IF current_setting('app.skip_stock_movement_trigger', true) = 'true' THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        ELSE
+            RETURN NEW;
+        END IF;
+    END IF;
+
     -- Skip if no actual change in quantity
     IF TG_OP = 'UPDATE' AND NEW.remaining_quantity = OLD.remaining_quantity THEN
         RETURN NEW;
@@ -631,13 +644,12 @@ BEGIN
         IF v_quantity_change > 0 THEN
             v_movement_type := 'ADJUSTMENT_IN'::movement_type;
         ELSIF v_quantity_change < 0 THEN
-            v_movement_type := 'SALE'::movement_type;
-            v_quantity_change := ABS(v_quantity_change);
+            v_movement_type := 'ADJUSTMENT_OUT'::movement_type;
         ELSE
             RETURN NEW; -- No change, skip logging
         END IF;
-        v_reference_type := 'ADJUSTMENT';
-        v_reference_id := NEW.id;
+        v_reference_type := COALESCE(NEW.source_type, 'ADJUSTMENT');
+        v_reference_id := NEW.source_reference_id;
     ELSIF TG_OP = 'DELETE' THEN
         v_movement_type := 'DAMAGE'::movement_type;
         v_quantity_change := OLD.remaining_quantity;
@@ -648,7 +660,7 @@ BEGIN
     -- Insert stock movement record WITH movement_number (required NOT NULL field)
     INSERT INTO stock_movements (
         id, movement_number, product_id, batch_id, movement_type, quantity,
-        reference_type, reference_id, created_at
+        reference_type, reference_id, unit_cost, notes, created_by_id, created_at
     ) VALUES (
         gen_random_uuid(),
         v_movement_number,
@@ -658,6 +670,9 @@ BEGIN
         v_quantity_change,
         v_reference_type,
         v_reference_id,
+        CASE WHEN TG_OP = 'DELETE' THEN OLD.cost_price ELSE NEW.cost_price END,
+        CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE NEW.notes END,
+        COALESCE(current_setting('app.current_user_id', true)::UUID, NULL),
         CURRENT_TIMESTAMP
     );
     

@@ -93,14 +93,14 @@ async function deleteBackup(id: string, deleteFile: boolean): Promise<void> {
     await api.delete(`/system/backups/${id}?deleteFile=${deleteFile}`);
 }
 
-async function executeReset(confirmText: string, reason: string): Promise<any> {
-    const response = await api.post<ApiResponse<any>>('/system/reset', { confirmText, reason });
+async function executeReset(confirmText: string, reason: string): Promise<unknown> {
+    const response = await api.post<ApiResponse<unknown>>('/system/reset', { confirmText, reason });
     if (!response.data.success) throw new Error(response.data.error);
     return response.data.data;
 }
 
-async function restoreBackup(backupId: string): Promise<any> {
-    const response = await api.post<ApiResponse<any>>(`/system/restore/${backupId}`);
+async function restoreBackup(backupId: string): Promise<unknown> {
+    const response = await api.post<ApiResponse<unknown>>(`/system/restore/${backupId}`);
     if (!response.data.success) throw new Error(response.data.error);
     return response.data.data;
 }
@@ -442,8 +442,8 @@ function BackupSection({
             setReason('');
             queryClient.invalidateQueries({ queryKey: ['systemBackups'] });
             onBackupCreated();
-        } catch (error: any) {
-            onError(error.message || 'Failed to create backup');
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Failed to create backup');
         } finally {
             setIsCreating(false);
         }
@@ -457,8 +457,8 @@ function BackupSection({
             } else {
                 onError(`Verification failed: ${result.message}`);
             }
-        } catch (error: any) {
-            onError(error.message || 'Verification failed');
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Verification failed');
         }
     };
 
@@ -468,8 +468,8 @@ function BackupSection({
         try {
             await deleteBackup(id, true);
             queryClient.invalidateQueries({ queryKey: ['systemBackups'] });
-        } catch (error: any) {
-            onError(error.message || 'Failed to delete backup');
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Failed to delete backup');
         }
     };
 
@@ -602,8 +602,8 @@ function ResetSection({
             setIsLoadingPreview(true);
             const data = await fetchResetPreview();
             setPreview(data);
-        } catch (error: any) {
-            onError(error.message || 'Failed to load reset preview');
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Failed to load reset preview');
         } finally {
             setIsLoadingPreview(false);
         }
@@ -628,8 +628,8 @@ function ResetSection({
             setReason('');
             onResetComplete();
             loadPreview();
-        } catch (error: any) {
-            onError(error.message || 'Reset failed');
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Reset failed');
         } finally {
             setIsResetting(false);
         }
@@ -866,8 +866,8 @@ function RestoreSection({
             setShowConfirmDialog(false);
             setSelectedBackup('');
             onRestoreComplete();
-        } catch (error: any) {
-            onError(error.message || 'Restore failed');
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Restore failed');
         } finally {
             setIsRestoring(false);
         }

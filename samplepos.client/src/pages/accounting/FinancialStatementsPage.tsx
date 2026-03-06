@@ -94,6 +94,16 @@ interface CashFlowStatement {
 type ReportType = 'income-statement' | 'balance-sheet' | 'cash-flow';
 type ReportPeriod = 'current-month' | 'current-quarter' | 'current-year' | 'last-month' | 'last-quarter' | 'last-year' | 'custom';
 
+/** Raw item shape returned by the accounting API before frontend transformation */
+interface RawStatementItem {
+  accountCode?: string;
+  accountNumber?: string;
+  accountName?: string;
+  description?: string;
+  amount?: string | number;
+  balance?: string | number;
+}
+
 const FinancialStatementsPage = () => {
   const [reportType, setReportType] = useState<ReportType>('income-statement');
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('current-month');
@@ -201,10 +211,10 @@ const FinancialStatementsPage = () => {
             // Transform the Node.js API response to match the expected frontend structure
             // Backend returns nested objects: { items: [...], totalRevenue: number }
             // Frontend expects flat arrays with mapped property names
-            const mapItems = (items: any[] | undefined) => (items || []).map((item: any) => ({
+            const mapItems = (items: RawStatementItem[] | undefined): FinancialStatementItem[] => (items || []).map((item: RawStatementItem) => ({
               accountNumber: item.accountCode || item.accountNumber,
-              accountName: item.accountName,
-              amount: parseFloat(item.amount) || parseFloat(item.balance) || 0,
+              accountName: item.accountName || '',
+              amount: parseFloat(String(item.amount ?? '')) || parseFloat(String(item.balance ?? '')) || 0,
               level: 0,
             }));
 
@@ -241,10 +251,10 @@ const FinancialStatementsPage = () => {
             // Transform the Node.js API response to match the expected frontend structure
             const bsData = result.data;
             console.log('Balance Sheet API Response:', bsData);
-            const mapBsItems = (items: any[] | undefined) => (items || []).map((item: any) => ({
+            const mapBsItems = (items: RawStatementItem[] | undefined): FinancialStatementItem[] => (items || []).map((item: RawStatementItem) => ({
               accountNumber: item.accountCode || item.accountNumber,
-              accountName: item.accountName,
-              amount: parseFloat(item.amount) || parseFloat(item.balance) || 0,
+              accountName: item.accountName || '',
+              amount: parseFloat(String(item.amount ?? '')) || parseFloat(String(item.balance ?? '')) || 0,
               level: 0,
             }));
 
@@ -282,10 +292,10 @@ const FinancialStatementsPage = () => {
           case 'cash-flow':
             // Transform the Node.js API response to match the expected frontend structure
             const cfData = result.data;
-            const mapCfItems = (items: any[] | undefined) => (items || []).map((item: any) => ({
+            const mapCfItems = (items: RawStatementItem[] | undefined): FinancialStatementItem[] => (items || []).map((item: RawStatementItem) => ({
               accountNumber: item.accountCode || item.accountNumber || '',
               accountName: item.accountName || item.description || '',
-              amount: parseFloat(item.amount) || 0,
+              amount: parseFloat(String(item.amount ?? '')) || 0,
               level: 0,
             }));
 
@@ -313,9 +323,9 @@ const FinancialStatementsPage = () => {
       } else {
         throw new Error(result.error || 'Failed to load financial statement');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading financial statement:', error);
-      toast.error(`Failed to load financial statement: ${error.message}`);
+      toast.error(`Failed to load financial statement: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
       // Clear all statements on error
       setIncomeStatement(null);
@@ -359,9 +369,9 @@ const FinancialStatementsPage = () => {
       URL.revokeObjectURL(url);
 
       toast.success('Financial statement exported to PDF successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error exporting financial statement:', error);
-      toast.error(`Failed to export: ${error.message}`);
+      toast.error(`Failed to export: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 

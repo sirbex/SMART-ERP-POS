@@ -34,6 +34,21 @@ interface TrialBalanceReport {
   generatedAt: string;
 }
 
+/** Raw account shape returned by trial-balance API */
+interface RawTrialBalanceAccount {
+  accountId: string;
+  accountCode?: string;
+  accountNumber?: string;
+  accountName?: string;
+  accountType: TrialBalanceEntry['accountType'];
+  debitBalance: string | number;
+  creditBalance: string | number;
+  netBalance: string | number;
+}
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const ACCOUNT_TYPE_ORDER = {
   'ASSET': 1,
   'LIABILITY': 2,
@@ -79,14 +94,14 @@ const TrialBalancePage = () => {
         // Map API response format to frontend interface
         // API returns accountCode, frontend uses accountNumber
         const rawAccounts = result.data.accounts || result.data.entries || [];
-        const mappedEntries = rawAccounts.map((acc: any) => ({
+        const mappedEntries = rawAccounts.map((acc: RawTrialBalanceAccount) => ({
           accountId: acc.accountId,
           accountNumber: acc.accountCode || acc.accountNumber || '',
           accountName: acc.accountName || '',
           accountType: acc.accountType,
-          debitBalance: parseFloat(acc.debitBalance) || 0,
-          creditBalance: parseFloat(acc.creditBalance) || 0,
-          netBalance: parseFloat(acc.netBalance) || 0
+          debitBalance: parseFloat(String(acc.debitBalance)) || 0,
+          creditBalance: parseFloat(String(acc.creditBalance)) || 0,
+          netBalance: parseFloat(String(acc.netBalance)) || 0
         }));
         const mappedData = {
           ...result.data,
@@ -96,9 +111,9 @@ const TrialBalancePage = () => {
       } else {
         throw new Error(result.error || 'Failed to load trial balance');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading trial balance:', error);
-      toast.error(`Failed to load trial balance: ${error.message}`);
+      toast.error(`Failed to load trial balance: ${getErrorMessage(error)}`);
       setTrialBalance(null);
     } finally {
       setLoading(false);
@@ -133,9 +148,9 @@ const TrialBalancePage = () => {
       URL.revokeObjectURL(url);
 
       toast.success('Trial balance exported to PDF successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error exporting trial balance:', error);
-      toast.error(`Failed to export: ${error.message}`);
+      toast.error(`Failed to export: ${getErrorMessage(error)}`);
     }
   };
 
@@ -160,9 +175,9 @@ const TrialBalancePage = () => {
       URL.revokeObjectURL(url);
 
       toast.success('Trial balance exported to CSV successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error exporting trial balance:', error);
-      toast.error(`Failed to export: ${error.message}`);
+      toast.error(`Failed to export: ${getErrorMessage(error)}`);
     }
   };
 
@@ -432,7 +447,7 @@ const TrialBalancePage = () => {
                             {formatCurrency(trialBalance.totals?.totalCredits || 0)}
                           </td>
                           <td className={`py-2 text-right font-mono ${trialBalance.totals?.isBalanced ? 'text-green-600' : 'text-red-600'}`}>
-                            {trialBalance.totals?.isBalanced ? '—' : formatCurrency(Math.abs((trialBalance.totals as any)?.netDifference || trialBalance.totals?.difference || 0))}
+                            {trialBalance.totals?.isBalanced ? '—' : formatCurrency(Math.abs(trialBalance.totals?.netDifference || trialBalance.totals?.difference || 0))}
                           </td>
                         </tr>
                       </tbody>
@@ -459,7 +474,7 @@ const TrialBalancePage = () => {
                 {trialBalance.totals && !trialBalance.totals.isBalanced && (
                   <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded">
                     <p className="text-red-800 font-medium">
-                      ⚠️ Your books are out of balance by {formatCurrency(Math.abs((trialBalance.totals as any)?.netDifference || trialBalance.totals?.difference || 0))}.
+                      ⚠️ Your books are out of balance by {formatCurrency(Math.abs(trialBalance.totals?.netDifference || trialBalance.totals?.difference || 0))}.
                       Please review your recent transactions and ensure all journal entries are complete.
                     </p>
                   </div>

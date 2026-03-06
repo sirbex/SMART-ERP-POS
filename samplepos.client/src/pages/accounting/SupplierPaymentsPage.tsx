@@ -13,6 +13,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AxiosError } from 'axios';
 import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -60,6 +61,11 @@ import type {
     SupplierPaymentReceipt
 } from '../../types/comprehensive-accounting';
 
+/** jsPDF instance extended with autoTable tracking properties */
+interface JsPDFWithAutoTable extends jsPDF {
+    lastAutoTable: { finalY: number };
+}
+
 // Unified Supplier interface matching backend response
 interface Supplier {
     id: string;
@@ -97,6 +103,8 @@ const SupplierPaymentsPage: React.FC = () => {
     const [bills, setBills] = useState<SupplierInvoice[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
+    const [startDate, setStartDate] = useState<string>('');
+    const [endDate, setEndDate] = useState<string>('');
 
     // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
     const { data: suppliersData, isLoading: suppliersLoading, error: suppliersError, refetch: refetchSuppliers } = useSuppliers({ page: 1, limit: 100 });
@@ -173,10 +181,12 @@ const SupplierPaymentsPage: React.FC = () => {
     }, [activeTab]);
 
     useEffect(() => {
-        if (searchTerm || selectedSupplierId) {
+        // Debounce search to avoid firing on every keystroke
+        const timer = setTimeout(() => {
             loadTabData();
-        }
-    }, [searchTerm, selectedSupplierId]);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchTerm, selectedSupplierId, startDate, endDate]);
 
     // Log suppliers data for debugging
     useEffect(() => {
@@ -193,9 +203,12 @@ const SupplierPaymentsPage: React.FC = () => {
 
             // Always load both payments and bills for summary cards
             await Promise.all([loadPayments(), loadBills()]);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('[SupplierPayments] Error loading tab data:', error);
-            toast.error(error?.response?.data?.error || 'Failed to load data');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to load data');
         } finally {
             setLoading(false);
         }
@@ -205,7 +218,9 @@ const SupplierPaymentsPage: React.FC = () => {
         try {
             const response = await supplierPaymentService.getSupplierPayments({
                 supplierId: selectedSupplierId || undefined,
-                search: searchTerm || undefined
+                search: searchTerm || undefined,
+                startDate: startDate || undefined,
+                endDate: endDate || undefined
             });
 
             if (response.items) {
@@ -220,7 +235,9 @@ const SupplierPaymentsPage: React.FC = () => {
         try {
             const response = await supplierInvoiceService.getSupplierInvoices({
                 supplierId: selectedSupplierId || undefined,
-                search: searchTerm || undefined
+                search: searchTerm || undefined,
+                startDate: startDate || undefined,
+                endDate: endDate || undefined
             });
 
             if (response.items) {
@@ -332,9 +349,12 @@ const SupplierPaymentsPage: React.FC = () => {
                 // Show receipt modal for printing
                 setIsReceiptModalOpen(true);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to record payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to record payment');
         } finally {
             setIsRecordingPayment(false);
         }
@@ -477,10 +497,8 @@ const SupplierPaymentsPage: React.FC = () => {
         const pageWidth = doc.internal.pageSize.getWidth();
         let yPos = 20;
 
-        // Helper function to format currency for PDF
-        const formatCurrencyPDF = (amount: number): string => {
-            return `UGX ${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-        };
+        // Use shared formatCurrency for PDF — consistent UGX formatting
+        const formatCurrencyPDF = (amount: number): string => formatCurrency(amount, true, 0);
 
         // Header
         doc.setFontSize(20);
@@ -579,7 +597,7 @@ const SupplierPaymentsPage: React.FC = () => {
                 margin: { left: 15, right: 15 }
             });
 
-            yPos = (doc as any).lastAutoTable.finalY + 10;
+            yPos = (doc as unknown as JsPDFWithAutoTable).lastAutoTable.finalY + 10;
 
             // Detailed Invoice Line Items
             doc.setFontSize(12);
@@ -628,7 +646,7 @@ const SupplierPaymentsPage: React.FC = () => {
                         margin: { left: 20, right: 15 }
                     });
 
-                    yPos = (doc as any).lastAutoTable.finalY + 8;
+                    yPos = (doc as unknown as JsPDFWithAutoTable).lastAutoTable.finalY + 8;
                 } else {
                     doc.setFont('helvetica', 'italic');
                     doc.setFontSize(9);
@@ -735,9 +753,12 @@ const SupplierPaymentsPage: React.FC = () => {
                 // Refetch suppliers to update outstanding balances (single source of truth)
                 refetchSuppliers();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating bill:', error);
-            toast.error(error.response?.data?.error || 'Failed to record bill');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to record bill');
         }
     };
 
@@ -784,9 +805,12 @@ const SupplierPaymentsPage: React.FC = () => {
                 // Refetch suppliers to update outstanding balances (single source of truth)
                 refetchSuppliers();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error auto-allocating payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to allocate payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to allocate payment');
         } finally {
             setAllocatingPayment(false);
         }
@@ -822,9 +846,12 @@ const SupplierPaymentsPage: React.FC = () => {
             loadPayments();
             // Refetch suppliers to update outstanding balances (single source of truth)
             refetchSuppliers();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error allocating payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to allocate payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to allocate payment');
         } finally {
             setAllocatingPayment(false);
         }
@@ -1037,36 +1064,69 @@ const SupplierPaymentsPage: React.FC = () => {
             </div>
 
             {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex-1">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                        <Input
-                            placeholder="Search..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="pl-10"
-                        />
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                            <Input
+                                placeholder="Search..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="pl-10"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="w-full sm:w-64">
+                        <Select value={selectedSupplierId || "all"} onValueChange={(value) => setSelectedSupplierId(value === "all" ? "" : value)}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="All suppliers" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All suppliers</SelectItem>
+                                {suppliers.map(supplier => {
+                                    const balance = safeParseFloat(supplier.outstandingBalance);
+                                    return (
+                                        <SelectItem key={supplier.id} value={supplier.id}>
+                                            {supplier.name}{balance > 0 ? ` (${formatCurrency(balance)} due)` : ''}
+                                        </SelectItem>
+                                    );
+                                })}
+                            </SelectContent>
+                        </Select>
                     </div>
                 </div>
 
-                <div className="w-full sm:w-64">
-                    <Select value={selectedSupplierId || "all"} onValueChange={(value) => setSelectedSupplierId(value === "all" ? "" : value)}>
-                        <SelectTrigger>
-                            <SelectValue placeholder="All suppliers" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All suppliers</SelectItem>
-                            {suppliers.map(supplier => {
-                                const balance = safeParseFloat(supplier.outstandingBalance);
-                                return (
-                                    <SelectItem key={supplier.id} value={supplier.id}>
-                                        {supplier.name}{balance > 0 ? ` (${formatCurrency(balance)} due)` : ''}
-                                    </SelectItem>
-                                );
-                            })}
-                        </SelectContent>
-                    </Select>
+                <div className="flex flex-col sm:flex-row items-end gap-4">
+                    <div className="w-full sm:w-48">
+                        <Label className="text-xs text-gray-500 mb-1 block">From</Label>
+                        <DatePicker
+                            value={startDate}
+                            onChange={(val) => setStartDate(val)}
+                            placeholder="Start date"
+                            maxDate={endDate ? new Date(endDate + 'T00:00:00') : undefined}
+                        />
+                    </div>
+                    <div className="w-full sm:w-48">
+                        <Label className="text-xs text-gray-500 mb-1 block">To</Label>
+                        <DatePicker
+                            value={endDate}
+                            onChange={(val) => setEndDate(val)}
+                            placeholder="End date"
+                            minDate={startDate ? new Date(startDate + 'T00:00:00') : undefined}
+                        />
+                    </div>
+                    {(startDate || endDate) && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => { setStartDate(''); setEndDate(''); }}
+                            className="text-gray-500 hover:text-gray-700"
+                        >
+                            Clear dates
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -1428,7 +1488,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             <div className="col-span-3">
                                 <Select
                                     value={paymentFormData.paymentMethod}
-                                    onValueChange={(value: any) => setPaymentFormData(prev => ({ ...prev, paymentMethod: value }))}
+                                    onValueChange={(value: string) => setPaymentFormData(prev => ({ ...prev, paymentMethod: value as CreateSupplierPaymentRequest['paymentMethod'] }))}
                                 >
                                     <SelectTrigger>
                                         <SelectValue />

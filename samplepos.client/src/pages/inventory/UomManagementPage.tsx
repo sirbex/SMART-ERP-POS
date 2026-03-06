@@ -13,7 +13,7 @@ async function fetchMasterUoms() {
   const res = await fetch('/api/products/uoms/master', { headers: authHeaders() });
   const json = await res.json();
   if (!json.success) throw new Error(json.error || 'Failed to load UoMs');
-  return json.data as Array<{ id: string; name: string; symbol: string | null; type: string }>; 
+  return json.data as Array<{ id: string; name: string; symbol: string | null; type: string }>;
 }
 
 async function createMasterUom(payload: { name: string; symbol?: string; type: 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' }) {
@@ -160,7 +160,7 @@ export default function UomManagementPage() {
                           aria-label="UoM type"
                           title="UoM type"
                           value={editingUom.type}
-                          onChange={e => setEditingUom(s => s ? ({ ...s, type: e.target.value as any }) : null)}
+                          onChange={e => setEditingUom(s => s ? ({ ...s, type: e.target.value as 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' }) : null)}
                         >
                           <option value="QUANTITY">QUANTITY</option>
                           <option value="WEIGHT">WEIGHT</option>
@@ -227,7 +227,7 @@ export default function UomManagementPage() {
               <div className="flex flex-col gap-2">
                 <input className="border rounded px-2 py-1" placeholder="Name (e.g., Carton)" value={newUom.name} onChange={e => setNewUom(s => ({ ...s, name: e.target.value }))} />
                 <input className="border rounded px-2 py-1" placeholder="Symbol (e.g., CTN)" value={newUom.symbol} onChange={e => setNewUom(s => ({ ...s, symbol: e.target.value }))} />
-                <select className="border rounded px-2 py-1" aria-label="UoM type" title="UoM type" value={newUom.type} onChange={e => setNewUom(s => ({ ...s, type: e.target.value as any }))}>
+                <select className="border rounded px-2 py-1" aria-label="UoM type" title="UoM type" value={newUom.type} onChange={e => setNewUom(s => ({ ...s, type: e.target.value as 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' }))}>
                   <option value="QUANTITY">QUANTITY</option>
                   <option value="WEIGHT">WEIGHT</option>
                   <option value="VOLUME">VOLUME</option>

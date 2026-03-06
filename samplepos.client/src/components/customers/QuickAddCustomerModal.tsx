@@ -7,10 +7,20 @@ import POSModal from '../pos/POSModal';
 import POSButton from '../pos/POSButton';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 
+interface CreatedCustomerData {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  creditLimit?: number;
+  [key: string]: unknown;
+}
+
 interface QuickAddCustomerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (customer: any) => void;
+  onSuccess?: (customer: CreatedCustomerData) => void;
 }
 
 export default function QuickAddCustomerModal({
@@ -39,14 +49,14 @@ export default function QuickAddCustomerModal({
 
       // Call success callback with created customer
       if (onSuccess && response.data.success) {
-        onSuccess(response.data.data);
+        onSuccess(response.data.data as CreatedCustomerData);
       }
 
       // Reset form and close
       resetForm();
       onClose();
     },
-    onError: (error: any) => {
+    onError: (error: { response?: { data?: { error?: string } }; message?: string }) => {
       const message = error.response?.data?.error || error.message || 'Failed to create customer';
       setErrors({ submit: message });
     },
@@ -84,7 +94,7 @@ export default function QuickAddCustomerModal({
     createMutation.mutate(validation.data);
   };
 
-  const handleChange = (field: keyof CreateCustomer, value: any) => {
+  const handleChange = (field: keyof CreateCustomer, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error for this field
     if (errors[field]) {
@@ -119,9 +129,8 @@ export default function QuickAddCustomerModal({
               type="text"
               value={formData.name || ''}
               onChange={(e) => handleChange('name', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                errors.name ? 'border-red-500' : 'border-gray-300'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${errors.name ? 'border-red-500' : 'border-gray-300'
+                }`}
               placeholder="Enter customer name"
               autoFocus
             />
@@ -138,9 +147,8 @@ export default function QuickAddCustomerModal({
               type="tel"
               value={formData.phone || ''}
               onChange={(e) => handleChange('phone', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                errors.phone ? 'border-red-500' : 'border-gray-300'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${errors.phone ? 'border-red-500' : 'border-gray-300'
+                }`}
               placeholder="+256 700 000 000"
             />
             {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
@@ -156,9 +164,8 @@ export default function QuickAddCustomerModal({
               type="email"
               value={formData.email || ''}
               onChange={(e) => handleChange('email', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                errors.email ? 'border-red-500' : 'border-gray-300'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${errors.email ? 'border-red-500' : 'border-gray-300'
+                }`}
               placeholder="customer@example.com"
             />
             {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
@@ -191,9 +198,8 @@ export default function QuickAddCustomerModal({
               step="1000"
               value={formData.creditLimit || 0}
               onChange={(e) => handleChange('creditLimit', parseFloat(e.target.value) || 0)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                errors.creditLimit ? 'border-red-500' : 'border-gray-300'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${errors.creditLimit ? 'border-red-500' : 'border-gray-300'
+                }`}
               placeholder="500000"
             />
             {errors.creditLimit && <p className="text-red-500 text-xs mt-1">{errors.creditLimit}</p>}

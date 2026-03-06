@@ -8,30 +8,31 @@
  */
 
 import { api } from './api';
+import type { AxiosRequestConfig } from 'axios';
 
 // Use the main API instance with /accounting/comprehensive prefix for Node.js proxy (C# API)
 const comprehensiveApi = {
-    get: (url: string, config?: any) => api.get(`/accounting/comprehensive${url}`, config),
-    post: (url: string, data?: any, config?: any) => api.post(`/accounting/comprehensive${url}`, data, config),
-    put: (url: string, data?: any, config?: any) => api.put(`/accounting/comprehensive${url}`, data, config),
-    patch: (url: string, data?: any, config?: any) => api.patch(`/accounting/comprehensive${url}`, data, config),
-    delete: (url: string, config?: any) => api.delete(`/accounting/comprehensive${url}`, config)
+    get: (url: string, config?: AxiosRequestConfig) => api.get(`/accounting/comprehensive${url}`, config),
+    post: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.post(`/accounting/comprehensive${url}`, data, config),
+    put: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.put(`/accounting/comprehensive${url}`, data, config),
+    patch: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.patch(`/accounting/comprehensive${url}`, data, config),
+    delete: (url: string, config?: AxiosRequestConfig) => api.delete(`/accounting/comprehensive${url}`, config)
 };
 
 // Direct Node.js API for supplier-related operations
 const supplierApi = {
-    get: (url: string, config?: any) => api.get(`/supplier-payments${url}`, config),
-    post: (url: string, data?: any, config?: any) => api.post(`/supplier-payments${url}`, data, config),
-    put: (url: string, data?: any, config?: any) => api.put(`/supplier-payments${url}`, data, config),
-    delete: (url: string, config?: any) => api.delete(`/supplier-payments${url}`, config)
+    get: (url: string, config?: AxiosRequestConfig) => api.get(`/supplier-payments${url}`, config),
+    post: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.post(`/supplier-payments${url}`, data, config),
+    put: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.put(`/supplier-payments${url}`, data, config),
+    delete: (url: string, config?: AxiosRequestConfig) => api.delete(`/supplier-payments${url}`, config)
 };
 
 // Direct Node.js API for suppliers list
 const suppliersApi = {
-    get: (url: string, config?: any) => api.get(`/suppliers${url}`, config),
-    post: (url: string, data?: any, config?: any) => api.post(`/suppliers${url}`, data, config),
-    put: (url: string, data?: any, config?: any) => api.put(`/suppliers${url}`, data, config),
-    delete: (url: string, config?: any) => api.delete(`/suppliers${url}`, config)
+    get: (url: string, config?: AxiosRequestConfig) => api.get(`/suppliers${url}`, config),
+    post: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.post(`/suppliers${url}`, data, config),
+    put: (url: string, data?: unknown, config?: AxiosRequestConfig) => api.put(`/suppliers${url}`, data, config),
+    delete: (url: string, config?: AxiosRequestConfig) => api.delete(`/suppliers${url}`, config)
 };
 import type {
     ComprehensiveInvoice,
@@ -257,6 +258,12 @@ export const comprehensiveSupplierService = {
  * Supplier Invoice Management - Uses Node.js backend directly
  */
 export const supplierInvoiceService = {
+    // Get invoice summary stats (total, unpaid, outstanding)
+    async getInvoiceSummary(): Promise<{ totalInvoices: number; unpaidInvoices: number; totalOutstanding: number }> {
+        const response = await supplierApi.get('/invoices/summary');
+        return response.data?.data ?? { totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 };
+    },
+
     // Get all supplier invoices
     async getSupplierInvoices(params?: {
         page?: number;
@@ -264,12 +271,15 @@ export const supplierInvoiceService = {
         supplierId?: string;
         status?: string;
         search?: string;
+        startDate?: string;
+        endDate?: string;
     }): Promise<PaginatedResponse<SupplierInvoice>> {
         const response = await supplierApi.get('/invoices', { params });
-        const data = response.data;
-        const pagination = data.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 };
+        // Backend wraps in { success, data: { items, pagination } }
+        const body = response.data?.data ?? response.data;
+        const pagination = body.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 };
         return {
-            items: data.items || [],
+            items: body.items || [],
             total: pagination.total,
             page: pagination.page,
             limit: pagination.limit,
@@ -313,12 +323,15 @@ export const supplierPaymentService = {
         supplierId?: string;
         paymentMethod?: string;
         search?: string;
+        startDate?: string;
+        endDate?: string;
     }): Promise<PaginatedResponse<SupplierPayment>> {
         const response = await supplierApi.get('/payments', { params });
-        const data = response.data;
-        const pagination = data.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 };
+        // Backend wraps in { success, data: { items, pagination } }
+        const body = response.data?.data ?? response.data;
+        const pagination = body.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 };
         return {
-            items: data.items || [],
+            items: body.items || [],
             total: pagination.total,
             page: pagination.page,
             limit: pagination.limit,

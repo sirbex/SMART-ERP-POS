@@ -10,6 +10,8 @@ import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
 import type { Customer } from '@shared/zod/customer';
+import type { QuotationItem, UpdateQuotationInput } from '@shared/types/quotation';
+import { AxiosError } from 'axios';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import CustomerSelector from '../../components/pos/CustomerSelector';
@@ -32,6 +34,19 @@ interface QuoteItem {
   uomName?: string;
   unitCost?: number;
   productType?: string;
+}
+
+interface ProductListItem {
+  id: string;
+  name: string;
+  sku?: string;
+  selling_price?: string;
+  is_taxable?: boolean;
+  tax_rate?: string;
+  uom_id?: string;
+  uom_name?: string;
+  unit_cost?: string;
+  product_type?: string;
 }
 
 export default function EditQuotationPage() {
@@ -104,21 +119,21 @@ export default function EditQuotationPage() {
 
       // Set items
       if (quote?.items && Array.isArray(quote.items)) {
-        const loadedItems: QuoteItem[] = quote.items.map((item: any) => ({
+        const loadedItems: QuoteItem[] = quote.items.map((item: QuotationItem) => ({
           id: item.id || crypto.randomUUID(),
-          productId: item.productId,
+          productId: item.productId ?? undefined,
           itemType: item.itemType || 'product',
-          sku: item.sku,
+          sku: item.sku ?? undefined,
           description: item.description,
-          notes: item.notes,
-          quantity: parseFloat(item.quantity),
-          unitPrice: parseFloat(item.unitPrice),
-          discountAmount: parseFloat(item.discountAmount || '0'),
+          notes: item.notes ?? undefined,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
+          discountAmount: Number(item.discountAmount || 0),
           isTaxable: item.isTaxable || false,
-          taxRate: parseFloat(item.taxRate || '0'),
-          uomId: item.uomId,
-          uomName: item.uomName,
-          unitCost: item.unitCost ? parseFloat(item.unitCost) : undefined,
+          taxRate: Number(item.taxRate || 0),
+          uomId: item.uomId ?? undefined,
+          uomName: item.uomName ?? undefined,
+          unitCost: item.unitCost != null ? Number(item.unitCost) : undefined,
           productType: item.productType,
         }));
         setItems(loadedItems);
@@ -133,7 +148,7 @@ export default function EditQuotationPage() {
     queryFn: async () => {
       const res = await api.products.list();
       if (!res.data.success) return [];
-      const products = res.data.data as any[];
+      const products = (res.data.data ?? []) as ProductListItem[];
       if (!productSearch) return products;
       return products.filter(
         (p) =>
@@ -148,15 +163,15 @@ export default function EditQuotationPage() {
 
   // Update mutation
   const updateMutation = useMutation({
-    mutationFn: (data: any) => quotationApi.updateQuotation(quotation!.id, data),
+    mutationFn: (data: UpdateQuotationInput) => quotationApi.updateQuotation(quotation!.id, data),
     onSuccess: () => {
       toast.success('Quotation updated successfully');
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       queryClient.invalidateQueries({ queryKey: ['quotation', quoteNumber] });
       navigate(`/quotations/${quoteNumber}`);
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || 'Failed to update quotation');
+    onError: (error: Error) => {
+      toast.error((error as AxiosError<{ error?: string }>).response?.data?.error || 'Failed to update quotation');
     },
   });
 
@@ -175,7 +190,7 @@ export default function EditQuotationPage() {
     setItems([...items, newItem]);
   };
 
-  const addProductAsItem = (product: any) => {
+  const addProductAsItem = (product: ProductListItem) => {
     const newItem: QuoteItem = {
       id: crypto.randomUUID(),
       productId: product.id,
@@ -196,7 +211,7 @@ export default function EditQuotationPage() {
     setProductSearch('');
   };
 
-  const updateItem = (id: string, field: keyof QuoteItem, value: any) => {
+  const updateItem = (id: string, field: keyof QuoteItem, value: string | number | boolean) => {
     setItems(
       items.map((item) =>
         item.id === id ? { ...item, [field]: value } : item
@@ -270,8 +285,8 @@ export default function EditQuotationPage() {
     const quoteData = {
       customerId: selectedCustomer?.id,
       customerName: selectedCustomer ? selectedCustomer.name : customerName,
-      customerPhone: selectedCustomer ? selectedCustomer.phone : customerPhone,
-      customerEmail: selectedCustomer ? selectedCustomer.email : customerEmail,
+      customerPhone: (selectedCustomer ? selectedCustomer.phone : customerPhone) || undefined,
+      customerEmail: (selectedCustomer ? selectedCustomer.email : customerEmail) || undefined,
       validFrom: validFrom,
       validUntil: validUntil,
       notes: internalNotes || undefined,
@@ -474,7 +489,7 @@ export default function EditQuotationPage() {
             />
             {productSearch && products.length > 0 && (
               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                {products.map((product: any) => (
+                {products.map((product: ProductListItem) => (
                   <button
                     key={product.id}
                     onClick={() => addProductAsItem(product)}

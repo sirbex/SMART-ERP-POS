@@ -83,6 +83,9 @@ export interface DeliveryOrder {
   // Items being delivered
   items?: DeliveryItem[];
 
+  // Status history
+  statusHistory?: DeliveryStatusHistory[];
+
   // Proof of delivery
   proofs?: DeliveryProof[];
 
@@ -330,6 +333,38 @@ export interface DeliveryRouteDbRow {
   created_by_name?: string;
 }
 
+export interface DeliveryStatusHistoryDbRow {
+  id: string;
+  delivery_order_id: string;
+  old_status?: string;
+  new_status: string;
+  status_date: string;
+  notes?: string;
+  photo_url?: string;
+  latitude?: string;
+  longitude?: string;
+  location_name?: string;
+  changed_by_id?: string;
+  changed_by_name?: string;
+  created_at?: string;
+}
+
+export interface RouteDeliveryDbRow {
+  id: string;
+  route_id: string;
+  delivery_order_id: string;
+  delivery_sequence: string;
+  estimated_arrival_time?: string;
+  actual_arrival_time?: string;
+  created_at: string;
+  // Joined fields
+  delivery_number?: string;
+  tracking_number?: string;
+  delivery_address?: string;
+  delivery_status?: string;
+  customer_name?: string;
+}
+
 // ====================================================
 // API REQUEST/RESPONSE TYPES
 // ====================================================
@@ -337,10 +372,7 @@ export interface DeliveryRouteDbRow {
 export interface CreateDeliveryOrderRequest {
   saleId?: string;
   invoiceId?: string;
-  customerId?: string;
-  customerName?: string;
-  customerPhone?: string;
-  customerEmail?: string;
+  customerId: string; // Required UUID — validated by Zod
   deliveryDate: string;
   expectedDeliveryTime?: string;
   deliveryAddress: string;
@@ -441,6 +473,36 @@ export function normalizeDeliveryItem(dbRow: DeliveryItemDbRow): DeliveryItem {
     damageNotes: dbRow.damage_notes,
     createdAt: dbRow.created_at,
     updatedAt: dbRow.updated_at,
+  };
+}
+
+export function normalizeDeliveryStatusHistory(dbRow: DeliveryStatusHistoryDbRow): DeliveryStatusHistory {
+  return {
+    id: dbRow.id,
+    deliveryOrderId: dbRow.delivery_order_id,
+    oldStatus: dbRow.old_status as DeliveryStatus | undefined,
+    newStatus: dbRow.new_status as DeliveryStatus,
+    statusDate: dbRow.status_date,
+    notes: dbRow.notes,
+    photoUrl: dbRow.photo_url,
+    latitude: dbRow.latitude ? parseFloat(dbRow.latitude) : undefined,
+    longitude: dbRow.longitude ? parseFloat(dbRow.longitude) : undefined,
+    locationName: dbRow.location_name,
+    changedById: dbRow.changed_by_id,
+    changedByName: dbRow.changed_by_name,
+    createdAt: dbRow.created_at || dbRow.status_date,
+  };
+}
+
+export function normalizeRouteDelivery(dbRow: RouteDeliveryDbRow): RouteDelivery {
+  return {
+    id: dbRow.id,
+    routeId: dbRow.route_id,
+    deliveryOrderId: dbRow.delivery_order_id,
+    deliverySequence: parseInt(dbRow.delivery_sequence) || 0,
+    estimatedArrivalTime: dbRow.estimated_arrival_time,
+    actualArrivalTime: dbRow.actual_arrival_time,
+    createdAt: dbRow.created_at,
   };
 }
 

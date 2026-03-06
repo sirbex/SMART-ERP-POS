@@ -11,6 +11,7 @@ import { convertQtyToBase, convertCostToBase } from '../../utils/uom';
 import { DatePicker } from '../../components/ui/date-picker';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import type { Product, Supplier } from '../../types';
 import {
   SupplierSelector,
   NotesField,
@@ -47,6 +48,92 @@ interface POLineItem {
   selectedUomId?: string | null;
 }
 
+/** UoM option for a product */
+interface ProductUom {
+  id: string;
+  uomName?: string;
+  conversionFactor: number | string;
+  isDefault: boolean;
+}
+
+/** Product with optional UoM data from API */
+interface ProductWithUoms extends Product {
+  product_uoms?: ProductUom[];
+  productUoms?: ProductUom[];
+}
+
+/** PO row — supports both snake_case (raw API) and camelCase (mapped) fields */
+interface PORow {
+  id: string;
+  status: string;
+  poNumber?: string;
+  order_number?: string;
+  orderDate?: string;
+  order_date?: string;
+  expectedDelivery?: string;
+  expected_delivery_date?: string;
+  totalAmount?: number | string;
+  total_amount?: number | string;
+  supplierName?: string;
+  supplier_name?: string;
+  supplierContact?: string;
+  supplierId?: string;
+  createdBy?: string;
+  created_by_id?: string;
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+  sentDate?: string;
+  sent_date?: string;
+  notes?: string;
+  items?: POItemRow[];
+}
+
+/** Shape of the data returned when sending a PO to supplier */
+interface SendToSupplierData {
+  goodsReceipt?: {
+    receiptNumber?: string;
+    [key: string]: unknown;
+  };
+}
+
+/** Shape of PO detail response */
+interface PODetailData {
+  po?: PORow;
+  items?: POItemRow[];
+  [key: string]: unknown;
+}
+
+/** Extract an error message from an unknown catch value */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return 'Unknown error';
+}
+
+/** PO line item — supports both snake_case and camelCase fields */
+interface POItemRow {
+  id?: string;
+  productName?: string;
+  product_name?: string;
+  purchaseOrderId?: string;
+  purchase_order_id?: string;
+  productId?: string;
+  product_id?: string;
+  quantity?: number | string;
+  ordered_quantity?: number | string;
+  unitCost?: number | string;
+  unit_price?: number | string;
+  receivedQuantity?: number | string;
+  received_quantity?: number | string;
+  totalPrice?: number | string;
+  total_price?: number | string;
+  totalCost?: number | string;
+  uomName?: string;
+  uom_name?: string;
+  notes?: string;
+}
+
 // Row component to handle UoM selection per product
 function LineItemRow({
   item,
@@ -59,7 +146,7 @@ function LineItemRow({
   onUpdate: (id: string, field: keyof POLineItem, value: string) => void;
   onRemove: (id: string) => void;
   disabled: boolean;
-  product: any;
+  product: Product | undefined;
 }) {
   // Compute line total
   let lineTotal = new Decimal(0);
@@ -85,8 +172,8 @@ function LineItemRow({
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-600">UOM:</span>
             <UomSelector
-              productId={product?.id}
-              baseCost={product?.costPrice || 0}
+              productId={product?.id ?? ''}
+              baseCost={product ? String(product.costPrice) : '0'}
               selectedUomId={item.selectedUomId}
               disabled={disabled}
               onChange={handleUomChange}
@@ -185,16 +272,16 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
   }, [lineItems]);
 
   // Add line item
-  const addLineItem = (product: any) => {
+  const addLineItem = (product: ProductWithUoms) => {
     // Check if product has UoMs and auto-select the default one
     const productUoms = product.product_uoms || product.productUoms || [];
-    const defaultUom = productUoms.find((u: any) => u.isDefault);
+    const defaultUom = productUoms.find((u: ProductUom) => u.isDefault);
 
     let initialCost = new Decimal(product.costPrice || 0).toFixed(2);
     let selectedUom = null;
 
     // If there's a default UoM with factor > 1, use it and calculate its cost
-    if (defaultUom && parseFloat(defaultUom.conversionFactor) > 1) {
+    if (defaultUom && parseFloat(String(defaultUom.conversionFactor)) > 1) {
       selectedUom = defaultUom.id;
       // Calculate UoM cost: baseCost × conversionFactor
       const uomCost = new Decimal(product.costPrice || 0)
@@ -308,7 +395,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 
           if (item.selectedUomId) {
             // Fetch UoM data to get conversion factor
-            const product = allProducts.find((p: any) => p.id === item.productId);
+            const product = allProducts.find((p: Product) => p.id === item.productId);
             if (product) {
               try {
                 const response = await fetch(`/api/products/${product.id}?includeUoms=true`, {
@@ -318,7 +405,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
                 });
                 const json = await response.json();
                 if (json.success) {
-                  const uom = json.data.uoms?.find((u: any) => u.id === item.selectedUomId);
+                  const uom = json.data.uoms?.find((u: ProductUom) => u.id === item.selectedUomId);
                   if (uom) {
                     // Convert: quantity × conversionFactor = base quantity
                     baseQuantity = parseFloat(convertQtyToBase(item.quantity, uom.conversionFactor));
@@ -346,9 +433,9 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
       alert('Purchase Order created successfully!');
       onSuccess();
       onClose();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('PO creation error:', error);
-      alert(`Failed to create PO: ${error.response?.data?.error || error.message || 'Unknown error'}`);
+      alert(`Failed to create PO: ${getErrorMessage(error)}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -408,7 +495,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 
           {/* Product Search/Add */}
           <ProductSearchBar
-            onProductSelect={addLineItem}
+            onProductSelect={(p) => addLineItem(p as unknown as ProductWithUoms)}
             disabled={isSubmitting}
             className="mb-4"
           />
@@ -428,7 +515,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {lineItems.map((item) => {
-                    const product = allProducts.find((p: any) => p.id === item.productId);
+                    const product = allProducts.find((p: Product) => p.id === item.productId);
                     return (
                       <LineItemRow
                         key={item.id}
@@ -466,7 +553,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         {/* Form Actions */}
         <ModalFooter
           onCancel={onClose}
-          onSubmit={() => handleSubmit(new Event('submit') as any)}
+          onSubmit={() => handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)}
           submitLabel="Create Purchase Order"
           isSubmitting={isSubmitting}
           submitDisabled={lineItems.length === 0}
@@ -480,7 +567,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 export default function PurchaseOrdersPage() {
   // State
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedPO, setSelectedPO] = useState<any>(null);
+  const [selectedPO, setSelectedPO] = useState<PORow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<POStatus | 'ALL'>('ALL');
   const [selectedSupplier, setSelectedSupplier] = useState('');
@@ -502,7 +589,7 @@ export default function PurchaseOrdersPage() {
   const deletePOMutation = useDeletePurchaseOrder();
 
   // Helper to map snake_case DB columns to camelCase
-  const mapPOFromDB = (po: any) => ({
+  const mapPOFromDB = (po: PORow): PORow => ({
     ...po,
     poNumber: po.order_number || po.poNumber,
     orderDate: po.order_date || po.orderDate,
@@ -525,7 +612,7 @@ export default function PurchaseOrdersPage() {
     // Map and deduplicate by ID to prevent duplicate display
     const mapped = rawData.map(mapPOFromDB);
     const seen = new Set();
-    return mapped.filter((po: any) => {
+    return mapped.filter((po: PORow) => {
       if (seen.has(po.id)) {
         console.warn(`Duplicate PO detected and filtered: ${po.id}`);
         return false;
@@ -544,14 +631,14 @@ export default function PurchaseOrdersPage() {
   // Calculate statistics - exclude cancelled POs from totals
   const stats = useMemo(() => {
     const total = purchaseOrders.length;
-    const draft = purchaseOrders.filter((po: any) => po.status === 'DRAFT').length;
-    const pending = purchaseOrders.filter((po: any) => po.status === 'PENDING').length;
-    const completed = purchaseOrders.filter((po: any) => po.status === 'COMPLETED').length;
-    const cancelled = purchaseOrders.filter((po: any) => po.status === 'CANCELLED').length;
+    const draft = purchaseOrders.filter((po: PORow) => po.status === 'DRAFT').length;
+    const pending = purchaseOrders.filter((po: PORow) => po.status === 'PENDING').length;
+    const completed = purchaseOrders.filter((po: PORow) => po.status === 'COMPLETED').length;
+    const cancelled = purchaseOrders.filter((po: PORow) => po.status === 'CANCELLED').length;
 
     // Only include non-cancelled POs in total value calculation
     let totalValue = new Decimal(0);
-    purchaseOrders.forEach((po: any) => {
+    purchaseOrders.forEach((po: PORow) => {
       if (po.status !== 'CANCELLED') {
         totalValue = totalValue.plus(new Decimal(po.totalAmount || 0));
       }
@@ -569,12 +656,13 @@ export default function PurchaseOrdersPage() {
 
       // Then automatically send to supplier (creates goods receipt)
       const result = await sendToSupplierMutation.mutateAsync(id);
-      const grNumber = result?.data?.goodsReceipt?.receiptNumber || 'GR-XXXX-XXXX';
+      const resultData = result?.data as SendToSupplierData | undefined;
+      const grNumber = resultData?.goodsReceipt?.receiptNumber || 'GR-XXXX-XXXX';
 
       alert(`✅ Purchase Order submitted and sent to supplier!\n\nGoods Receipt ${grNumber} created for receiving department.\n\nNext: Receiving department will confirm quantities when delivery arrives.`);
       refetch();
-    } catch (error: any) {
-      alert(`❌ Failed to submit PO: ${error.response?.data?.error || error.message}`);
+    } catch (error: unknown) {
+      alert(`❌ Failed to submit PO: ${getErrorMessage(error)}`);
     }
   };
 
@@ -595,13 +683,13 @@ export default function PurchaseOrdersPage() {
     try {
       await deletePOMutation.mutateAsync(id);
       alert('Purchase order deleted');
-    } catch (error) {
-      alert('Failed to delete purchase order');
+    } catch (error: unknown) {
+      alert(`Failed to delete purchase order: ${getErrorMessage(error)}`);
     }
   };
 
   // Handle view details - fetch full PO with items
-  const handleViewDetails = async (po: any) => {
+  const handleViewDetails = async (po: PORow) => {
     try {
       // Fetch full PO details with items
       const response = await api.purchaseOrders.getById(po.id);
@@ -612,7 +700,7 @@ export default function PurchaseOrdersPage() {
       console.log('API Data:', apiData);
 
       // Extract the nested data object
-      const responseData = apiData.data || apiData;
+      const responseData = (apiData.data || apiData) as PODetailData;
       console.log('Response Data:', responseData);
 
       const poData = responseData.po || responseData;
@@ -622,7 +710,7 @@ export default function PurchaseOrdersPage() {
       console.log('Items:', items);
 
       // Map items from snake_case to camelCase
-      const mappedItems = items.map((item: any) => ({
+      const mappedItems = items.map((item: POItemRow) => ({
         ...item,
         productName: item.product_name || item.productName,
         purchaseOrderId: item.purchase_order_id || item.purchaseOrderId,
@@ -634,7 +722,7 @@ export default function PurchaseOrdersPage() {
       }));
 
       const finalPO = {
-        ...mapPOFromDB(poData),
+        ...mapPOFromDB(poData as PORow),
         items: mappedItems
       };
 
@@ -642,12 +730,10 @@ export default function PurchaseOrdersPage() {
 
       setSelectedPO(finalPO);
       setShowDetailsModal(true);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading PO details:', error);
-      console.error('Error response:', error.response);
-      console.error('Error data:', error.response?.data);
 
-      const errorMessage = error.response?.data?.error || error.message || 'Unknown error';
+      const errorMessage = getErrorMessage(error);
       alert(`Failed to load purchase order details: ${errorMessage}`);
     }
   };
@@ -669,11 +755,12 @@ export default function PurchaseOrdersPage() {
   };
 
   // Export Purchase Order to PDF
-  const handleExportPDF = (po: any) => {
+  const handleExportPDF = (po: PORow | null) => {
     if (!po) return;
 
     const doc = new jsPDF();
-    const formatCurrencyPDF = (amount: number) => `UGX ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // Use shared formatCurrency for PDF — consistent UGX formatting
+    const formatCurrencyPDF = (amount: number) => formatCurrency(amount, true, 2);
 
     // Title
     doc.setFontSize(20);
@@ -738,7 +825,7 @@ export default function PurchaseOrdersPage() {
     yPos += 5;
 
     if (po.items && po.items.length > 0) {
-      const itemTableData = po.items.map((item: any) => {
+      const itemTableData = po.items.map((item: POItemRow) => {
         const quantity = new Decimal(item.quantity || 0);
         const unitCost = new Decimal(item.unitCost || 0);
         const total = quantity.times(unitCost);
@@ -768,7 +855,7 @@ export default function PurchaseOrdersPage() {
         margin: { left: 15, right: 15 }
       });
 
-      yPos = (doc as any).lastAutoTable.finalY + 10;
+      yPos = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
     } else {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
@@ -913,7 +1000,7 @@ export default function PurchaseOrdersPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">All Suppliers</option>
-              {suppliers.map((supplier: any) => (
+              {suppliers.map((supplier: Supplier) => (
                 <option key={supplier.id} value={supplier.id}>
                   {supplier.name}
                 </option>
@@ -982,7 +1069,7 @@ export default function PurchaseOrdersPage() {
                   </td>
                 </tr>
               ) : (
-                purchaseOrders.map((po: any) => {
+                purchaseOrders.map((po: PORow) => {
                   const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
                   const totalAmount = new Decimal(po.totalAmount || 0);
 
@@ -1053,22 +1140,13 @@ export default function PurchaseOrdersPage() {
                             </>
                           )}
                           {(po.status === 'PENDING' || po.status === 'APPROVED') && (
-                            <>
-                              <button
-                                onClick={() => handleCancelPO(po.id)}
-                                className="text-orange-600 hover:text-orange-900"
-                                title="Cancel PO"
-                              >
-                                ❌
-                              </button>
-                              <button
-                                onClick={() => handleDeletePO(po.id)}
-                                className="text-red-600 hover:text-red-900"
-                                title="Delete PO"
-                              >
-                                🗑️
-                              </button>
-                            </>
+                            <button
+                              onClick={() => handleCancelPO(po.id)}
+                              className="text-orange-600 hover:text-orange-900"
+                              title="Cancel PO"
+                            >
+                              ❌
+                            </button>
                           )}
                           <button
                             onClick={() => handleViewDetails(po)}
@@ -1218,7 +1296,7 @@ export default function PurchaseOrdersPage() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {selectedPO.items && selectedPO.items.length > 0 ? (
-                        selectedPO.items.map((item: any, index: number) => {
+                        selectedPO.items.map((item: POItemRow, index: number) => {
                           const quantity = new Decimal(item.quantity || 0);
                           const unitCost = new Decimal(item.unitCost || 0);
                           const total = quantity.times(unitCost);

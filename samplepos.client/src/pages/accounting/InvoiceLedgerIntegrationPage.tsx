@@ -147,11 +147,11 @@ const InvoiceLedgerIntegrationPage = () => {
         try {
             const response = await api.sales.list();
             if (response.data.success) {
-                setSales(response.data.data || []);
+                setSales((response.data.data || []) as Sale[]);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error loading sales:', error);
-            toast.error(`Failed to load sales: ${error.message}`);
+            toast.error(`Failed to load sales: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
@@ -159,9 +159,9 @@ const InvoiceLedgerIntegrationPage = () => {
         try {
             const response = await api.customers.list();
             if (response.data.success) {
-                setCustomers(response.data.data || []);
+                setCustomers((response.data.data || []) as Customer[]);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error loading customers:', error);
         }
     };
@@ -170,9 +170,9 @@ const InvoiceLedgerIntegrationPage = () => {
         try {
             const response = await api.products.list();
             if (response.data.success) {
-                setProducts(response.data.data || []);
+                setProducts((response.data.data || []) as Product[]);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error loading products:', error);
         }
     };
@@ -182,7 +182,7 @@ const InvoiceLedgerIntegrationPage = () => {
             // This would need to be implemented in the C# API
             // For now, we'll show empty state
             setTransactions([]);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error loading transactions:', error);
         }
     };
@@ -217,9 +217,9 @@ const InvoiceLedgerIntegrationPage = () => {
             } else {
                 throw new Error(response.data.error || 'Failed to integrate invoice');
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error integrating invoice:', error);
-            toast.error(`Failed to integrate invoice: ${error.message}`);
+            toast.error(`Failed to integrate invoice: ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
             setIntegrating(false);
         }
@@ -240,9 +240,9 @@ const InvoiceLedgerIntegrationPage = () => {
             } else {
                 throw new Error(response.data.error || 'Failed to record payment');
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error recording payment:', error);
-            toast.error(`Failed to record payment: ${error.message}`);
+            toast.error(`Failed to record payment: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 

@@ -23,9 +23,14 @@ export const CreateSupplierSchema = z.object({
   phone: z.string().max(50).optional(),
   address: z.string().optional(),
   paymentTerms: z.string().max(50).default('NET30'),
+  creditLimit: z.number().nonnegative().optional(),
+  taxId: z.string().max(100).optional(),
+  notes: z.string().optional(),
 }).strict();
 
-export const UpdateSupplierSchema = CreateSupplierSchema.partial();
+export const UpdateSupplierSchema = CreateSupplierSchema.extend({
+  isActive: z.boolean().optional(),
+}).partial();
 
 export type Supplier = z.infer<typeof SupplierSchema>;
 export type CreateSupplier = z.infer<typeof CreateSupplierSchema>;

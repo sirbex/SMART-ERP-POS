@@ -6,6 +6,132 @@ import Decimal from 'decimal.js';
 import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
 
+// ── Local type definitions ──────────────────────────────────────────────
+
+/** Normalized sale row for UI display (financial fields are numbers) */
+interface SaleRow {
+  id: string;
+  saleNumber: string;
+  customerId?: string;
+  customerName?: string;
+  cashierId?: string;
+  cashierName?: string;
+  soldById?: string;
+  soldByName?: string;
+  saleDate: string;
+  subtotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  totalCost: number;
+  profit: number;
+  profitMargin: number;
+  amountPaid: number;
+  paymentReceived: number;
+  changeAmount: number;
+  paymentMethod: string;
+  status: string;
+  notes?: string;
+  createdAt: string;
+  items?: SaleItemRow[];
+  paymentLines?: PaymentLine[];
+  /** Raw snake_case aliases used defensively in modal */
+  discount_amount?: number | string;
+  tax_amount?: number | string;
+}
+
+interface SaleItemRow {
+  id?: string;
+  productId?: string;
+  productName?: string;
+  product_name?: string;
+  quantity: number | string;
+  qty?: number | string;
+  unitPrice?: number | string;
+  unit_price?: number | string;
+  price?: number | string;
+  subtotal?: number | string;
+  discountAmount?: number | string;
+  taxAmount?: number | string;
+  totalAmount?: number | string;
+  batchNumber?: string;
+}
+
+interface PaymentLine {
+  paymentMethod?: string;
+  payment_method?: string;
+  amount: number | string;
+  reference?: string;
+}
+
+interface CustomerGroup {
+  customerId: string;
+  customerName: string;
+  salesCount: number;
+  totalAmount: Decimal;
+  totalProfit: Decimal;
+  sales: SaleRow[];
+}
+
+interface UserGroup {
+  userId: string;
+  userName: string;
+  salesCount: number;
+  totalAmount: Decimal;
+  totalProfit: Decimal;
+  sales: SaleRow[];
+}
+
+interface SalesSummary {
+  totalAmount?: string;
+  total_amount?: string;
+  totalProfit?: string;
+  total_profit?: string;
+  totalSales?: string;
+  total_sales?: string;
+  byPaymentMethod?: Record<string, string | undefined>[];
+  by_payment_method?: Record<string, string | undefined>[];
+}
+
+interface NormalizedPaymentMethod {
+  paymentMethod: string;
+  count: number;
+  totalAmount: number;
+}
+
+interface SalesTableProps {
+  sales: SaleRow[];
+  onSelectSale: (sale: SaleRow) => void;
+  pagination?: { page: number; totalPages: number; total: number; limit: number };
+  currentPage: number;
+  onPageChange: (page: number) => void;
+}
+
+interface CustomerSalesViewProps {
+  customers: CustomerGroup[];
+  onSelectSale: (sale: SaleRow) => void;
+}
+
+interface UserSalesViewProps {
+  users: UserGroup[];
+  onSelectSale: (sale: SaleRow) => void;
+}
+
+interface CreditSalesViewProps {
+  sales: SaleRow[];
+  onSelectSale: (sale: SaleRow) => void;
+}
+
+interface PartialPaymentsViewProps {
+  sales: SaleRow[];
+  onSelectSale: (sale: SaleRow) => void;
+}
+
+interface SaleDetailModalProps {
+  sale: SaleRow;
+  onClose: () => void;
+}
+
 type TabType = 'overview' | 'by-customer' | 'by-user' | 'invoices' | 'payments' | 'all-sales';
 type DateFilterType = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month' | 'last-month' | 'custom';
 
@@ -137,7 +263,7 @@ export default function SalesPage() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSale, setSelectedSale] = useState<any>(null);
+  const [selectedSale, setSelectedSale] = useState<SaleRow | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const limit = 50;
@@ -184,59 +310,59 @@ export default function SalesPage() {
 
   // Normalize daily trend data (convert snake_case from DB to camelCase)
   const dailyTrend = useMemo(() => {
-    return dailyTrendRaw.map((day: any) => ({
-      period: day.period,
-      date: day.period, // Use period as date
-      count: parseInt(day.transaction_count || '0'),
-      totalAmount: parseFloat(day.total_revenue || '0'),
-      totalCost: parseFloat(day.total_cost || '0'),
-      totalProfit: parseFloat(day.total_profit || '0'),
-      avgTransaction: parseFloat(day.avg_transaction_value || '0'),
+    return dailyTrendRaw.map((day: Record<string, unknown>) => ({
+      period: String(day.period || ''),
+      date: String(day.period || ''), // Use period as date
+      count: Number(day.transaction_count || 0),
+      totalAmount: Number(day.total_revenue || 0),
+      totalCost: Number(day.total_cost || 0),
+      totalProfit: Number(day.total_profit || 0),
+      avgTransaction: Number(day.avg_transaction_value || 0),
     }));
   }, [dailyTrendRaw]);
 
   // Normalize sales data (convert snake_case from DB to camelCase for UI)
   // Following MANDATORY TypeScript Standards from copilot-instructions.md
-  const normalizedSales = useMemo(() => {
-    return sales.map((sale: any) => {
+  const normalizedSales: SaleRow[] = useMemo(() => {
+    return (sales as Record<string, unknown>[]).map((sale) => {
       // Parse all financial fields as numbers (PostgreSQL numeric returns as string)
-      const totalAmount = parseFloat(sale.total_amount || sale.totalAmount || '0');
-      const totalCost = parseFloat(sale.total_cost || sale.totalCost || '0');
-      const profit = parseFloat(sale.profit || '0');
-      const subtotal = parseFloat(sale.subtotal || '0');
-      const taxAmount = parseFloat(sale.tax_amount || sale.taxAmount || '0');
+      const totalAmount = Number(sale.total_amount || sale.totalAmount || 0);
+      const totalCost = Number(sale.total_cost || sale.totalCost || 0);
+      const profit = Number(sale.profit || 0);
+      const subtotal = Number(sale.subtotal || 0);
+      const taxAmount = Number(sale.tax_amount || sale.taxAmount || 0);
 
       return {
         // Dual ID System (per instructions)
-        id: sale.id, // UUID - keep internal
-        saleNumber: sale.sale_number || sale.saleNumber, // Business ID - display everywhere
+        id: String(sale.id || ''), // UUID - keep internal
+        saleNumber: String(sale.sale_number || sale.saleNumber || ''), // Business ID - display everywhere
 
         // Relations
-        customerId: sale.customer_id || sale.customerId,
-        customerName: sale.customer_name || sale.customerName,
-        cashierId: sale.cashier_id || sale.cashierId,
-        cashierName: sale.cashier_name || sale.cashierName,
-        soldById: sale.cashier_id || sale.cashierId, // Alias
-        soldByName: sale.cashier_name || sale.cashierName, // Alias
+        customerId: String(sale.customer_id || sale.customerId || ''),
+        customerName: String(sale.customer_name || sale.customerName || ''),
+        cashierId: String(sale.cashier_id || sale.cashierId || ''),
+        cashierName: String(sale.cashier_name || sale.cashierName || ''),
+        soldById: String(sale.cashier_id || sale.cashierId || ''), // Alias
+        soldByName: String(sale.cashier_name || sale.cashierName || ''), // Alias
 
         // Financial fields (always numbers, never strings)
         totalAmount,
         totalCost,
         profit,
-        profitMargin: parseFloat(sale.profit_margin || sale.profitMargin || '0'),
+        profitMargin: Number(sale.profit_margin || sale.profitMargin || 0),
         subtotal,
         taxAmount,
-        discountAmount: parseFloat(sale.discount_amount || sale.discountAmount || '0'),
-        amountPaid: parseFloat(sale.amount_paid || sale.amountPaid || '0'),
-        paymentReceived: parseFloat(sale.amount_paid || sale.amountPaid || sale.paymentReceived || '0'),
-        changeAmount: parseFloat(sale.change_amount || sale.changeAmount || '0'),
+        discountAmount: Number(sale.discount_amount || sale.discountAmount || 0),
+        amountPaid: Number(sale.amount_paid || sale.amountPaid || 0),
+        paymentReceived: Number(sale.amount_paid || sale.amountPaid || sale.paymentReceived || 0),
+        changeAmount: Number(sale.change_amount || sale.changeAmount || 0),
 
         // Metadata
-        saleDate: sale.sale_date || sale.saleDate,
-        createdAt: sale.created_at || sale.createdAt,
-        paymentMethod: (sale.payment_method || sale.paymentMethod) as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT',
-        status: (sale.status || 'COMPLETED') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
-        notes: sale.notes,
+        saleDate: String(sale.sale_date || sale.saleDate || ''),
+        createdAt: String(sale.created_at || sale.createdAt || ''),
+        paymentMethod: String(sale.payment_method || sale.paymentMethod || '') as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT',
+        status: String(sale.status || 'COMPLETED') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
+        notes: sale.notes ? String(sale.notes) : undefined,
       };
     });
   }, [sales]);
@@ -250,23 +376,23 @@ export default function SalesPage() {
         salesCount: 0,
         avgSale: 0,
         profitMargin: 0,
-        paymentMethods: []
+        paymentMethods: [] as NormalizedPaymentMethod[]
       };
     }
 
-    const summaryObj = summary as any;
-    const totalSales = parseFloat(summaryObj.totalAmount || summaryObj.total_amount || '0');
-    const totalProfit = parseFloat(summaryObj.totalProfit || summaryObj.total_profit || '0');
-    const salesCount = parseInt(summaryObj.totalSales || summaryObj.total_sales || '0');
+    const summaryObj = summary as SalesSummary;
+    const totalSales = Number(summaryObj.totalAmount || summaryObj.total_amount || 0);
+    const totalProfit = Number(summaryObj.totalProfit || summaryObj.total_profit || 0);
+    const salesCount = Number(summaryObj.totalSales || summaryObj.total_sales || 0);
     const avgSale = salesCount > 0 ? totalSales / salesCount : 0;
     const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
 
     // Normalize payment methods data
     const paymentMethodsRaw = summaryObj.byPaymentMethod || summaryObj.by_payment_method || [];
-    const paymentMethods = Array.isArray(paymentMethodsRaw) ? paymentMethodsRaw.map((pm: any) => ({
-      paymentMethod: pm.payment_method || pm.paymentMethod,
-      count: parseInt(pm.count || '0'),
-      totalAmount: parseFloat(pm.total_amount || pm.totalAmount || '0')
+    const paymentMethods: NormalizedPaymentMethod[] = Array.isArray(paymentMethodsRaw) ? paymentMethodsRaw.map((pm) => ({
+      paymentMethod: String(pm.payment_method || pm.paymentMethod || ''),
+      count: Number(pm.count || 0),
+      totalAmount: Number(pm.total_amount || pm.totalAmount || 0)
     })) : [];
 
     return {
@@ -281,7 +407,7 @@ export default function SalesPage() {
 
   // Filter sales
   const filteredSales = useMemo(() => {
-    return normalizedSales.filter((sale: any) => {
+    return normalizedSales.filter((sale) => {
       const matchesPayment = paymentMethodFilter === 'ALL' || sale.paymentMethod === paymentMethodFilter;
       const matchesStatus = statusFilter === 'ALL' || sale.status === statusFilter;
       const matchesSearch = !searchQuery ||
@@ -294,9 +420,9 @@ export default function SalesPage() {
 
   // Group sales by customer
   const salesByCustomer = useMemo(() => {
-    const grouped = new Map<string, any>();
+    const grouped = new Map<string, CustomerGroup>();
 
-    filteredSales.forEach((sale: any) => {
+    filteredSales.forEach((sale) => {
       const customerId = sale.customerId || 'WALK-IN';
       const customerName = sale.customerName || 'Walk-in Customer';
 
@@ -325,9 +451,9 @@ export default function SalesPage() {
 
   // Group sales by user
   const salesByUser = useMemo(() => {
-    const grouped = new Map<string, any>();
+    const grouped = new Map<string, UserGroup>();
 
-    filteredSales.forEach((sale: any) => {
+    filteredSales.forEach((sale) => {
       const userId = sale.cashierId || sale.soldById || 'UNKNOWN';
       const userName = sale.cashierName || sale.soldByName || 'Unknown User';
 
@@ -356,12 +482,12 @@ export default function SalesPage() {
 
   // Get credit/invoice sales
   const creditSales = useMemo(() => {
-    return filteredSales.filter((sale: any) => sale.paymentMethod === 'CREDIT');
+    return filteredSales.filter((sale) => sale.paymentMethod === 'CREDIT');
   }, [filteredSales]);
 
   // Calculate partial payments
   const partialPayments = useMemo(() => {
-    return creditSales.filter((sale: any) => {
+    return creditSales.filter((sale) => {
       const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
       const total = new Decimal(sale.totalAmount || 0);
       return paid.greaterThan(0) && paid.lessThan(total);
@@ -611,7 +737,7 @@ export default function SalesPage() {
                       <h3 className="text-lg font-semibold text-gray-900 mb-4">Payment Methods Breakdown</h3>
                       {kpis.paymentMethods.length > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                          {kpis.paymentMethods.map((pm: any) => (
+                          {kpis.paymentMethods.map((pm) => (
                             <div key={pm.paymentMethod} className="bg-gray-50 rounded-lg p-4">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-sm font-medium text-gray-700">{pm.paymentMethod}</span>
@@ -651,7 +777,7 @@ export default function SalesPage() {
                               </tr>
                             </thead>
                             <tbody className="text-sm">
-                              {dailyTrend.slice(0, 10).map((day: any, idx: number) => (
+                              {dailyTrend.slice(0, 10).map((day, idx) => (
                                 <tr key={idx} className="border-t border-gray-200">
                                   <td className="py-2">{day.period}</td>
                                   <td className="py-2 text-right">{day.count}</td>
@@ -760,7 +886,7 @@ export default function SalesPage() {
 }
 
 // Sales Table Component
-function SalesTable({ sales, onSelectSale, pagination, currentPage, onPageChange }: any) {
+function SalesTable({ sales, onSelectSale, pagination, currentPage, onPageChange }: SalesTableProps) {
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto">
@@ -780,7 +906,7 @@ function SalesTable({ sales, onSelectSale, pagination, currentPage, onPageChange
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale: any) => (
+            {sales.map((sale: SaleRow) => (
               <tr key={sale.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onSelectSale(sale)}>
                 <td className="px-4 py-3 text-sm font-medium text-blue-600">{sale.saleNumber || sale.id.slice(0, 8)}</td>
                 <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(sale.saleDate)}</td>
@@ -849,7 +975,7 @@ function SalesTable({ sales, onSelectSale, pagination, currentPage, onPageChange
 }
 
 // Customer Sales View Component
-function CustomerSalesView({ customers, onSelectSale }: any) {
+function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) {
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
 
   return (
@@ -858,7 +984,7 @@ function CustomerSalesView({ customers, onSelectSale }: any) {
         Showing sales for {customers.length} customers
       </div>
 
-      {customers.map((customer: any) => (
+      {customers.map((customer: CustomerGroup) => (
         <div key={customer.customerId} className="border border-gray-200 rounded-lg overflow-hidden">
           <button
             onClick={() => setExpandedCustomer(expandedCustomer === customer.customerId ? null : customer.customerId)}
@@ -892,7 +1018,7 @@ function CustomerSalesView({ customers, onSelectSale }: any) {
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {customer.sales.map((sale: any) => (
+                  {customer.sales.map((sale: SaleRow) => (
                     <tr key={sale.id} className="border-t border-gray-100">
                       <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                       <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
@@ -923,7 +1049,7 @@ function CustomerSalesView({ customers, onSelectSale }: any) {
 }
 
 // User Sales View Component  
-function UserSalesView({ users, onSelectSale }: any) {
+function UserSalesView({ users, onSelectSale }: UserSalesViewProps) {
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
 
   return (
@@ -932,7 +1058,7 @@ function UserSalesView({ users, onSelectSale }: any) {
         Performance for {users.length} cashiers
       </div>
 
-      {users.map((user: any) => (
+      {users.map((user: UserGroup) => (
         <div key={user.userId} className="border border-gray-200 rounded-lg overflow-hidden">
           <button
             onClick={() => setExpandedUser(expandedUser === user.userId ? null : user.userId)}
@@ -966,7 +1092,7 @@ function UserSalesView({ users, onSelectSale }: any) {
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {user.sales.map((sale: any) => (
+                  {user.sales.map((sale: SaleRow) => (
                     <tr key={sale.id} className="border-t border-gray-100">
                       <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                       <td className="py-2">{sale.customerName || 'Walk-in'}</td>
@@ -993,9 +1119,9 @@ function UserSalesView({ users, onSelectSale }: any) {
 }
 
 // Credit Sales View Component
-function CreditSalesView({ sales, onSelectSale }: any) {
+function CreditSalesView({ sales, onSelectSale }: CreditSalesViewProps) {
   const totalOutstanding = useMemo(() => {
-    return sales.reduce((sum: Decimal, sale: any) => {
+    return sales.reduce((sum: Decimal, sale: SaleRow) => {
       const total = new Decimal(sale.totalAmount || 0);
       const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
       return sum.plus(total.minus(paid));
@@ -1031,7 +1157,7 @@ function CreditSalesView({ sales, onSelectSale }: any) {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale: any) => {
+            {sales.map((sale: SaleRow) => {
               const total = new Decimal(sale.totalAmount || 0);
               const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
               const outstanding = total.minus(paid);
@@ -1063,7 +1189,7 @@ function CreditSalesView({ sales, onSelectSale }: any) {
 }
 
 // Partial Payments View Component
-function PartialPaymentsView({ sales, onSelectSale }: any) {
+function PartialPaymentsView({ sales, onSelectSale }: PartialPaymentsViewProps) {
   return (
     <div className="space-y-4">
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -1087,7 +1213,7 @@ function PartialPaymentsView({ sales, onSelectSale }: any) {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale: any) => {
+            {sales.map((sale: SaleRow) => {
               const total = new Decimal(sale.totalAmount || 0);
               const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
               const balance = total.minus(paid);
@@ -1130,8 +1256,8 @@ function PartialPaymentsView({ sales, onSelectSale }: any) {
 }
 
 // Sale Detail Modal Component with improved accessibility and design
-function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) {
-  const [saleDetails, setSaleDetails] = useState<any>(null);
+function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
+  const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -1166,12 +1292,12 @@ function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) 
       try {
         const response = await api.sales.getById(sale.id);
         if (response.data.success) {
-          setSaleDetails(response.data.data);
+          setSaleDetails(response.data.data as SaleRow);
         } else {
           setError('Failed to load sale details');
         }
-      } catch (err: any) {
-        setError(err.message || 'Failed to load sale details');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load sale details');
       } finally {
         setLoadingDetails(false);
       }
@@ -1253,16 +1379,16 @@ function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) 
                 <div className="text-xl font-bold text-purple-900">{items.length}</div>
               </div>
               <div className={`rounded-lg p-4 border ${sale.status === 'COMPLETED' ? 'bg-green-50 border-green-100' :
-                  sale.status === 'PENDING' ? 'bg-yellow-50 border-yellow-100' :
-                    'bg-red-50 border-red-100'
+                sale.status === 'PENDING' ? 'bg-yellow-50 border-yellow-100' :
+                  'bg-red-50 border-red-100'
                 }`}>
                 <div className={`text-sm font-medium ${sale.status === 'COMPLETED' ? 'text-green-600' :
-                    sale.status === 'PENDING' ? 'text-yellow-600' :
-                      'text-red-600'
+                  sale.status === 'PENDING' ? 'text-yellow-600' :
+                    'text-red-600'
                   }`}>Status</div>
                 <div className={`text-xl font-bold ${sale.status === 'COMPLETED' ? 'text-green-900' :
-                    sale.status === 'PENDING' ? 'text-yellow-900' :
-                      'text-red-900'
+                  sale.status === 'PENDING' ? 'text-yellow-900' :
+                    'text-red-900'
                   }`}>{sale.status}</div>
               </div>
             </div>
@@ -1282,10 +1408,10 @@ function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) 
                 <div className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">Payment Method</span>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH' ? 'bg-green-100 text-green-800' :
-                      sale.paymentMethod === 'CARD' ? 'bg-blue-100 text-blue-800' :
-                        sale.paymentMethod === 'MOBILE_MONEY' ? 'bg-purple-100 text-purple-800' :
-                          sale.paymentMethod === 'CREDIT' ? 'bg-orange-100 text-orange-800' :
-                            'bg-gray-100 text-gray-800'
+                    sale.paymentMethod === 'CARD' ? 'bg-blue-100 text-blue-800' :
+                      sale.paymentMethod === 'MOBILE_MONEY' ? 'bg-purple-100 text-purple-800' :
+                        sale.paymentMethod === 'CREDIT' ? 'bg-orange-100 text-orange-800' :
+                          'bg-gray-100 text-gray-800'
                     }`}>
                     {sale.paymentMethod}
                   </span>
@@ -1301,17 +1427,17 @@ function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) 
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <div className="text-sm font-medium text-gray-900 mb-2">Split Payment Breakdown:</div>
                   <div className="grid grid-cols-2 gap-2">
-                    {saleDetails.paymentLines.map((payment: any, idx: number) => (
+                    {saleDetails.paymentLines.map((payment: PaymentLine, idx: number) => (
                       <div key={idx} className="flex items-center justify-between gap-2 p-2 bg-gray-50 rounded-lg">
                         <span className={`px-2 py-1 text-xs font-semibold rounded-full ${(payment.paymentMethod || payment.payment_method) === 'CASH' ? 'bg-green-100 text-green-800' :
-                            (payment.paymentMethod || payment.payment_method) === 'CARD' ? 'bg-blue-100 text-blue-800' :
-                              (payment.paymentMethod || payment.payment_method) === 'MOBILE_MONEY' ? 'bg-purple-100 text-purple-800' :
-                                (payment.paymentMethod || payment.payment_method) === 'CREDIT' ? 'bg-orange-100 text-orange-800' :
-                                  'bg-gray-100 text-gray-800'
+                          (payment.paymentMethod || payment.payment_method) === 'CARD' ? 'bg-blue-100 text-blue-800' :
+                            (payment.paymentMethod || payment.payment_method) === 'MOBILE_MONEY' ? 'bg-purple-100 text-purple-800' :
+                              (payment.paymentMethod || payment.payment_method) === 'CREDIT' ? 'bg-orange-100 text-orange-800' :
+                                'bg-gray-100 text-gray-800'
                           }`}>
                           {payment.paymentMethod || payment.payment_method}
                         </span>
-                        <span className="text-sm font-medium">{formatCurrency(parseFloat(payment.amount || 0))}</span>
+                        <span className="text-sm font-medium">{formatCurrency(parseFloat(String(payment.amount || 0)))}</span>
                       </div>
                     ))}
                   </div>
@@ -1356,9 +1482,9 @@ function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) 
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {items.map((item: any, index: number) => {
-                        const quantity = parseFloat(item.quantity || item.qty || 0);
-                        const unitPrice = parseFloat(item.unitPrice || item.unit_price || item.price || 0);
+                      {items.map((item: SaleItemRow, index: number) => {
+                        const quantity = parseFloat(String(item.quantity || item.qty || 0));
+                        const unitPrice = parseFloat(String(item.unitPrice || item.unit_price || item.price || 0));
                         const subtotal = new Decimal(quantity).times(unitPrice).toNumber();
 
                         return (
@@ -1391,7 +1517,7 @@ function SaleDetailModal({ sale, onClose }: { sale: any; onClose: () => void }) 
                   <span>Subtotal:</span>
                   <span className="font-medium">{formatCurrency(sale.subtotal || sale.totalAmount || 0)}</span>
                 </div>
-                {(sale.discountAmount || sale.discount_amount) && parseFloat(sale.discountAmount || sale.discount_amount || '0') > 0 && (
+                {(sale.discountAmount || sale.discount_amount) && parseFloat(String(sale.discountAmount || sale.discount_amount || '0')) > 0 && (
                   <div className="flex justify-between text-red-600">
                     <span>Discount:</span>
                     <span className="font-medium">-{formatCurrency(sale.discountAmount || sale.discount_amount || 0)}</span>

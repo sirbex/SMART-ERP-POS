@@ -7,12 +7,13 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getErrorMessage } from '../utils/api';
+import type { CreateProductInput, UpdateProductInput } from '../types/inputs';
 
 // Query Keys
 export const productKeys = {
   all: ['products'] as const,
   lists: () => [...productKeys.all, 'list'] as const,
-  list: (filters: Record<string, any>) => [...productKeys.lists(), filters] as const,
+  list: (filters: Record<string, unknown>) => [...productKeys.lists(), filters] as const,
   details: () => [...productKeys.all, 'detail'] as const,
   detail: (id: string) => [...productKeys.details(), id] as const,
 };
@@ -54,7 +55,7 @@ export function useCreateProduct() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: CreateProductInput) => {
       const response = await api.products.create(data);
       return response.data;
     },
@@ -75,7 +76,7 @@ export function useUpdateProduct() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+    mutationFn: async ({ id, data }: { id: string; data: UpdateProductInput }) => {
       const response = await api.products.update(id, data);
       return response.data;
     },

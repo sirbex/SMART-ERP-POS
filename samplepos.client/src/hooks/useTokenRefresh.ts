@@ -39,7 +39,7 @@ export interface TokenResponse {
         id: string;
         email: string;
         fullName: string;
-        role: string;
+        role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
     };
 }
 

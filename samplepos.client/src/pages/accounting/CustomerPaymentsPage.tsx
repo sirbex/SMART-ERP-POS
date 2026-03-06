@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { AxiosError } from 'axios';
 import { Plus, Search, DollarSign, FileText, ArrowUpRight } from 'lucide-react';
 import {
     Button,
@@ -137,9 +138,12 @@ const CustomerPaymentsPage: React.FC = () => {
                 resetForm();
                 loadPayments();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error creating payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to record payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to record payment');
         }
     };
 
@@ -184,9 +188,12 @@ const CustomerPaymentsPage: React.FC = () => {
                 setIsAllocationModalOpen(false);
                 loadPayments();
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error auto-allocating payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to allocate payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to allocate payment');
         } finally {
             setAllocatingPayment(false);
         }
@@ -220,9 +227,12 @@ const CustomerPaymentsPage: React.FC = () => {
             toast.success('Payment allocated successfully');
             setIsAllocationModalOpen(false);
             loadPayments();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error allocating payment:', error);
-            toast.error(error.response?.data?.error || 'Failed to allocate payment');
+            const errMsg = error instanceof AxiosError
+                ? (error.response?.data as { error?: string })?.error
+                : error instanceof Error ? error.message : undefined;
+            toast.error(errMsg || 'Failed to allocate payment');
         } finally {
             setAllocatingPayment(false);
         }
@@ -327,7 +337,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                 <div className="col-span-3">
                                     <Select
                                         value={formData.paymentMethod}
-                                        onValueChange={(value: any) => setFormData(prev => ({ ...prev, paymentMethod: value }))}
+                                        onValueChange={(value: string) => setFormData(prev => ({ ...prev, paymentMethod: value as CreateCustomerPaymentRequest['paymentMethod'] }))}
                                     >
                                         <SelectTrigger>
                                             <SelectValue />

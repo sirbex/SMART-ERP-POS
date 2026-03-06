@@ -30,7 +30,7 @@ export interface Document {
   uploadedBy: string;
   uploadedAt: string;
   tags: string[];
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   isActive: boolean;
 }
 

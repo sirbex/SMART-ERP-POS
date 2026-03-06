@@ -37,7 +37,149 @@ import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/ca
 import { useCurrentSession } from '../../hooks/useCashRegister';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
 import quotationApi from '../../api/quotations';
-import type { QuickQuoteItemInput } from '@shared/types/quotation';
+import type { QuickQuoteItemInput, Quotation, QuotationDetail, QuotationItem } from '@shared/types/quotation';
+import type { OfflineSaleData } from '../../hooks/useOfflineMode';
+import type { CreateSaleInput } from '../../types/inputs';
+
+// ── Discount applied from DiscountDialog (before manager approval extension) ──
+interface AppliedDiscount {
+  type: DiscountType;
+  scope: DiscountScope;
+  value: number;
+  reason: string;
+  lineItemIndex?: number;
+}
+
+/** Pending discount stored while awaiting manager approval */
+interface PendingDiscount extends AppliedDiscount {
+  amount: number;
+  originalAmount: number;
+  discountPercentage: number;
+}
+
+/** Shape of a hold-order line item returned by the API */
+interface HoldLineItem {
+  productId: string | null;
+  productName: string;
+  productSku: string;
+  uomName: string;
+  uomId?: string;
+  quantity: number;
+  unitPrice: number;
+  costPrice: number;
+  subtotal: number;
+  isTaxable: boolean;
+  taxRate: number;
+  discountAmount?: number;
+  productType?: 'inventory' | 'consumable' | 'service';
+}
+
+/** Shape of a hold order returned by the API */
+interface HoldOrder {
+  id: string;
+  holdNumber: string;
+  customerName?: string;
+  items: HoldLineItem[];
+}
+
+/** Sale record returned from the create-sale API */
+interface SaleRecord {
+  id: string;
+  saleNumber: string;
+  sale_number?: string;
+  saleDate?: string;
+  sale_date?: string;
+  totalAmount?: number;
+  total_amount?: number;
+}
+
+/** Sync-result shape returned by syncPendingSales */
+interface SyncResult {
+  offlineId: string;
+  success: boolean;
+  error?: string;
+}
+
+/** Product search result (mirrors POSProductSearch's ProductSearchResult) */
+interface POSProductInput {
+  id: string;
+  name: string;
+  sku: string;
+  barcode?: string;
+  unitOfMeasure?: string;
+  costPrice?: number;
+  averageCost?: number;
+  average_cost?: number;
+  costingMethod?: string;
+  pricingFormula?: string;
+  isTaxable?: boolean;
+  taxRate?: number;
+  uoms?: Array<{
+    uomId: string;
+    name: string;
+    symbol?: string;
+    conversionFactor: number;
+    price: number;
+    cost: number;
+    isDefault: boolean;
+  }>;
+  selectedUom?: {
+    uomId: string;
+    name: string;
+    symbol?: string;
+    conversionFactor: number;
+    price: number;
+    cost: number;
+    isDefault: boolean;
+  };
+  selectedUomId?: string;
+  quantity?: number;
+  autoUpdatePrice?: boolean;
+  reorderLevel?: number;
+  trackExpiry?: boolean;
+}
+
+/** Axios-like error shape for typed catch blocks */
+interface AxiosLikeError {
+  response?: {
+    data?: { error?: string; message?: string; success?: boolean };
+    status?: number;
+  };
+  message?: string;
+  code?: string;
+}
+
+/** Extract error message from unknown catch value */
+function getAxiosErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  const axErr = error as AxiosLikeError;
+  return axErr?.response?.data?.error || axErr?.message || fallback;
+}
+
+/** Shape of invoice settings data from API */
+interface InvoiceSettingsData {
+  companyName?: string;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+}
+
+/** Shape of deposit balance data from API */
+interface DepositBalanceData {
+  availableBalance: number;
+}
+
+/** Shape of hold create response data from API */
+interface HoldCreateResponseData {
+  holdNumber: string;
+  id: string;
+}
+
+/** Shape of sale creation response from API */
+interface SaleCreateResponseData {
+  sale: SaleRecord;
+  items: unknown[];
+  paymentLines: unknown[];
+}
 
 // Line item type
 interface LineItem {
@@ -125,7 +267,7 @@ export default function POSPage() {
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
-  const [lastSale, setLastSale] = useState<any | null>(null);
+  const [lastSale, setLastSale] = useState<SaleRecord | null>(null);
   const [autoCreateInvoice, setAutoCreateInvoice] = useState(true); // Toggle for auto-invoice on credit sales
   const [invoiceCreated, setInvoiceCreated] = useState(false);
   const [saleDate, setSaleDate] = useState<string>(''); // For backdated sales (empty = current date)
@@ -141,7 +283,7 @@ export default function POSPage() {
     reason: string;
   } | null>(null);
   const [showManagerApprovalDialog, setShowManagerApprovalDialog] = useState(false);
-  const [pendingDiscount, setPendingDiscount] = useState<any>(null);
+  const [pendingDiscount, setPendingDiscount] = useState<PendingDiscount | null>(null);
 
   // Hold/Resume Cart state
   const [showResumeDialog, setShowResumeDialog] = useState(false);
@@ -158,7 +300,7 @@ export default function POSPage() {
   const [showSaveQuoteDialog, setShowSaveQuoteDialog] = useState(false);
   const [showLoadQuoteDialog, setShowLoadQuoteDialog] = useState(false);
   const [showQuoteSuccessDialog, setShowQuoteSuccessDialog] = useState(false);
-  const [savedQuoteData, setSavedQuoteData] = useState<any>(null);
+  const [savedQuoteData, setSavedQuoteData] = useState<QuotationDetail | null>(null);
   const [loadedQuoteId, setLoadedQuoteId] = useState<string | null>(null); // Track loaded quote for auto-conversion
   const [quoteCustomerName, setQuoteCustomerName] = useState('');
   const [quoteCustomerPhone, setQuoteCustomerPhone] = useState('');
@@ -167,7 +309,7 @@ export default function POSPage() {
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [quotesCount, setQuotesCount] = useState(0);
   const [quoteSearchTerm, setQuoteSearchTerm] = useState('');
-  const [availableQuotes, setAvailableQuotes] = useState<any[]>([]);
+  const [availableQuotes, setAvailableQuotes] = useState<Quotation[]>([]);
   const [isLoadingQuotes, setIsLoadingQuotes] = useState(false);
 
   // Get current user from localStorage (recompute when localStorage changes)
@@ -218,10 +360,11 @@ export default function POSPage() {
       try {
         const response = await api.settings.getInvoiceSettings();
         if (response.data?.success && response.data?.data) {
+          const settingsData = response.data.data as InvoiceSettingsData;
           setInvoiceSettings({
-            companyName: response.data.data.companyName,
-            companyAddress: response.data.data.companyAddress,
-            companyPhone: response.data.data.companyPhone,
+            companyName: settingsData.companyName,
+            companyAddress: settingsData.companyAddress,
+            companyPhone: settingsData.companyPhone,
           });
         }
       } catch (error) {
@@ -236,8 +379,8 @@ export default function POSPage() {
     if (isOnline && pendingCount > 0) {
       syncPendingSales(apiClient).then(results => {
         if (results && results.length > 0) {
-          const synced = results.filter((r: any) => r.success).length;
-          const failed = results.filter((r: any) => !r.success).length;
+          const synced = results.filter((r: SyncResult) => r.success).length;
+          const failed = results.filter((r: SyncResult) => !r.success).length;
           if (synced > 0) {
             toast.success(`Synced ${synced} offline sale(s) successfully!`);
           }
@@ -302,7 +445,8 @@ export default function POSPage() {
         try {
           const response = await api.hold.list();
           if (response.data.success) {
-            const count = response.data.data?.length || 0;
+            const holdList = response.data.data as HoldOrder[] | undefined;
+            const count = holdList?.length || 0;
             setHeldOrdersCount(count);
           }
         } catch (error) {
@@ -333,7 +477,8 @@ export default function POSPage() {
       try {
         const response = await api.hold.list();
         if (response.data.success) {
-          setHeldOrdersCount(response.data.data?.length || 0);
+          const holdList = response.data.data as HoldOrder[] | undefined;
+          setHeldOrdersCount(holdList?.length || 0);
         }
       } catch (error) {
         console.error('Failed to refresh held orders count:', error);
@@ -355,14 +500,15 @@ export default function POSPage() {
         const response = await api.deposits.getCustomerBalance(selectedCustomer.id);
         console.log('📦 Deposit balance response:', response.data);
         if (response.data?.success && response.data?.data) {
-          setCustomerDepositBalance(response.data.data.availableBalance || 0);
-          console.log('💰 Customer deposit balance:', response.data.data.availableBalance);
+          const depositData = response.data.data as DepositBalanceData;
+          setCustomerDepositBalance(depositData.availableBalance || 0);
+          console.log('💰 Customer deposit balance:', depositData.availableBalance);
         } else {
           console.warn('⚠️ Deposit balance response was not successful:', response.data);
           setCustomerDepositBalance(0);
         }
-      } catch (error: any) {
-        console.error('❌ Failed to fetch customer deposit balance:', error?.response?.data || error?.message || error);
+      } catch (error: unknown) {
+        console.error('❌ Failed to fetch customer deposit balance:', getAxiosErrorMessage(error, 'Unknown error'));
         setCustomerDepositBalance(0);
       } finally {
         setIsLoadingDeposits(false);
@@ -429,8 +575,11 @@ export default function POSPage() {
       }
 
       // Add product to cart with correct UoM
-      const productWithUom = {
-        ...match.product,
+      const productWithUom: POSProductInput = {
+        id: match.product.id,
+        name: match.product.name,
+        sku: '',
+        barcode: match.product.barcode || undefined,
         selectedUomId: match.uom.id,
         quantity: match.defaultQuantity,
       };
@@ -648,9 +797,10 @@ export default function POSPage() {
   }, [showUomModal, uomModalItemIndex]);
 
   // Add product handler
-  const handleAddProduct = useCallback((product: any) => {
+  const handleAddProduct = useCallback((product: POSProductInput) => {
     // Use computeUomPrices to get correct price/cost for selected UoM
-    const uom = product.selectedUom || product.uoms?.find((u: any) => u.isDefault) || product.uoms?.[0];
+    type UomEntry = NonNullable<POSProductInput['uoms']>[number];
+    const uom: UomEntry | undefined = product.selectedUom || product.uoms?.find((u: UomEntry) => u.isDefault) || product.uoms?.[0];
 
     // Handle case where UoM already has price/cost (from inventory API)
     if (uom && uom.price && uom.cost) {
@@ -684,7 +834,7 @@ export default function POSPage() {
 
     const pricing = computeUomPrices({
       baseCost: baseCost,
-      units: [uom || { factor: 1, name: product.unitOfMeasure || 'PIECE' }],
+      units: [uom ? { factor: uom.conversionFactor, name: uom.name, uomId: uom.uomId } : { factor: 1, name: product.unitOfMeasure || 'PIECE' }],
       defaultMultiplier: 1.2,
       currencyDecimals: 0,
       roundingMode: 'ROUND_HALF_UP',
@@ -857,7 +1007,7 @@ export default function POSPage() {
     applyDiscountToCart(discount, discountAmount);
   };
 
-  const applyDiscountToCart = (discount: any, discountAmount: number) => {
+  const applyDiscountToCart = (discount: AppliedDiscount, discountAmount: number) => {
     if (discount.scope === 'CART') {
       // Validate discount doesn't exceed subtotal
       if (discountAmount > subtotal) {
@@ -875,9 +1025,10 @@ export default function POSPage() {
       toast.success(`Cart discount applied: ${discountAmount.toLocaleString()} UGX`);
     } else if (discount.lineItemIndex !== undefined) {
       // Apply line-item discount
+      const lineIdx = discount.lineItemIndex;
       setItems(prev => {
         const updated = [...prev];
-        const item = updated[discount.lineItemIndex];
+        const item = updated[lineIdx];
 
         // Validate discount doesn't exceed line item subtotal
         if (discountAmount > item.subtotal) {
@@ -885,7 +1036,7 @@ export default function POSPage() {
           return prev;
         }
 
-        updated[discount.lineItemIndex] = {
+        updated[lineIdx] = {
           ...item,
           discount: {
             type: discount.type,
@@ -949,7 +1100,8 @@ export default function POSPage() {
     try {
       // CRITICAL: Always check response.data.success (not response.success)
       // Axios wraps backend response: { data: { success, data, message } }
-      const response = await api.hold.create({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Hold API accepts richer payload than CreateHoldOrderInput
+      const response = await (api.hold.create as unknown as (data: Record<string, unknown>) => ReturnType<typeof api.hold.create>)({
         userId: activeUser.id,
         terminalId: 'TERMINAL-001',
         customerName: selectedCustomer?.name,
@@ -982,7 +1134,8 @@ export default function POSPage() {
       });
 
       if (response.data.success) {
-        toast.success(`Cart held: ${response.data.data.holdNumber}`);
+        const holdData = response.data.data as HoldCreateResponseData;
+        toast.success(`Cart held: ${holdData.holdNumber}`);
 
         // Clear cart immediately - ready for next transaction
         setItems([]);
@@ -1000,9 +1153,9 @@ export default function POSPage() {
         // Focus back on search for next transaction
         setTimeout(() => productSearchRef.current?.focusSearch(), 100);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Hold cart error:', error);
-      toast.error(error.response?.data?.error || 'Failed to hold cart');
+      toast.error(getAxiosErrorMessage(error, 'Failed to hold cart'));
     }
   };
 
@@ -1017,15 +1170,15 @@ export default function POSPage() {
         return;
       }
 
-      const hold = response.data.data;
+      const hold = response.data.data as HoldOrder;
 
       // Restore cart from hold
-      setItems(hold.items.map((item: any) => {
+      setItems(hold.items.map((item: HoldLineItem) => {
         // Service/custom items have null productId — generate a unique custom ID
         const isServiceItem = !item.productId || item.productType === 'service';
         const itemId = isServiceItem
           ? `custom_svc_${item.productName?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-          : item.productId;
+          : item.productId!;
 
         return {
           id: itemId,
@@ -1040,8 +1193,10 @@ export default function POSPage() {
           isTaxable: item.isTaxable,
           taxRate: item.taxRate,
           selectedUomId: item.uomId,
-          discount: item.discountAmount,
-          productType: item.productType || 'inventory',
+          discount: typeof item.discountAmount === 'number' && item.discountAmount > 0
+            ? { type: 'FIXED_AMOUNT' as DiscountType, value: item.discountAmount, amount: item.discountAmount, reason: '' }
+            : undefined,
+          productType: (item.productType || 'inventory') as 'inventory' | 'consumable' | 'service',
         };
       }));
 
@@ -1060,9 +1215,9 @@ export default function POSPage() {
 
       toast.success(`Resumed hold: ${hold.holdNumber}`);
       setShowResumeDialog(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Resume hold error:', error);
-      toast.error(error.response?.data?.error || 'Failed to resume hold');
+      toast.error(getAxiosErrorMessage(error, 'Failed to resume hold'));
     }
   };
 
@@ -1151,9 +1306,9 @@ export default function POSPage() {
 
       // Update quotes count
       setQuotesCount(prev => prev + 1);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Save quote error:', error);
-      toast.error(error.response?.data?.error || 'Failed to save quote');
+      toast.error(getAxiosErrorMessage(error, 'Failed to save quote'));
     } finally {
       setIsSavingQuote(false);
     }
@@ -1195,7 +1350,7 @@ export default function POSPage() {
   };
 
   // Load quote to cart
-  const handleLoadQuoteToCart = async (quoteData: any) => {
+  const handleLoadQuoteToCart = async (quoteData: QuotationDetail) => {
     try {
       if (items.length > 0) {
         const confirmed = window.confirm('This will replace current cart items. Continue?');
@@ -1219,28 +1374,27 @@ export default function POSPage() {
       setCartDiscount(null);
 
       // Load quote items into cart
-      const cartItems: LineItem[] = itemsToLoad.map((item: any) => {
+      const cartItems: LineItem[] = itemsToLoad.map((item: QuotationItem) => {
         // Service/custom items have null productId — generate a unique custom ID
         const isServiceItem = !item.productId || item.itemType === 'service' || item.itemType === 'custom';
         const itemId = isServiceItem
           ? `custom_svc_${item.description?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-          : item.productId;
+          : item.productId!;
         const productType = isServiceItem ? 'service' : (item.productType || 'inventory');
 
         return {
           id: itemId,
           name: item.description,
           sku: item.sku || '',
-          unitPrice: parseFloat(item.unitPrice),
-          costPrice: item.unitCost ? parseFloat(item.unitCost) : 0,
-          quantity: parseFloat(item.quantity),
-          subtotal: parseFloat(item.lineTotal || item.quantity * item.unitPrice),
+          unitPrice: Number(item.unitPrice),
+          costPrice: item.unitCost ? Number(item.unitCost) : 0,
+          quantity: Number(item.quantity),
+          subtotal: Number(item.lineTotal || item.quantity * item.unitPrice),
           isTaxable: item.isTaxable,
           taxRate: item.taxRate || 18,
           uom: item.uomName || 'unit',
           selectedUomId: item.uomId || undefined, // Convert null to undefined for Zod validation
           productType: productType as LineItem['productType'],
-          quantityInStock: 1000, // Placeholder
           marginPct: 0,
         };
       });
@@ -1260,27 +1414,18 @@ export default function POSPage() {
       // Set customer if available - ENHANCED with better error handling and logging
       if (quotation.customerId) {
         console.log('📋 Loading customer for quote:', { customerId: quotation.customerId, customerName: quotation.customerName });
-        // Fetch customer details
+        // Fetch customer details using shared api client
         try {
-          const customerResponse = await fetch(`http://localhost:3001/api/customers/${quotation.customerId}`, {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
-            },
-          });
-          if (customerResponse.ok) {
-            const customerData = await customerResponse.json();
-            if (customerData.success && customerData.data) {
-              console.log('✅ Customer data loaded successfully:', customerData.data);
-              setSelectedCustomer(customerData.data);
-              // Also store in localStorage for persistence across refreshes
-              localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(customerData.data));
-            } else {
-              console.warn('❌ Invalid customer data response:', customerData);
-              toast.error('Failed to load customer data for quote');
-            }
+          const customerResponse = await api.customers.getById(quotation.customerId);
+          const customerData = customerResponse.data;
+          if (customerData.success && customerData.data) {
+            console.log('✅ Customer data loaded successfully:', customerData.data);
+            setSelectedCustomer(customerData.data as Customer);
+            // Also store in localStorage for persistence across refreshes
+            localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(customerData.data));
           } else {
-            console.error('❌ Failed to fetch customer data:', customerResponse.status);
-            toast.error(`Failed to load customer (${customerResponse.status})`);
+            console.warn('❌ Invalid customer data response:', customerData);
+            toast.error('Failed to load customer data for quote');
           }
         } catch (err) {
           console.error('❌ Exception loading customer:', err);
@@ -1289,9 +1434,9 @@ export default function POSPage() {
       } else if (quotation.customerName) {
         // If we have customer name but no ID, create a basic customer object
         console.log('📋 Using customer name from quote:', quotation.customerName);
-        const basicCustomer = {
+        const basicCustomer: Customer = {
           id: 'temp_' + Date.now(),
-          name: quotation.customerName,
+          name: quotation.customerName || 'Walk-in Customer',
           email: quotation.customerEmail || '',
           phone: quotation.customerPhone || '',
           balance: 0,
@@ -1811,10 +1956,10 @@ export default function POSPage() {
     // If offline, save to queue with local stock validation
     if (!isOnline) {
       try {
-        const offlineId = saveSaleOffline(saleData as any);
+        const offlineId = saveSaleOffline(saleData as unknown as OfflineSaleData);
         toast.success(`Sale saved offline (${offlineId}). Will sync when online.`);
-      } catch (stockErr: any) {
-        toast.error(stockErr.message || 'Insufficient stock for offline sale');
+      } catch (stockErr: unknown) {
+        toast.error(stockErr instanceof Error ? stockErr.message : 'Insufficient stock for offline sale');
         isSubmittingRef.current = false;
         setIsProcessingSale(false);
         return;
@@ -1838,14 +1983,14 @@ export default function POSPage() {
 
     // API call
     try {
-      const response = await createSale.mutateAsync(saleData);
+      const response = await createSale.mutateAsync(saleData as unknown as CreateSaleInput);
       console.log('✅ Sale creation successful:', response);
 
       // Response structure: response.data = {success, data, message}
       // The actual result is in response.data.data = { sale, items, paymentLines }
       if (response.data?.success && response.data?.data) {
         console.log('✅ Inside success block');
-        const result = response.data.data; // { sale, items, paymentLines }
+        const result = response.data.data as SaleCreateResponseData; // { sale, items, paymentLines }
         const sale = result.sale; // Extract the sale object
         console.log('Sale data:', sale);
         console.log('Full result:', result);
@@ -1858,7 +2003,7 @@ export default function POSPage() {
 
         // Prepare receipt data with payment lines (use finalPaymentLines which includes auto-credit)
         setReceiptData({
-          saleNumber: sale.saleNumber || sale.sale_number,
+          saleNumber: sale.saleNumber || sale.sale_number || '',
           saleDate: sale.saleDate || sale.sale_date || new Date().toISOString(),
           subtotal,
           discountAmount: cartDiscountAmount,
@@ -1938,12 +2083,13 @@ export default function POSPage() {
         // Refresh held orders count in case any were affected
         refreshHeldOrdersCount();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Sale creation error:', error);
-      console.error('Error response:', error.response?.data);
+      const axErr = error as AxiosLikeError;
+      console.error('Error response:', axErr.response?.data);
 
-      const errorMsg = error.response?.data?.error || error.message || 'Unknown error';
-      const statusCode = error.response?.status;
+      const errorMsg = axErr.response?.data?.error || axErr.message || 'Unknown error';
+      const statusCode = axErr.response?.status;
 
       let userMessage = '❌ Sale Creation Failed\n\n';
 
@@ -1955,9 +2101,9 @@ export default function POSPage() {
         userMessage += `🔍 Not Found\n${errorMsg}\n\n💡 This may indicate:\n• Product was deleted\n• Customer was deleted\n• Database connection issue`;
       } else if (statusCode === 409) {
         userMessage += `⚠️ Conflict\n${errorMsg}\n\n💡 This may indicate:\n• Duplicate sale number\n• Inventory already sold\n• Please try again`;
-      } else if (statusCode === 500 || statusCode >= 500) {
+      } else if (statusCode && (statusCode === 500 || statusCode >= 500)) {
         userMessage += `🔧 Server Error\n${errorMsg}\n\n💡 Server is having issues:\n• Sale was NOT saved\n• Please try again\n• If offline, sale will sync when online\n• Contact support if persists`;
-      } else if (error.code === 'ERR_NETWORK' || !navigator.onLine) {
+      } else if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
         userMessage += `📡 Network Error\n\nNo internet connection detected.\n\n💡 Options:\n• Check your internet connection\n• Sale will be saved offline\n• It will sync when connection restored\n\nDon't worry - no data is lost!`;
       } else {
         userMessage += `${errorMsg}\n\n💡 What to do:\n• Try the sale again\n• Check all entered information\n• Contact support if error repeats`;
@@ -2762,8 +2908,27 @@ export default function POSPage() {
 
               {/* Dynamic Action Button: Add Payment or Complete Sale */}
               {remainingBalance > 0.01 ? (
-                // Show "Complete Sale & Create Invoice" when customer selected with remaining balance
-                selectedCustomer ? (
+                // When user has entered an amount, ALWAYS show "Add Payment" button
+                // This fixes the bug where deposit/card/mobile payments couldn't be added
+                // when a customer was selected (the button showed disabled "Complete & Invoice" instead)
+                (paymentAmount && parseFloat(paymentAmount) > 0) ? (
+                  <POSButton
+                    variant="primary"
+                    onClick={handleAddPayment}
+                    disabled={!paymentAmount || parseFloat(paymentAmount) <= 0}
+                    className="flex-1 text-sm sm:text-base py-3 sm:py-4"
+                    title="Add payment to reduce remaining balance (or press Enter)"
+                  >
+                    <span className="block sm:hidden">
+                      Add {formatCurrency(parseFloat(paymentAmount) || 0)}
+                    </span>
+                    <span className="hidden sm:block">
+                      Add Payment ({formatCurrency(remainingBalance)} remaining)
+                    </span>
+                  </POSButton>
+                ) : selectedCustomer ? (
+                  // No amount entered, customer selected — show "Complete Sale & Create Invoice"
+                  // This allows completing a sale with remaining balance as credit/invoice
                   <POSButton
                     variant="primary"
                     onClick={() => {
@@ -2785,16 +2950,16 @@ export default function POSPage() {
                     )}
                   </POSButton>
                 ) : (
-                  // Show "Add Payment" when no customer or when user wants to add more payments
+                  // No amount entered, no customer — show disabled "Add Payment"
                   <POSButton
                     variant="primary"
                     onClick={handleAddPayment}
                     disabled={!paymentAmount || parseFloat(paymentAmount) <= 0}
                     className="flex-1 text-sm sm:text-base py-3 sm:py-4"
-                    title="Add payment to reduce remaining balance (or press Enter)"
+                    title="Enter a payment amount first"
                   >
                     <span className="block sm:hidden">
-                      Add {formatCurrency(parseFloat(paymentAmount) || 0)}
+                      Add Payment
                     </span>
                     <span className="hidden sm:block">
                       Add Payment ({formatCurrency(remainingBalance)} remaining)
@@ -3103,19 +3268,19 @@ export default function POSPage() {
                       String(q.quoteNumber ?? '').toLowerCase().includes(quoteSearchTerm.toLowerCase()) ||
                       (q.customerName && String(q.customerName).toLowerCase().includes(quoteSearchTerm.toLowerCase()))
                     )
-                    .map((quote: any) => (
+                    .map((quote: Quotation) => (
                       <button
                         key={quote.id}
-                        onClick={() => handleLoadQuoteToCart({ quotation: quote, items: quote.items || [] })}
+                        onClick={() => handleLoadQuoteToCart({ quotation: quote, items: (quote as Quotation & { items?: QuotationItem[] }).items || [] })}
                         className="w-full p-4 text-left hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <p className="font-semibold text-blue-600">{quote.quoteNumber}</p>
-                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${quote.status === 'DRAFT' ? 'bg-gray-100 text-gray-800' :
-                                quote.status === 'SENT' ? 'bg-blue-100 text-blue-800' :
-                                  quote.status === 'ACCEPTED' ? 'bg-green-100 text-green-800' :
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${(quote.status as string) === 'DRAFT' ? 'bg-gray-100 text-gray-800' :
+                                (quote.status as string) === 'SENT' ? 'bg-blue-100 text-blue-800' :
+                                  (quote.status as string) === 'ACCEPTED' ? 'bg-green-100 text-green-800' :
                                     'bg-gray-100 text-gray-800'
                                 }`}>
                                 {quote.status}
@@ -3130,7 +3295,7 @@ export default function POSPage() {
                           <div className="text-right">
                             <p className="font-bold text-gray-900">{formatCurrency(quote.totalAmount)}</p>
                             <p className="text-xs text-gray-600 mt-1">
-                              {quote.items?.length || 0} items
+                              {(quote as Quotation & { items?: QuotationItem[] }).items?.length || 0} items
                             </p>
                           </div>
                         </div>

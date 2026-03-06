@@ -5,33 +5,45 @@ export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
 
 export interface User {
   id: string;
-  username: string;
   email: string;
-  firstName: string;
-  lastName: string;
+  fullName: string;
   role: UserRole;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  lastLoginAt?: string;
   passwordHash?: string; // Only included in database queries, never in API responses
+  /** @deprecated Use fullName instead - kept for backward compat */
+  username?: string;
+  /** @deprecated Use fullName instead */
+  firstName?: string;
+  /** @deprecated Use fullName instead */
+  lastName?: string;
+  /** @deprecated Not in users table */
+  lastLoginAt?: string;
 }
 
 export interface CreateUserRequest {
-  username: string;
   email: string;
   password: string;
-  firstName: string;
-  lastName: string;
+  fullName: string;
   role: UserRole;
+  /** @deprecated Use fullName */
+  username?: string;
+  /** @deprecated Use fullName */
+  firstName?: string;
+  /** @deprecated Use fullName */
+  lastName?: string;
 }
 
 export interface UpdateUserRequest {
   email?: string;
-  firstName?: string;
-  lastName?: string;
+  fullName?: string;
   role?: UserRole;
   isActive?: boolean;
+  /** @deprecated Use fullName */
+  firstName?: string;
+  /** @deprecated Use fullName */
+  lastName?: string;
 }
 
 export interface ChangePasswordRequest {

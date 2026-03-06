@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Label from '@radix-ui/react-label';
 import * as Switch from '@radix-ui/react-switch';
 import * as RadioGroup from '@radix-ui/react-radio-group';
+import { api } from '../../../services/api';
 
 // Utility function to format dates without timezone conversion
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -41,7 +42,7 @@ interface ValidationError {
   message: string;
 }
 
-const API_BASE = 'http://localhost:3001/api';
+// Removed hardcoded API_BASE — uses shared api client
 
 export default function InvoiceSettingsTab() {
   const queryClient = useQueryClient();
@@ -53,33 +54,10 @@ export default function InvoiceSettingsTab() {
   const { data: settingsData, isLoading, error: fetchError } = useQuery({
     queryKey: ['invoice-settings'],
     queryFn: async () => {
-      const token = localStorage.getItem('auth_token');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      const response = await fetch(`${API_BASE}/settings/invoice`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error('Unauthorized. Please log in again.');
-        }
-        if (response.status === 404) {
-          throw new Error('Settings not found. Database may need initialization.');
-        }
-        throw new Error(`Failed to fetch settings: ${response.statusText}`);
-      }
-
-      const result = await response.json();
+      const { data: result } = await api.get('/settings/invoice');
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch settings');
       }
-
       return result.data as InvoiceSettings;
     },
     retry: 1,
@@ -89,23 +67,8 @@ export default function InvoiceSettingsTab() {
   // Update settings mutation
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<InvoiceSettings>) => {
-      const token = localStorage.getItem('auth_token');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      const response = await fetch(`${API_BASE}/settings/invoice`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
+      const { data: result } = await api.put('/settings/invoice', data);
+      if (!result.success) {
         if (result.details && Array.isArray(result.details)) {
           throw {
             message: result.error || 'Validation failed',
@@ -114,11 +77,6 @@ export default function InvoiceSettingsTab() {
         }
         throw new Error(result.error || 'Failed to update settings');
       }
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to update settings');
-      }
-
       return result.data;
     },
     onSuccess: (data) => {
@@ -128,7 +86,7 @@ export default function InvoiceSettingsTab() {
       setValidationErrors([]);
       setTimeout(() => setSaveStatus('idle'), 3000);
     },
-    onError: (error: any) => {
+    onError: (error: Error & { details?: Array<{ field: string; message: string }>; message?: string }) => {
       setSaveStatus('error');
 
       if (error.details && Array.isArray(error.details)) {

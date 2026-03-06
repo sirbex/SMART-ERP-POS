@@ -123,16 +123,16 @@ export default function InventoryAdjustmentsPage() {
 
     // For now, create mock batches from stock levels
     // In production, this would come from a dedicated batches endpoint
-    return levels.flatMap((level: any) => {
+    return levels.flatMap((level: { product_id: string; product_name: string; sku?: string; total_stock?: string; total_quantity?: string; nearest_expiry?: string | null; average_cost?: string }) => {
       // Mock: Assume single batch per product for simplicity
       return [{
         id: `batch-${level.product_id}`, // Mock batch ID
         product_id: level.product_id,
         product_name: level.product_name,
         batch_number: level.sku || 'MAIN',
-        remaining_quantity: parseFloat(level.total_stock || level.total_quantity || 0),
+        remaining_quantity: parseFloat(String(level.total_stock || level.total_quantity || '0')),
         expiry_date: level.nearest_expiry || null,
-        cost_price: parseFloat(level.average_cost || 0),
+        cost_price: parseFloat(String(level.average_cost || '0')),
         status: 'ACTIVE',
         created_at: new Date().toISOString(),
       }];
@@ -349,7 +349,7 @@ export default function InventoryAdjustmentsPage() {
             </button>
           </div>
           <div className="space-y-2">
-            {recentAdjustments.slice(0, 5).map((adj: any) => (
+            {recentAdjustments.slice(0, 5).map((adj: { id: string; movement_type: string; product_name?: string; quantity?: number; created_at?: string }) => (
               <div key={adj.id} className="flex items-center justify-between text-sm bg-white rounded px-3 py-2">
                 <div className="flex items-center gap-3">
                   <span className={adj.movement_type === 'ADJUSTMENT_IN' ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>

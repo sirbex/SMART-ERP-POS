@@ -5,6 +5,7 @@ import InvoiceSettingsTab from './tabs/InvoiceSettingsTab';
 import UserManagementTab from './tabs/UserManagementTab';
 import SystemSettingsTab from './tabs/SystemSettingsTab';
 import DataManagementTab from './tabs/DataManagementTab';
+import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('invoice');
@@ -54,6 +55,12 @@ export default function SettingsPage() {
               >
                 Data Management
               </Tabs.Trigger>
+              <Tabs.Trigger
+                value="offline"
+                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors"
+              >
+                Offline &amp; Sync
+              </Tabs.Trigger>
             </Tabs.List>
 
             <Tabs.Content value="invoice">
@@ -77,6 +84,10 @@ export default function SettingsPage() {
 
             <Tabs.Content value="data">
               <DataManagementTab />
+            </Tabs.Content>
+
+            <Tabs.Content value="offline">
+              <OfflineSyncStatusPanel />
             </Tabs.Content>
           </Tabs.Root>
         </div>

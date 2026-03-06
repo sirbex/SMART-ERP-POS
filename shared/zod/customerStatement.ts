@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 export const CustomerStatementEntrySchema = z.object({
   date: z.string(), // ISO string
-  type: z.enum(['OPENING', 'INVOICE', 'PAYMENT', 'ADJUSTMENT']),
+  type: z.enum(['OPENING', 'INVOICE', 'PAYMENT', 'ADJUSTMENT', 'DEPOSIT', 'DEPOSIT_APPLIED']),
   reference: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   debit: z.number().nonnegative(), // Increases what customer owes

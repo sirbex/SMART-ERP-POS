@@ -49,7 +49,7 @@ export function ResumeHoldDialog({ isOpen, onClose, onResume }: ResumeHoldDialog
             } else if (response.data?.error) {
                 toast.error(response.data.error);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Failed to load holds:', error);
             toast.error('Failed to load held orders');
         } finally {
@@ -77,7 +77,7 @@ export function ResumeHoldDialog({ isOpen, onClose, onResume }: ResumeHoldDialog
             } else if (response.data?.error) {
                 toast.error(response.data.error);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Failed to delete hold:', error);
             toast.error('Failed to delete hold');
         } finally {

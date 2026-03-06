@@ -91,8 +91,8 @@ export function CloseRegisterDialog({
             alert('Session closed successfully!');
             onOpenChange(false);
             onSuccess?.();
-        } catch (error: any) {
-            alert(`Error: ${error?.message || 'Unknown error'}`);
+        } catch (error: unknown) {
+            alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
             console.error('CloseRegisterDialog: Failed to close session:', error);
         }
     };

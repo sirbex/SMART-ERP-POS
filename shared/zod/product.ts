@@ -12,6 +12,7 @@ export const ProductCoreObject = z.object({
   barcode: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   description: z.string().trim().min(1).max(2000).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   category: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
+  genericName: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   unitOfMeasure: UnitOfMeasureEnum.default('PIECE'),
   conversionFactor: z.number().positive().finite().default(1),
   costPrice: z.number().min(0, 'Cost price must be >= 0').finite().default(0),
@@ -23,10 +24,19 @@ export const ProductCoreObject = z.object({
   autoUpdatePrice: z.boolean().default(false),
   reorderLevel: z.number().min(0).finite().default(0),
   trackExpiry: z.boolean().default(false),
+  minDaysBeforeExpirySale: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),
 });
 
-const pricingRefinement = (data: any, ctx: z.RefinementCtx) => {
+// Refinement type matches both full and partial product shapes
+interface PricingRefinementInput {
+  sellingPrice?: number;
+  costPrice?: number;
+  isTaxable?: boolean;
+  taxRate?: number;
+}
+
+const pricingRefinement = (data: PricingRefinementInput, ctx: z.RefinementCtx) => {
   // BR-PRC-001: Selling must exceed or at least equal cost
   if (
     typeof data.sellingPrice === 'number' &&
@@ -72,6 +82,7 @@ export const ProductSchema = z.object({
   barcode: z.string().optional(),
   description: z.string().optional(),
   category: z.string().optional(),
+  genericName: z.string().optional(),
   unitOfMeasure: UnitOfMeasureEnum,
   conversionFactor: z.number(),
   costPrice: z.number(),
@@ -84,6 +95,7 @@ export const ProductSchema = z.object({
   quantityOnHand: z.number().optional(),
   reorderLevel: z.number(),
   trackExpiry: z.boolean(),
+  minDaysBeforeExpirySale: z.number().optional(),
   isActive: z.boolean(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),

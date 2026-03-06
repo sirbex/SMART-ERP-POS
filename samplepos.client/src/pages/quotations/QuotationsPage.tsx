@@ -246,7 +246,7 @@ export default function QuotationsPage() {
         ) : error ? (
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
             <p className="text-red-800 font-semibold">Failed to load quotations</p>
-            <p className="text-red-600 text-sm mt-2">{(error as any).message}</p>
+            <p className="text-red-600 text-sm mt-2">{(error as Error).message}</p>
             <button
               onClick={() => refetch()}
               className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"

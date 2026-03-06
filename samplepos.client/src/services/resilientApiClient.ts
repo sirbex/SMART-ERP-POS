@@ -14,7 +14,7 @@ import logger from '../utils/logger';
 
 class ResilientApiClient {
     private client: AxiosInstance;
-    private pendingRequests: Map<string, Promise<any>> = new Map();
+    private pendingRequests: Map<string, Promise<unknown>> = new Map();
 
     constructor(baseURL: string) {
         this.client = axios.create({
@@ -104,7 +104,7 @@ class ResilientApiClient {
 
     private normalizeError(error: AxiosError): Error {
         if (error.response?.data && typeof error.response.data === 'object') {
-            const data = error.response.data as any;
+            const data = error.response.data as { error?: string; message?: string };
             return new Error(data.error || data.message || 'An error occurred');
         }
         return new Error(error.message || 'An error occurred');
@@ -142,12 +142,12 @@ class ResilientApiClient {
         return promise;
     }
 
-    async post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    async post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
         const response = await this.client.post<T>(url, data, config);
         return response.data;
     }
 
-    async put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    async put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
         const response = await this.client.put<T>(url, data, config);
         return response.data;
     }

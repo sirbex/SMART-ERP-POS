@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Download } from 'lucide-react';
 import Layout from '../../components/Layout';
-import { DatePicker } from '../../components/ui/date-picker';
+import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
 import { formatCurrency } from '../../utils/currency';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -14,8 +14,11 @@ const formatDisplayDate = (dateString: string | null | undefined): string => {
     return dateString;
 };
 
+type ReportDataValue = string | number | boolean | null | undefined;
+type ReportDataRow = Record<string, ReportDataValue>;
+
 // Dynamic field formatting
-const formatFieldValue = (key: string, value: any): string => {
+const formatFieldValue = (key: string, value: ReportDataValue): string => {
     const lowerKey = key.toLowerCase();
     if (value === null || value === undefined) return '-';
 
@@ -71,7 +74,7 @@ const formatFieldValue = (key: string, value: any): string => {
 };
 
 // Color coding for values
-const getFieldColorClass = (key: string, _value: any): string => {
+const getFieldColorClass = (key: string, _value: unknown): string => {
     const lowerKey = key.toLowerCase();
     if (lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('revenue')) {
         return 'text-green-600 font-semibold';
@@ -134,10 +137,10 @@ const ExpenseReportsPage: React.FC = () => {
     const { isAuthenticated } = useAuth();
     const [selectedReport, setSelectedReport] = useState<ExpenseReportType>('SUMMARY');
     const [dateRange, setDateRange] = useState<DateRange>({
-        startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-        endDate: new Date().toISOString().split('T')[0]
+        startDate: '',
+        endDate: ''
     });
-    const [reportData, setReportData] = useState<any>(null);
+    const [reportData, setReportData] = useState<ReportDataRow | ReportDataRow[] | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -303,7 +306,7 @@ const ExpenseReportsPage: React.FC = () => {
     };
 
     // Render summary cards
-    const renderSummary = (data: any) => {
+    const renderSummary = (data: ReportDataRow) => {
         if (!data || typeof data !== 'object') return null;
 
         return (
@@ -323,7 +326,7 @@ const ExpenseReportsPage: React.FC = () => {
     };
 
     // Render data table
-    const renderTable = (data: any[]) => {
+    const renderTable = (data: ReportDataRow[]) => {
         if (!Array.isArray(data) || data.length === 0) {
             return <div className="text-center py-8 text-gray-500">No data available</div>;
         }
@@ -395,24 +398,13 @@ const ExpenseReportsPage: React.FC = () => {
                 {/* Filters */}
                 <div className="bg-white rounded-lg border shadow-sm p-6">
                     <h2 className="text-lg font-semibold mb-4">Filters</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-                            <DatePicker
-                                value={dateRange.startDate || undefined}
-                                onChange={(date) => setDateRange((prev) => ({ ...prev, startDate: date }))}
-                                placeholder="Select start date"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-                            <DatePicker
-                                value={dateRange.endDate || undefined}
-                                onChange={(date) => setDateRange((prev) => ({ ...prev, endDate: date }))}
-                                placeholder="Select end date"
-                            />
-                        </div>
-                    </div>
+                    <DateRangeFilter
+                        startDate={dateRange.startDate || ''}
+                        endDate={dateRange.endDate || ''}
+                        onStartDateChange={(date) => setDateRange((prev) => ({ ...prev, startDate: date }))}
+                        onEndDateChange={(date) => setDateRange((prev) => ({ ...prev, endDate: date }))}
+                        defaultPreset="THIS_MONTH"
+                    />
                 </div>
 
                 {/* Action Buttons */}

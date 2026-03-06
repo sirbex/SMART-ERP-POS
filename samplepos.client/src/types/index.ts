@@ -63,3 +63,32 @@ export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
 
 // Invoice Types
 export type { Invoice, InvoicePayment, InvoiceStatus } from './invoice';
+
+// Input/Payload Types
+export type {
+  CreateProductInput,
+  UpdateProductInput,
+  CreateCustomerInput,
+  UpdateCustomerInput,
+  CreateSupplierInput,
+  UpdateSupplierInput,
+  CreateSaleInput,
+  CreateSaleItemInput,
+  CreatePurchaseOrderInput,
+  CreatePurchaseOrderItemInput,
+  CreateGoodsReceiptInput,
+  CreateGoodsReceiptItemInput,
+  UpdateGoodsReceiptItemInput,
+  InventoryAdjustmentInput,
+  RecordStockMovementInput,
+  CreateInvoiceInput,
+  RecordInvoicePaymentInput,
+  SplitPaymentInput,
+  RecordCustomerPaymentInput,
+  CreateHoldOrderInput,
+  InvoiceSettingsInput,
+  CreatePOInvoiceInput,
+  RecordPOPaymentInput,
+  SaleListFilters,
+  FilterRecord
+} from './inputs';

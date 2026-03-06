@@ -1,3 +1,5 @@
+import { formatCurrency } from '../../utils/currency';
+
 interface ServiceInfoBannerProps {
     serviceCount: number;
     totalRevenue: number;
@@ -32,7 +34,7 @@ export function ServiceInfoBanner({ serviceCount, totalRevenue, className = '' }
                 in cart (no inventory deduction)
                 {totalRevenue > 0 && (
                     <span className="ml-2 text-blue-600">
-                        • Revenue: {new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX' }).format(totalRevenue)}
+                        • Revenue: {formatCurrency(totalRevenue)}
                     </span>
                 )}
             </div>

@@ -1,11 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
+import type { CreateGoodsReceiptInput, UpdateGoodsReceiptItemInput } from '../types/inputs';
 
 // Query keys
 export const GOODS_RECEIPTS_KEYS = {
   all: ['goods-receipts'] as const,
   lists: () => [...GOODS_RECEIPTS_KEYS.all, 'list'] as const,
-  list: (filters: any) => [...GOODS_RECEIPTS_KEYS.lists(), filters] as const,
+  list: (filters: Record<string, unknown>) => [...GOODS_RECEIPTS_KEYS.lists(), filters] as const,
   details: () => [...GOODS_RECEIPTS_KEYS.all, 'detail'] as const,
   detail: (id: string) => [...GOODS_RECEIPTS_KEYS.details(), id] as const,
 };
@@ -37,7 +38,7 @@ export function useCreateGoodsReceipt() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: any) => api.goodsReceipts.create(data),
+    mutationFn: (data: CreateGoodsReceiptInput) => api.goodsReceipts.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.lists() });
       // Invalidate purchase orders list to refresh status
@@ -66,7 +67,7 @@ export function useUpdateGRItem() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ grId, itemId, data }: { grId: string; itemId: string; data: any }) =>
+    mutationFn: ({ grId, itemId, data }: { grId: string; itemId: string; data: UpdateGoodsReceiptItemInput }) =>
       api.goodsReceipts.updateItem(grId, itemId, data),
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.detail(vars.grId) });

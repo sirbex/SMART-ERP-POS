@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
+import type { CreateSupplierInput, UpdateSupplierInput } from '../types/inputs';
 
 /**
  * Query key factory for suppliers
@@ -11,10 +12,10 @@ import { api } from '../utils/api';
 export const supplierKeys = {
   all: ['suppliers'] as const,
   lists: () => [...supplierKeys.all, 'list'] as const,
-  list: (filters: Record<string, any>) => [...supplierKeys.lists(), filters] as const,
+  list: (filters: Record<string, unknown>) => [...supplierKeys.lists(), filters] as const,
   detail: (id: string) => [...supplierKeys.all, 'detail', id] as const,
   performance: (id: string) => [...supplierKeys.detail(id), 'performance'] as const,
-  orders: (id: string, filters: Record<string, any>) => [...supplierKeys.detail(id), 'orders', filters] as const,
+  orders: (id: string, filters: Record<string, unknown>) => [...supplierKeys.detail(id), 'orders', filters] as const,
   products: (id: string) => [...supplierKeys.detail(id), 'products'] as const,
 };
 
@@ -57,7 +58,7 @@ export function useCreateSupplier() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: CreateSupplierInput) => {
       const response = await api.suppliers.create(data);
       return response.data;
     },
@@ -74,7 +75,7 @@ export function useUpdateSupplier() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+    mutationFn: async ({ id, data }: { id: string; data: UpdateSupplierInput }) => {
       const response = await api.suppliers.update(id, data);
       return response.data;
     },

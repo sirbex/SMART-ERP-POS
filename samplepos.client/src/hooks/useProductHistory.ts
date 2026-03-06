@@ -14,7 +14,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../utils/api';
+import { api, type ApiResponse } from '../utils/api';
 import { productKeys } from './useProducts';
 
 // History Item Types (matching backend enum)
@@ -63,7 +63,7 @@ export interface ProductHistoryItem {
     poUnitPrice?: number;
     qtyVariance?: number;
     costVariance?: number;
-    
+
     // Sale fields
     saleId?: string;
     saleNumber?: string;
@@ -75,7 +75,7 @@ export interface ProductHistoryItem {
     paymentReceived?: number;
     changeAmount?: number;
     totalAmount?: number;
-    
+
     // Stock movement fields
     movementId?: string;
     referenceType?: string;
@@ -117,7 +117,7 @@ export interface ProductHistoryResponse {
 // Query key factory
 export const productHistoryKeys = {
   all: (productId: string) => [...productKeys.detail(productId), 'history'] as const,
-  filtered: (productId: string, filters: ProductHistoryFilters) => 
+  filtered: (productId: string, filters: ProductHistoryFilters) =>
     [...productHistoryKeys.all(productId), filters] as const,
 };
 
@@ -155,14 +155,14 @@ export function useProductHistory(
         endDate: filters.endDate,
         type: filters.type,
       });
-      
+
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to fetch product history');
       }
-      
+
       return {
-        items: response.data.data || [],
-        summary: (response.data as any).summary || {
+        items: (response.data.data ?? []) as ProductHistoryItem[],
+        summary: (response.data as ApiResponse & { summary?: ProductHistorySummary }).summary || {
           totalInQuantity: 0,
           totalOutQuantity: 0,
           netQuantityChange: 0,
@@ -226,7 +226,7 @@ export function isExpiringSoon(expiryDate: string | null | undefined): boolean {
 export function formatHistoryReference(item: ProductHistoryItem): string {
   const ref = item.reference;
   if (!ref) return '';
-  
+
   switch (item.type) {
     case 'GOODS_RECEIPT':
       return `GR ${ref.grNumber}${ref.poNumber ? ` (PO ${ref.poNumber})` : ''}${ref.supplierName ? ` - ${ref.supplierName}` : ''}`;

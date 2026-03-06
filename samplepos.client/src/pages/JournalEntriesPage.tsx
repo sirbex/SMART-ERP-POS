@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, CheckCircle, X } from 'lucide-react';
@@ -119,6 +119,25 @@ interface Account {
     currentBalance: number;
 }
 
+interface JournalEntryListItem {
+    id: string;
+    entryDate: string;
+    entryNumber?: string;
+    reference?: string;
+    narration: string;
+    totalDebit: number;
+    totalCredit: number;
+    status: string;
+}
+
+interface JournalEntryDetailLine {
+    accountCode: string;
+    accountName: string;
+    description?: string;
+    debitAmount?: number;
+    creditAmount?: number;
+}
+
 export default function JournalEntriesPage() {
     const queryClient = useQueryClient();
     const today = new Date();
@@ -141,6 +160,43 @@ export default function JournalEntriesPage() {
             { accountId: '', debitAmount: 0, creditAmount: 0, description: '' }
         ]
     });
+
+    // Check for pre-fill data from Reconciliation page (or any external source)
+    useEffect(() => {
+        const PREFILL_KEY = 'recon_adjust_prefill';
+        const raw = sessionStorage.getItem(PREFILL_KEY);
+        if (raw) {
+            sessionStorage.removeItem(PREFILL_KEY);
+            try {
+                const prefill = JSON.parse(raw) as {
+                    transactionDate?: string;
+                    description?: string;
+                    referenceNumber?: string;
+                    lines?: Array<{
+                        accountId: string;
+                        debitAmount: number;
+                        creditAmount: number;
+                        description: string;
+                    }>;
+                };
+                setForm({
+                    transactionDate: prefill.transactionDate || format(today, 'yyyy-MM-dd'),
+                    description: prefill.description || '',
+                    referenceNumber: prefill.referenceNumber || '',
+                    lines: prefill.lines && prefill.lines.length >= 2
+                        ? prefill.lines
+                        : [
+                            { accountId: '', debitAmount: 0, creditAmount: 0, description: '' },
+                            { accountId: '', debitAmount: 0, creditAmount: 0, description: '' }
+                        ]
+                });
+                setShowCreateModal(true);
+            } catch {
+                // Ignore invalid JSON
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Queries
     const { data: entriesData, isLoading: entriesLoading, refetch } = useQuery({
@@ -168,7 +224,7 @@ export default function JournalEntriesPage() {
             resetForm();
             setError(null);
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err.message);
         }
     });
@@ -182,7 +238,7 @@ export default function JournalEntriesPage() {
             setReverseReason('');
             setError(null);
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err.message);
         }
     });
@@ -312,7 +368,7 @@ export default function JournalEntriesPage() {
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Status</label>
                         <select
                             value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value as any)}
+                            onChange={(e) => setStatusFilter(e.target.value as '' | 'POSTED' | 'REVERSED')}
                             className="w-full px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500"
                             title="Status filter"
                         >
@@ -356,7 +412,7 @@ export default function JournalEntriesPage() {
                             </tr>
                         </thead>
                         <tbody className="divide-y">
-                            {entries.map((entry: any) => (
+                            {entries.map((entry: JournalEntryListItem) => (
                                 <tr key={entry.id} className="hover:bg-gray-50">
                                     <td className="px-6 py-4">{entry.entryDate}</td>
                                     <td className="px-6 py-4 font-mono text-sm">{entry.entryNumber || entry.reference || '-'}</td>
@@ -735,7 +791,7 @@ export default function JournalEntriesPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y">
-                                        {detail.lines?.map((line: any, idx: number) => (
+                                        {detail.lines?.map((line: JournalEntryDetailLine, idx: number) => (
                                             <tr key={idx}>
                                                 <td className="px-4 py-2">{line.accountCode} - {line.accountName}</td>
                                                 <td className="px-4 py-2">{line.description || '-'}</td>
