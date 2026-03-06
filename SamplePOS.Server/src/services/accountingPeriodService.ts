@@ -173,11 +173,11 @@ export class AccountingPeriodService {
                 periodId: row.period_id
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to close accounting period', { year, month, error });
             return {
                 success: false,
-                message: error.message,
+                message: (error instanceof Error ? error.message : String(error)),
                 periodId: null
             };
         }
@@ -224,11 +224,11 @@ export class AccountingPeriodService {
                 periodId: row.period_id
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to reopen accounting period', { year, month, error });
             return {
                 success: false,
-                message: error.message,
+                message: (error instanceof Error ? error.message : String(error)),
                 periodId: null
             };
         }
@@ -309,12 +309,12 @@ export class AccountingPeriodService {
                 periodId: period.id
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query('ROLLBACK');
             logger.error('Failed to lock accounting period', { year, month, error });
             return {
                 success: false,
-                message: error.message,
+                message: (error instanceof Error ? error.message : String(error)),
                 periodId: null
             };
         } finally {
@@ -332,7 +332,7 @@ export class AccountingPeriodService {
                 notes, period_year, period_month, previous_status, new_status
             FROM accounting_period_history
         `;
-        const params: any[] = [];
+        const params: unknown[] = [];
 
         if (periodId) {
             query += ' WHERE period_id = $1';

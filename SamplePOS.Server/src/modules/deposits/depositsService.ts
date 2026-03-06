@@ -7,6 +7,7 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import * as depositsRepository from './depositsRepository.js';
 import { findCustomerById } from '../customers/customerRepository.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 
 // Type for either a Pool or PoolClient - allows reuse in transactions
@@ -343,6 +344,7 @@ async function applyDepositsToSaleWithPool(
 
 /**
  * Reverse all deposit applications for a sale (used when voiding sale)
+ * All reversals are atomic — if one fails, none are committed.
  */
 export async function reverseDepositsForSale(
     pool: Pool,
@@ -350,14 +352,20 @@ export async function reverseDepositsForSale(
 ): Promise<number> {
     const applications = await depositsRepository.getDepositApplicationsBySale(pool, saleId);
 
-    for (const app of applications) {
-        await depositsRepository.reverseDepositApplication(pool, app.id);
-        logger.info('Deposit application reversed', {
-            depositNumber: app.deposit_number,
-            amountReversed: app.amount_applied,
-            saleId
-        });
+    if (applications.length === 0) {
+        return 0;
     }
+
+    await UnitOfWork.run<void>(pool, async (client) => {
+        for (const app of applications) {
+            await depositsRepository.reverseDepositApplicationInTransaction(client, app.id);
+            logger.info('Deposit application reversed', {
+                depositNumber: app.deposit_number,
+                amountReversed: app.amount_applied,
+                saleId
+            });
+        }
+    });
 
     return applications.length;
 }

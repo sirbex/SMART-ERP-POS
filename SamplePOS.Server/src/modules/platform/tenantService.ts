@@ -658,12 +658,14 @@ export const tenantService = {
       { code: '3100', name: 'Retained Earnings', type: 'EQUITY' },
       { code: '4000', name: 'Sales Revenue', type: 'REVENUE' },
       { code: '4100', name: 'Service Revenue', type: 'REVENUE' },
+      { code: '4500', name: 'Delivery Revenue', type: 'REVENUE' },
       { code: '5000', name: 'Cost of Goods Sold', type: 'EXPENSE' },
       { code: '5100', name: 'Purchase Expense', type: 'EXPENSE' },
       { code: '6000', name: 'Operating Expenses', type: 'EXPENSE' },
       { code: '6100', name: 'Salaries Expense', type: 'EXPENSE' },
       { code: '6200', name: 'Rent Expense', type: 'EXPENSE' },
       { code: '6300', name: 'Utilities Expense', type: 'EXPENSE' },
+      { code: '6750', name: 'Delivery Expense', type: 'EXPENSE' },
     ];
 
     for (const a of accounts) {

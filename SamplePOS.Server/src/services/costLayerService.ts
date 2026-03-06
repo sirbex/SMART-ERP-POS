@@ -5,6 +5,7 @@
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
+import { UnitOfWork } from '../db/unitOfWork.js';
 import logger from '../utils/logger.js';
 import type { CostLayer, CreateCostLayer } from '../../../shared/zod/cost-layer.js';
 
@@ -100,21 +101,12 @@ export async function createCostLayer(data: CreateCostLayer, dbPool?: pg.Pool, t
     return;
   }
 
-  // Standalone mode: open own connection and transaction
+  // Standalone mode: use UnitOfWork for transaction management
   const pool = dbPool || globalPool;
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
+  await UnitOfWork.run(pool, async (client) => {
     await _createCostLayerOnClient(client, data);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to create cost layer', { error, data });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -492,26 +484,17 @@ export async function deductFromCostLayers(
     return;
   }
 
-  // Standalone mode: open own connection and transaction
+  // Standalone mode: use UnitOfWork for transaction management
   const pool = dbPool || globalPool;
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
+  await UnitOfWork.run(pool, async (client) => {
     await _deductFromCostLayersOnClient(client, productId, quantity);
-    await client.query('COMMIT');
 
     logger.info('Cost layers deducted (standalone)', {
       productId,
       quantity: quantity.toString(),
     });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to deduct from cost layers', { error, productId, quantity });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -585,7 +568,7 @@ async function _deductFromCostLayersOnClient(
 /**
  * Update product's average_cost based on active cost layers
  */
-export async function updateAverageCost(productId: string, client?: any, dbPool?: pg.Pool): Promise<void> {
+export async function updateAverageCost(productId: string, client?: pg.PoolClient | pg.Pool, dbPool?: pg.Pool): Promise<void> {
   const pool = dbPool || globalPool;
   const queryClient = client || pool;
 

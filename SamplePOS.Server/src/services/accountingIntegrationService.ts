@@ -80,9 +80,9 @@ export class AccountingIntegrationService {
         idempotencyKey: `INVOICE-${data.invoiceId}`
       });
       return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to record invoice', { error: error.message, invoiceId: data.invoiceId });
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      logger.error('Failed to record invoice', { error: (error instanceof Error ? error.message : String(error)), invoiceId: data.invoiceId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -108,9 +108,9 @@ export class AccountingIntegrationService {
         reducesAR: true
       });
       return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to record payment', { error: error.message, paymentId: data.paymentId });
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      logger.error('Failed to record payment', { error: (error instanceof Error ? error.message : String(error)), paymentId: data.paymentId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -134,9 +134,9 @@ export class AccountingIntegrationService {
         customerId: data.customerId
       });
       return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to record sale', { error: error.message, saleId: data.saleId });
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      logger.error('Failed to record sale', { error: (error instanceof Error ? error.message : String(error)), saleId: data.saleId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -159,9 +159,9 @@ export class AccountingIntegrationService {
         supplierName: 'Supplier'
       });
       return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to record goods receipt', { error: error.message, grId: data.grId });
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      logger.error('Failed to record goods receipt', { error: (error instanceof Error ? error.message : String(error)), grId: data.grId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -185,9 +185,9 @@ export class AccountingIntegrationService {
         supplierName: 'Supplier'
       });
       return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to record supplier payment', { error: error.message, paymentId: data.paymentId });
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      logger.error('Failed to record supplier payment', { error: (error instanceof Error ? error.message : String(error)), paymentId: data.paymentId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -203,7 +203,7 @@ export class AccountingIntegrationService {
 
   /**
    * Record delivery charge in accounting
-   * @deprecated Delivery accounting not yet implemented - stub method
+   * Posts journal entry: DR Accounts Receivable, CR Delivery Revenue
    */
   async recordDeliveryCharge(data: {
     deliveryId: string;
@@ -213,18 +213,24 @@ export class AccountingIntegrationService {
     fuelCost: number;
     deliveryDate: string;
   }): Promise<{ success: boolean; error?: string }> {
-    // TODO: Implement delivery fee GL posting when delivery revenue tracking is required
-    // For now, delivery fees are tracked in the delivery table but not posted to GL
-    logger.debug('Delivery charge recording skipped (not yet implemented)', {
-      deliveryId: data.deliveryId,
-      deliveryFee: data.deliveryFee
-    });
-    return { success: true };
+    try {
+      await glEntryService.recordDeliveryChargeToGL({
+        deliveryId: data.deliveryId,
+        deliveryNumber: data.deliveryNumber,
+        deliveryDate: data.deliveryDate,
+        customerId: data.customerId,
+        deliveryFee: data.deliveryFee
+      });
+      return { success: true };
+    } catch (error: unknown) {
+      logger.error('Failed to record delivery charge', { error: (error instanceof Error ? error.message : String(error)), deliveryId: data.deliveryId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+    }
   }
 
   /**
    * Record delivery completion costs in accounting
-   * @deprecated Delivery accounting not yet implemented - stub method
+   * Posts journal entry: DR Delivery Expense, CR Cash
    */
   async recordDeliveryCompleted(data: {
     deliveryId: string;
@@ -235,13 +241,18 @@ export class AccountingIntegrationService {
       totalCost: number;
     };
   }): Promise<{ success: boolean; error?: string }> {
-    // TODO: Implement delivery cost GL posting when delivery cost tracking is required
-    // For now, delivery costs are tracked in the delivery table but not posted to GL
-    logger.debug('Delivery completion recording skipped (not yet implemented)', {
-      deliveryId: data.deliveryId,
-      actualCosts: data.actualCosts
-    });
-    return { success: true };
+    try {
+      await glEntryService.recordDeliveryCompletedToGL({
+        deliveryId: data.deliveryId,
+        deliveryNumber: data.deliveryNumber,
+        completedAt: data.completedAt,
+        totalCost: data.actualCosts.totalCost
+      });
+      return { success: true };
+    } catch (error: unknown) {
+      logger.error('Failed to record delivery completion', { error: (error instanceof Error ? error.message : String(error)), deliveryId: data.deliveryId });
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+    }
   }
 }
 

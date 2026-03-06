@@ -58,13 +58,14 @@ function paymentTermsStringToDays(terms: string): number {
 /**
  * Normalize supplier row from database to convert paymentTerms from number to string
  */
-function normalizeSupplierRow(row: any): Supplier {
-  if (!row) return row;
+function normalizeSupplierRow(row: Record<string, unknown>): Supplier {
+  if (!row) return row as unknown as Supplier;
+  const base = row as unknown as Supplier;
   return {
-    ...row,
+    ...base,
     paymentTerms: typeof row.paymentTerms === 'number'
       ? paymentTermsDaysToString(row.paymentTerms)
-      : row.paymentTerms || 'NET30'
+      : (row.paymentTerms as string) || 'NET30'
   };
 }
 
@@ -223,7 +224,7 @@ export async function update(
   }>
 ): Promise<Supplier | null> {
   const fields: string[] = ['"UpdatedAt" = NOW()'];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramIndex = 1;
 
   if (data.name !== undefined) {

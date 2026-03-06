@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { salesRepository, CreateSaleData, CreateSaleItemData } from './salesRepository.js';
+import { salesRepository, CreateSaleData, CreateSaleItemData, SaleRecord, SaleItemRecord } from './salesRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import { BankingService } from '../../services/bankingService.js';
 import { cashRegisterService } from '../cash-register/index.js';
@@ -9,6 +9,12 @@ import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/bus
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import {
+  batchFetchProducts,
+  batchFetchProductUoms,
+  type ProductBatchRow,
+  type ProductUomRow
+} from '../../db/batchFetch.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -33,7 +39,7 @@ export interface CreateSaleInput {
   discountAmount?: number; // Discount amount applied to sale
   taxAmount?: number; // Tax amount
   totalAmount?: number; // Total amount (can be provided or calculated)
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT' | 'BANK_TRANSFER';
   paymentReceived: number;
   soldBy: string;
   saleDate?: string; // ISO 8601 datetime for backdated sales
@@ -86,10 +92,11 @@ export const salesService = {
     for (const layer of costLayers) {
       if (remainingQty.lessThanOrEqualTo(0)) break;
 
-      const qtyFromLayer = Decimal.min(remainingQty, new Decimal(layer.remaining_quantity));
-      const newQuantity = new Decimal(layer.remaining_quantity).minus(qtyFromLayer).toNumber();
+      const layerRemainingQty = Number(layer.remaining_quantity);
+      const qtyFromLayer = Decimal.min(remainingQty, new Decimal(layerRemainingQty));
+      const newQuantity = new Decimal(layerRemainingQty).minus(qtyFromLayer).toNumber();
 
-      await salesRepository.updateCostLayerQuantity(pool, layer.id, newQuantity);
+      await salesRepository.updateCostLayerQuantity(pool, String(layer.id), newQuantity);
       remainingQty = remainingQty.minus(qtyFromLayer);
     }
   },
@@ -118,12 +125,16 @@ export const salesService = {
    * 
    * Financial Precision: Uses Decimal.js for all calculations
    */
-  async createSale(pool: Pool, input: CreateSaleInput): Promise<any> {
+  async createSale(pool: Pool, input: CreateSaleInput): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines: PaymentLineInput[]; warnings?: string[] }> {
     const client = await pool.connect();
     const warnings: string[] = [];
 
     try {
       await client.query('BEGIN');
+
+      // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
+      // Sales code already creates proper MOV- movements for each batch deduction
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
       // ========== BUSINESS RULE VALIDATIONS ==========
 
@@ -137,7 +148,7 @@ export const salesService = {
           new Decimal(0)
         ).toNumber();
         await SalesBusinessRules.validateCreditSale(
-          client as any,
+          client,
           input.customerId || null,
           totalAmount,
           input.paymentMethod
@@ -156,6 +167,18 @@ export const salesService = {
         quantity: number;
         costingMethod: 'FIFO' | 'AVCO' | 'STANDARD';
       }> = [];
+
+      // ========== BATCH PRE-FETCH (N+1 elimination) ==========
+      // Collect all regular product IDs and fetch in bulk before the per-item loop.
+      // Previously each item triggered 2-3 individual product queries.
+      const regularProductIds = input.items
+        .filter(it => !it.productId?.startsWith('custom_'))
+        .map(it => it.productId);
+
+      const [productsMap, uomsMap] = await Promise.all([
+        batchFetchProducts(client, regularProductIds),
+        batchFetchProductUoms(client, regularProductIds),
+      ]);
 
       for (const item of input.items) {
         // ========== CUSTOM ITEM DETECTION ==========
@@ -197,35 +220,19 @@ export const salesService = {
         const selectedUom = (item.uom || '').trim();
         let baseUnit = 'PIECE';
         try {
-          // Get costing method and selling price
-          const productResult = await client.query(
-            'SELECT costing_method, selling_price FROM products WHERE id = $1',
-            [item.productId]
-          );
-          if (productResult.rows.length === 0) {
+          // Use pre-fetched product data (batch query instead of per-item)
+          const prefetchedProduct = productsMap.get(item.productId);
+          if (!prefetchedProduct) {
             throw new Error(`Product ${item.productId} not found`);
           }
-          // Get base unit from default product_uom
-          const baseUomResult = await client.query(
-            `SELECT u.symbol, pu.conversion_factor
-             FROM product_uoms pu
-             JOIN uoms u ON u.id = pu.uom_id
-             WHERE pu.product_id = $1 AND pu.is_default = true
-             LIMIT 1`,
-            [item.productId]
-          );
-          baseUnit = baseUomResult.rows[0]?.symbol || 'PIECE';
+          // Use pre-fetched UoMs (batch query instead of per-item)
+          const productUoms = uomsMap.get(item.productId) || [];
+          const defaultUom = productUoms.find(u => u.is_default);
+          baseUnit = defaultUom?.symbol || 'PIECE';
 
           // If UoM provided and different from base, try find conversion
           if (selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
-            const conv = await client.query(
-              `SELECT pu.conversion_factor, u.name, u.symbol
-               FROM product_uoms pu
-               JOIN uoms u ON u.id = pu.uom_id
-               WHERE pu.product_id = $1`,
-              [item.productId]
-            );
-            const match = conv.rows.find((r: any) => {
+            const match = productUoms.find((r: ProductUomRow) => {
               const name = (r.name || '').toString().toUpperCase();
               const symbol = (r.symbol || '').toString().toUpperCase();
               const want = selectedUom.toUpperCase();
@@ -249,25 +256,22 @@ export const salesService = {
         InventoryBusinessRules.validatePositiveQuantity(item.quantity, 'sale item');
 
         // BR-SAL-005: Validate product is active
-        await SalesBusinessRules.validateProductActive(client as any, item.productId);
+        await SalesBusinessRules.validateProductActive(client, item.productId);
 
         const lineTotal = new Decimal(item.quantity).times(item.unitPrice);
         totalAmount = totalAmount.plus(lineTotal);
 
-        // Get product costing method
-        const productResult = await client.query(
-          'SELECT costing_method, selling_price FROM products WHERE id = $1',
-          [item.productId]
-        );
-        if (productResult.rows.length === 0) {
+        // Use pre-fetched product data (eliminates duplicate per-item query)
+        const productData = productsMap.get(item.productId);
+        if (!productData) {
           throw new Error(`Product ${item.productId} not found`);
         }
-        const costingMethod = productResult.rows[0]?.costing_method || 'FIFO';
-        const originalPrice = parseFloat(productResult.rows[0]?.selling_price || item.unitPrice);
+        const costingMethod = (productData.costing_method || 'FIFO') as 'FIFO' | 'AVCO' | 'STANDARD';
+        const originalPrice = parseFloat(productData.selling_price || String(item.unitPrice));
 
         // BR-SAL-004: Validate minimum price
         await SalesBusinessRules.validateMinimumPrice(
-          client as any,
+          client,
           item.productId,
           item.unitPrice
         );
@@ -275,7 +279,7 @@ export const salesService = {
         // BR-SAL-006: Validate discount
         if (item.unitPrice < originalPrice) {
           await SalesBusinessRules.validateDiscount(
-            client as any,
+            client,
             item.productId,
             item.unitPrice,
             originalPrice
@@ -284,7 +288,7 @@ export const salesService = {
 
         // BR-INV-001: Validate stock availability
         await InventoryBusinessRules.validateStockAvailability(
-          client as any,
+          client,
           item.productId,
           baseQty.toNumber()
         );
@@ -297,7 +301,7 @@ export const salesService = {
             baseQty.toNumber(),
             costingMethod,
             undefined, // dbPool
-            client as any // txClient: reuse sale transaction to prevent deadlock
+            client // txClient: reuse sale transaction to prevent deadlock
           );
           unitCost = parseFloat(costResult.averageCost.toFixed(2));
 
@@ -307,20 +311,16 @@ export const salesService = {
             unitCost,
             totalCost: costResult.totalCost.toNumber(),
           });
-        } catch (error: any) {
-          // Fallback: use product average_cost (normal for products not received via GR)
-          const fallbackResult = await client.query(
-            'SELECT COALESCE(average_cost, 0) as cost FROM products WHERE id = $1',
-            [item.productId]
-          );
-          unitCost = parseFloat(fallbackResult.rows[0]?.cost || '0');
+        } catch (error: unknown) {
+          // Fallback: use pre-fetched average_cost (normal for products not received via GR)
+          unitCost = parseFloat(productData.average_cost || '0');
 
           logger.debug(`Using average cost fallback for product ${item.productId}`, {
             productId: item.productId,
             averageCost: unitCost,
-            reason: error.message?.includes('Insufficient cost layers')
+            reason: (error instanceof Error ? error.message : String(error))?.includes('Insufficient cost layers')
               ? 'No cost layers (not received via GR)'
-              : error.message,
+              : (error instanceof Error ? error.message : String(error)),
           });
         }
 
@@ -569,7 +569,7 @@ export const salesService = {
         quoteId: input.quoteId || null, // Link to quotation for auto-conversion
       };
 
-      const sale = await salesRepository.createSale(client as any, saleData);
+      const sale = await salesRepository.createSale(client, saleData);
 
       // ============================================================
       // CRITICAL: DISCOUNT ALLOCATION TO ITEM-LEVEL PROFITS
@@ -637,7 +637,7 @@ export const salesService = {
       });
 
       // Create sale items
-      const items = await salesRepository.addSaleItems(client as any, itemsWithCosts);
+      const items = await salesRepository.addSaleItems(client, itemsWithCosts);
 
       // Deduct from cost layers AND inventory batches for each item
       for (const item of input.items) {
@@ -674,14 +674,14 @@ export const salesService = {
              WHERE pu.product_id = $1`,
             [item.productId]
           );
-          const match = conv.rows.find((r: any) => {
+          const match = conv.rows.find((r: Record<string, unknown>) => {
             const name = (r.name || '').toString().toUpperCase();
             const symbol = (r.symbol || '').toString().toUpperCase();
             const want = selectedUom.toUpperCase();
             return name === want || (symbol && symbol === want);
           });
           if (match) {
-            const factor = new Decimal(match.conversion_factor || 1);
+            const factor = new Decimal(Number(match.conversion_factor) || 1);
             baseQty = new Decimal(item.quantity).times(factor);
           }
         }
@@ -820,7 +820,7 @@ export const salesService = {
       // ========== CREATE PAYMENT LINES (Split Payment Support) ==========
       if (input.paymentLines && input.paymentLines.length > 0) {
         // Insert payment lines
-        const paymentLinesValues: any[] = [];
+        const paymentLinesValues: unknown[] = [];
         const paymentLinesPlaceholders: string[] = [];
 
         input.paymentLines.forEach((line, index) => {
@@ -873,14 +873,14 @@ export const salesService = {
                 totalDepositsApplied: depositResult.totalApplied,
                 applicationsCount: depositResult.applications.length,
               });
-            } catch (depositError: any) {
+            } catch (depositError: unknown) {
               logger.error('Failed to apply customer deposits', {
                 saleId: sale.id,
                 customerId: input.customerId,
                 requestedAmount: totalDepositAmount,
-                error: depositError.message,
+                error: (depositError instanceof Error ? depositError.message : String(depositError)),
               });
-              throw new Error(`Failed to apply customer deposits: ${depositError.message}`);
+              throw new Error(`Failed to apply customer deposits: ${(depositError instanceof Error ? depositError.message : String(depositError))}`);
             }
           }
         }
@@ -939,7 +939,7 @@ export const salesService = {
             const dueDate = new Date();
             dueDate.setDate(dueDate.getDate() + 30);
 
-            const invoiceResult = await invoiceRepository.createInvoice(client as any, {
+            const invoiceResult = await invoiceRepository.createInvoice(client, {
               saleId: sale.id,
               customerId: input.customerId,
               customerName: customerName,
@@ -967,7 +967,7 @@ export const salesService = {
               // Record each non-CREDIT payment separately (matches invoice_payments table structure)
               for (const paymentLine of input.paymentLines) {
                 if (paymentLine.paymentMethod !== 'CREDIT' && paymentLine.amount > 0) {
-                  await invoiceRepository.addPayment(client as any, {
+                  await invoiceRepository.addPayment(client, {
                     invoiceId,
                     amount: parseFloat(paymentLine.amount.toFixed(2)),
                     paymentMethod: paymentLine.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
@@ -980,10 +980,10 @@ export const salesService = {
               }
 
               // Recalculate invoice aggregates & status after all payments
-              await invoiceRepository.recalcInvoice(client as any, invoiceId);
+              await invoiceRepository.recalcInvoice(client, invoiceId);
 
               // Synchronize payment to linked sale
-              const freshInvoice = await invoiceRepository.getInvoiceById(client as any, invoiceId);
+              const freshInvoice = await invoiceRepository.getInvoiceById(client, invoiceId);
               if (freshInvoice) {
                 await client.query(
                   `UPDATE sales 
@@ -1091,7 +1091,7 @@ export const salesService = {
 
           // IMPORTANT: Invoice represents the FULL SALE, not just the credit portion
           // This allows tracking all payments against the full amount
-          const invoiceResult = await invoiceRepository.createInvoice(client as any, {
+          const invoiceResult = await invoiceRepository.createInvoice(client, {
             saleId: sale.id,
             customerId: input.customerId,
             customerName: customerName,
@@ -1108,7 +1108,7 @@ export const salesService = {
           if (input.paymentLines && input.paymentLines.length > 0 && invoiceId) {
             for (const paymentLine of input.paymentLines) {
               if (paymentLine.paymentMethod !== 'CREDIT' && paymentLine.amount > 0) {
-                await invoiceRepository.addPayment(client as any, {
+                await invoiceRepository.addPayment(client, {
                   invoiceId,
                   amount: parseFloat(paymentLine.amount.toFixed(2)),
                   paymentMethod: paymentLine.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
@@ -1128,7 +1128,7 @@ export const salesService = {
 
             // Recalculate invoice after all payments
             // This will update: amount_paid, balance, and status
-            const updatedInvoice = await invoiceRepository.recalcInvoice(client as any, invoiceId);
+            const updatedInvoice = await invoiceRepository.recalcInvoice(client, invoiceId);
 
             logger.info('Invoice recalculated', {
               invoiceId,
@@ -1171,15 +1171,15 @@ export const salesService = {
             deduction.quantity,
             deduction.costingMethod,
             undefined, // dbPool
-            client as any // txClient: reuse sale transaction to prevent deadlock
+            client // txClient: reuse sale transaction to prevent deadlock
           );
           logger.info(`Cost layers deducted for product ${deduction.productId}`, {
             quantity: deduction.quantity,
             method: deduction.costingMethod,
           });
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Cost layer deduction failed - inventory already deducted but FIFO/AVCO tracking incomplete
-          if (error.message?.includes('Insufficient cost layers')) {
+          if ((error instanceof Error ? error.message : String(error))?.includes('Insufficient cost layers')) {
             // Expected case: product uses average cost or has no layers
             logger.debug(`No cost layers available for product ${deduction.productId}, using average cost`, {
               productId: deduction.productId,
@@ -1192,10 +1192,10 @@ export const salesService = {
               saleNumber: sale.saleNumber,
               productId: deduction.productId,
               quantity: deduction.quantity,
-              error: error.message,
+              error: (error instanceof Error ? error.message : String(error)),
               remediation: 'Review cost layers for this product and adjust if needed',
             });
-            warnings.push(`Cost layer deduction failed for product ${deduction.productId}: ${error.message}. FIFO/AVCO tracking may be inaccurate.`);
+            warnings.push(`Cost layer deduction failed for product ${deduction.productId}: ${(error instanceof Error ? error.message : String(error))}. FIFO/AVCO tracking may be inaccurate.`);
           }
         }
       }
@@ -1249,16 +1249,16 @@ export const salesService = {
             amount: actualTotalAmount,
           });
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         // CRITICAL: Banking integration failed - sale exists but bank transaction missing
         // This MUST be remediated manually or via background job
         logger.error('CRITICAL: Banking integration failed - REQUIRES MANUAL REMEDIATION', {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
-          error: error.message,
+          error: (error instanceof Error ? error.message : String(error)),
           remediation: 'Create bank transaction manually via Banking module',
         });
-        warnings.push(`Banking integration failed for sale ${sale.saleNumber}: ${error.message}. Manual remediation required.`);
+        warnings.push(`Banking integration failed for sale ${sale.saleNumber}: ${(error instanceof Error ? error.message : String(error))}. Manual remediation required.`);
         // Note: Not throwing here because sale is already committed
         // The GL entry exists (via trigger), only bank_transactions record is missing
       }
@@ -1315,16 +1315,16 @@ export const salesService = {
             });
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Non-blocking - sale is already committed
         logger.error('Cash register integration failed - drawer tracking incomplete', {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           sessionId: input.cashRegisterSessionId,
-          error: error.message,
+          error: (error instanceof Error ? error.message : String(error)),
           remediation: 'Manually record cash movement in cash register',
         });
-        warnings.push(`Cash register integration failed: ${error.message}. Drawer tracking incomplete.`);
+        warnings.push(`Cash register integration failed: ${(error instanceof Error ? error.message : String(error))}. Drawer tracking incomplete.`);
       }
 
       const result = {
@@ -1341,88 +1341,13 @@ export const salesService = {
       // DO NOT add glEntryService calls here - it causes duplicate entries
       // ============================================================
 
-      // DELIVERY INTEGRATION: Auto-create delivery order for applicable sales
-      // CRITICAL: Non-blocking - sale completion continues even if delivery creation fails
-      setImmediate(async () => {
-        try {
-          // Check if customer exists and requires delivery
-          if (input.customerId) {
-            const customerResult = await pool.query(
-              'SELECT name, phone, email, address FROM customers WHERE id = $1',
-              [input.customerId]
-            );
-
-            const customer = customerResult.rows[0];
-
-            // Only create delivery order if customer has address (delivery needed)
-            if (customer && customer.address && customer.address.trim()) {
-              const { createDeliveryOrder } = await import('../delivery/deliveryService.js');
-
-              // Prepare delivery items from sale items
-              const deliveryItems = itemsWithCosts.map(item => ({
-                productId: item.productId,
-                productName: item.productName,
-                quantityRequested: item.quantity,
-                unitPrice: item.unitPrice,
-                lineTotal: item.lineTotal
-              }));
-
-              const deliveryOrderData = {
-                saleId: sale.id,
-                customerId: input.customerId,
-                customerName: customer.name,
-                customerPhone: customer.phone || '',
-                customerEmail: customer.email || '',
-                deliveryAddress: customer.address,
-                items: deliveryItems,
-                totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
-                deliveryDate: new Date().toISOString().split('T')[0], // Today
-                priority: 'NORMAL' as const,
-                notes: `Auto-generated from sale ${sale.saleNumber}`
-              };
-
-              // Create audit context for delivery creation
-              const auditContext = {
-                userId: input.soldBy,
-                sessionId: 'system-auto',
-                ipAddress: 'system',
-                userAgent: 'SalesService-AutoDelivery'
-              };
-
-              const deliveryResult = await createDeliveryOrder(deliveryOrderData, auditContext);
-
-              if (deliveryResult.success && deliveryResult.data) {
-                logger.info('Auto-created delivery order for sale', {
-                  saleId: sale.id,
-                  saleNumber: sale.saleNumber,
-                  deliveryNumber: deliveryResult.data.deliveryNumber,
-                  customerId: input.customerId,
-                  customerName: customer.name
-                });
-              } else {
-                logger.warn('Failed to auto-create delivery order for sale', {
-                  saleId: sale.id,
-                  saleNumber: sale.saleNumber,
-                  error: deliveryResult.error
-                });
-              }
-            } else {
-              logger.debug('Skipping delivery order creation - no customer address', {
-                saleId: sale.id,
-                saleNumber: sale.saleNumber,
-                customerId: input.customerId,
-                hasAddress: !!(customer?.address?.trim())
-              });
-            }
-          }
-        } catch (error: any) {
-          logger.error('Unexpected error in delivery integration for sale', {
-            saleId: sale.id,
-            saleNumber: sale.saleNumber,
-            error: error.message
-          });
-        }
-      });
+      // ============================================================
+      // DELIVERY NOTE: Created manually via Delivery > "From Sale" UI.
+      // Previously auto-created here via setImmediate, but that conflicted
+      // with the manual Tally-style workflow (createDeliveryFromSale).
+      // Delivery should be an intentional user action, not automatic.
+      // See: deliveryService.createDeliveryFromSale()
+      // ============================================================
 
       return result;
     } catch (error) {
@@ -1436,7 +1361,7 @@ export const salesService = {
   /**
    * Get sale by ID
    */
-  async getSaleById(pool: Pool, id: string): Promise<any> {
+  async getSaleById(pool: Pool, id: string): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines?: Record<string, unknown>[] }> {
     const result = await salesRepository.getSaleById(pool, id);
 
     if (!result) {
@@ -1454,7 +1379,7 @@ export const salesService = {
     page: number = 1,
     limit: number = 50,
     filters?: { status?: string; customerId?: string; startDate?: string; endDate?: string }
-  ): Promise<any> {
+  ): Promise<{ sales: SaleRecord[]; total: number }> {
     return salesRepository.listSales(pool, page, limit, filters);
   },
 
@@ -1468,7 +1393,7 @@ export const salesService = {
       endDate?: string;
       groupBy?: string;
     }
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return salesRepository.getSalesSummary(pool, filters);
   },
 
@@ -1483,7 +1408,7 @@ export const salesService = {
       productId?: string;
       customerId?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     return salesRepository.getProductSalesSummary(pool, filters);
   },
 
@@ -1497,7 +1422,7 @@ export const salesService = {
       startDate?: string;
       endDate?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     return salesRepository.getTopSellingProducts(pool, limit, filters);
   },
 
@@ -1511,7 +1436,7 @@ export const salesService = {
       startDate?: string;
       endDate?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     return salesRepository.getSalesSummaryByDate(pool, groupBy, filters);
   },
 
@@ -1526,7 +1451,7 @@ export const salesService = {
       productId?: string;
       customerId?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     return salesRepository.getSalesDetailsReport(pool, filters);
   },
 
@@ -1540,7 +1465,7 @@ export const salesService = {
       endDate?: Date;
       userId?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     return salesRepository.getSalesByCashier(pool, filters);
   },
 
@@ -1570,11 +1495,15 @@ export const salesService = {
     voidReason: string,
     approvedById?: string,
     amountThreshold: number = 1000000
-  ): Promise<any> {
+  ): Promise<{ success: boolean; sale: Record<string, unknown>; itemsRestored: number; totalAmount: number }> {
     const client = await pool.connect();
 
     try {
       await client.query('BEGIN');
+
+      // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
+      // Void code already creates proper MOV- movements for inventory restoration
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
       // Get sale details
       const saleResult = await client.query(
@@ -1610,14 +1539,14 @@ export const salesService = {
 
       // If approval provided, verify approver is manager
       if (approvedById) {
-        const isManager = await salesRepository.isManager(client as any, approvedById);
+        const isManager = await salesRepository.isManager(client, approvedById);
         if (!isManager) {
           throw new Error('Approver must have MANAGER or ADMIN role');
         }
       }
 
       // Get sale items for inventory restoration
-      const saleItems = await salesRepository.getSaleItemsForVoid(client as any, saleId);
+      const saleItems = await salesRepository.getSaleItemsForVoid(client, saleId);
 
       logger.info('Voiding sale - restoring inventory', {
         saleId,
@@ -1628,8 +1557,8 @@ export const salesService = {
 
       // Restore inventory for each item
       for (const item of saleItems) {
-        const quantity = parseFloat(item.quantity || 0);
-        const productId = item.productId;
+        const quantity = parseFloat(String(item.quantity || 0));
+        const productId = String(item.productId);
         const batchId = item.batchId;
 
         // Get product costing method
@@ -1643,7 +1572,7 @@ export const salesService = {
         if (costingMethod === 'FIFO') {
           try {
             // Add back to cost layers
-            const unitCost = parseFloat(item.unitCost || 0);
+            const unitCost = parseFloat(String(item.unitCost || 0));
             await client.query(
               `INSERT INTO cost_layers (product_id, quantity, remaining_quantity, unit_cost, batch_number, created_at)
                VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
@@ -1656,10 +1585,10 @@ export const salesService = {
               unitCost,
               saleNumber: sale.sale_number,
             });
-          } catch (error: any) {
+          } catch (error: unknown) {
             logger.error('Failed to restore cost layer', {
               productId,
-              error: error.message,
+              error: (error instanceof Error ? error.message : String(error)),
             });
             // Don't fail transaction - inventory restoration is more critical
           }
@@ -1823,7 +1752,7 @@ export const salesService = {
 
       // Mark sale as VOID
       const voidedSale = await salesRepository.voidSale(
-        client as any,
+        client,
         saleId,
         voidedById,
         voidReason,

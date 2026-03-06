@@ -7,172 +7,118 @@
 import { Request, Response } from 'express';
 import { stockCountService } from './stockCountService.js';
 import { pool as globalPool } from '../../db/pool.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
   CreateStockCountSchema,
   UpdateCountLineSchema,
   ValidateStockCountSchema,
 } from '../../../../shared/zod/stockCount.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler, AppError, NotFoundError, ValidationError, UnauthorizedError } from '../../middleware/errorHandler.js';
+
+/** Rethrow known business errors as appropriate AppError subclasses */
+function mapBusinessError(error: unknown): never {
+  if (error instanceof AppError) throw error;
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes('not found')) throw new NotFoundError(msg);
+  if (msg.includes('state') || msg.includes('cancel') || msg.includes('Validation failed')) {
+    throw new ValidationError(msg);
+  }
+  throw error;
+}
 
 export const stockCountController = {
   /**
    * POST /api/inventory/stockcounts
    * Create new stock count
    */
-  async createStockCount(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
+  createStockCount: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedError('Unauthorized - user ID not found');
 
-      const userId = req.user?.id; // From JWT middleware
+    const data = CreateStockCountSchema.parse(req.body);
 
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized - user ID not found',
-        });
-      }
+    const result = await stockCountService.createStockCount(pool, {
+      name: data.name,
+      locationId: data.locationId,
+      notes: data.notes,
+      includeAllProducts: data.includeAllProducts,
+      productIds: data.productIds,
+      categoryId: data.categoryId,
+      createdById: userId,
+    });
 
-      // Validate request body
-      const validationResult = CreateStockCountSchema.safeParse(req.body);
+    logger.info('Stock count created via API', {
+      stockCountId: result.stockCount.id,
+      userId,
+    });
 
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: validationResult.error.errors,
-        });
-      }
-
-      const data = validationResult.data;
-
-      const result = await stockCountService.createStockCount(pool, {
-        name: data.name,
-        locationId: data.locationId,
-        notes: data.notes,
-        includeAllProducts: data.includeAllProducts,
-        productIds: data.productIds,
-        categoryId: data.categoryId,
-        createdById: userId,
-      });
-
-      logger.info('Stock count created via API', {
-        stockCountId: result.stockCount.id,
-        userId,
-      });
-
-      res.status(201).json({
-        success: true,
-        data: result,
-        message: 'Stock count created successfully',
-      });
-    } catch (error) {
-      logger.error('Failed to create stock count', { error });
-      res.status(500).json({
-        success: false,
-        error: (error as Error).message,
-      });
-    }
-  },
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: 'Stock count created successfully',
+    });
+  }),
 
   /**
    * GET /api/inventory/stockcounts/:id
    * Get stock count by ID with lines
    */
-  async getStockCount(req: Request, res: Response) {
+  getStockCount: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 100;
+
     try {
-      const pool = req.tenantPool || globalPool;
-
-      const { id } = req.params;
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 100;
-
       const result = await stockCountService.getStockCountWithLines(pool, id, page, limit);
-
       res.json({
         success: true,
         data: result,
       });
     } catch (error) {
-      logger.error('Failed to get stock count', { error });
-
-      if ((error as Error).message.includes('not found')) {
-        return res.status(404).json({
-          success: false,
-          error: (error as Error).message,
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: (error as Error).message,
-      });
+      mapBusinessError(error);
     }
-  },
+  }),
 
   /**
    * GET /api/inventory/stockcounts
    * List stock counts with filters
    */
-  async listStockCounts(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
+  listStockCounts: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const state = req.query.state as string | undefined;
+    const createdById = req.query.createdById as string | undefined;
 
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
-      const state = req.query.state as string | undefined;
-      const createdById = req.query.createdById as string | undefined;
+    const result = await stockCountService.listStockCounts(pool, {
+      state,
+      createdById,
+      page,
+      limit,
+    });
 
-      const result = await stockCountService.listStockCounts(pool, {
-        state,
-        createdById,
-        page,
-        limit,
-      });
-
-      res.json({
-        success: true,
-        data: result,
-      });
-    } catch (error) {
-      logger.error('Failed to list stock counts', { error });
-      res.status(500).json({
-        success: false,
-        error: (error as Error).message,
-      });
-    }
-  },
+    res.json({
+      success: true,
+      data: result,
+    });
+  }),
 
   /**
    * POST /api/inventory/stockcounts/:id/lines
    * Add or update count line
    */
-  async updateCountLine(req: Request, res: Response) {
+  updateCountLine: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id: stockCountId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedError('Unauthorized - user ID not found');
+
+    const data = UpdateCountLineSchema.parse(req.body);
+
     try {
-      const pool = req.tenantPool || globalPool;
-
-      const { id: stockCountId } = req.params;
-      const userId = req.user?.id;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized - user ID not found',
-        });
-      }
-
-      // Validate request body
-      const validationResult = UpdateCountLineSchema.safeParse(req.body);
-
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: validationResult.error.errors,
-        });
-      }
-
-      const data = validationResult.data;
-
       const line = await stockCountService.updateCountLine(pool, {
         stockCountId,
         productId: data.productId,
@@ -195,61 +141,23 @@ export const stockCountController = {
         message: 'Count line updated successfully',
       });
     } catch (error) {
-      logger.error('Failed to update count line', { error });
-
-      const errorMsg = (error as Error).message;
-      if (errorMsg.includes('not found')) {
-        return res.status(404).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      if (errorMsg.includes('state')) {
-        return res.status(400).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: errorMsg,
-      });
+      mapBusinessError(error);
     }
-  },
+  }),
 
   /**
    * POST /api/inventory/stockcounts/:id/validate
    * Validate and reconcile stock count
    */
-  async validateStockCount(req: Request, res: Response) {
+  validateStockCount: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id: stockCountId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedError('Unauthorized - user ID not found');
+
+    const data = ValidateStockCountSchema.parse(req.body);
+
     try {
-      const pool = req.tenantPool || globalPool;
-
-      const { id: stockCountId } = req.params;
-      const userId = req.user?.id;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized - user ID not found',
-        });
-      }
-
-      // Validate request body
-      const validationResult = ValidateStockCountSchema.safeParse(req.body);
-
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: validationResult.error.errors,
-        });
-      }
-
-      const data = validationResult.data;
-
       const result = await stockCountService.validateStockCount(pool, {
         stockCountId,
         allowNegativeAdjustments: data.allowNegativeAdjustments,
@@ -270,49 +178,22 @@ export const stockCountController = {
         message: 'Stock count validated and reconciled successfully',
       });
     } catch (error) {
-      logger.error('Failed to validate stock count', { error });
-
-      const errorMsg = (error as Error).message;
-      if (errorMsg.includes('not found')) {
-        return res.status(404).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      if (errorMsg.includes('state') || errorMsg.includes('Validation failed')) {
-        return res.status(400).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: errorMsg,
-      });
+      mapBusinessError(error);
     }
-  },
+  }),
 
   /**
    * POST /api/inventory/stockcounts/:id/cancel
    * Cancel stock count
    */
-  async cancelStockCount(req: Request, res: Response) {
+  cancelStockCount: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id: stockCountId } = req.params;
+    const userId = req.user?.id;
+    const { notes } = req.body;
+    if (!userId) throw new UnauthorizedError('Unauthorized - user ID not found');
+
     try {
-      const pool = req.tenantPool || globalPool;
-
-      const { id: stockCountId } = req.params;
-      const userId = req.user?.id;
-      const { notes } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized - user ID not found',
-        });
-      }
-
       const result = await stockCountService.cancelStockCount(
         pool,
         stockCountId,
@@ -328,95 +209,39 @@ export const stockCountController = {
         message: 'Stock count cancelled successfully',
       });
     } catch (error) {
-      logger.error('Failed to cancel stock count', { error });
-
-      const errorMsg = (error as Error).message;
-      if (errorMsg.includes('not found')) {
-        return res.status(404).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      if (errorMsg.includes('cancel')) {
-        return res.status(400).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: errorMsg,
-      });
+      mapBusinessError(error);
     }
-  },
+  }),
 
   /**
    * DELETE /api/inventory/stockcounts/:id
    * Delete stock count (only if in draft/cancelled state)
    */
-  async deleteStockCount(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
+  deleteStockCount: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id: stockCountId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedError('Unauthorized - user ID not found');
 
-      const { id: stockCountId } = req.params;
-      const userId = req.user?.id;
+    // Check state before deletion
+    const stockCount = await stockCountService.getStockCountWithLines(pool, stockCountId, 1, 1);
 
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized - user ID not found',
-        });
-      }
-
-      // Check state before deletion
-      const stockCount = await stockCountService.getStockCountWithLines(pool, stockCountId, 1, 1);
-
-      if (!['draft', 'cancelled'].includes(stockCount.stockCount.state)) {
-        return res.status(400).json({
-          success: false,
-          error: `Cannot delete stock count in ${stockCount.stockCount.state} state. Only draft or cancelled counts can be deleted.`,
-        });
-      }
-
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-
-        // Import repository to access deleteStockCount
-        const { stockCountRepository } = await import('./stockCountRepository.js');
-        await stockCountRepository.deleteStockCount(client, stockCountId);
-
-        await client.query('COMMIT');
-
-        logger.info('Stock count deleted via API', { stockCountId, userId });
-
-        res.json({
-          success: true,
-          message: 'Stock count deleted successfully',
-        });
-      } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-      } finally {
-        client.release();
-      }
-    } catch (error) {
-      logger.error('Failed to delete stock count', { error });
-
-      const errorMsg = (error as Error).message;
-      if (errorMsg.includes('not found')) {
-        return res.status(404).json({
-          success: false,
-          error: errorMsg,
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: errorMsg,
-      });
+    if (!['draft', 'cancelled'].includes(stockCount.stockCount.state)) {
+      throw new ValidationError(
+        `Cannot delete stock count in ${stockCount.stockCount.state} state. Only draft or cancelled counts can be deleted.`
+      );
     }
-  },
+
+    await UnitOfWork.run(pool, async (client) => {
+      const { stockCountRepository } = await import('./stockCountRepository.js');
+      await stockCountRepository.deleteStockCount(client, stockCountId);
+    });
+
+    logger.info('Stock count deleted via API', { stockCountId, userId });
+
+    res.json({
+      success: true,
+      message: 'Stock count deleted successfully',
+    });
+  }),
 };

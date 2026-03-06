@@ -16,6 +16,7 @@ import Decimal from 'decimal.js';
 import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository';
 import { salesService } from '../sales/salesService.js';
 import { invoiceService } from '../invoices/invoiceService.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -208,11 +209,7 @@ export const quotationService = {
       }>;
     }
   ): Promise<QuotationDetail> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       // Calculate totals
       let subtotal = new Decimal(0);
       let taxAmount = new Decimal(0);
@@ -272,18 +269,11 @@ export const quotationService = {
         itemsWithTotals
       );
 
-      await client.query('COMMIT');
-
       return {
         quotation: normalizeQuotation(quotation),
         items: items.map(normalizeQuotationItem),
       };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**
@@ -347,13 +337,9 @@ export const quotationService = {
   async updateQuotation(
     pool: Pool,
     id: string,
-    data: any
+    data: Record<string, unknown>
   ): Promise<Quotation> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    await UnitOfWork.run(pool, async (client) => {
       // Get existing quotation
       const existing = await client.query(
         'SELECT status FROM quotations WHERE id = $1',
@@ -382,8 +368,9 @@ export const quotationService = {
         let subtotal = new Decimal(0);
         let taxAmount = new Decimal(0);
 
-        const itemsWithTotals = data.items.map((item: any, idx: number) => {
-          const qty = new Decimal(item.quantity);
+        const itemsWithTotals = (data.items as Record<string, unknown>[]).map((raw: Record<string, unknown>, idx: number) => {
+          const item = raw as Record<string, string | number | boolean | null>;
+          const qty = new Decimal(item.quantity as number);
           const price = new Decimal(item.unitPrice);
           const discount = new Decimal(item.discountAmount || 0);
           const taxRate = new Decimal(item.taxRate || 0);
@@ -398,24 +385,24 @@ export const quotationService = {
 
           return {
             lineNumber: idx + 1, // Auto-assign line numbers
-            productId: item.productId || null,
-            itemType: item.itemType || 'product',
-            sku: item.sku || null,
-            description: item.description,
-            notes: item.notes || null,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
+            productId: (item.productId as string | null) || null,
+            itemType: (item.itemType as 'product' | 'service' | 'custom') || 'product',
+            sku: (item.sku as string | null) || null,
+            description: String(item.description || ''),
+            notes: (item.notes as string | null) || null,
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.unitPrice),
             discountAmount: discount.toNumber(),
             subtotal: itemSubtotal.toNumber(),
             isTaxable,
             taxRate: taxRate.toNumber(),
             taxAmount: itemTax.toNumber(),
             lineTotal: lineTotal.toNumber(),
-            uomId: item.uomId || null,
-            uomName: item.uomName || null,
-            unitCost: item.unitCost || null,
+            uomId: (item.uomId as string | null) || null,
+            uomName: (item.uomName as string | null) || null,
+            unitCost: item.unitCost ? Number(item.unitCost) : null,
             costTotal: item.unitCost ? new Decimal(item.unitCost).times(qty).toNumber() : null,
-            productType: item.productType || 'inventory',
+            productType: String(item.productType || 'inventory'),
           };
         });
 
@@ -432,21 +419,15 @@ export const quotationService = {
         await quotationRepository.createQuotationItems(client, id, itemsWithTotals);
       }
 
-      await client.query('COMMIT');
+    });
 
-      // Return full quotation with items
-      const result = await this.getQuotationById(pool, id);
-      if (!result) {
-        throw new Error('Failed to retrieve updated quotation');
-      }
-
-      return result.quotation;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+    // Return full quotation with items (after commit)
+    const result = await this.getQuotationById(pool, id);
+    if (!result) {
+      throw new Error('Failed to retrieve updated quotation');
     }
+
+    return result.quotation;
   },
 
   /**
@@ -460,11 +441,7 @@ export const quotationService = {
     status: string,
     notes?: string
   ): Promise<Quotation> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       // CRITICAL: Check current quotation state before allowing status change
       const existingQuote = await quotationRepository.getQuotationById(pool, id);
 
@@ -492,15 +469,8 @@ export const quotationService = {
 
       const quotation = await quotationRepository.updateQuotationStatus(client, id, status, notes);
 
-      await client.query('COMMIT');
-
       return normalizeQuotation(quotation);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**
@@ -526,15 +496,12 @@ export const quotationService = {
       notes?: string;
     }
   ): Promise<{
-    sale: any;
-    invoice: any;
-    payment?: any;
+    sale: Record<string, unknown>;
+    invoice: unknown;
+    payment?: Record<string, unknown>;
   }> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    // Phase 1: Transactional work - create sale, sale items, GL posting, mark converted
+    const { saleRecord, quotation, customerId, totalAmount } = await UnitOfWork.run(pool, async (client) => {
       // Get quotation with items
       const quoteData = await quotationRepository.getQuotationById(pool, quotationId);
       if (!quoteData) {
@@ -752,16 +719,11 @@ export const quotationService = {
         await client.query('SAVEPOINT gl_posting');
         await client.query('SELECT fn_post_sale_to_ledger() FROM sales WHERE id = $1', [saleRecord.id]);
         await client.query('RELEASE SAVEPOINT gl_posting');
-      } catch (glError: any) {
+      } catch (glError: unknown) {
         console.error('GL posting failed for quotation conversion:', glError);
         await client.query('ROLLBACK TO SAVEPOINT gl_posting');
         // Continue - GL posting failure shouldn't block the sale
       }
-
-      // ALWAYS create invoice for quote conversions (formal business transaction)
-      // Quote → Sale → Invoice linkage must be maintained for all payment types
-      let invoice;
-      let payment;
 
       // BR-QUOTE-003: Mark quotation as CONVERTED (proper business logic)
       // CONVERTED status indicates the quotation has been fulfilled
@@ -773,75 +735,67 @@ export const quotationService = {
         null // Will update with invoice ID later
       );
 
-      await client.query('COMMIT');
+      return { saleRecord, quotation, customerId, totalAmount };
+    });
 
-      // Create invoice AFTER committing the sale transaction
-      // This ensures the sale is visible to the invoice service
-      const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      const invoiceResult = await invoiceService.createInvoice(pool, {
-        saleId: saleRecord.id,
-        customerId: customerId,
-        quoteId: quotation.id,
-        dueDate: dueDate,
+    // Phase 2: Post-commit work - create invoice and handle payment
+    // These use pool (separate connections) because the sale must be committed first
+    let invoice: unknown;
+    let payment: Record<string, unknown> | undefined;
+
+    // Create invoice AFTER committing the sale transaction
+    // This ensures the sale is visible to the invoice service
+    const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const invoiceResult = await invoiceService.createInvoice(pool, {
+      saleId: saleRecord.id,
+      customerId: customerId,
+      quoteId: quotation.id,
+      dueDate: dueDate,
+    });
+    invoice = invoiceResult.invoice;
+
+    // Handle payment recording based on payment option
+    if (data.paymentOption === 'full' && invoice) {
+      // Full payment: mark invoice as PAID immediately
+      const paymentDate = new Date();
+      await invoiceService.addPayment(pool, (invoice as Record<string, string>).id, {
+        paymentDate: paymentDate,
+        amount: totalAmount,
+        paymentMethod: data.depositMethod || 'CASH',
+        notes: `Full payment for quote ${quotation.quote_number}`,
       });
-      invoice = invoiceResult.invoice;
-
-      // Handle payment recording based on payment option
-      if (data.paymentOption === 'full' && invoice) {
-        // Full payment: mark invoice as PAID immediately
-        const paymentDate = new Date();
-        await invoiceService.addPayment(pool, invoice.id, {
-          paymentDate: paymentDate,
-          amount: totalAmount,
-          paymentMethod: data.depositMethod || 'CASH',
-          notes: `Full payment for quote ${quotation.quote_number}`,
-        });
-      } else if (data.paymentOption === 'partial' && data.depositAmount && invoice) {
-        // Partial payment: record deposit, invoice remains PARTIALLY_PAID
-        const paymentDate = new Date();
-        await invoiceService.addPayment(pool, invoice.id, {
-          paymentDate: paymentDate,
-          amount: data.depositAmount,
-          paymentMethod: data.depositMethod!,
-          notes: `Deposit for quote ${quotation.quote_number}`,
-        });
-      }
-      // For 'none': invoice remains UNPAID with full balance due
-
-      // Update quotation with invoice ID if invoice was created
-      if (invoice) {
-        await pool.query(
-          'UPDATE quotations SET converted_to_invoice_id = $1, updated_at = NOW() WHERE id = $2',
-          [invoice.id, quotation.id]
-        );
-      }
-
-      return {
-        sale: saleRecord,
-        invoice,
-        payment,
-      };
-    } catch (error) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (rollbackError) {
-        // Ignore rollback errors if transaction was already committed
-      }
-      throw error;
-    } finally {
-      client.release();
+    } else if (data.paymentOption === 'partial' && data.depositAmount && invoice) {
+      // Partial payment: record deposit, invoice remains PARTIALLY_PAID
+      const paymentDate = new Date();
+      await invoiceService.addPayment(pool, (invoice as Record<string, string>).id, {
+        paymentDate: paymentDate,
+        amount: data.depositAmount,
+        paymentMethod: data.depositMethod!,
+        notes: `Deposit for quote ${quotation.quote_number}`,
+      });
     }
+    // For 'none': invoice remains UNPAID with full balance due
+
+    // Update quotation with invoice ID if invoice was created
+    if (invoice) {
+      await pool.query(
+        'UPDATE quotations SET converted_to_invoice_id = $1, updated_at = NOW() WHERE id = $2',
+        [(invoice as Record<string, string>).id, quotation.id]
+      );
+    }
+
+    return {
+      sale: saleRecord,
+      invoice,
+      payment,
+    };
   },
 
   /**
    * Delete quotation (cancel any non-terminal quote)
    */
   async deleteQuotation(pool: Pool, id: string): Promise<void> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    await UnitOfWork.run(pool, async (client) => {
       const result = await quotationRepository.getQuotationById(pool, id);
       if (!result) {
         throw new Error('Quotation not found');
@@ -857,13 +811,6 @@ export const quotationService = {
 
       // Soft delete by setting status to CANCELLED
       await quotationRepository.deleteQuotation(client, id);
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 };

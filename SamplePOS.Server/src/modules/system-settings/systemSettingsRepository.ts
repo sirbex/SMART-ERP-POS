@@ -31,7 +31,7 @@ export const systemSettingsRepository = {
     ): Promise<SystemSettings> {
         // Build dynamic SET clause
         const setClauses: string[] = [];
-        const values: any[] = [];
+        const values: unknown[] = [];
         let paramIndex = 1;
 
         if (updates.businessName !== undefined) {

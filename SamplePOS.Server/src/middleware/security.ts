@@ -104,17 +104,17 @@ export const strictRateLimit = rateLimit({
 export function xssProtection(req: Request, res: Response, next: NextFunction): void {
   // Sanitize request body
   if (req.body && typeof req.body === 'object') {
-    req.body = sanitizeObject(req.body);
+    req.body = sanitizeObject(req.body) as typeof req.body;
   }
 
   // Sanitize query parameters
   if (req.query && typeof req.query === 'object') {
-    req.query = sanitizeObject(req.query);
+    req.query = sanitizeObject(req.query) as typeof req.query;
   }
 
   // Sanitize URL parameters
   if (req.params && typeof req.params === 'object') {
-    req.params = sanitizeObject(req.params);
+    req.params = sanitizeObject(req.params) as typeof req.params;
   }
 
   next();
@@ -123,7 +123,7 @@ export function xssProtection(req: Request, res: Response, next: NextFunction): 
 /**
  * Recursively sanitize an object to prevent XSS
  */
-function sanitizeObject(obj: any): any {
+function sanitizeObject(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -140,10 +140,11 @@ function sanitizeObject(obj: any): any {
   }
 
   if (typeof obj === 'object') {
-    const sanitized: any = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        sanitized[key] = sanitizeObject(obj[key]);
+    const sanitized: Record<string, unknown> = {};
+    const record = obj as Record<string, unknown>;
+    for (const key in record) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        sanitized[key] = sanitizeObject(record[key]);
       }
     }
     return sanitized;
@@ -248,7 +249,7 @@ export function preventSqlInjection(req: Request, res: Response, next: NextFunct
     /((\\x3C)|(\\x3c)|<|(<script.*?>))/i,
   ];
 
-  const checkForSqlInjection = (value: any): boolean => {
+  const checkForSqlInjection = (value: unknown): boolean => {
     if (typeof value === 'string') {
       return suspiciousPatterns.some(pattern => pattern.test(value));
     }

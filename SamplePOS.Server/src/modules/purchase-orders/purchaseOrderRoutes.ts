@@ -4,6 +4,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import { purchaseOrderService } from './purchaseOrderService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 // Validation schemas
 const POItemSchema = z.object({
@@ -51,58 +52,54 @@ export const purchaseOrderController = {
    * Create purchase order
    */
   async createPO(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const validatedData = CreatePOSchema.parse(req.body);
 
       // Use authenticated user's ID if createdBy not provided
-      const createdBy = validatedData.createdBy || (req as any).user?.id || (req as any).user?.userId;
+      const createdBy = validatedData.createdBy || req.user?.id;
       if (!createdBy) {
-        res.status(400).json({
-          success: false,
-          error: 'User ID is required. Please provide createdBy or ensure you are authenticated.',
-        });
-        return;
+    res.status(400).json({
+      success: false,
+      error: 'User ID is required. Please provide createdBy or ensure you are authenticated.',
+    });
+    return;
       }
 
       const result = await purchaseOrderService.createPO(pool, {
-        ...validatedData,
-        createdBy,
+    ...validatedData,
+    createdBy,
       });
 
       // Log audit trail
       try {
-        const auditContext = (req as any).auditContext || {
-          userId: (req as any).user?.id || createdBy,
-          userName: (req as any).user?.full_name,
-          userRole: (req as any).user?.role,
-          ipAddress: req.ip,
-          userAgent: req.headers['user-agent'],
-        };
+    const auditContext = req.auditContext || {
+      userId: req.user?.id || createdBy,
+      userName: req.user?.fullName,
+      userRole: req.user?.role,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    };
 
-        const { logPurchaseOrderCreated } = await import('../audit/auditService.js');
-        await logPurchaseOrderCreated(
-          pool,
-          result.po.id,
-          result.po.poNumber,
-          {
-            itemCount: result.items?.length || 0,
-            totalAmount: result.po.totalAmount,
-            supplierId: result.po.supplierId,
-            status: result.po.status,
-          },
-          auditContext
-        );
-      } catch (auditError) {
-        console.error('Audit logging failed (non-fatal):', auditError);
-      }
+    const { logPurchaseOrderCreated } = await import('../audit/auditService.js');
+    await logPurchaseOrderCreated(
+      pool,
+      result.po.id,
+      result.po.poNumber,
+      {
+        itemCount: result.items?.length || 0,
+        totalAmount: result.po.totalAmount,
+        supplierId: result.po.supplierId,
+        status: result.po.status,
+      },
+      auditContext
+    );
 
       res.status(201).json({
         success: true,
         data: result,
         message: `Purchase order ${result.po.poNumber} created successfully`,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof z.ZodError) {
         res.status(400).json({
           success: false,
@@ -115,7 +112,7 @@ export const purchaseOrderController = {
       console.error('Error creating purchase order:', error);
       res.status(500).json({
         success: false,
-        error: error.message || 'Failed to create purchase order',
+        error: error instanceof Error ? error.message : 'Failed to create purchase order',
       });
     }
   },
@@ -124,78 +121,43 @@ export const purchaseOrderController = {
    * Get PO by ID
    */
   async getPOById(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await purchaseOrderService.getPOById(pool, id);
 
       res.json({
-        success: true,
-        data: result,
+    success: true,
+    data: result,
       });
-    } catch (error: any) {
-      console.error('Error getting purchase order:', error);
-
-      if (error.message.includes('not found')) {
-        res.status(404).json({
-          success: false,
-          error: error.message,
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get purchase order',
-      });
-    }
   },
 
   /**
    * List purchase orders
    */
   async listPOs(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const query = ListPOsQuerySchema.parse(req.query);
       const result = await purchaseOrderService.listPOs(pool, query.page, query.limit, {
-        status: query.status,
-        supplierId: query.supplierId,
+    status: query.status,
+    supplierId: query.supplierId,
       });
 
       res.json({
-        success: true,
-        data: result.pos,
-        pagination: {
-          page: query.page,
-          limit: query.limit,
-          total: result.total,
-          totalPages: Math.ceil(result.total / query.limit),
-        },
+    success: true,
+    data: result.pos,
+    pagination: {
+      page: query.page,
+      limit: query.limit,
+      total: result.total,
+      totalPages: Math.ceil(result.total / query.limit),
+    },
       });
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid query parameters',
-          details: error.errors,
-        });
-        return;
-      }
-
-      console.error('Error listing purchase orders:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to list purchase orders',
-      });
-    }
   },
 
   /**
    * Update PO status
    */
   async updatePOStatus(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const { status } = UpdatePOStatusSchema.parse(req.body);
@@ -208,33 +170,30 @@ export const purchaseOrderController = {
 
       // Log audit trail for status change
       try {
-        const auditContext = (req as any).auditContext || {
-          userId: (req as any).user?.id || '00000000-0000-0000-0000-000000000000',
-          userName: (req as any).user?.full_name,
-          userRole: (req as any).user?.role,
-          ipAddress: req.ip,
-          userAgent: req.headers['user-agent'],
-        };
+    const auditContext = req.auditContext || {
+      userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+      userName: req.user?.fullName,
+      userRole: req.user?.role,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    };
 
-        const { logPurchaseOrderStatusChanged } = await import('../audit/auditService.js');
-        await logPurchaseOrderStatusChanged(
-          pool,
-          id,
-          result.po?.poNumber || result.poNumber,
-          oldStatus || 'UNKNOWN',
-          status,
-          auditContext
-        );
-      } catch (auditError) {
-        console.error('Audit logging failed (non-fatal):', auditError);
-      }
+    const { logPurchaseOrderStatusChanged } = await import('../audit/auditService.js');
+    await logPurchaseOrderStatusChanged(
+      pool,
+      id,
+      result.poNumber,
+      oldStatus || 'UNKNOWN',
+      status,
+      auditContext
+    );
 
       res.json({
         success: true,
         data: result,
         message: `Purchase order status updated to ${status}`,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof z.ZodError) {
         res.status(400).json({
           success: false,
@@ -247,7 +206,7 @@ export const purchaseOrderController = {
       console.error('Error updating purchase order status:', error);
       res.status(500).json({
         success: false,
-        error: error.message || 'Failed to update purchase order status',
+        error: error instanceof Error ? error.message : 'Failed to update purchase order status',
       });
     }
   },
@@ -256,174 +215,126 @@ export const purchaseOrderController = {
    * Submit purchase order (DRAFT -> PENDING)
    */
   async submitPO(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await purchaseOrderService.submitPO(pool, id);
 
       res.json({
-        success: true,
-        data: result,
-        message: 'Purchase order submitted successfully',
+    success: true,
+    data: result,
+    message: 'Purchase order submitted successfully',
       });
-    } catch (error: any) {
-      console.error('Error submitting purchase order:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to submit purchase order',
-      });
-    }
   },
 
   /**
    * Cancel purchase order
    */
   async cancelPO(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       const result = await purchaseOrderService.cancelPO(pool, id);
 
       res.json({
-        success: true,
-        data: result,
-        message: 'Purchase order cancelled successfully',
+    success: true,
+    data: result,
+    message: 'Purchase order cancelled successfully',
       });
-    } catch (error: any) {
-      console.error('Error cancelling purchase order:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to cancel purchase order',
-      });
-    }
   },
 
   /**
    * Delete purchase order
    */
   async deletePO(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
       await purchaseOrderService.deletePO(pool, id);
 
       res.json({
-        success: true,
-        message: 'Purchase order deleted successfully',
+    success: true,
+    message: 'Purchase order deleted successfully',
       });
-    } catch (error: any) {
-      console.error('Error deleting purchase order:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to delete purchase order',
-      });
-    }
   },
 
   /**
    * Send PO to supplier (auto-creates goods receipt draft)
    */
   async sendPOToSupplier(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
-      const userId = (req as any).user.id;
+      const userId = req.user!.id;
 
       const result = await purchaseOrderService.sendPOToSupplier(pool, id, userId);
 
       res.json({
-        success: true,
-        data: result,
-        message: 'Purchase order sent to supplier. Goods receipt draft created for receiving.',
+    success: true,
+    data: result,
+    message: 'Purchase order sent to supplier. Goods receipt draft created for receiving.',
       });
-    } catch (error: any) {
-      console.error('Error sending PO to supplier:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to send PO to supplier',
-      });
-    }
   },
 
   /**
    * Create supplier invoice
    */
   async createInvoice(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const {
-        purchaseOrderId,
-        goodsReceiptId,
-        invoiceNumber,
-        invoiceDate,
-        dueDate,
-        supplierId,
-        totalAmount,
-        paymentTerms,
-        notes,
+    purchaseOrderId,
+    goodsReceiptId,
+    invoiceNumber,
+    invoiceDate,
+    dueDate,
+    supplierId,
+    totalAmount,
+    paymentTerms,
+    notes,
       } = req.body;
-      const userId = (req as any).user.id;
+      const userId = req.user!.id;
 
       const invoice = await purchaseOrderService.createSupplierInvoice(pool, {
-        purchaseOrderId,
-        goodsReceiptId,
-        invoiceNumber,
-        invoiceDate: new Date(invoiceDate),
-        dueDate: new Date(dueDate),
-        supplierId,
-        totalAmount: parseFloat(totalAmount),
-        paymentTerms,
-        notes,
-        createdBy: userId,
+    purchaseOrderId,
+    goodsReceiptId,
+    invoiceNumber,
+    invoiceDate: new Date(invoiceDate),
+    dueDate: new Date(dueDate),
+    supplierId,
+    totalAmount: parseFloat(totalAmount),
+    paymentTerms,
+    notes,
+    createdBy: userId,
       });
 
       res.status(201).json({
-        success: true,
-        data: invoice,
-        message: 'Supplier invoice created successfully',
+    success: true,
+    data: invoice,
+    message: 'Supplier invoice created successfully',
       });
-    } catch (error: any) {
-      console.error('Error creating invoice:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to create invoice',
-      });
-    }
   },
 
   /**
    * Record payment
    */
   async recordPayment(req: Request, res: Response): Promise<void> {
-    try {
       const pool = req.tenantPool || globalPool;
       const { invoiceId, supplierId, amount, paymentMethod, paymentDate, referenceNumber, notes } =
-        req.body;
-      const userId = (req as any).user.id;
+    req.body;
+      const userId = req.user!.id;
 
       const payment = await purchaseOrderService.recordPayment(pool, {
-        invoiceId,
-        supplierId,
-        amount: parseFloat(amount),
-        paymentMethod,
-        paymentDate: new Date(paymentDate),
-        referenceNumber,
-        notes,
-        createdBy: userId,
+    invoiceId,
+    supplierId,
+    amount: parseFloat(amount),
+    paymentMethod,
+    paymentDate: new Date(paymentDate),
+    referenceNumber,
+    notes,
+    createdBy: userId,
       });
 
       res.status(201).json({
-        success: true,
-        data: payment,
-        message: 'Payment recorded successfully',
+    success: true,
+    data: payment,
+    message: 'Payment recorded successfully',
       });
-    } catch (error: any) {
-      console.error('Error recording payment:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to record payment',
-      });
-    }
   },
 };
 
@@ -431,45 +342,45 @@ export const purchaseOrderController = {
 export const purchaseOrderRoutes = Router();
 
 // View routes - all authenticated users
-purchaseOrderRoutes.get('/', authenticate, purchaseOrderController.listPOs);
-purchaseOrderRoutes.get('/:id', authenticate, purchaseOrderController.getPOById);
+purchaseOrderRoutes.get('/', authenticate, asyncHandler(purchaseOrderController.listPOs));
+purchaseOrderRoutes.get('/:id', authenticate, asyncHandler(purchaseOrderController.getPOById));
 
 // Create/modify routes - requires purchasing permissions
 purchaseOrderRoutes.post(
   '/',
   authenticate,
   requirePermission('purchasing.create'),
-  purchaseOrderController.createPO
+  asyncHandler(purchaseOrderController.createPO)
 );
 purchaseOrderRoutes.put(
   '/:id/status',
   authenticate,
   requirePermission('purchasing.update'),
-  purchaseOrderController.updatePOStatus
+  asyncHandler(purchaseOrderController.updatePOStatus)
 );
 purchaseOrderRoutes.post(
   '/:id/submit',
   authenticate,
   requirePermission('purchasing.approve'),
-  purchaseOrderController.submitPO
+  asyncHandler(purchaseOrderController.submitPO)
 );
 purchaseOrderRoutes.post(
   '/:id/send-to-supplier',
   authenticate,
   requirePermission('purchasing.approve'),
-  purchaseOrderController.sendPOToSupplier
+  asyncHandler(purchaseOrderController.sendPOToSupplier)
 );
 purchaseOrderRoutes.post(
   '/:id/cancel',
   authenticate,
   requirePermission('purchasing.update'),
-  purchaseOrderController.cancelPO
+  asyncHandler(purchaseOrderController.cancelPO)
 );
 purchaseOrderRoutes.delete(
   '/:id',
   authenticate,
   requirePermission('purchasing.delete'),
-  purchaseOrderController.deletePO
+  asyncHandler(purchaseOrderController.deletePO)
 );
 
 // Invoice and payment routes
@@ -477,11 +388,11 @@ purchaseOrderRoutes.post(
   '/invoices',
   authenticate,
   requirePermission('purchasing.create'),
-  purchaseOrderController.createInvoice
+  asyncHandler(purchaseOrderController.createInvoice)
 );
 purchaseOrderRoutes.post(
   '/payments',
   authenticate,
   requirePermission('purchasing.create'),
-  purchaseOrderController.recordPayment
+  asyncHandler(purchaseOrderController.recordPayment)
 );

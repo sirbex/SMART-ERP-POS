@@ -25,7 +25,7 @@ export interface ReconciliationItem {
     amount: number;
     difference: number;
     status: 'BASE' | 'MATCHED' | 'DISCREPANCY' | 'ACTION_REQUIRED' | 'INFO';
-    details?: any;
+    details?: unknown;
 }
 
 export interface ReconciliationReport {
@@ -111,7 +111,7 @@ export class ReconciliationService {
                 recommendations
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Cash reconciliation failed', { asOfDate: date, error });
             throw error;
         }
@@ -165,7 +165,7 @@ export class ReconciliationService {
                 recommendations
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('AR reconciliation failed', { asOfDate: date, error });
             throw error;
         }
@@ -223,7 +223,7 @@ export class ReconciliationService {
                 recommendations
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Inventory reconciliation failed', { asOfDate: date, error });
             throw error;
         }
@@ -277,7 +277,7 @@ export class ReconciliationService {
                 recommendations
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('AP reconciliation failed', { asOfDate: date, error });
             throw error;
         }
@@ -321,7 +321,7 @@ export class ReconciliationService {
                 discrepancyCount: discrepancies.length
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Full reconciliation failed', { asOfDate: date, error });
             throw error;
         }
@@ -444,7 +444,7 @@ export class ReconciliationService {
                 }))
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to get discrepancy details', { accountCode, asOfDate: date, error });
             throw error;
         }

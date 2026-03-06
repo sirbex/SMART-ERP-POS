@@ -8,6 +8,7 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import * as supplierPaymentRepository from './supplierPaymentRepository.js';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -19,6 +20,7 @@ export interface CreateSupplierPaymentInput {
     paymentDate: string;
     reference?: string;
     notes?: string;
+    targetInvoiceId?: string;
 }
 
 export interface CreateSupplierInvoiceInput {
@@ -96,9 +98,7 @@ export async function createSupplierPayment(
     data: CreateSupplierPaymentInput,
     userId?: string
 ) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
 
         // Use Decimal.js for precise amount handling
         const paymentAmount = new Decimal(data.amount);
@@ -125,7 +125,16 @@ export async function createSupplierPayment(
         const supplier = supplierResult.rows[0];
 
         // Auto-allocate to outstanding invoices (FIFO by due date)
-        const outstandingInvoices = await supplierPaymentRepository.findOutstandingInvoices(pool, data.supplierId);
+        let outstandingInvoices = await supplierPaymentRepository.findOutstandingInvoices(pool, data.supplierId);
+
+        // If a target invoice is specified, prioritize it by moving it to the front
+        if (data.targetInvoiceId) {
+            const targetIdx = outstandingInvoices.findIndex(inv => inv.id === data.targetInvoiceId);
+            if (targetIdx > 0) {
+                const [target] = outstandingInvoices.splice(targetIdx, 1);
+                outstandingInvoices = [target, ...outstandingInvoices];
+            }
+        }
 
         const allocations: Array<{
             invoiceId: string;
@@ -287,7 +296,6 @@ export async function createSupplierPayment(
         const glCount = parseInt(glCheck.rows[0].gl_count, 10);
 
         if (glCount === 0) {
-            await client.query('ROLLBACK');
             throw new Error(
                 `GL INTEGRITY VIOLATION: Supplier payment ${payment.paymentNumber} was not posted to GL. ` +
                 `Transaction rolled back to prevent AP discrepancy.`
@@ -295,7 +303,6 @@ export async function createSupplierPayment(
         }
 
         if (glCount > 1) {
-            await client.query('ROLLBACK');
             throw new Error(
                 `GL INTEGRITY VIOLATION: Supplier payment ${payment.paymentNumber} was posted ${glCount} times. ` +
                 `Transaction rolled back to prevent duplicate GL entries.`
@@ -314,7 +321,6 @@ export async function createSupplierPayment(
         const totalCr = new Decimal(balanceCheck.rows[0].total_cr || '0');
 
         if (totalDr.minus(totalCr).abs().greaterThan('0.01')) {
-            await client.query('ROLLBACK');
             throw new Error(
                 `GL BALANCE VIOLATION: Supplier payment ${payment.paymentNumber} GL is imbalanced. ` +
                 `DR=${totalDr.toFixed(2)}, CR=${totalCr.toFixed(2)}. Transaction rolled back.`
@@ -322,21 +328,14 @@ export async function createSupplierPayment(
         }
 
         if (totalDr.minus(paymentAmount).abs().greaterThan('0.01')) {
-            await client.query('ROLLBACK');
             throw new Error(
                 `GL AMOUNT MISMATCH: Supplier payment ${payment.paymentNumber} amount=${paymentAmount.toNumber()} ` +
                 `but GL DR=${totalDr.toFixed(2)}. Transaction rolled back.`
             );
         }
 
-        await client.query('COMMIT');
         return receiptData;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 export async function updateSupplierPayment(
@@ -344,24 +343,14 @@ export async function updateSupplierPayment(
     id: string,
     data: Partial<CreateSupplierPaymentInput>
 ) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
         const payment = await supplierPaymentRepository.updatePayment(client, id, data);
-        await client.query('COMMIT');
         return payment;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 export async function deleteSupplierPayment(pool: Pool, id: string) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
 
         // Check if payment has allocations
         const allocations = await supplierPaymentRepository.findAllocationsByPaymentId(pool, id);
@@ -370,14 +359,8 @@ export async function deleteSupplierPayment(pool: Pool, id: string) {
         }
 
         const result = await supplierPaymentRepository.deletePayment(client, id);
-        await client.query('COMMIT');
         return result;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 // ============================================================
@@ -416,6 +399,10 @@ export async function getSupplierInvoices(
     };
 }
 
+export async function getInvoiceSummary(pool: Pool) {
+    return supplierPaymentRepository.getInvoiceSummary(pool);
+}
+
 export async function getSupplierInvoiceById(pool: Pool, id: string) {
     return supplierPaymentRepository.findInvoiceById(pool, id);
 }
@@ -437,9 +424,7 @@ export async function createSupplierInvoice(
     data: CreateSupplierInvoiceInput,
     userId?: string
 ) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
 
         // Calculate totals from line items using Decimal.js for precision
         const subtotal = data.lineItems.reduce(
@@ -481,20 +466,12 @@ export async function createSupplierInvoice(
             supplierId: data.supplierId
         });
 
-        await client.query('COMMIT');
         return invoice;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 export async function deleteSupplierInvoice(pool: Pool, id: string) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
 
         // Check if invoice has payments
         const invoice = await supplierPaymentRepository.findInvoiceById(pool, id);
@@ -503,14 +480,8 @@ export async function deleteSupplierInvoice(pool: Pool, id: string) {
         }
 
         const result = await supplierPaymentRepository.deleteInvoice(client, id);
-        await client.query('COMMIT');
         return result;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 // ============================================================
@@ -522,9 +493,7 @@ export async function allocatePayment(
     data: AllocatePaymentInput,
     userId?: string
 ) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
 
         // Use Decimal.js for precise currency comparisons
         const allocationAmount = new Decimal(data.amount);
@@ -567,14 +536,8 @@ export async function allocatePayment(
             amount: allocationAmount.toNumber()
         });
 
-        await client.query('COMMIT');
         return allocation;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 export async function getPaymentAllocations(pool: Pool, paymentId: string) {
@@ -582,24 +545,14 @@ export async function getPaymentAllocations(pool: Pool, paymentId: string) {
 }
 
 export async function removeAllocation(pool: Pool, allocationId: string) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
         const result = await supplierPaymentRepository.deleteAllocation(client, allocationId);
-        await client.query('COMMIT');
         return result;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }
 
 export async function autoAllocatePayment(pool: Pool, paymentId: string, userId?: string) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    return UnitOfWork.run(pool, async (client) => {
 
         const payment = await supplierPaymentRepository.findPaymentById(pool, paymentId);
         if (!payment) {
@@ -647,8 +600,6 @@ export async function autoAllocatePayment(pool: Pool, paymentId: string, userId?
             });
         }
 
-        await client.query('COMMIT');
-
         logger.info('Auto-allocation completed', {
             paymentId,
             allocationsCount: allocations.length,
@@ -656,10 +607,5 @@ export async function autoAllocatePayment(pool: Pool, paymentId: string, userId?
         });
 
         return allocations;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    });
 }

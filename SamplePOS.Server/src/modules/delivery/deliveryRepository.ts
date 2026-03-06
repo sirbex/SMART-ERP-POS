@@ -11,6 +11,8 @@ import type {
   DeliveryOrderDbRow,
   DeliveryItemDbRow,
   DeliveryRouteDbRow,
+  DeliveryStatusHistoryDbRow,
+  RouteDeliveryDbRow,
   CreateDeliveryOrderRequest,
   UpdateDeliveryStatusRequest,
   CreateDeliveryRouteRequest,
@@ -90,7 +92,7 @@ export async function createDeliveryItems(
   deliveryOrderId: string,
   items: CreateDeliveryOrderRequest['items']
 ): Promise<DeliveryItemDbRow[]> {
-  const values: any[] = [];
+  const values: unknown[] = [];
   const placeholders: string[] = [];
 
   items.forEach((item, index) => {
@@ -128,17 +130,17 @@ export async function createDeliveryItems(
 export async function getDeliveryOrderById(pool: Pool, id: string): Promise<DeliveryOrderDbRow | null> {
   const result = await pool.query(`
     SELECT 
-      do.*,
+      dord.*,
       c.name as customer_name,
-      u.name as assigned_driver_name,
-      cb.name as created_by_name,
-      ub.name as updated_by_name
-    FROM delivery_orders do
-    LEFT JOIN customers c ON do.customer_id = c.id
-    LEFT JOIN users u ON do.assigned_driver_id = u.id
-    LEFT JOIN users cb ON do.created_by_id = cb.id
-    LEFT JOIN users ub ON do.updated_by_id = ub.id
-    WHERE do.id = $1
+      u.full_name as assigned_driver_name,
+      cb.full_name as created_by_name,
+      ub.full_name as updated_by_name
+    FROM delivery_orders dord
+    LEFT JOIN customers c ON dord.customer_id = c.id
+    LEFT JOIN users u ON dord.assigned_driver_id = u.id
+    LEFT JOIN users cb ON dord.created_by_id = cb.id
+    LEFT JOIN users ub ON dord.updated_by_id = ub.id
+    WHERE dord.id = $1
   `, [id]);
 
   return result.rows[0] || null;
@@ -150,17 +152,17 @@ export async function getDeliveryOrderById(pool: Pool, id: string): Promise<Deli
 export async function getDeliveryOrderByNumber(pool: Pool, deliveryNumber: string): Promise<DeliveryOrderDbRow | null> {
   const result = await pool.query(`
     SELECT 
-      do.*,
+      dord.*,
       c.name as customer_name,
-      u.name as assigned_driver_name,
-      cb.name as created_by_name,
-      ub.name as updated_by_name
-    FROM delivery_orders do
-    LEFT JOIN customers c ON do.customer_id = c.id
-    LEFT JOIN users u ON do.assigned_driver_id = u.id
-    LEFT JOIN users cb ON do.created_by_id = cb.id
-    LEFT JOIN users ub ON do.updated_by_id = ub.id
-    WHERE do.delivery_number = $1
+      u.full_name as assigned_driver_name,
+      cb.full_name as created_by_name,
+      ub.full_name as updated_by_name
+    FROM delivery_orders dord
+    LEFT JOIN customers c ON dord.customer_id = c.id
+    LEFT JOIN users u ON dord.assigned_driver_id = u.id
+    LEFT JOIN users cb ON dord.created_by_id = cb.id
+    LEFT JOIN users ub ON dord.updated_by_id = ub.id
+    WHERE dord.delivery_number = $1
   `, [deliveryNumber]);
 
   return result.rows[0] || null;
@@ -172,13 +174,13 @@ export async function getDeliveryOrderByNumber(pool: Pool, deliveryNumber: strin
 export async function getDeliveryOrderByTrackingNumber(pool: Pool, trackingNumber: string): Promise<DeliveryOrderDbRow | null> {
   const result = await pool.query(`
     SELECT 
-      do.*,
+      dord.*,
       c.name as customer_name,
-      u.name as assigned_driver_name
-    FROM delivery_orders do
-    LEFT JOIN customers c ON do.customer_id = c.id
-    LEFT JOIN users u ON do.assigned_driver_id = u.id
-    WHERE do.tracking_number = $1
+      u.full_name as assigned_driver_name
+    FROM delivery_orders dord
+    LEFT JOIN customers c ON dord.customer_id = c.id
+    LEFT JOIN users u ON dord.assigned_driver_id = u.id
+    WHERE dord.tracking_number = $1
   `, [trackingNumber]);
 
   return result.rows[0] || null;
@@ -206,38 +208,38 @@ export async function searchDeliveryOrders(pool: Pool, query: DeliveryOrderQuery
   totalCount: number;
 }> {
   const conditions: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let valueIndex = 1;
 
   // Status filter
   if (query.status) {
-    conditions.push(`do.status = $${valueIndex++}`);
+    conditions.push(`dord.status = $${valueIndex++}`);
     values.push(query.status);
   }
 
   // Customer filter
   if (query.customerId) {
-    conditions.push(`do.customer_id = $${valueIndex++}`);
+    conditions.push(`dord.customer_id = $${valueIndex++}`);
     values.push(query.customerId);
   }
 
   // Driver filter
   if (query.driverId) {
-    conditions.push(`do.assigned_driver_id = $${valueIndex++}`);
+    conditions.push(`dord.assigned_driver_id = $${valueIndex++}`);
     values.push(query.driverId);
   }
 
   // Date filters
   if (query.deliveryDate) {
-    conditions.push(`do.delivery_date = $${valueIndex++}`);
+    conditions.push(`dord.delivery_date = $${valueIndex++}`);
     values.push(query.deliveryDate);
   } else {
     if (query.deliveryDateFrom) {
-      conditions.push(`do.delivery_date >= $${valueIndex++}`);
+      conditions.push(`dord.delivery_date >= $${valueIndex++}`);
       values.push(query.deliveryDateFrom);
     }
     if (query.deliveryDateTo) {
-      conditions.push(`do.delivery_date <= $${valueIndex++}`);
+      conditions.push(`dord.delivery_date <= $${valueIndex++}`);
       values.push(query.deliveryDateTo);
     }
   }
@@ -245,10 +247,10 @@ export async function searchDeliveryOrders(pool: Pool, query: DeliveryOrderQuery
   // Search filter
   if (query.search) {
     conditions.push(`(
-      do.delivery_number ILIKE $${valueIndex} OR 
-      do.tracking_number ILIKE $${valueIndex} OR 
+      dord.delivery_number ILIKE $${valueIndex} OR 
+      dord.tracking_number ILIKE $${valueIndex} OR 
       c.name ILIKE $${valueIndex} OR
-      do.delivery_address ILIKE $${valueIndex}
+      dord.delivery_address ILIKE $${valueIndex}
     )`);
     values.push(`%${query.search}%`);
     valueIndex++;
@@ -259,8 +261,8 @@ export async function searchDeliveryOrders(pool: Pool, query: DeliveryOrderQuery
   // Get total count
   const countResult = await pool.query(`
     SELECT COUNT(*) as total_count
-    FROM delivery_orders do
-    LEFT JOIN customers c ON do.customer_id = c.id
+    FROM delivery_orders dord
+    LEFT JOIN customers c ON dord.customer_id = c.id
     ${whereClause}
   `, values);
 
@@ -268,10 +270,10 @@ export async function searchDeliveryOrders(pool: Pool, query: DeliveryOrderQuery
 
   // Get paginated results
   const sortMapping = {
-    deliveryDate: 'do.delivery_date',
-    deliveryNumber: 'do.delivery_number',
-    status: 'do.status',
-    createdAt: 'do.created_at'
+    deliveryDate: 'dord.delivery_date',
+    deliveryNumber: 'dord.delivery_number',
+    status: 'dord.status',
+    createdAt: 'dord.created_at'
   };
 
   const sortColumn = sortMapping[query.sortBy as keyof typeof sortMapping] || sortMapping.createdAt;
@@ -283,16 +285,16 @@ export async function searchDeliveryOrders(pool: Pool, query: DeliveryOrderQuery
 
   const dataResult = await pool.query(`
     SELECT 
-      do.*,
+      dord.*,
       c.name as customer_name,
-      u.name as assigned_driver_name,
-      cb.name as created_by_name,
-      ub.name as updated_by_name
-    FROM delivery_orders do
-    LEFT JOIN customers c ON do.customer_id = c.id
-    LEFT JOIN users u ON do.assigned_driver_id = u.id
-    LEFT JOIN users cb ON do.created_by_id = cb.id
-    LEFT JOIN users ub ON do.updated_by_id = ub.id
+      u.full_name as assigned_driver_name,
+      cb.full_name as created_by_name,
+      ub.full_name as updated_by_name
+    FROM delivery_orders dord
+    LEFT JOIN customers c ON dord.customer_id = c.id
+    LEFT JOIN users u ON dord.assigned_driver_id = u.id
+    LEFT JOIN users cb ON dord.created_by_id = cb.id
+    LEFT JOIN users ub ON dord.updated_by_id = ub.id
     ${whereClause}
     ORDER BY ${sortColumn} ${(query.sortOrder || 'desc').toUpperCase()}
     LIMIT $${valueIndex++} OFFSET $${valueIndex++}
@@ -314,7 +316,7 @@ export async function updateDeliveryOrderStatus(
   userId?: string
 ): Promise<DeliveryOrderDbRow | null> {
   const fields: string[] = ['status = $2', 'updated_by_id = $3', 'updated_at = CURRENT_TIMESTAMP'];
-  const values: any[] = [id, data.status, userId || null];
+  const values: unknown[] = [id, data.status, userId || null];
   let valueIndex = 4;
 
   if (data.actualDeliveryTime) {
@@ -403,7 +405,7 @@ export async function addDeliveriesToRoute(
   routeId: string,
   deliveryOrderIds: string[]
 ): Promise<void> {
-  const values: any[] = [];
+  const values: unknown[] = [];
   const placeholders: string[] = [];
 
   deliveryOrderIds.forEach((deliveryOrderId, index) => {
@@ -425,8 +427,8 @@ export async function getDeliveryRouteById(pool: Pool, id: string): Promise<Deli
   const result = await pool.query(`
     SELECT 
       dr.*,
-      u.name as driver_name,
-      cb.name as created_by_name
+      u.full_name as driver_name,
+      cb.full_name as created_by_name
     FROM delivery_routes dr
     LEFT JOIN users u ON dr.driver_id = u.id
     LEFT JOIN users cb ON dr.created_by_id = cb.id
@@ -444,7 +446,7 @@ export async function searchDeliveryRoutes(pool: Pool, query: DeliveryRouteQuery
   totalCount: number;
 }> {
   const conditions: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let valueIndex = 1;
 
   // Status filter
@@ -478,7 +480,7 @@ export async function searchDeliveryRoutes(pool: Pool, query: DeliveryRouteQuery
   if (query.search) {
     conditions.push(`(
       dr.route_name ILIKE $${valueIndex} OR 
-      u.name ILIKE $${valueIndex} OR
+      u.full_name ILIKE $${valueIndex} OR
       dr.vehicle_plate_number ILIKE $${valueIndex}
     )`);
     values.push(`%${query.search}%`);
@@ -515,15 +517,15 @@ export async function searchDeliveryRoutes(pool: Pool, query: DeliveryRouteQuery
   const dataResult = await pool.query(`
     SELECT 
       dr.*,
-      u.name as driver_name,
-      cb.name as created_by_name,
+      u.full_name as driver_name,
+      cb.full_name as created_by_name,
       COUNT(rd.delivery_order_id) as total_deliveries
     FROM delivery_routes dr
     LEFT JOIN users u ON dr.driver_id = u.id
     LEFT JOIN users cb ON dr.created_by_id = cb.id
     LEFT JOIN route_deliveries rd ON dr.id = rd.route_id
     ${whereClause}
-    GROUP BY dr.id, u.name, cb.name
+    GROUP BY dr.id, u.full_name, cb.full_name
     ORDER BY ${sortColumn} ${(query.sortOrder || 'desc').toUpperCase()}
     LIMIT $${valueIndex++} OFFSET $${valueIndex++}
   `, values);
@@ -537,18 +539,18 @@ export async function searchDeliveryRoutes(pool: Pool, query: DeliveryRouteQuery
 /**
  * Get route deliveries by route ID
  */
-export async function getRouteDeliveries(pool: Pool, routeId: string): Promise<any[]> {
+export async function getRouteDeliveries(pool: Pool, routeId: string): Promise<RouteDeliveryDbRow[]> {
   const result = await pool.query(`
     SELECT 
       rd.*,
-      do.delivery_number,
-      do.tracking_number,
-      do.delivery_address,
-      do.status as delivery_status,
+      dord.delivery_number,
+      dord.tracking_number,
+      dord.delivery_address,
+      dord.status as delivery_status,
       c.name as customer_name
     FROM route_deliveries rd
-    JOIN delivery_orders do ON rd.delivery_order_id = do.id
-    LEFT JOIN customers c ON do.customer_id = c.id
+    JOIN delivery_orders dord ON rd.delivery_order_id = dord.id
+    LEFT JOIN customers c ON dord.customer_id = c.id
     WHERE rd.route_id = $1
     ORDER BY rd.delivery_sequence
   `, [routeId]);
@@ -601,11 +603,11 @@ export async function createStatusHistoryEntry(
 /**
  * Get status history for delivery order
  */
-export async function getDeliveryStatusHistory(pool: Pool, deliveryOrderId: string): Promise<any[]> {
+export async function getDeliveryStatusHistory(pool: Pool, deliveryOrderId: string): Promise<DeliveryStatusHistoryDbRow[]> {
   const result = await pool.query(`
     SELECT 
       dsh.*,
-      u.name as changed_by_name
+      u.full_name as changed_by_name
     FROM delivery_status_history dsh
     LEFT JOIN users u ON dsh.changed_by_id = u.id
     WHERE dsh.delivery_order_id = $1
@@ -613,4 +615,50 @@ export async function getDeliveryStatusHistory(pool: Pool, deliveryOrderId: stri
   `, [deliveryOrderId]);
 
   return result.rows;
+}
+
+/**
+ * Get delivery analytics summary with optional date range filter
+ */
+export async function getDeliveryAnalyticsSummary(
+  pool: Pool,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<Record<string, string>> {
+  let dateFilter = '';
+  const params: string[] = [];
+
+  if (dateFrom) {
+    params.push(dateFrom);
+    dateFilter += ` AND dord.delivery_date >= $${params.length}`;
+  }
+  if (dateTo) {
+    params.push(dateTo);
+    dateFilter += ` AND dord.delivery_date <= $${params.length}`;
+  }
+
+  const result = await pool.query(`
+    SELECT
+      COUNT(*)::int AS total_deliveries,
+      COUNT(*) FILTER (WHERE dord.status = 'DELIVERED')::int AS completed_deliveries,
+      COUNT(*) FILTER (WHERE dord.status = 'FAILED')::int AS failed_deliveries,
+      COUNT(*) FILTER (WHERE dord.status = 'PENDING')::int AS pending_deliveries,
+      COUNT(*) FILTER (WHERE dord.status = 'IN_TRANSIT')::int AS in_transit_deliveries,
+      COUNT(*) FILTER (WHERE dord.status = 'ASSIGNED')::int AS assigned_deliveries,
+      COUNT(*) FILTER (WHERE dord.status = 'CANCELLED')::int AS cancelled_deliveries,
+      COALESCE(SUM(dord.delivery_fee), 0) AS total_revenue,
+      COALESCE(SUM(dord.total_cost), 0) AS total_cost,
+      CASE
+        WHEN COUNT(*) FILTER (WHERE dord.status IN ('DELIVERED', 'FAILED')) > 0
+        THEN ROUND(
+          COUNT(*) FILTER (WHERE dord.status = 'DELIVERED')::numeric /
+          COUNT(*) FILTER (WHERE dord.status IN ('DELIVERED', 'FAILED'))::numeric * 100, 1
+        )
+        ELSE 0
+      END AS delivery_success_rate
+    FROM delivery_orders dord
+    WHERE dord.status != 'CANCELLED'${dateFilter}
+  `, params);
+
+  return result.rows[0];
 }

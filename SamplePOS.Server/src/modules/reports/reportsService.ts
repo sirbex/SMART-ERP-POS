@@ -136,6 +136,8 @@ export const reportsService = {
     // Calculate summary
     const totalValue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalValue), new Decimal(0));
     const totalQuantity = data.reduce((sum, item) => new Decimal(sum).plus(item.quantityOnHand), new Decimal(0));
+    const totalPotentialRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialRevenue), new Decimal(0));
+    const totalPotentialProfit = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialProfit), new Decimal(0));
 
     const executionTime = Date.now() - startTime;
 
@@ -162,6 +164,13 @@ export const reportsService = {
         totalValue: totalValue.toDecimalPlaces(2).toNumber(),
         totalValueFormatted: formatCurrency(totalValue.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
         totalQuantity: totalQuantity.toDecimalPlaces(3).toNumber(),
+        totalPotentialRevenue: totalPotentialRevenue.toDecimalPlaces(2).toNumber(),
+        totalPotentialRevenueFormatted: formatCurrency(totalPotentialRevenue.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        totalPotentialProfit: totalPotentialProfit.toDecimalPlaces(2).toNumber(),
+        totalPotentialProfitFormatted: formatCurrency(totalPotentialProfit.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        overallMargin: totalPotentialRevenue.greaterThan(0)
+          ? totalPotentialProfit.dividedBy(totalPotentialRevenue).times(100).toDecimalPlaces(2).toNumber()
+          : 0,
         valuationMethod: options.valuationMethod || 'FIFO',
       },
       recordCount: data.length,
@@ -632,6 +641,8 @@ export const reportsService = {
     const totalPaid = data.reduce((sum, item) => new Decimal(sum).plus(item.totalPaid), new Decimal(0));
     const totalOutstanding = data.reduce((sum, item) => new Decimal(sum).plus(item.totalOutstanding), new Decimal(0));
     const totalOverdue = data.reduce((sum, item) => new Decimal(sum).plus(item.overdueAmount), new Decimal(0));
+    const totalDeposited = data.reduce((sum, item) => new Decimal(sum).plus(item.totalDeposited || 0), new Decimal(0));
+    const totalDepositAvailable = data.reduce((sum, item) => new Decimal(sum).plus(item.depositAvailable || 0), new Decimal(0));
 
     const executionTime = Date.now() - startTime;
 
@@ -659,6 +670,8 @@ export const reportsService = {
         totalPaid: totalPaid.toDecimalPlaces(2).toNumber(),
         totalOutstanding: totalOutstanding.toDecimalPlaces(2).toNumber(),
         totalOverdue: totalOverdue.toDecimalPlaces(2).toNumber(),
+        totalDeposited: totalDeposited.toDecimalPlaces(2).toNumber(),
+        depositAvailable: totalDepositAvailable.toDecimalPlaces(2).toNumber(),
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -951,9 +964,9 @@ export const reportsService = {
 
     const summary = {
       totalTransactions: data.transactions.length,
-      totalSales: data.transactions.reduce((sum: Decimal, t: any) => new Decimal(sum).plus(t.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalPaid: data.transactions.reduce((sum: Decimal, t: any) => new Decimal(sum).plus(t.amountPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalOutstanding: data.transactions.reduce((sum: Decimal, t: any) => new Decimal(sum).plus(t.balanceDue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalSales: data.transactions.reduce((sum: Decimal, t) => new Decimal(sum).plus(t.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalPaid: data.transactions.reduce((sum: Decimal, t) => new Decimal(sum).plus(t.amountPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalOutstanding: data.transactions.reduce((sum: Decimal, t) => new Decimal(sum).plus(t.balanceDue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -1057,14 +1070,16 @@ export const reportsService = {
       includeDebCollections: true
     });
 
-    // Separate sales revenue from debt collections for advanced analysis
+    // Separate sales revenue from debt collections and deposit receipts for advanced analysis
     const salesRevenue = data.filter(d => d.revenueType === 'SALES_REVENUE');
     const debtCollections = data.filter(d => d.revenueType === 'DEBT_COLLECTION');
+    const depositReceipts = data.filter(d => d.revenueType === 'DEPOSIT_RECEIPT');
 
     // Calculate metrics with bank-grade precision
     const salesRevenueTotal = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.cashAmount), new Decimal(0));
     const debtCollectionsTotal = debtCollections.reduce((sum, d) => new Decimal(sum).plus(d.cashAmount), new Decimal(0));
-    const totalCashFlow = salesRevenueTotal.plus(debtCollectionsTotal);
+    const depositReceiptsTotal = depositReceipts.reduce((sum, d) => new Decimal(sum).plus(d.cashAmount), new Decimal(0));
+    const totalCashFlow = salesRevenueTotal.plus(debtCollectionsTotal).plus(depositReceiptsTotal);
     const totalSalesValue = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.totalSales), new Decimal(0));
     const totalProfit = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.grossProfit), new Decimal(0));
     const totalCreditExtended = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.creditCreated), new Decimal(0));
@@ -1084,6 +1099,10 @@ export const reportsService = {
       debtCollections: debtCollectionsTotal.toDecimalPlaces(2).toNumber(),
       collectionsTransactionCount: debtCollections.reduce((sum, d) => sum + d.transactionCount, 0),
 
+      // Customer Deposit Receipts (advance payments received)
+      depositReceipts: depositReceiptsTotal.toDecimalPlaces(2).toNumber(),
+      depositsTransactionCount: depositReceipts.reduce((sum, d) => sum + d.transactionCount, 0),
+
       // Combined Metrics
       totalCashIn: totalCashFlow.toDecimalPlaces(2).toNumber(),
       totalTransactions: data.reduce((sum, d) => sum + d.transactionCount, 0),
@@ -1091,8 +1110,10 @@ export const reportsService = {
       // Revenue Composition (completely flattened for frontend)
       salesPercent: totalCashFlow.isZero() ? 0 : salesRevenueTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
       collectionsPercent: totalCashFlow.isZero() ? 0 : debtCollectionsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
+      depositsPercent: totalCashFlow.isZero() ? 0 : depositReceiptsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
       salesAmount: salesRevenueTotal.toDecimalPlaces(2).toNumber(),
       collectionsAmount: debtCollectionsTotal.toDecimalPlaces(2).toNumber(),
+      depositsAmount: depositReceiptsTotal.toDecimalPlaces(2).toNumber(),
 
       // Working Capital Impact
       creditExtended: totalCreditExtended.toDecimalPlaces(2).toNumber(),
@@ -1101,8 +1122,9 @@ export const reportsService = {
       businessInsights: [
         ...(salesRevenueTotal.greaterThan(debtCollectionsTotal) ? ['Strong new business growth - sales exceed collections'] : []),
         ...(debtCollectionsTotal.greaterThan(salesRevenueTotal) ? ['Focus on debt recovery - collections exceed new sales'] : []),
-        ...(totalProfit.div(totalSalesValue).mul(100).greaterThan(20) ? ['Healthy profit margins (>20%)'] : []),
-        ...(data.length > 0 && totalCashFlow.greaterThan(0) ? ['Positive overall cash flow'] : [])
+        ...(totalProfit.div(totalSalesValue.isZero() ? new Decimal(1) : totalSalesValue).mul(100).greaterThan(20) ? ['Healthy profit margins (>20%)'] : []),
+        ...(data.length > 0 && totalCashFlow.greaterThan(0) ? ['Positive overall cash flow'] : []),
+        ...(depositReceiptsTotal.greaterThan(0) ? [`Customer deposits received: ${depositReceiptsTotal.toDecimalPlaces(2).toNumber()}`] : []),
       ]
     };
 
@@ -1458,8 +1480,8 @@ export const reportsService = {
 
     const summary = {
       totalCategories: data.length,
-      totalRevenue: data.reduce((sum: Decimal, item: any) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalProfit: data.reduce((sum: Decimal, item: any) => sum.plus(item.grossProfit), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data.reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalProfit: data.reduce((sum: Decimal, item) => sum.plus(item.grossProfit), new Decimal(0)).toDecimalPlaces(2).toNumber(),
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
       topCategory: data.length > 0 ? data[0].category : null,
     };
@@ -1496,7 +1518,7 @@ export const reportsService = {
 
     const summary = {
       totalPaymentMethods: data.length,
-      totalRevenue: data.reduce((sum: Decimal, item: any) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data.reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
       topPaymentMethod: data.length > 0 ? data[0].paymentMethod : null,
     };
@@ -1537,7 +1559,7 @@ export const reportsService = {
 
     const summary = {
       totalHours: data.length,
-      totalRevenue: data.reduce((sum: Decimal, item: any) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data.reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
       peakHour: peakHour?.hour,
       peakHourRevenue: peakHour?.totalRevenue || 0,
@@ -1576,8 +1598,8 @@ export const reportsService = {
     const data = await reportsRepository.getSalesComparison(pool, options);
     const executionTime = Date.now() - startTime;
 
-    const totalCurrentSales = data.reduce((sum: Decimal, item: any) => sum.plus(item.currentSales), new Decimal(0));
-    const totalPreviousSales = data.reduce((sum: Decimal, item: any) => sum.plus(item.previousSales), new Decimal(0));
+    const totalCurrentSales = data.reduce((sum: Decimal, item) => sum.plus(item.currentSales), new Decimal(0));
+    const totalPreviousSales = data.reduce((sum: Decimal, item) => sum.plus(item.previousSales), new Decimal(0));
     const overallChange = totalPreviousSales.isZero() ? new Decimal(100) :
       totalCurrentSales.minus(totalPreviousSales).dividedBy(totalPreviousSales).times(100);
 
@@ -1622,11 +1644,11 @@ export const reportsService = {
 
     const summary = {
       totalPurchases: data.length,
-      totalSpent: data.reduce((sum: Decimal, item: any) => sum.plus(item.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalPaid: data.reduce((sum: Decimal, item: any) => sum.plus(item.amountPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalOutstanding: data.reduce((sum: Decimal, item: any) => sum.plus(item.outstandingBalance), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalSpent: data.reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalPaid: data.reduce((sum: Decimal, item) => sum.plus(item.amountPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalOutstanding: data.reduce((sum: Decimal, item) => sum.plus(item.outstandingBalance), new Decimal(0)).toDecimalPlaces(2).toNumber(),
       averagePurchaseValue: data.length > 0 ?
-        data.reduce((sum: Decimal, item: any) => sum.plus(item.totalAmount), new Decimal(0)).dividedBy(data.length).toDecimalPlaces(2).toNumber() : 0,
+        data.reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0)).dividedBy(data.length).toDecimalPlaces(2).toNumber() : 0,
     };
 
     // Audit logging handled by controller layer

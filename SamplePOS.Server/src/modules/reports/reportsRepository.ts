@@ -4,6 +4,19 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
+import type {
+  SalesReportRow, SupplierCostAnalysisRow, PaymentReportRow,
+  InventoryAdjustmentRow, PurchaseOrderSummaryRow, StockMovementAnalysisRow,
+  CustomerAccountStatementData, DailyCashFlowRow, TopCustomerRow,
+  StockAgingRow, SalesByCategoryRow, SalesByPaymentMethodRow,
+  HourlySalesAnalysisRow, BusinessPositionData, InventoryValuationRow,
+  ExpiringItemRow, LowStockItemRow, BestSellingProductRow, GoodsReceivedRow,
+  CustomerPaymentsRow, ProfitLossRow, DeletedItemRow, ProfitMarginByProductRow,
+  SupplierPaymentStatusRow, CustomerAgingRow, WasteDamageRow,
+  ReorderRecommendationRow, SalesComparisonRow, CustomerPurchaseHistoryRow,
+  CashRegisterSessionSummaryData, CashRegisterMovementBreakdownData,
+  CashRegisterSessionHistoryData,
+} from './reportTypes.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -43,7 +56,7 @@ export interface ReportRunRecord {
   id: string;
   report_type: string;
   report_name: string;
-  parameters: any;
+  parameters: Record<string, unknown>;
   generated_by_id: string | null;
   start_date: Date | null;
   end_date: Date | null;
@@ -64,7 +77,7 @@ export const reportsRepository = {
     data: {
       reportType: string;
       reportName: string;
-      parameters: any;
+      parameters: Record<string, unknown>;
       generatedById: string | null;
       startDate?: Date | null;
       endDate?: Date | null;
@@ -107,8 +120,8 @@ export const reportsRepository = {
         ]
       );
       return result.rows[0];
-    } catch (error: any) {
-      logger.warn('Failed to log report run', { error: error.message });
+    } catch (error: unknown) {
+      logger.warn('Failed to log report run', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   },
@@ -124,12 +137,12 @@ export const reportsRepository = {
       categoryId?: string;
       valuationMethod?: 'FIFO' | 'AVCO' | 'LIFO';
     }
-  ): Promise<any[]> {
+  ): Promise<InventoryValuationRow[]> {
     const asOfDate = options.asOfDate || new Date();
     const method = options.valuationMethod || 'FIFO';
 
     let categoryFilter = '';
-    const params: any[] = [asOfDate];
+    const params: unknown[] = [asOfDate];
     let methodParamIndex = 2;
 
     if (options.categoryId) {
@@ -217,8 +230,8 @@ export const reportsRepository = {
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
       customerId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<SalesReportRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     let groupByClause = '';
     let selectClause = '';
     let customerFilter = '';
@@ -356,8 +369,8 @@ export const reportsRepository = {
       daysAhead: number;
       categoryId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.daysAhead];
+  ): Promise<ExpiringItemRow[]> {
+    const params: unknown[] = [options.daysAhead];
     let categoryFilter = '';
 
     if (options.categoryId) {
@@ -415,8 +428,8 @@ export const reportsRepository = {
       threshold?: number;
       categoryId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [];
+  ): Promise<LowStockItemRow[]> {
+    const params: unknown[] = [];
     let categoryFilter = '';
     let thresholdFilter = '';
 
@@ -510,8 +523,8 @@ export const reportsRepository = {
       limit: number;
       categoryId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate, options.limit];
+  ): Promise<BestSellingProductRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate, options.limit];
     let categoryFilter = '';
 
     if (options.categoryId) {
@@ -573,8 +586,8 @@ export const reportsRepository = {
       endDate: Date;
       supplierId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<SupplierCostAnalysisRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     let supplierFilter = '';
 
     if (options.supplierId) {
@@ -650,8 +663,8 @@ export const reportsRepository = {
       supplierId?: string;
       productId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<GoodsReceivedRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     let filters = '';
 
     if (options.supplierId) {
@@ -715,8 +728,8 @@ export const reportsRepository = {
       endDate: Date;
       paymentMethod?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<PaymentReportRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     let methodFilter = '';
 
     if (options.paymentMethod) {
@@ -773,8 +786,8 @@ export const reportsRepository = {
       customerId?: string;
       status?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<CustomerPaymentsRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     let filters = '';
 
     if (options.customerId) {
@@ -860,7 +873,7 @@ export const reportsRepository = {
       endDate: Date;
       groupBy: 'day' | 'week' | 'month';
     }
-  ): Promise<any[]> {
+  ): Promise<ProfitLossRow[]> {
     let dateGroup = '';
     switch (options.groupBy) {
       case 'day':
@@ -923,8 +936,8 @@ export const reportsRepository = {
       startDate?: Date;
       endDate?: Date;
     }
-  ): Promise<any[]> {
-    const params: any[] = [];
+  ): Promise<DeletedItemRow[]> {
+    const params: unknown[] = [];
     let dateFilter = '';
 
     if (options.startDate && options.endDate) {
@@ -977,8 +990,8 @@ export const reportsRepository = {
       endDate: Date;
       productId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<InventoryAdjustmentRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     let productFilter = '';
 
     if (options.productId) {
@@ -1035,8 +1048,8 @@ export const reportsRepository = {
       status?: string;
       supplierId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [];
+  ): Promise<PurchaseOrderSummaryRow[]> {
+    const params: unknown[] = [];
     const filters: string[] = [];
 
     if (options.startDate && options.endDate) {
@@ -1115,8 +1128,8 @@ export const reportsRepository = {
       movementType?: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'movement_type';
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<StockMovementAnalysisRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     const filters: string[] = ['sm.created_at BETWEEN $1 AND $2'];
 
     if (options.productId) {
@@ -1197,8 +1210,8 @@ export const reportsRepository = {
       startDate?: Date;
       endDate?: Date;
     }
-  ): Promise<any> {
-    const params: any[] = [options.customerId];
+  ): Promise<CustomerAccountStatementData> {
+    const params: unknown[] = [options.customerId];
     const filters: string[] = ['s.customer_id = $1'];
 
     if (options.startDate && options.endDate) {
@@ -1297,8 +1310,8 @@ export const reportsRepository = {
       categoryId?: string;
       minMarginPercent?: number;
     }
-  ): Promise<any[]> {
-    const params: any[] = [];
+  ): Promise<ProfitMarginByProductRow[]> {
+    const params: unknown[] = [];
     const filters: string[] = [];
 
     if (options.startDate && options.endDate) {
@@ -1368,7 +1381,7 @@ export const reportsRepository = {
       paymentMethod?: string;
       includeDebCollections?: boolean;
     }
-  ): Promise<any[]> {
+  ): Promise<DailyCashFlowRow[]> {
     // Convert dates to YYYY-MM-DD strings to avoid timezone issues
     const startDateStr = options.startDate instanceof Date
       ? options.startDate.toISOString().split('T')[0]
@@ -1509,8 +1522,8 @@ export const reportsRepository = {
       supplierId?: string;
       status?: 'PAID' | 'PARTIAL' | 'PENDING';
     }
-  ): Promise<any[]> {
-    const params: any[] = [];
+  ): Promise<SupplierPaymentStatusRow[]> {
+    const params: unknown[] = [];
     const supplierFilters: string[] = [];
     const invoiceFilters: string[] = ['deleted_at IS NULL'];
 
@@ -1607,8 +1620,8 @@ export const reportsRepository = {
       minPurchaseAmount?: number;
       sortBy?: 'REVENUE' | 'ORDERS' | 'PROFIT';
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<TopCustomerRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     const filters: string[] = ['s.sale_date BETWEEN $1 AND $2'];
 
     if (options.minPurchaseAmount) {
@@ -1672,7 +1685,7 @@ export const reportsRepository = {
     options: {
       asOfDate?: Date;
     }
-  ): Promise<any[]> {
+  ): Promise<CustomerAgingRow[]> {
     const asOfDate = options.asOfDate || new Date();
     const asOfDateStr = asOfDate instanceof Date
       ? asOfDate.toISOString().split('T')[0]
@@ -1764,8 +1777,8 @@ export const reportsRepository = {
       categoryId?: string;
       minDaysInStock?: number;
     }
-  ): Promise<any[]> {
-    const params: any[] = [];
+  ): Promise<StockAgingRow[]> {
+    const params: unknown[] = [];
     const filters: string[] = ['b.remaining_quantity > 0'];
 
     if (options.categoryId) {
@@ -1832,8 +1845,8 @@ export const reportsRepository = {
       endDate: Date;
       productId?: string;
     }
-  ): Promise<any[]> {
-    const params: any[] = [options.startDate, options.endDate];
+  ): Promise<WasteDamageRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
     const filters: string[] = [
       'sm.created_at BETWEEN $1 AND $2',
       "sm.movement_type IN ('DAMAGE', 'EXPIRY')"
@@ -1899,9 +1912,9 @@ export const reportsRepository = {
       categoryId?: string;
       daysToAnalyze?: number;
     }
-  ): Promise<any[]> {
+  ): Promise<ReorderRecommendationRow[]> {
     const daysToAnalyze = options.daysToAnalyze || 30;
-    const params: any[] = [daysToAnalyze];
+    const params: unknown[] = [daysToAnalyze];
     const filters: string[] = [];
 
     if (options.categoryId) {
@@ -2024,7 +2037,7 @@ export const reportsRepository = {
       startDate: Date | string;
       endDate: Date | string;
     }
-  ): Promise<any[]> {
+  ): Promise<SalesByCategoryRow[]> {
     const startDateStr = options.startDate instanceof Date
       ? options.startDate.toISOString().split('T')[0]
       : options.startDate;
@@ -2032,7 +2045,7 @@ export const reportsRepository = {
       ? options.endDate.toISOString().split('T')[0]
       : options.endDate;
 
-    const params: any[] = [startDateStr, endDateStr];
+    const params: unknown[] = [startDateStr, endDateStr];
 
     const query = `
       SELECT 
@@ -2085,7 +2098,7 @@ export const reportsRepository = {
       startDate: Date | string;
       endDate: Date | string;
     }
-  ): Promise<any[]> {
+  ): Promise<SalesByPaymentMethodRow[]> {
     const startDateStr = options.startDate instanceof Date
       ? options.startDate.toISOString().split('T')[0]
       : options.startDate;
@@ -2093,7 +2106,7 @@ export const reportsRepository = {
       ? options.endDate.toISOString().split('T')[0]
       : options.endDate;
 
-    const params: any[] = [startDateStr, endDateStr];
+    const params: unknown[] = [startDateStr, endDateStr];
 
     const query = `
       WITH payment_totals AS (
@@ -2142,7 +2155,7 @@ export const reportsRepository = {
       startDate: Date | string;
       endDate: Date | string;
     }
-  ): Promise<any[]> {
+  ): Promise<HourlySalesAnalysisRow[]> {
     const startDateStr = options.startDate instanceof Date
       ? options.startDate.toISOString().split('T')[0]
       : options.startDate;
@@ -2150,7 +2163,7 @@ export const reportsRepository = {
       ? options.endDate.toISOString().split('T')[0]
       : options.endDate;
 
-    const params: any[] = [startDateStr, endDateStr];
+    const params: unknown[] = [startDateStr, endDateStr];
 
     const query = `
       SELECT 
@@ -2190,7 +2203,7 @@ export const reportsRepository = {
       previousEndDate: Date | string;
       groupBy: 'day' | 'week' | 'month';
     }
-  ): Promise<any[]> {
+  ): Promise<SalesComparisonRow[]> {
     const currentStartStr = options.currentStartDate instanceof Date
       ? options.currentStartDate.toISOString().split('T')[0]
       : options.currentStartDate;
@@ -2204,7 +2217,7 @@ export const reportsRepository = {
       ? options.previousEndDate.toISOString().split('T')[0]
       : options.previousEndDate;
 
-    const params: any[] = [currentStartStr, currentEndStr, previousStartStr, previousEndStr];
+    const params: unknown[] = [currentStartStr, currentEndStr, previousStartStr, previousEndStr];
 
     let groupByClause = '';
     let selectClause = '';
@@ -2285,7 +2298,7 @@ export const reportsRepository = {
       startDate: Date | string;
       endDate: Date | string;
     }
-  ): Promise<any[]> {
+  ): Promise<CustomerPurchaseHistoryRow[]> {
     const startDateStr = options.startDate instanceof Date
       ? options.startDate.toISOString().split('T')[0]
       : options.startDate;
@@ -2310,7 +2323,7 @@ export const reportsRepository = {
       customerUuid = customerLookup.rows[0].id;
     }
 
-    const params: any[] = [customerUuid, startDateStr, endDateStr];
+    const params: unknown[] = [customerUuid, startDateStr, endDateStr];
 
     const query = `
       SELECT 
@@ -2360,7 +2373,7 @@ export const reportsRepository = {
       includeComparisons?: boolean;
       includeForecasts?: boolean;
     }
-  ): Promise<any> {
+  ): Promise<BusinessPositionData> {
     const reportDateStr = options.reportDate instanceof Date
       ? options.reportDate.toISOString().split('T')[0]
       : options.reportDate;
@@ -2512,12 +2525,12 @@ export const reportsRepository = {
       return {
         reportDate: reportDateStr,
         businessHealthScore: 0,
-        salesPerformance: {},
-        collectionsPerformance: {},
-        inventoryHealth: {},
-        customerMetrics: {},
-        cashPosition: {},
-        riskAssessment: {}
+        salesPerformance: { transactionsCount: 0, uniqueCustomers: 0, totalRevenue: 0, totalCost: 0, grossProfit: 0, avgTransactionValue: 0, walkInRevenue: 0, customerRevenue: 0, salesCashCollected: 0, creditExtended: 0 },
+        collectionsPerformance: { collectionTransactions: 0, totalCollections: 0, avgCollectionValue: 0, payingCustomers: 0 },
+        inventoryHealth: { totalProducts: 0, lowStockItems: 0, expiringUnits: 0, inventoryValue: 0 },
+        customerMetrics: { totalCustomers: 0, newCustomers30d: 0, totalReceivables: 0, customersWithBalance: 0, avgCustomerBalance: 0 },
+        cashPosition: { totalCashIn: 0, newCreditExtended: 0, outstandingReceivables: 0, profitMarginPercent: 0, cashCollectionRate: 0 },
+        riskAssessment: { receivablesRisk: 'LOW' as const, inventoryRisk: 'LOW' as const, overallRiskLevel: 'LOW' as const },
       };
     }
 
@@ -2593,7 +2606,7 @@ export const reportsRepository = {
   async getCashRegisterSessionSummary(
     pool: Pool,
     sessionId: string
-  ): Promise<any | null> {
+  ): Promise<CashRegisterSessionSummaryData | null> {
     try {
       // Determine if input is UUID or session_number
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
@@ -2737,9 +2750,9 @@ export const reportsRepository = {
       registerId?: string;
       userId?: string;
     }
-  ): Promise<any> {
+  ): Promise<CashRegisterMovementBreakdownData> {
     try {
-      const params: any[] = [options.startDate, options.endDate];
+      const params: unknown[] = [options.startDate, options.endDate];
       let paramIndex = 3;
 
       let whereClause = 'WHERE DATE(m.created_at) BETWEEN $1::date AND $2::date';
@@ -2898,9 +2911,9 @@ export const reportsRepository = {
       userId?: string;
       status?: 'OPEN' | 'CLOSED' | 'ALL';
     }
-  ): Promise<any> {
+  ): Promise<CashRegisterSessionHistoryData> {
     try {
-      const params: any[] = [options.startDate, options.endDate];
+      const params: unknown[] = [options.startDate, options.endDate];
       let paramIndex = 3;
 
       let whereClause = 'WHERE DATE(s.opened_at) BETWEEN $1::date AND $2::date';

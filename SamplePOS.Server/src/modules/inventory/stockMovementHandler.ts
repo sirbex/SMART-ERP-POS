@@ -11,7 +11,7 @@
  *   - Recalculates inventory values
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
@@ -77,6 +77,10 @@ export class StockMovementHandler {
 
     try {
       await client.query('BEGIN');
+
+      // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
+      // This handler already creates proper MOV- movements in Step 9
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
       // Step 1: Validate parameters
       this.validateMovementParams(params);
@@ -213,7 +217,7 @@ export class StockMovementHandler {
    * - For FEFO movements (sales), select appropriate batch
    */
   private async resolveBatch(
-    client: any,
+    client: PoolClient,
     params: StockMovementParams
   ): Promise<{
     id: string;
@@ -223,11 +227,12 @@ export class StockMovementHandler {
     cost_price: number | null;
   }> {
     if (params.batchId) {
-      // Validate provided batch exists
+      // Validate provided batch exists — lock row to prevent concurrent modification
       const result = await client.query(
         `SELECT id, product_id, batch_number, remaining_quantity, cost_price 
          FROM inventory_batches 
-         WHERE id = $1 AND status = 'ACTIVE'`,
+         WHERE id = $1 AND status = 'ACTIVE'
+         FOR UPDATE`,
         [params.batchId]
       );
 
@@ -243,13 +248,14 @@ export class StockMovementHandler {
       return result.rows[0];
     }
 
-    // No batchId provided - find or create MAIN batch
+    // No batchId provided - find or create MAIN batch (with row lock)
     let result = await client.query(
       `SELECT id, product_id, batch_number, remaining_quantity, cost_price 
        FROM inventory_batches 
        WHERE product_id = $1 AND batch_number = 'MAIN' AND status = 'ACTIVE' 
        ORDER BY received_date DESC 
-       LIMIT 1`,
+       LIMIT 1
+       FOR UPDATE`,
       [params.productId]
     );
 
@@ -257,7 +263,7 @@ export class StockMovementHandler {
       return result.rows[0];
     }
 
-    // MAIN batch doesn't exist - create it
+    // MAIN batch doesn't exist - create it atomically with ON CONFLICT
     const product = await client.query(
       'SELECT name, cost_price FROM products WHERE id = $1',
       [params.productId]
@@ -273,6 +279,7 @@ export class StockMovementHandler {
       `INSERT INTO inventory_batches 
        (product_id, batch_number, quantity, remaining_quantity, cost_price, received_date, status)
        VALUES ($1, 'MAIN', 0, 0, $2, CURRENT_TIMESTAMP, 'ACTIVE')
+       ON CONFLICT (product_id, batch_number) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
        RETURNING id, product_id, batch_number, remaining_quantity, cost_price`,
       [params.productId, costPrice]
     );
@@ -290,7 +297,7 @@ export class StockMovementHandler {
    * Prevents negative stock unless system config allows it
    */
   private async validateResultingQuantity(
-    client: any,
+    client: PoolClient,
     newQuantity: Decimal,
     productId: string
   ): Promise<void> {
@@ -328,7 +335,9 @@ export class StockMovementHandler {
    * Generate sequential movement number
    * Format: MOV-YYYY-####
    */
-  private async generateMovementNumber(client: any): Promise<string> {
+  private async generateMovementNumber(client: PoolClient): Promise<string> {
+    // Advisory lock prevents concurrent duplicate movement number generation (held until COMMIT)
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
     const result = await client.query(
       `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
        LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0') 
@@ -343,7 +352,7 @@ export class StockMovementHandler {
   /**
    * Update product quantity_on_hand from batch aggregation
    */
-  private async updateProductQuantity(client: any, productId: string): Promise<void> {
+  private async updateProductQuantity(client: PoolClient, productId: string): Promise<void> {
     await client.query(
       `UPDATE products 
        SET quantity_on_hand = (

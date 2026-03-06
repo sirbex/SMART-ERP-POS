@@ -106,7 +106,7 @@ export async function updateInvoiceSettings(
 ): Promise<InvoiceSettings> {
   // Build dynamic UPDATE query
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramIndex = 1;
 
   if (data.companyName !== undefined) {

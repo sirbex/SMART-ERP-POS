@@ -9,6 +9,7 @@
 import { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 import * as auditService from '../audit/auditService.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
@@ -18,6 +19,7 @@ import type {
   DeliveryItem,
   DeliveryRoute,
   DeliveryStatusHistory,
+  DeliveryRouteDbRow,
   CreateDeliveryOrderRequest,
   UpdateDeliveryStatusRequest,
   CreateDeliveryRouteRequest
@@ -25,13 +27,57 @@ import type {
 import {
   normalizeDeliveryOrder,
   normalizeDeliveryItem,
-  normalizeDeliveryRoute
+  normalizeDeliveryRoute,
+  normalizeDeliveryStatusHistory,
+  normalizeRouteDelivery
 } from '../../../../shared/types/delivery.js';
 import type {
   DeliveryOrderQuery,
   DeliveryRouteQuery
 } from '../../../../shared/types/delivery.js';
 import * as deliveryRepo from './deliveryRepository.js';
+
+// ====================================================
+// SHARED HELPERS
+// ====================================================
+
+/**
+ * Post delivery fee revenue to GL (non-blocking).
+ * Safe to call for any delivery order — skips if fee is 0 or no customer.
+ * Uses idempotency key so double-calls are harmless.
+ */
+async function postDeliveryFeeToGL(deliveryOrder: DeliveryOrder): Promise<void> {
+  if (!(deliveryOrder.deliveryFee > 0) || !deliveryOrder.customerId) return;
+
+  try {
+    const accountingResult = await accountingIntegrationService.recordDeliveryCharge({
+      deliveryId: deliveryOrder.id,
+      deliveryNumber: deliveryOrder.deliveryNumber,
+      customerId: deliveryOrder.customerId,
+      deliveryFee: deliveryOrder.deliveryFee,
+      fuelCost: deliveryOrder.fuelCost || 0,
+      deliveryDate: deliveryOrder.deliveryDate
+    });
+
+    if (!accountingResult.success) {
+      logger.error('CRITICAL: Delivery fee GL posting failed - REQUIRES MANUAL REMEDIATION', {
+        deliveryId: deliveryOrder.id,
+        deliveryNumber: deliveryOrder.deliveryNumber,
+        deliveryFee: deliveryOrder.deliveryFee,
+        error: accountingResult.error,
+        remediation: `Create manual journal entry: DR AR/Cash, CR Delivery Revenue for amount ${deliveryOrder.deliveryFee}`
+      });
+    }
+  } catch (error: unknown) {
+    logger.error('CRITICAL: Delivery fee GL posting exception - REQUIRES MANUAL REMEDIATION', {
+      deliveryId: deliveryOrder.id,
+      deliveryNumber: deliveryOrder.deliveryNumber,
+      deliveryFee: deliveryOrder.deliveryFee,
+      error: (error instanceof Error ? error.message : String(error)),
+      remediation: `Create manual journal entry: DR AR/Cash, CR Delivery Revenue for amount ${deliveryOrder.deliveryFee}`
+    });
+  }
+}
 
 // ====================================================
 // DELIVERY ORDER BUSINESS LOGIC
@@ -49,104 +95,73 @@ export async function createDeliveryOrder(
   data: CreateDeliveryOrderRequest,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
-  const client = await globalPool.connect();
-
   try {
-    await client.query('BEGIN');
+    const { deliveryOrderRow, itemRows, customerName, deliveryNumber } = await UnitOfWork.run(globalPool, async (client) => {
+      // Generate delivery number
+      const deliveryNumber = await deliveryRepo.generateDeliveryNumber(globalPool);
 
-    // Generate delivery number
-    const deliveryNumber = await deliveryRepo.generateDeliveryNumber(globalPool);
-
-    // Validate customer exists if provided
-    if (data.customerId) {
-      const customerCheck = await client.query(
-        'SELECT id, name FROM customers WHERE id = $1 AND deleted_at IS NULL',
-        [data.customerId]
-      );
-
-      if (customerCheck.rows.length === 0) {
-        throw new Error('Customer not found or inactive');
-      }
-    }
-
-    // Validate delivery items have valid products
-    for (const item of data.items) {
-      if (item.productId) {
-        const productCheck = await client.query(
-          'SELECT id, name FROM products WHERE id = $1 AND deleted_at IS NULL',
-          [item.productId]
+      // Validate customer exists if provided
+      let customerName: string | undefined;
+      if (data.customerId) {
+        const customerCheck = await client.query(
+          'SELECT id, name FROM customers WHERE id = $1 AND is_active = true',
+          [data.customerId]
         );
 
-        if (productCheck.rows.length === 0) {
-          throw new Error(`Product ${item.productName} not found or inactive`);
+        if (customerCheck.rows.length === 0) {
+          throw new Error('Customer not found or inactive');
+        }
+        customerName = customerCheck.rows[0].name;
+      }
+
+      // Validate delivery items have valid products
+      for (const item of data.items) {
+        if (item.productId) {
+          const productCheck = await client.query(
+            'SELECT id, name FROM products WHERE id = $1 AND is_active = true',
+            [item.productId]
+          );
+
+          if (productCheck.rows.length === 0) {
+            throw new Error(`Product ${item.productName} not found or inactive`);
+          }
         }
       }
-    }
 
-    // Create delivery order
-    const deliveryOrderRow = await deliveryRepo.createDeliveryOrder(
-      client,
-      deliveryNumber,
-      data,
-      auditContext?.userId
-    );
+      // Create delivery order
+      const deliveryOrderRow = await deliveryRepo.createDeliveryOrder(
+        client,
+        deliveryNumber,
+        data,
+        auditContext?.userId
+      );
 
-    // Create delivery items
-    const itemRows = await deliveryRepo.createDeliveryItems(
-      client,
-      deliveryOrderRow.id,
-      data.items
-    );
+      // Create delivery items
+      const itemRows = await deliveryRepo.createDeliveryItems(
+        client,
+        deliveryOrderRow.id,
+        data.items
+      );
 
-    // Create audit entry
-    // TODO: Implement proper audit logging for delivery orders
-    // if (auditContext) {
-    //   await auditService.logAction(globalPool, data, auditContext);
-    // }
+      // Create audit entry
+      // TODO: Implement proper audit logging for delivery orders
+      // if (auditContext) {
+      //   await auditService.logAction(globalPool, data, auditContext);
+      // }
 
-    await client.query('COMMIT');
+      return { deliveryOrderRow, itemRows, customerName, deliveryNumber };
+    });
 
     // Normalize response
     const deliveryOrder = normalizeDeliveryOrder(deliveryOrderRow);
     deliveryOrder.items = itemRows.map(normalizeDeliveryItem);
-    // Set customer name if available
-    if (data.customerId && data.customerName) {
-      deliveryOrder.customerName = data.customerName;
+    // Set customer name from the validated lookup
+    if (customerName) {
+      deliveryOrder.customerName = customerName;
     }
 
-    // ACCOUNTING INTEGRATION: Record delivery cost in accounting system
-    // NOTE: Delivery fees are optional ancillary charges. If accounting fails,
-    // log CRITICAL error but don't fail the delivery order - manual remediation required.
-    if (deliveryOrder.deliveryFee > 0 && deliveryOrder.customerId) {
-      try {
-        const accountingResult = await accountingIntegrationService.recordDeliveryCharge({
-          deliveryId: deliveryOrder.id,
-          deliveryNumber: deliveryOrder.deliveryNumber,
-          customerId: deliveryOrder.customerId,
-          deliveryFee: deliveryOrder.deliveryFee,
-          fuelCost: deliveryOrder.fuelCost || 0,
-          deliveryDate: deliveryOrder.deliveryDate
-        });
-
-        if (!accountingResult.success) {
-          logger.error('CRITICAL: Delivery fee GL posting failed - REQUIRES MANUAL REMEDIATION', {
-            deliveryId: deliveryOrder.id,
-            deliveryNumber: deliveryOrder.deliveryNumber,
-            deliveryFee: deliveryOrder.deliveryFee,
-            error: accountingResult.error,
-            remediation: 'Create manual journal entry: DR AR/Cash, CR Delivery Revenue for amount ' + deliveryOrder.deliveryFee
-          });
-        }
-      } catch (error: any) {
-        logger.error('CRITICAL: Delivery fee GL posting exception - REQUIRES MANUAL REMEDIATION', {
-          deliveryId: deliveryOrder.id,
-          deliveryNumber: deliveryOrder.deliveryNumber,
-          deliveryFee: deliveryOrder.deliveryFee,
-          error: error.message,
-          remediation: 'Create manual journal entry: DR AR/Cash, CR Delivery Revenue for amount ' + deliveryOrder.deliveryFee
-        });
-      }
-    }
+    // ACCOUNTING INTEGRATION: Record delivery fee revenue (non-blocking, idempotent)
+    await postDeliveryFeeToGL(deliveryOrder);
 
     logger.info('Delivery order created successfully', {
       deliveryNumber,
@@ -157,12 +172,9 @@ export async function createDeliveryOrder(
 
     return { success: true, data: deliveryOrder };
 
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to create delivery order', { error: error.message, data });
-    return { success: false, error: error.message };
-  } finally {
-    client.release();
+  } catch (error: unknown) {
+    logger.error('Failed to create delivery order', { error: (error instanceof Error ? error.message : String(error)), data });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -194,11 +206,14 @@ export async function getDeliveryOrder(
     const deliveryOrder = normalizeDeliveryOrder(deliveryOrderRow);
     deliveryOrder.items = itemRows.map(normalizeDeliveryItem);
 
+    // Attach status history
+    deliveryOrder.statusHistory = statusHistory.map(normalizeDeliveryStatusHistory);
+
     return { success: true, data: deliveryOrder };
 
-  } catch (error: any) {
-    logger.error('Failed to get delivery order', { error: error.message, identifier });
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    logger.error('Failed to get delivery order', { error: (error instanceof Error ? error.message : String(error)), identifier });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -207,7 +222,7 @@ export async function getDeliveryOrder(
  */
 export async function trackDelivery(
   trackingNumber: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
     const deliveryOrderRow = await deliveryRepo.getDeliveryOrderByTrackingNumber(globalPool, trackingNumber);
 
@@ -218,28 +233,17 @@ export async function trackDelivery(
     // Get status history for tracking
     const statusHistory = await deliveryRepo.getDeliveryStatusHistory(globalPool, deliveryOrderRow.id);
 
-    // Return limited information for customer tracking
-    const trackingInfo = {
-      trackingNumber: deliveryOrderRow.tracking_number,
-      deliveryNumber: deliveryOrderRow.delivery_number,
-      status: deliveryOrderRow.status,
-      deliveryDate: deliveryOrderRow.delivery_date,
-      expectedDeliveryTime: deliveryOrderRow.expected_delivery_time,
-      actualDeliveryTime: deliveryOrderRow.actual_delivery_time,
-      customerName: deliveryOrderRow.customer_name,
-      statusHistory: statusHistory.map(h => ({
-        status: h.new_status,
-        statusDate: h.status_date,
-        locationName: h.location_name,
-        notes: h.notes
-      }))
-    };
+    // Normalize the delivery order using the shared normalizer
+    const order = normalizeDeliveryOrder(deliveryOrderRow);
 
-    return { success: true, data: trackingInfo };
+    // Attach status history
+    order.statusHistory = statusHistory.map(normalizeDeliveryStatusHistory);
 
-  } catch (error: any) {
-    logger.error('Failed to track delivery', { error: error.message, trackingNumber });
-    return { success: false, error: error.message };
+    return { success: true, data: order };
+
+  } catch (error: unknown) {
+    logger.error('Failed to track delivery', { error: (error instanceof Error ? error.message : String(error)), trackingNumber });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -256,70 +260,68 @@ export async function updateDeliveryStatus(
   data: UpdateDeliveryStatusRequest,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
-  const client = await globalPool.connect();
-
   try {
-    await client.query('BEGIN');
+    const { updatedRow, oldStatus } = await UnitOfWork.run(globalPool, async (client) => {
+      // Get current delivery order
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
+      const currentRow = isUuid
+        ? await deliveryRepo.getDeliveryOrderById(globalPool, identifier)
+        : await deliveryRepo.getDeliveryOrderByNumber(globalPool, identifier);
 
-    // Get current delivery order
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
-    const currentRow = isUuid
-      ? await deliveryRepo.getDeliveryOrderById(globalPool, identifier)
-      : await deliveryRepo.getDeliveryOrderByNumber(globalPool, identifier);
+      if (!currentRow) {
+        throw new Error('Delivery order not found');
+      }
 
-    if (!currentRow) {
-      throw new Error('Delivery order not found');
-    }
+      // Validate status transition
+      const validTransitions: Record<string, string[]> = {
+        'PENDING': ['ASSIGNED', 'CANCELLED'],
+        'ASSIGNED': ['IN_TRANSIT', 'CANCELLED'],
+        'IN_TRANSIT': ['DELIVERED', 'FAILED', 'CANCELLED'],
+        'DELIVERED': [], // Terminal state
+        'FAILED': ['IN_TRANSIT', 'CANCELLED'],
+        'CANCELLED': [] // Terminal state
+      };
 
-    // Validate status transition
-    const validTransitions: Record<string, string[]> = {
-      'PENDING': ['ASSIGNED', 'CANCELLED'],
-      'ASSIGNED': ['IN_TRANSIT', 'CANCELLED'],
-      'IN_TRANSIT': ['DELIVERED', 'FAILED', 'CANCELLED'],
-      'DELIVERED': [], // Terminal state
-      'FAILED': ['IN_TRANSIT', 'CANCELLED'],
-      'CANCELLED': [] // Terminal state
-    };
+      const allowedNextStatuses = validTransitions[currentRow.status] || [];
+      if (!allowedNextStatuses.includes(data.status)) {
+        throw new Error(`Invalid status transition from ${currentRow.status} to ${data.status}`);
+      }
 
-    const allowedNextStatuses = validTransitions[currentRow.status] || [];
-    if (!allowedNextStatuses.includes(data.status)) {
-      throw new Error(`Invalid status transition from ${currentRow.status} to ${data.status}`);
-    }
-
-    // Update delivery order status
-    const updatedRow = await deliveryRepo.updateDeliveryOrderStatus(
-      client,
-      currentRow.id,
-      data,
-      auditContext?.userId
-    );
-
-    if (!updatedRow) {
-      throw new Error('Failed to update delivery order');
-    }
-
-    // Create manual status history entry with location data
-    if (data.latitude || data.longitude || data.locationName || data.notes) {
-      await deliveryRepo.createStatusHistoryEntry(
+      // Update delivery order status
+      const updatedRow = await deliveryRepo.updateDeliveryOrderStatus(
         client,
         currentRow.id,
-        currentRow.status,
-        data.status,
-        data.notes,
-        data.latitude,
-        data.longitude,
-        data.locationName,
+        data,
         auditContext?.userId
       );
-    }
 
-    // Create audit entry
-    // TODO: Fix audit service integration
-    // if (auditContext) {
-    //   await auditService.createAuditEntry({...});
-    // }
+      if (!updatedRow) {
+        throw new Error('Failed to update delivery order');
+      }
 
-    await client.query('COMMIT');
+      // Create manual status history entry with location data
+      if (data.latitude || data.longitude || data.locationName || data.notes) {
+        await deliveryRepo.createStatusHistoryEntry(
+          client,
+          currentRow.id,
+          currentRow.status,
+          data.status,
+          data.notes,
+          data.latitude,
+          data.longitude,
+          data.locationName,
+          auditContext?.userId
+        );
+      }
+
+      // Create audit entry
+      // TODO: Fix audit service integration
+      // if (auditContext) {
+      //   await auditService.createAuditEntry({...});
+      // }
+
+      return { updatedRow, oldStatus: currentRow.status };
+    });
 
     const deliveryOrder = normalizeDeliveryOrder(updatedRow);
 
@@ -350,11 +352,11 @@ export async function updateDeliveryStatus(
             remediation: 'Update delivery costs in GL manually'
           });
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error('CRITICAL: Delivery completion GL posting exception - REQUIRES MANUAL REMEDIATION', {
           deliveryId: deliveryOrder.id,
           deliveryNumber: deliveryOrder.deliveryNumber,
-          error: error.message,
+          error: (error instanceof Error ? error.message : String(error)),
           remediation: 'Update delivery costs in GL manually'
         });
       }
@@ -362,19 +364,16 @@ export async function updateDeliveryStatus(
 
     logger.info('Delivery status updated successfully', {
       deliveryNumber: deliveryOrder.deliveryNumber,
-      oldStatus: currentRow.status,
+      oldStatus,
       newStatus: data.status,
       location: data.locationName
     });
 
     return { success: true, data: deliveryOrder };
 
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to update delivery status', { error: error.message, identifier, data });
-    return { success: false, error: error.message };
-  } finally {
-    client.release();
+  } catch (error: unknown) {
+    logger.error('Failed to update delivery status', { error: (error instanceof Error ? error.message : String(error)), identifier, data });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -386,60 +385,54 @@ export async function assignDriver(
   driverId: string,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
-  const client = await globalPool.connect();
-
   try {
-    await client.query('BEGIN');
+    const { updatedRow, driverFullName } = await UnitOfWork.run(globalPool, async (client) => {
+      // Validate driver exists and has delivery permissions
+      const driverCheck = await client.query(`
+        SELECT u.id, u.full_name, u.role
+        FROM users u
+        WHERE u.id = $1 AND u.is_active = true
+          AND u.role IN ('ADMIN', 'MANAGER', 'STAFF')
+      `, [driverId]);
 
-    // Validate driver exists and has delivery permissions
-    const driverCheck = await client.query(`
-      SELECT u.id, u.name, ur.role_name
-      FROM users u
-      JOIN user_roles ur ON u.role_id = ur.id
-      WHERE u.id = $1 AND u.deleted_at IS NULL
-        AND (ur.permissions @> ARRAY['delivery:update_status'] OR ur.role_name IN ('ADMIN', 'MANAGER'))
-    `, [driverId]);
+      if (driverCheck.rows.length === 0) {
+        throw new Error('Driver not found or does not have delivery permissions');
+      }
 
-    if (driverCheck.rows.length === 0) {
-      throw new Error('Driver not found or does not have delivery permissions');
-    }
+      // Assign driver
+      const updatedRow = await deliveryRepo.assignDriver(
+        client,
+        deliveryOrderId,
+        driverId,
+        auditContext?.userId
+      );
 
-    // Assign driver
-    const updatedRow = await deliveryRepo.assignDriver(
-      client,
-      deliveryOrderId,
-      driverId,
-      auditContext?.userId
-    );
+      if (!updatedRow) {
+        throw new Error('Delivery order not found');
+      }
 
-    if (!updatedRow) {
-      throw new Error('Delivery order not found');
-    }
+      // Create audit entry
+      // TODO: Fix audit service integration
+      // if (auditContext) {
+      //   await auditService.createAuditEntry({...});
+      // }
 
-    // Create audit entry
-    // TODO: Fix audit service integration
-    // if (auditContext) {
-    //   await auditService.createAuditEntry({...});
-    // }
-
-    await client.query('COMMIT');
+      return { updatedRow, driverFullName: driverCheck.rows[0].full_name as string };
+    });
 
     const deliveryOrder = normalizeDeliveryOrder(updatedRow);
-    deliveryOrder.assignedDriverName = driverCheck.rows[0].name;
+    deliveryOrder.assignedDriverName = driverFullName;
 
     logger.info('Driver assigned to delivery', {
       deliveryNumber: deliveryOrder.deliveryNumber,
-      driverName: driverCheck.rows[0].name
+      driverName: driverFullName
     });
 
     return { success: true, data: deliveryOrder };
 
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to assign driver', { error: error.message, deliveryOrderId, driverId });
-    return { success: false, error: error.message };
-  } finally {
-    client.release();
+  } catch (error: unknown) {
+    logger.error('Failed to assign driver', { error: (error instanceof Error ? error.message : String(error)), deliveryOrderId, driverId });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -448,7 +441,7 @@ export async function assignDriver(
  */
 export async function searchDeliveryOrders(
   query: DeliveryOrderQuery
-): Promise<{ success: boolean; data?: { orders: DeliveryOrder[]; pagination: any }; error?: string }> {
+): Promise<{ success: boolean; data?: { orders: DeliveryOrder[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; error?: string }> {
   try {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
@@ -469,9 +462,9 @@ export async function searchDeliveryOrders(
 
     return { success: true, data: { orders, pagination } };
 
-  } catch (error: any) {
-    logger.error('Failed to search delivery orders', { error: error.message, query });
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    logger.error('Failed to search delivery orders', { error: (error instanceof Error ? error.message : String(error)), query });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -491,60 +484,58 @@ export async function createDeliveryRoute(
   data: CreateDeliveryRouteRequest,
   auditContext?: AuditContext
 ): Promise<{ success: boolean; data?: DeliveryRoute; error?: string }> {
-  const client = await globalPool.connect();
-
   try {
-    await client.query('BEGIN');
+    const routeRow = await UnitOfWork.run(globalPool, async (client) => {
+      // Validate all delivery orders exist and are assignable
+      const deliveryCheck = await client.query(`
+        SELECT id, delivery_number, status, delivery_address
+        FROM delivery_orders
+        WHERE id = ANY($1) AND status IN ('PENDING', 'ASSIGNED')
+      `, [data.deliveryOrderIds]);
 
-    // Validate all delivery orders exist and are assignable
-    const deliveryCheck = await client.query(`
-      SELECT id, delivery_number, status, delivery_address
-      FROM delivery_orders
-      WHERE id = ANY($1) AND status IN ('PENDING', 'ASSIGNED')
-    `, [data.deliveryOrderIds]);
-
-    if (deliveryCheck.rows.length !== data.deliveryOrderIds.length) {
-      throw new Error('Some delivery orders are not found or not assignable to routes');
-    }
-
-    // Validate driver if provided
-    if (data.driverId) {
-      const driverCheck = await client.query(`
-        SELECT id, name FROM users 
-        WHERE id = $1 AND deleted_at IS NULL
-      `, [data.driverId]);
-
-      if (driverCheck.rows.length === 0) {
-        throw new Error('Driver not found');
+      if (deliveryCheck.rows.length !== data.deliveryOrderIds.length) {
+        throw new Error('Some delivery orders are not found or not assignable to routes');
       }
-    }
 
-    // Create delivery route
-    const routeRow = await deliveryRepo.createDeliveryRoute(client, data, auditContext?.userId);
+      // Validate driver if provided
+      if (data.driverId) {
+        const driverCheck = await client.query(`
+          SELECT id, full_name FROM users 
+          WHERE id = $1 AND is_active = true
+        `, [data.driverId]);
 
-    // Add deliveries to route (simple sequence for now - can be optimized later)
-    await deliveryRepo.addDeliveriesToRoute(client, routeRow.id, data.deliveryOrderIds);
+        if (driverCheck.rows.length === 0) {
+          throw new Error('Driver not found');
+        }
+      }
 
-    // If driver assigned, assign to all delivery orders
-    if (data.driverId) {
-      await client.query(`
-        UPDATE delivery_orders 
-        SET 
-          assigned_driver_id = $1,
-          assigned_at = CURRENT_TIMESTAMP,
-          status = CASE WHEN status = 'PENDING' THEN 'ASSIGNED' ELSE status END,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ANY($2)
-      `, [data.driverId, data.deliveryOrderIds]);
-    }
+      // Create delivery route
+      const routeRow = await deliveryRepo.createDeliveryRoute(client, data, auditContext?.userId);
 
-    // Create audit entry
-    // TODO: Fix audit service integration
-    // if (auditContext) {
-    //   await auditService.createAuditEntry({...});
-    // }
+      // Add deliveries to route (simple sequence for now - can be optimized later)
+      await deliveryRepo.addDeliveriesToRoute(client, routeRow.id, data.deliveryOrderIds);
 
-    await client.query('COMMIT');
+      // If driver assigned, assign to all delivery orders
+      if (data.driverId) {
+        await client.query(`
+          UPDATE delivery_orders 
+          SET 
+            assigned_driver_id = $1,
+            assigned_at = CURRENT_TIMESTAMP,
+            status = CASE WHEN status = 'PENDING' THEN 'ASSIGNED' ELSE status END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ANY($2)
+        `, [data.driverId, data.deliveryOrderIds]);
+      }
+
+      // Create audit entry
+      // TODO: Fix audit service integration
+      // if (auditContext) {
+      //   await auditService.createAuditEntry({...});
+      // }
+
+      return routeRow;
+    });
 
     const deliveryRoute = normalizeDeliveryRoute(routeRow);
     deliveryRoute.totalDeliveries = data.deliveryOrderIds.length;
@@ -558,12 +549,9 @@ export async function createDeliveryRoute(
 
     return { success: true, data: deliveryRoute };
 
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to create delivery route', { error: error.message, data });
-    return { success: false, error: error.message };
-  } finally {
-    client.release();
+  } catch (error: unknown) {
+    logger.error('Failed to create delivery route', { error: (error instanceof Error ? error.message : String(error)), data });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -584,16 +572,16 @@ export async function getDeliveryRoute(
     const routeDeliveries = await deliveryRepo.getRouteDeliveries(globalPool, routeId);
 
     const deliveryRoute = normalizeDeliveryRoute(routeRow);
-    deliveryRoute.deliveries = routeDeliveries;
+    deliveryRoute.deliveries = routeDeliveries.map(normalizeRouteDelivery);
     deliveryRoute.totalDeliveries = routeDeliveries.length;
     deliveryRoute.completedDeliveries = routeDeliveries.filter(d => d.delivery_status === 'DELIVERED').length;
     deliveryRoute.failedDeliveries = routeDeliveries.filter(d => d.delivery_status === 'FAILED').length;
 
     return { success: true, data: deliveryRoute };
 
-  } catch (error: any) {
-    logger.error('Failed to get delivery route', { error: error.message, routeId });
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    logger.error('Failed to get delivery route', { error: (error instanceof Error ? error.message : String(error)), routeId });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -602,7 +590,7 @@ export async function getDeliveryRoute(
  */
 export async function searchDeliveryRoutes(
   query: DeliveryRouteQuery
-): Promise<{ success: boolean; data?: { routes: DeliveryRoute[]; pagination: any }; error?: string }> {
+): Promise<{ success: boolean; data?: { routes: DeliveryRoute[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; error?: string }> {
   try {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
@@ -610,7 +598,7 @@ export async function searchDeliveryRoutes(
 
     const routes = result.rows.map(row => {
       const route = normalizeDeliveryRoute(row);
-      route.totalDeliveries = parseInt((row as any).total_deliveries || '0');
+      route.totalDeliveries = parseInt((row as DeliveryRouteDbRow & { total_deliveries?: string }).total_deliveries || '0');
       return route;
     });
 
@@ -627,8 +615,229 @@ export async function searchDeliveryRoutes(
 
     return { success: true, data: { routes, pagination } };
 
-  } catch (error: any) {
-    logger.error('Failed to search delivery routes', { error: error.message, query });
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    logger.error('Failed to search delivery routes', { error: (error instanceof Error ? error.message : String(error)), query });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+  }
+}
+
+/**
+ * Get delivery analytics summary
+ * Aggregates delivery counts by status, revenue, cost, and success rate
+ */
+export async function getDeliveryAnalytics(
+  dateFrom?: string,
+  dateTo?: string
+): Promise<{ success: boolean; data?: Record<string, number>; error?: string }> {
+  try {
+    const row = await deliveryRepo.getDeliveryAnalyticsSummary(globalPool, dateFrom, dateTo);
+
+    return {
+      success: true,
+      data: {
+        totalDeliveries: parseInt(row.total_deliveries || '0'),
+        completedDeliveries: parseInt(row.completed_deliveries || '0'),
+        failedDeliveries: parseInt(row.failed_deliveries || '0'),
+        pendingDeliveries: parseInt(row.pending_deliveries || '0'),
+        inTransitDeliveries: parseInt(row.in_transit_deliveries || '0'),
+        assignedDeliveries: parseInt(row.assigned_deliveries || '0'),
+        cancelledDeliveries: parseInt(row.cancelled_deliveries || '0'),
+        deliverySuccessRate: parseFloat(row.delivery_success_rate || '0'),
+        totalRevenue: parseFloat(row.total_revenue || '0'),
+        totalCost: parseFloat(row.total_cost || '0')
+      }
+    };
+  } catch (error: unknown) {
+    logger.error('Failed to get delivery analytics', { error: (error instanceof Error ? error.message : String(error)), dateFrom, dateTo });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+  }
+}
+
+// ====================================================
+// TALLY-STYLE: CREATE DELIVERY FROM COMPLETED SALE
+// ====================================================
+
+export interface CreateFromSaleInput {
+  deliveryAddress: string;
+  deliveryContactName?: string;
+  deliveryContactPhone?: string;
+  specialInstructions?: string;
+  deliveryFee?: number;
+  deliveryDate?: string; // YYYY-MM-DD, defaults to today
+}
+
+/**
+ * Create a delivery note from a completed sale (Tally-style).
+ *
+ * Business Rules:
+ * - Sale must exist and be COMPLETED
+ * - Sale must not already have an active (non-cancelled) delivery order
+ * - Items are auto-populated from sale_items with product details
+ * - sale_id is linked on delivery_orders for traceability
+ * - Customer is inherited from the sale
+ * - Delivery fee GL posting follows existing pattern
+ */
+export async function createDeliveryFromSale(
+  saleId: string,
+  input: CreateFromSaleInput,
+  auditContext?: AuditContext
+): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
+  try {
+    const { deliveryOrderRow, itemRows, customerName, saleNumber, deliveryNumber, deliveryItemCount } = await UnitOfWork.run(globalPool, async (client) => {
+      // 1. Fetch sale with customer info
+      const saleResult = await client.query(`
+        SELECT s.id, s.sale_number, s.customer_id, s.status, s.total_amount,
+               c.name AS customer_name, c.phone AS customer_phone, c.address AS customer_address
+        FROM sales s
+        LEFT JOIN customers c ON c.id = s.customer_id
+        WHERE s.id = $1
+      `, [saleId]);
+
+      if (saleResult.rows.length === 0) {
+        throw new Error('Sale not found');
+      }
+
+      const sale = saleResult.rows[0];
+
+      if (sale.status !== 'COMPLETED') {
+        throw new Error(`Sale ${sale.sale_number} is ${sale.status} — only COMPLETED sales can generate delivery notes`);
+      }
+
+      if (!sale.customer_id) {
+        throw new Error(`Sale ${sale.sale_number} has no customer — delivery requires a customer`);
+      }
+
+      // 2. Check no active delivery already exists for this sale
+      const existingDelivery = await client.query(`
+        SELECT delivery_number, status FROM delivery_orders
+        WHERE sale_id = $1 AND status NOT IN ('CANCELLED')
+        LIMIT 1
+      `, [saleId]);
+
+      if (existingDelivery.rows.length > 0) {
+        const existing = existingDelivery.rows[0];
+        throw new Error(`Sale ${sale.sale_number} already has delivery ${existing.delivery_number} (${existing.status})`);
+      }
+
+      // 3. Fetch sale items with product details
+      const itemsResult = await client.query(`
+        SELECT si.product_id, si.quantity, si.unit_price, si.total_price,
+               p.name AS product_name, p.sku AS product_code
+        FROM sale_items si
+        JOIN products p ON p.id = si.product_id
+        WHERE si.sale_id = $1
+        ORDER BY si.created_at
+      `, [saleId]);
+
+      if (itemsResult.rows.length === 0) {
+        throw new Error(`Sale ${sale.sale_number} has no items`);
+      }
+
+      // 4. Build delivery order request
+      const deliveryDate = input.deliveryDate || new Date().toISOString().split('T')[0];
+      const deliveryAddress = input.deliveryAddress || sale.customer_address || '';
+
+      if (!deliveryAddress.trim()) {
+        throw new Error('Delivery address is required — provide one or add an address to the customer');
+      }
+
+      const deliveryNumber = await deliveryRepo.generateDeliveryNumber(globalPool);
+
+      const deliveryItems = itemsResult.rows.map(row => ({
+        productId: row.product_id,
+        productName: row.product_name,
+        productCode: row.product_code || undefined,
+        quantityRequested: parseFloat(row.quantity),
+      }));
+
+      // 5. Create delivery order linked to sale
+      const deliveryOrderRow = await deliveryRepo.createDeliveryOrder(
+        client,
+        deliveryNumber,
+        {
+          saleId,
+          customerId: sale.customer_id,
+          deliveryDate,
+          deliveryAddress,
+          deliveryContactName: input.deliveryContactName,
+          deliveryContactPhone: input.deliveryContactPhone,
+          specialInstructions: input.specialInstructions || `From sale ${sale.sale_number}`,
+          deliveryFee: input.deliveryFee || 0,
+          items: deliveryItems,
+        },
+        auditContext?.userId
+      );
+
+      // 6. Create delivery items
+      const itemRows = await deliveryRepo.createDeliveryItems(
+        client,
+        deliveryOrderRow.id,
+        deliveryItems
+      );
+
+      return {
+        deliveryOrderRow,
+        itemRows,
+        customerName: sale.customer_name as string,
+        saleNumber: sale.sale_number as string,
+        deliveryNumber,
+        deliveryItemCount: deliveryItems.length
+      };
+    });
+
+    // Normalize response
+    const deliveryOrder = normalizeDeliveryOrder(deliveryOrderRow);
+    deliveryOrder.items = itemRows.map(normalizeDeliveryItem);
+    deliveryOrder.customerName = customerName;
+
+    // ACCOUNTING INTEGRATION: Record delivery fee revenue (non-blocking, idempotent)
+    await postDeliveryFeeToGL(deliveryOrder);
+
+    logger.info('Delivery note created from sale (Tally-style)', {
+      saleId,
+      saleNumber,
+      deliveryNumber,
+      itemCount: deliveryItemCount,
+      deliveryFee: input.deliveryFee || 0
+    });
+
+    return { success: true, data: deliveryOrder };
+
+  } catch (error: unknown) {
+    logger.error('Failed to create delivery from sale', { error: (error instanceof Error ? error.message : String(error)), saleId });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+  }
+}
+
+/**
+ * Get completed sales that don't yet have an active delivery order.
+ * Used by the frontend to list sales available for delivery note creation.
+ */
+export async function getDeliverableSales(
+  search?: string
+): Promise<{ success: boolean; data?: Array<Record<string, unknown>>; error?: string }> {
+  try {
+    const result = await globalPool.query(`
+      SELECT s.id, s.sale_number, s.sale_date, s.total_amount, s.payment_method,
+             c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone,
+             c.address AS customer_address,
+             (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS item_count
+      FROM sales s
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.status = 'COMPLETED'
+        AND s.customer_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM delivery_orders d
+          WHERE d.sale_id = s.id AND d.status NOT IN ('CANCELLED')
+        )
+        ${search ? `AND (s.sale_number ILIKE $1 OR c.name ILIKE $1)` : ''}
+      ORDER BY s.sale_date DESC
+      LIMIT 50
+    `, search ? [`%${search}%`] : []);
+
+    return { success: true, data: result.rows };
+  } catch (error: unknown) {
+    logger.error('Failed to get deliverable sales', { error: (error instanceof Error ? error.message : String(error)) });
+    return { success: false, error: (error instanceof Error ? error.message : String(error)) };
   }
 }

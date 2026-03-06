@@ -17,6 +17,7 @@ import { authenticate } from '../../middleware/auth.js';
 import * as accountingRepository from '../../repositories/accountingRepository.js';
 import { Money } from '../../utils/money.js';
 import { getSettings } from '../settings/invoiceSettingsService.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -47,8 +48,7 @@ router.get('/health', (_req, res) => {
  * GET /api/accounting/chart-of-accounts
  * Get all accounts with optional filtering
  */
-router.get('/chart-of-accounts', async (req, res) => {
-  try {
+router.get('/chart-of-accounts', asyncHandler(async (req, res) => {
     const { accountType, isActive, isPostingAccount, search } = req.query;
 
     const filters: accountingRepository.AccountFilters = {};
@@ -79,16 +79,16 @@ router.get('/chart-of-accounts', async (req, res) => {
       const displayBalance = isCreditNormal ? Money.negate(rawBalance).toNumber() : rawBalance.toNumber();
 
       return {
-        id: acc.id,
-        accountNumber: acc.accountCode,
-        accountName: acc.accountName,
-        accountType: acc.accountType,
-        normalBalance: acc.normalBalance,
-        parentAccountId: acc.parentAccountId,
-        level: acc.level,
-        isPostingAccount: acc.isPostingAccount,
-        isActive: acc.isActive,
-        currentBalance: displayBalance
+    id: acc.id,
+    accountNumber: acc.accountCode,
+    accountName: acc.accountName,
+    accountType: acc.accountType,
+    normalBalance: acc.normalBalance,
+    parentAccountId: acc.parentAccountId,
+    level: acc.level,
+    isPostingAccount: acc.isPostingAccount,
+    isActive: acc.isActive,
+    currentBalance: displayBalance
       };
     });
 
@@ -96,66 +96,50 @@ router.get('/chart-of-accounts', async (req, res) => {
       success: true,
       data: formattedAccounts
     });
-  } catch (error) {
-    logger.error('Error in chart-of-accounts endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load chart of accounts'
-    });
-  }
-});
+}));
 
 /**
  * GET /api/accounting/chart-of-accounts/:id
  * Get account by ID
  */
-router.get('/chart-of-accounts/:id', async (req, res) => {
-  try {
+router.get('/chart-of-accounts/:id', asyncHandler(async (req, res) => {
     const account = await accountingRepository.getAccountById(req.params.id);
 
     if (!account) {
       return res.status(404).json({
-        success: false,
-        error: 'Account not found'
+    success: false,
+    error: 'Account not found'
       });
     }
 
     res.json({
       success: true,
       data: {
-        id: account.id,
-        accountNumber: account.accountCode,
-        accountName: account.accountName,
-        accountType: account.accountType,
-        normalBalance: account.normalBalance,
-        parentAccountId: account.parentAccountId,
-        level: account.level,
-        isPostingAccount: account.isPostingAccount,
-        isActive: account.isActive
+    id: account.id,
+    accountNumber: account.accountCode,
+    accountName: account.accountName,
+    accountType: account.accountType,
+    normalBalance: account.normalBalance,
+    parentAccountId: account.parentAccountId,
+    level: account.level,
+    isPostingAccount: account.isPostingAccount,
+    isActive: account.isActive
       }
     });
-  } catch (error) {
-    logger.error('Error fetching account by ID:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load account'
-    });
-  }
-});
+}));
 
 /**
  * POST /api/accounting/chart-of-accounts
  * Create new account
  */
-router.post('/chart-of-accounts', authenticate, async (req, res) => {
-  try {
+router.post('/chart-of-accounts', authenticate, asyncHandler(async (req, res) => {
     const { accountNumber, accountName, accountType, normalBalance, parentAccountId, isPostingAccount } = req.body;
 
     // Validate required fields
     if (!accountNumber || !accountName || !accountType || !normalBalance) {
       return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: accountNumber, accountName, accountType, normalBalance'
+    success: false,
+    error: 'Missing required fields: accountNumber, accountName, accountType, normalBalance'
       });
     }
 
@@ -163,16 +147,16 @@ router.post('/chart-of-accounts', authenticate, async (req, res) => {
     const validTypes = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
     if (!validTypes.includes(accountType)) {
       return res.status(400).json({
-        success: false,
-        error: `Invalid accountType. Must be one of: ${validTypes.join(', ')}`
+    success: false,
+    error: `Invalid accountType. Must be one of: ${validTypes.join(', ')}`
       });
     }
 
     // Validate normal balance
     if (!['DEBIT', 'CREDIT'].includes(normalBalance)) {
       return res.status(400).json({
-        success: false,
-        error: 'Invalid normalBalance. Must be DEBIT or CREDIT'
+    success: false,
+    error: 'Invalid normalBalance. Must be DEBIT or CREDIT'
       });
     }
 
@@ -181,7 +165,7 @@ router.post('/chart-of-accounts', authenticate, async (req, res) => {
     if (parentAccountId) {
       const parent = await accountingRepository.getAccountById(parentAccountId);
       if (parent) {
-        level = parent.level + 1;
+    level = parent.level + 1;
       }
     }
 
@@ -199,21 +183,14 @@ router.post('/chart-of-accounts', authenticate, async (req, res) => {
     res.status(201).json({
       success: true,
       data: {
-        id: account.id,
-        accountNumber: account.accountCode,
-        accountName: account.accountName,
-        accountType: account.accountType,
-        normalBalance: account.normalBalance
+    id: account.id,
+    accountNumber: account.accountCode,
+    accountName: account.accountName,
+    accountType: account.accountType,
+    normalBalance: account.normalBalance
       }
     });
-  } catch (error) {
-    logger.error('Error creating account:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create account'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // GENERAL LEDGER
@@ -223,8 +200,7 @@ router.post('/chart-of-accounts', authenticate, async (req, res) => {
  * GET /api/accounting/general-ledger
  * Get ledger entries with filtering and pagination
  */
-router.get('/general-ledger', async (req, res) => {
-  try {
+router.get('/general-ledger', asyncHandler(async (req, res) => {
     const {
       page = 1,
       limit = 20,
@@ -248,42 +224,34 @@ router.get('/general-ledger', async (req, res) => {
     res.json({
       success: true,
       data: entries.map(entry => ({
-        id: entry.id,
-        transactionId: entry.transactionId,
-        accountId: entry.accountId,
-        accountNumber: entry.accountCode,
-        accountName: entry.accountName,
-        description: entry.description,
-        debitAmount: entry.debitAmount,
-        creditAmount: entry.creditAmount,
-        balance: entry.runningBalance,
-        transactionDate: entry.entryDate?.split('T')[0] || entry.entryDate,
-        reference: entry.reference,
-        createdAt: entry.createdAt
+    id: entry.id,
+    transactionId: entry.transactionId,
+    accountId: entry.accountId,
+    accountNumber: entry.accountCode,
+    accountName: entry.accountName,
+    description: entry.description,
+    debitAmount: entry.debitAmount,
+    creditAmount: entry.creditAmount,
+    balance: entry.runningBalance,
+    transactionDate: entry.entryDate?.split('T')[0] || entry.entryDate,
+    reference: entry.reference,
+    createdAt: entry.createdAt
       })),
       pagination: {
-        page: filters.page,
-        limit: filters.limit,
-        total,
-        totalPages: Math.ceil(total / filters.limit)
+    page: filters.page,
+    limit: filters.limit,
+    total,
+    totalPages: Math.ceil(total / filters.limit)
       }
     });
-  } catch (error) {
-    logger.error('Error in general-ledger endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load ledger entries'
-    });
-  }
-});
+}));
 
 /**
  * GET /api/accounting/general-ledger/export
  * Export general ledger entries as CSV
  * NOTE: This route MUST come before /general-ledger/:id to avoid route conflict
  */
-router.get('/general-ledger/export', async (req, res) => {
-  try {
+router.get('/general-ledger/export', asyncHandler(async (req, res) => {
     const { accountId, dateFrom, dateTo, search } = req.query;
 
     // Get all entries (high limit for export)
@@ -319,27 +287,19 @@ router.get('/general-ledger/export', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="general-ledger-${new Date().toISOString().split('T')[0]}.csv"`);
     res.send(csvContent);
-  } catch (error) {
-    logger.error('Error exporting general ledger:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to export general ledger'
-    });
-  }
-});
+}));
 
 /**
  * GET /api/accounting/general-ledger/:id
  * Get journal entry by ID with all lines
  */
-router.get('/general-ledger/:id', async (req, res) => {
-  try {
+router.get('/general-ledger/:id', asyncHandler(async (req, res) => {
     const entry = await accountingRepository.getJournalEntryById(req.params.id);
 
     if (!entry) {
       return res.status(404).json({
-        success: false,
-        error: 'Journal entry not found'
+    success: false,
+    error: 'Journal entry not found'
       });
     }
 
@@ -347,22 +307,14 @@ router.get('/general-ledger/:id', async (req, res) => {
       success: true,
       data: entry
     });
-  } catch (error) {
-    logger.error('Error fetching journal entry:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load journal entry'
-    });
-  }
-});
+}));
 
 /**
  * GET /api/accounting/transactions/:transactionId
  * Get transaction details by transaction ID
  * Tries ledger_transactions first (backfilled data), then journal_entries
  */
-router.get('/transactions/:transactionId', async (req, res) => {
-  try {
+router.get('/transactions/:transactionId', asyncHandler(async (req, res) => {
     const transactionId = req.params.transactionId;
 
     // First, try to find in ledger_transactions (backfilled data)
@@ -370,32 +322,32 @@ router.get('/transactions/:transactionId', async (req, res) => {
 
     if (ledgerTxn) {
       return res.json({
-        success: true,
-        data: {
-          id: ledgerTxn.id,
-          transactionId: ledgerTxn.id,
-          transactionNumber: ledgerTxn.transactionNumber,
-          transactionDate: ledgerTxn.transactionDate?.split('T')[0] || '',
-          reference: ledgerTxn.referenceNumber || ledgerTxn.transactionNumber,
-          referenceType: ledgerTxn.referenceType,
-          description: ledgerTxn.description,
-          status: ledgerTxn.status,
-          // Frontend expects totalAmount - use totalDebitAmount (or totalCreditAmount, they should match)
-          totalAmount: ledgerTxn.totalDebitAmount || ledgerTxn.totalCreditAmount || 0,
-          totalDebitAmount: ledgerTxn.totalDebitAmount,
-          totalCreditAmount: ledgerTxn.totalCreditAmount,
-          createdAt: ledgerTxn.createdAt || '',
-          createdBy: ledgerTxn.createdBy || 'System',
-          entries: ledgerTxn.entries.map(entry => ({
-            id: entry.id,
-            accountId: entry.accountId,
-            accountNumber: entry.accountCode,
-            accountName: entry.accountName,
-            debitAmount: entry.debitAmount,
-            creditAmount: entry.creditAmount,
-            description: entry.description
-          }))
-        }
+    success: true,
+    data: {
+      id: ledgerTxn.id,
+      transactionId: ledgerTxn.id,
+      transactionNumber: ledgerTxn.transactionNumber,
+      transactionDate: ledgerTxn.transactionDate?.split('T')[0] || '',
+      reference: ledgerTxn.referenceNumber || ledgerTxn.transactionNumber,
+      referenceType: ledgerTxn.referenceType,
+      description: ledgerTxn.description,
+      status: ledgerTxn.status,
+      // Frontend expects totalAmount - use totalDebitAmount (or totalCreditAmount, they should match)
+      totalAmount: ledgerTxn.totalDebitAmount || ledgerTxn.totalCreditAmount || 0,
+      totalDebitAmount: ledgerTxn.totalDebitAmount,
+      totalCreditAmount: ledgerTxn.totalCreditAmount,
+      createdAt: ledgerTxn.createdAt || '',
+      createdBy: ledgerTxn.createdBy || 'System',
+      entries: ledgerTxn.entries.map(entry => ({
+        id: entry.id,
+        accountId: entry.accountId,
+        accountNumber: entry.accountCode,
+        accountName: entry.accountName,
+        debitAmount: entry.debitAmount,
+        creditAmount: entry.creditAmount,
+        description: entry.description
+      }))
+    }
       });
     }
 
@@ -404,40 +356,33 @@ router.get('/transactions/:transactionId', async (req, res) => {
 
     if (!journalEntry) {
       return res.status(404).json({
-        success: false,
-        error: 'Transaction not found'
+    success: false,
+    error: 'Transaction not found'
       });
     }
 
     res.json({
       success: true,
       data: {
-        id: journalEntry.id,
-        transactionId: journalEntry.transactionId,
-        date: journalEntry.entryDate?.split('T')[0],
-        reference: journalEntry.transactionId,
-        description: journalEntry.description,
-        status: journalEntry.status,
-        createdAt: journalEntry.createdAt,
-        entries: journalEntry.lines.map(line => ({
-          id: line.id,
-          accountId: line.accountId,
-          accountNumber: line.accountCode,
-          accountName: line.accountName,
-          debitAmount: line.debitAmount,
-          creditAmount: line.creditAmount,
-          description: line.description
-        }))
+    id: journalEntry.id,
+    transactionId: journalEntry.transactionId,
+    date: journalEntry.entryDate?.split('T')[0],
+    reference: journalEntry.transactionId,
+    description: journalEntry.description,
+    status: journalEntry.status,
+    createdAt: journalEntry.createdAt,
+    entries: journalEntry.lines.map(line => ({
+      id: line.id,
+      accountId: line.accountId,
+      accountNumber: line.accountCode,
+      accountName: line.accountName,
+      debitAmount: line.debitAmount,
+      creditAmount: line.creditAmount,
+      description: line.description
+    }))
       }
     });
-  } catch (error) {
-    logger.error('Error in transactions endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load transaction details'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // TRIAL BALANCE
@@ -447,8 +392,7 @@ router.get('/transactions/:transactionId', async (req, res) => {
  * GET /api/accounting/trial-balance
  * Generate trial balance as of a given date
  */
-router.get('/trial-balance', async (req, res) => {
-  try {
+router.get('/trial-balance', asyncHandler(async (req, res) => {
     const {
       asOfDate = new Date().toISOString().split('T')[0],
       includeZeroBalances = 'false'
@@ -463,14 +407,7 @@ router.get('/trial-balance', async (req, res) => {
       success: true,
       data: trialBalance
     });
-  } catch (error) {
-    logger.error('Error in trial-balance endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load trial balance'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // BALANCE SHEET
@@ -480,8 +417,7 @@ router.get('/trial-balance', async (req, res) => {
  * GET /api/accounting/balance-sheet
  * Generate balance sheet as of a given date
  */
-router.get('/balance-sheet', async (req, res) => {
-  try {
+router.get('/balance-sheet', asyncHandler(async (req, res) => {
     const pool = (await import('../../db/pool.js')).default;
     const asOfDate = (req.query.asOfDate as string) || new Date().toISOString().split('T')[0];
 
@@ -495,14 +431,7 @@ router.get('/balance-sheet', async (req, res) => {
       success: true,
       data: { ...balanceSheet, companyName }
     });
-  } catch (error) {
-    logger.error('Error in balance-sheet endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load balance sheet'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // INCOME STATEMENT
@@ -512,8 +441,7 @@ router.get('/balance-sheet', async (req, res) => {
  * GET /api/accounting/income-statement
  * Generate income statement for a date range
  */
-router.get('/income-statement', async (req, res) => {
-  try {
+router.get('/income-statement', asyncHandler(async (req, res) => {
     const pool = (await import('../../db/pool.js')).default;
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -531,14 +459,7 @@ router.get('/income-statement', async (req, res) => {
       success: true,
       data: { ...incomeStatement, companyName }
     });
-  } catch (error) {
-    logger.error('Error in income-statement endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load income statement'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // CASH FLOW STATEMENT
@@ -551,8 +472,7 @@ router.get('/income-statement', async (req, res) => {
  * Note: Cash flow is calculated from changes in account balances
  * between two periods, categorized by activity type.
  */
-router.get('/cash-flow', async (req, res) => {
-  try {
+router.get('/cash-flow', asyncHandler(async (req, res) => {
     const pool = (await import('../../db/pool.js')).default;
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -566,14 +486,14 @@ router.get('/cash-flow', async (req, res) => {
     // Get cash movements by type from ledger entries
     const cashMovementsResult = await pool.query(`
       SELECT 
-        lt."ReferenceType",
-        SUM(CASE WHEN le."EntryType" = 'DEBIT' THEN le."Amount" ELSE 0 END) as cash_in,
-        SUM(CASE WHEN le."EntryType" = 'CREDIT' THEN le."Amount" ELSE 0 END) as cash_out
+    lt."ReferenceType",
+    SUM(CASE WHEN le."EntryType" = 'DEBIT' THEN le."Amount" ELSE 0 END) as cash_in,
+    SUM(CASE WHEN le."EntryType" = 'CREDIT' THEN le."Amount" ELSE 0 END) as cash_out
       FROM ledger_entries le
       JOIN accounts a ON a."Id" = le."AccountId"
       LEFT JOIN ledger_transactions lt ON lt."Id" = le."LedgerTransactionId"
       WHERE a."AccountCode" = '1010'
-        AND le."EntryDate" >= $1 AND le."EntryDate" <= $2
+    AND le."EntryDate" >= $1 AND le."EntryDate" <= $2
       GROUP BY lt."ReferenceType"
     `, [startDate, endDate + ' 23:59:59']);
 
@@ -597,33 +517,33 @@ router.get('/cash-flow', async (req, res) => {
 
       // Operating activities: sales, customer payments, deposits, expenses
       if (['SALE', 'CUSTOMER_PAYMENT', 'INVOICE_PAYMENT', 'CUSTOMER_DEPOSIT', 'EXPENSE'].includes(refType)) {
-        operatingCashIn = Money.add(operatingCashIn, cashIn);
-        operatingCashOut = Money.add(operatingCashOut, cashOut);
-        if (!Money.isZero(netAmount)) {
-          operatingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
-        }
+    operatingCashIn = Money.add(operatingCashIn, cashIn);
+    operatingCashOut = Money.add(operatingCashOut, cashOut);
+    if (!Money.isZero(netAmount)) {
+      operatingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
+    }
       }
       // Investing activities: fixed assets, equipment purchases
       else if (['ASSET_PURCHASE', 'ASSET_SALE', 'INVESTMENT'].includes(refType)) {
-        investingCashIn = Money.add(investingCashIn, cashIn);
-        investingCashOut = Money.add(investingCashOut, cashOut);
-        if (!Money.isZero(netAmount)) {
-          investingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
-        }
+    investingCashIn = Money.add(investingCashIn, cashIn);
+    investingCashOut = Money.add(investingCashOut, cashOut);
+    if (!Money.isZero(netAmount)) {
+      investingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
+    }
       }
       // Financing activities: loans, capital contributions
       else if (['LOAN', 'CAPITAL_CONTRIBUTION', 'DIVIDEND'].includes(refType)) {
-        financingCashIn = Money.add(financingCashIn, cashIn);
-        financingCashOut = Money.add(financingCashOut, cashOut);
-        if (!Money.isZero(netAmount)) {
-          financingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
-        }
+    financingCashIn = Money.add(financingCashIn, cashIn);
+    financingCashOut = Money.add(financingCashOut, cashOut);
+    if (!Money.isZero(netAmount)) {
+      financingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
+    }
       }
       // Default to operating
       else if (!Money.isZero(netAmount)) {
-        operatingCashIn = Money.add(operatingCashIn, cashIn);
-        operatingCashOut = Money.add(operatingCashOut, cashOut);
-        operatingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
+    operatingCashIn = Money.add(operatingCashIn, cashIn);
+    operatingCashOut = Money.add(operatingCashOut, cashOut);
+    operatingItems.push({ description: refType.replace(/_/g, ' '), amount: netAmount.toNumber() });
       }
     }
 
@@ -658,22 +578,22 @@ router.get('/cash-flow', async (req, res) => {
     // Get beginning cash balance from ledger entries (before the period)
     const beginningResult = await pool.query(`
       SELECT 
-        COALESCE(SUM("DebitAmount"), 0) - COALESCE(SUM("CreditAmount"), 0) as beginning_balance
+    COALESCE(SUM("DebitAmount"), 0) - COALESCE(SUM("CreditAmount"), 0) as beginning_balance
       FROM ledger_entries le
       JOIN accounts a ON a."Id" = le."AccountId"
       WHERE a."AccountCode" IN ('1010', '1020', '1030')
-        AND le."EntryDate" < $1
+    AND le."EntryDate" < $1
     `, [startDate]);
     const beginningCashBalance = Money.parseDb(beginningResult.rows[0]?.beginning_balance).toNumber();
 
     // Calculate ending balance from ledger entries (through end of period)
     const endingResult = await pool.query(`
       SELECT 
-        COALESCE(SUM("DebitAmount"), 0) - COALESCE(SUM("CreditAmount"), 0) as ending_balance
+    COALESCE(SUM("DebitAmount"), 0) - COALESCE(SUM("CreditAmount"), 0) as ending_balance
       FROM ledger_entries le
       JOIN accounts a ON a."Id" = le."AccountId"
       WHERE a."AccountCode" IN ('1010', '1020', '1030')
-        AND le."EntryDate" <= $1
+    AND le."EntryDate" <= $1
     `, [endDate + ' 23:59:59']);
     const endingCashBalance = Money.parseDb(endingResult.rows[0]?.ending_balance).toNumber();
 
@@ -688,30 +608,23 @@ router.get('/cash-flow', async (req, res) => {
     res.json({
       success: true,
       data: {
-        companyName,
-        periodStart: startDate,
-        periodEnd: endDate,
-        generatedAt: new Date().toISOString(),
-        operatingActivities,
-        investingActivities,
-        financingActivities,
-        // Provide totals in the format expected by frontend
-        totalOperatingCashFlow: operatingActivities.totalOperatingCashFlow,
-        totalInvestingCashFlow: investingActivities.totalInvestingCashFlow,
-        totalFinancingCashFlow: financingActivities.totalFinancingCashFlow,
-        netChangeInCash,
-        beginningCashBalance,
-        endingCashBalance
+    companyName,
+    periodStart: startDate,
+    periodEnd: endDate,
+    generatedAt: new Date().toISOString(),
+    operatingActivities,
+    investingActivities,
+    financingActivities,
+    // Provide totals in the format expected by frontend
+    totalOperatingCashFlow: operatingActivities.totalOperatingCashFlow,
+    totalInvestingCashFlow: investingActivities.totalInvestingCashFlow,
+    totalFinancingCashFlow: financingActivities.totalFinancingCashFlow,
+    netChangeInCash,
+    beginningCashBalance,
+    endingCashBalance
       }
     });
-  } catch (error) {
-    logger.error('Error in cash-flow endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load cash flow statement'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // DASHBOARD SUMMARY ENDPOINT
@@ -722,8 +635,7 @@ router.get('/cash-flow', async (req, res) => {
  * Comprehensive dashboard data for accounting module
  * Fetches: chart of accounts, trial balance, sales summary, receivables, payables
  */
-router.get('/dashboard-summary', async (req, res) => {
-  try {
+router.get('/dashboard-summary', asyncHandler(async (req, res) => {
     const pool = (await import('../../db/pool.js')).default;
 
     // Fetch all dashboard data in parallel
@@ -737,53 +649,53 @@ router.get('/dashboard-summary', async (req, res) => {
     ] = await Promise.all([
       // Chart of accounts summary (using correct table and column names)
       pool.query(`
-        SELECT "AccountType" as account_type, COUNT(*) as count
-        FROM accounts
-        WHERE "IsActive" = true
-        GROUP BY "AccountType"
+    SELECT "AccountType" as account_type, COUNT(*) as count
+    FROM accounts
+    WHERE "IsActive" = true
+    GROUP BY "AccountType"
       `),
       // Trial balance totals from ledger_entries (where actual data lives)
       pool.query(`
-        SELECT 
-          COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
-          COALESCE(SUM(le."CreditAmount"), 0) as total_credits
-        FROM ledger_entries le
-        JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-        WHERE lt."Status" = 'POSTED'
+    SELECT 
+      COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
+      COALESCE(SUM(le."CreditAmount"), 0) as total_credits
+    FROM ledger_entries le
+    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+    WHERE lt."Status" = 'POSTED'
       `),
       // Sales summary (last 30 days)
       pool.query(`
-        SELECT 
-          COUNT(*) as total_sales,
-          COALESCE(SUM(total_amount), 0) as total_revenue,
-          COALESCE(SUM(total_cost), 0) as total_cogs,
-          COALESCE(SUM(profit), 0) as total_profit
-        FROM sales
-        WHERE sale_date >= CURRENT_DATE - INTERVAL '30 days'
-          AND status = 'COMPLETED'
+    SELECT 
+      COUNT(*) as total_sales,
+      COALESCE(SUM(total_amount), 0) as total_revenue,
+      COALESCE(SUM(total_cost), 0) as total_cogs,
+      COALESCE(SUM(profit), 0) as total_profit
+    FROM sales
+    WHERE sale_date >= CURRENT_DATE - INTERVAL '30 days'
+      AND status = 'COMPLETED'
       `),
       // Accounts receivable (customers with balance)
       pool.query(`
-        SELECT 
-          COUNT(*) as customer_count,
-          COALESCE(SUM(balance), 0) as total_receivables
-        FROM customers
-        WHERE balance > 0
+    SELECT 
+      COUNT(*) as customer_count,
+      COALESCE(SUM(balance), 0) as total_receivables
+    FROM customers
+    WHERE balance > 0
       `),
       // Accounts payable (suppliers - using OutstandingBalance from suppliers table)
       pool.query(`
-        SELECT 
-          COUNT(*) as supplier_count,
-          COALESCE(SUM("OutstandingBalance"), 0) as total_payables
-        FROM suppliers
-        WHERE "IsActive" = true
+    SELECT 
+      COUNT(*) as supplier_count,
+      COALESCE(SUM("OutstandingBalance"), 0) as total_payables
+    FROM suppliers
+    WHERE "IsActive" = true
       `),
       // Recent ledger transactions count (where actual data lives)
       pool.query(`
-        SELECT COUNT(*) as entry_count
-        FROM ledger_transactions
-        WHERE "TransactionDate" >= CURRENT_DATE - INTERVAL '30 days'
-          AND "Status" = 'POSTED'
+    SELECT COUNT(*) as entry_count
+    FROM ledger_transactions
+    WHERE "TransactionDate" >= CURRENT_DATE - INTERVAL '30 days'
+      AND "Status" = 'POSTED'
       `)
     ]);
 
@@ -820,46 +732,39 @@ router.get('/dashboard-summary', async (req, res) => {
     res.json({
       success: true,
       data: {
-        asOfDate: new Date().toISOString().split('T')[0],
-        chartOfAccounts: {
-          total: totalAccounts,
-          byType: accountsByType
-        },
-        trialBalance: {
-          totalDebits: totalDebits.toNumber(),
-          totalCredits: totalCredits.toNumber(),
-          difference: difference.toNumber(),
-          isBalanced
-        },
-        sales: {
-          periodDays: 30,
-          totalSales: parseInt(salesData.total_sales || '0'),
-          totalRevenue: totalRevenue.toNumber(),
-          totalCOGS: totalCOGS.toNumber(),
-          totalProfit: totalProfit.toNumber(),
-          profitMargin: profitMargin.toNumber()
-        },
-        receivables: {
-          customerCount: parseInt(receivablesData.customer_count || '0'),
-          totalAmount: Money.parseDb(receivablesData.total_receivables).toNumber()
-        },
-        payables: {
-          supplierCount: parseInt(payablesData.supplier_count || '0'),
-          totalAmount: Money.parseDb(payablesData.total_payables).toNumber()
-        },
-        journalEntries: {
-          recentCount: journalEntriesCount
-        }
+    asOfDate: new Date().toISOString().split('T')[0],
+    chartOfAccounts: {
+      total: totalAccounts,
+      byType: accountsByType
+    },
+    trialBalance: {
+      totalDebits: totalDebits.toNumber(),
+      totalCredits: totalCredits.toNumber(),
+      difference: difference.toNumber(),
+      isBalanced
+    },
+    sales: {
+      periodDays: 30,
+      totalSales: parseInt(salesData.total_sales || '0'),
+      totalRevenue: totalRevenue.toNumber(),
+      totalCOGS: totalCOGS.toNumber(),
+      totalProfit: totalProfit.toNumber(),
+      profitMargin: profitMargin.toNumber()
+    },
+    receivables: {
+      customerCount: parseInt(receivablesData.customer_count || '0'),
+      totalAmount: Money.parseDb(receivablesData.total_receivables).toNumber()
+    },
+    payables: {
+      supplierCount: parseInt(payablesData.supplier_count || '0'),
+      totalAmount: Money.parseDb(payablesData.total_payables).toNumber()
+    },
+    journalEntries: {
+      recentCount: journalEntriesCount
+    }
       }
     });
-  } catch (error) {
-    logger.error('Error in dashboard-summary endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load dashboard summary'
-    });
-  }
-});
+}));
 
 // =============================================================================
 // EXPORT ENDPOINTS (Other reports - GL export is above with its routes)

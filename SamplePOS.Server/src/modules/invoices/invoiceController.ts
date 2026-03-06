@@ -1,11 +1,14 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { invoiceService } from './invoiceService.js';
+import type { InvoiceRecord } from './invoiceRepository.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { CreateInvoiceSchema, RecordInvoicePaymentSchema } from '../../../../shared/zod/invoice.js';
 import { getSettings } from '../settings/invoiceSettingsService.js';
 import PDFDocument from 'pdfkit';
 import Decimal from 'decimal.js';
+import Money from '../../utils/money.js';
+import { asyncHandler, NotFoundError, ConflictError, ValidationError, AppError } from '../../middleware/errorHandler.js';
 
 const ListInvoicesQuerySchema = z.object({
   page: z
@@ -21,19 +24,12 @@ const ListInvoicesQuerySchema = z.object({
 });
 
 export const invoiceController = {
-  async createInvoice(req: Request, res: Response) {
+  createInvoice: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const data = CreateInvoiceSchema.parse(req.body);
+    const userId = req.user?.id || null;
+
     try {
-      const pool = req.tenantPool || globalPool;
-      console.log('📄 Invoice creation request received:', {
-        body: req.body,
-        userId: (req as any).user?.id,
-      });
-
-      const data = CreateInvoiceSchema.parse(req.body);
-      const userId = (req as any).user?.id || null;
-
-      console.log('✅ Validation passed, creating invoice...');
-
       const result = await invoiceService.createInvoice(pool, {
         customerId: data.customerId,
         saleId: data.saleId,
@@ -44,106 +40,68 @@ export const invoiceController = {
         initialPaymentAmount: data.initialPaymentAmount || null,
       });
 
-      console.log('✅ Invoice created successfully:', result.invoice);
-
-      // Flatten response so frontend doesn't need to unwrap { invoice, initialPayment }
       res.status(201).json({ success: true, data: result.invoice, initialPayment: result.initialPayment, message: 'Invoice created' });
-    } catch (error: any) {
-      console.error('❌ Invoice creation failed:', {
-        error: error.message,
-        stack: error.stack,
-        body: req.body,
-      });
-
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: 'Validation failed', details: error.errors });
-        return;
-      }
-      const msg = error?.message || 'Failed to create invoice';
-      const status = msg.includes('already exists') ? 409 : msg.includes('fully paid') ? 400 : 400;
-      res.status(status).json({ success: false, error: msg });
+    } catch (error: unknown) {
+      if (error instanceof AppError) throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('already exists')) throw new ConflictError(msg);
+      throw new ValidationError(msg);
     }
-  },
+  }),
 
-  async getInvoice(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await invoiceService.getInvoiceById(pool, id);
-      res.json({ success: true, data: result });
-    } catch (error: any) {
-      const status = error?.message?.includes('not found') ? 404 : 500;
-      res.status(status).json({ success: false, error: error.message || 'Failed to get invoice' });
-    }
-  },
+  getInvoice: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    const result = await invoiceService.getInvoiceById(pool, id);
+    if (!result) throw new NotFoundError('Invoice');
+    res.json({ success: true, data: result });
+  }),
 
-  async listInvoices(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const q = ListInvoicesQuerySchema.parse(req.query);
-      const result = await invoiceService.listInvoices(pool, q.page, q.limit, {
-        customerId: q.customerId,
-        status: q.status,
-      });
+  listInvoices: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const q = ListInvoicesQuerySchema.parse(req.query);
+    const result = await invoiceService.listInvoices(pool, q.page, q.limit, {
+      customerId: q.customerId,
+      status: q.status,
+    });
 
-      res.json({
-        success: true,
-        data: result.invoices,
-        pagination: {
-          page: q.page,
-          limit: q.limit,
-          total: result.total,
-          totalPages: Math.ceil(result.total / q.limit),
-        },
-      });
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: 'Invalid query', details: error.errors });
-        return;
-      }
-      res.status(500).json({ success: false, error: error.message || 'Failed to list invoices' });
-    }
-  },
+    res.json({
+      success: true,
+      data: result.invoices,
+      pagination: {
+        page: q.page,
+        limit: q.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / q.limit),
+      },
+    });
+  }),
 
-  async addPayment(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params; // invoice id
-      const data = RecordInvoicePaymentSchema.parse(req.body);
-      const userId = (req as any).user?.id || null;
+  addPayment: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    const data = RecordInvoicePaymentSchema.parse(req.body);
+    const userId = req.user?.id || null;
 
-      const result = await invoiceService.addPayment(pool, id, {
-        amount: data.amount,
-        paymentMethod: data.paymentMethod,
-        paymentDate: data.paymentDate ? new Date(data.paymentDate) : undefined,
-        referenceNumber: data.referenceNumber || null,
-        notes: data.notes || null,
-        processedById: userId,
-      });
-      res.status(201).json({ success: true, data: result.invoice, payment: result.payment, message: 'Payment recorded' });
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        // Format Zod validation errors into readable message
-        const errorMessages = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
-        res.status(400).json({ success: false, error: `Validation failed: ${errorMessages}`, details: error.errors });
-        return;
-      }
-      res.status(400).json({ success: false, error: error.message || 'Failed to record payment' });
-    }
-  },
+    const result = await invoiceService.addPayment(pool, id, {
+      amount: data.amount,
+      paymentMethod: data.paymentMethod,
+      paymentDate: data.paymentDate ? new Date(data.paymentDate) : undefined,
+      referenceNumber: data.referenceNumber || null,
+      notes: data.notes || null,
+      processedById: userId,
+    });
+    res.status(201).json({ success: true, data: result.invoice, payment: result.payment, message: 'Payment recorded' });
+  }),
 
-  async listPayments(req: Request, res: Response) {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params; // invoice id
-      const payments = await invoiceService.listPayments(pool, id);
-      res.json({ success: true, data: payments });
-    } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message || 'Failed to list payments' });
-    }
-  },
+  listPayments: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    const payments = await invoiceService.listPayments(pool, id);
+    res.json({ success: true, data: payments });
+  }),
 
-  async exportInvoicePdf(req: Request, res: Response) {
+  exportInvoicePdf: asyncHandler(async (req: Request, res: Response) => {
     try {
       const pool = req.tenantPool || globalPool;
       const { id } = req.params;
@@ -158,7 +116,7 @@ export const invoiceController = {
         return;
       }
 
-      const invoice = result.invoice as any;
+      const invoice = result.invoice as InvoiceRecord & { [key: string]: unknown };
       const items = result.items || [];
       const payments = result.payments || [];
 
@@ -169,16 +127,8 @@ export const invoiceController = {
       );
       const customer = customerResult.rows[0];
 
-      // Helper function to format currency
-      const formatCurrency = (amount: number | string): string => {
-        const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-        return new Intl.NumberFormat('en-UG', {
-          style: 'currency',
-          currency: 'UGX',
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 2,
-        }).format(num);
-      };
+      // Use centralized Money.formatCurrency
+      const formatCurrency = (amount: number | string): string => Money.formatCurrency(amount);
 
       // Create PDF
       const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -234,11 +184,11 @@ export const invoiceController = {
 
       // Invoice number and date on right
       doc.fontSize(11).font('Helvetica-Bold')
-        .text(invoice.invoice_number || invoice.invoiceNumber, margin, 52, { align: 'right', width: contentWidth });
+        .text(String(invoice.invoice_number || ''), margin, 52, { align: 'right', width: contentWidth });
 
       doc.fontSize(8).font('Helvetica')
-        .text(`Issue: ${invoice.issue_date || invoice.issueDate ? new Date(invoice.issue_date || invoice.issueDate).toLocaleDateString() : 'N/A'}`, margin, 68, { align: 'right', width: contentWidth })
-        .text(`Due: ${invoice.due_date || invoice.dueDate ? new Date(invoice.due_date || invoice.dueDate).toLocaleDateString() : 'N/A'}`, margin, 78, { align: 'right', width: contentWidth });
+        .text(`Issue: ${invoice.issue_date ? new Date(String(invoice.issue_date)).toLocaleDateString() : 'N/A'}`, margin, 68, { align: 'right', width: contentWidth })
+        .text(`Due: ${invoice.due_date ? new Date(String(invoice.due_date)).toLocaleDateString() : 'N/A'}`, margin, 78, { align: 'right', width: contentWidth });
 
       // Bill To section - REDUCED SIZE
       const billToY = 115;
@@ -283,13 +233,13 @@ export const invoiceController = {
 
       // Show aggregated payment methods if any payments exist
       const paymentMethodsText = payments.length > 0
-        ? [...new Set(payments.map((p: any) => p.payment_method || p.paymentMethod))].join(', ')
-        : (invoice.payment_method || invoice.paymentMethod || 'CREDIT');
+        ? [...new Set(payments.map((p) => p.payment_method as string))].join(', ')
+        : String(invoice.payment_method || 'CREDIT');
 
       doc.fillColor(colors.dark).fontSize(8).font('Helvetica')
         .text(`Payment Method: ${paymentMethodsText}`, infoX + 10, infoY + 41, { width: contentWidth / 2 - 30 })
-        .text(`Total: ${formatCurrency(invoice.total_amount || invoice.totalAmount)}`, infoX + 10, infoY + 54, { width: contentWidth / 2 - 30 })
-        .text(`Paid: ${formatCurrency(invoice.amount_paid || invoice.amountPaid)}`, infoX + 10, infoY + 67, { width: contentWidth / 2 - 30 });
+        .text(`Total: ${formatCurrency(invoice.total_amount || 0)}`, infoX + 10, infoY + 54, { width: contentWidth / 2 - 30 })
+        .text(`Paid: ${formatCurrency(invoice.amount_paid || 0)}`, infoX + 10, infoY + 67, { width: contentWidth / 2 - 30 });
 
       // Balance due with color
       const balanceDue = new Decimal(invoice.balance || 0);
@@ -327,7 +277,7 @@ export const invoiceController = {
       let currentY = tableTop + 28;
 
       // Table rows - REDUCED ROW HEIGHT
-      items.forEach((item: any, index: number) => {
+      items.forEach((item, index) => {
         const rowHeight = 22;
 
         // Check if we need a new page (leave space for summary)
@@ -435,7 +385,7 @@ export const invoiceController = {
         currentY = paymentTableTop + 28;
 
         // Payment rows
-        payments.forEach((payment: any, index: number) => {
+        payments.forEach((payment, index) => {
           const rowHeight = 22;
 
           // Check if we need a new page
@@ -452,10 +402,10 @@ export const invoiceController = {
           xPos = margin;
           doc.fillColor(colors.dark).fontSize(8).font('Helvetica');
 
-          const paymentDate = payment.payment_date || payment.paymentDate;
-          const receiptNumber = payment.receipt_number || payment.receiptNumber;
-          const paymentMethod = payment.payment_method || payment.paymentMethod;
-          const referenceNumber = payment.reference_number || payment.referenceNumber;
+          const paymentDate = payment.payment_date;
+          const receiptNumber = payment.receipt_number;
+          const paymentMethod = payment.payment_method;
+          const referenceNumber = payment.reference_number;
 
           const rowData = [
             receiptNumber || 'N/A',
@@ -506,11 +456,13 @@ export const invoiceController = {
       );
 
       doc.end();
-    } catch (error: any) {
-      console.error('Invoice PDF export error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: error.message || 'Failed to generate PDF' });
+    } catch (error: unknown) {
+      // If headers already sent (PDF streaming started), log only — can't send JSON
+      if (res.headersSent) {
+        console.error('Invoice PDF export error (headers already sent):', error);
+        return;
       }
+      throw error; // Let asyncHandler → global handler return 500 JSON
     }
-  },
+  }),
 };

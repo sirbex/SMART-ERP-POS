@@ -1,11 +1,77 @@
-import { Pool } from 'pg';
-import { invoiceRepository } from './invoiceRepository.js';
+import { Pool, PoolClient } from 'pg';
+import { invoiceRepository, InvoicePaymentRecord } from './invoiceRepository.js';
 import { salesRepository } from '../sales/salesRepository.js';
 import logger from '../../utils/logger.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as depositsService from '../deposits/depositsService.js';
 import Decimal from 'decimal.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
+
+/** Raw DB row from payment_lines table as returned by salesRepository */
+interface PaymentLineRow {
+  id: string;
+  payment_method: string;
+  paymentMethod?: string;
+  amount: string | number;
+  reference?: string | null;
+  created_at: string;
+}
+
+/** Raw DB row fields from sales table as accessed in this module */
+interface RawSaleRow {
+  customer_id?: string | null;
+  customerId?: string | null;
+  subtotal?: string | number;
+  tax_amount?: string | number;
+  total_amount?: string | number;
+  quote_id?: string | null;
+  [key: string]: unknown;
+}
+
+/** Raw DB row from sale_items as accessed in this module */
+interface RawSaleItemRow {
+  id: string;
+  product_id?: string;
+  productId?: string;
+  quantity?: string | number;
+  unit_price?: string | number;
+  unitPrice?: string | number;
+  total_price?: string | number;
+  lineTotal?: string | number;
+  unit_cost?: string | number;
+  unitCost?: string | number;
+  product_name?: string | null;
+  productName?: string | null;
+  name?: string | null;
+  product_code?: string | null;
+  productCode?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+}
+
+/** Mapped invoice line item for UI display */
+interface InvoiceLineItem {
+  id: string;
+  productId?: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  unitCost: number;
+  productName: string | null;
+  productCode: string | null;
+  sku: string | null;
+  barcode: string | null;
+}
+
+/** Row shape from sale_items query for delivery integration */
+interface SaleItemDeliveryRow {
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: string | number;
+  line_total: string | number;
+}
 
 export const invoiceService = {
   /**
@@ -50,6 +116,10 @@ export const invoiceService = {
       initialPaymentAmount?: number | null;
     }
   ) {
+    // ============================================================
+    // VALIDATION PHASE (read-only, outside transaction)
+    // ============================================================
+
     // Enforce uniqueness: one invoice per sale
     if (input.saleId) {
       const existing = await invoiceRepository.findBySaleId(pool, input.saleId);
@@ -61,47 +131,50 @@ export const invoiceService = {
     let subtotal = 0;
     let taxAmount = 0;
     let totalAmount = 0;
-    let nonCreditPaymentLinesForInvoice: any[] = [];
+    let nonCreditPaymentLinesForInvoice: PaymentLineRow[] = [];
     let saleAmountPaid = 0;
 
     if (input.saleId) {
       const saleData = await salesRepository.getSaleById(pool, input.saleId);
       if (!saleData) throw new Error(`Sale ${input.saleId} not found`);
 
+      // Cast sale to raw DB field shape (repository types use camelCase but actual DB rows are snake_case)
+      const rawSale = saleData.sale as unknown as RawSaleRow;
+
       logger.info('Invoice creation - Sale data retrieved', {
         saleId: input.saleId,
         hasSaleData: !!saleData,
-        hasPaymentLines: !!(saleData as any).paymentLines,
-        paymentLinesCount: ((saleData as any).paymentLines || []).length,
-        paymentLines: (saleData as any).paymentLines,
+        hasPaymentLines: !!(saleData.paymentLines),
+        paymentLinesCount: (saleData.paymentLines || []).length,
+        paymentLines: saleData.paymentLines,
       });
 
       // Ensure customer linkage
-      const saleCustomerId = (saleData as any).sale.customer_id || (saleData as any).sale.customerId;
+      const saleCustomerId = rawSale.customer_id || rawSale.customerId;
       if (saleCustomerId && saleCustomerId !== input.customerId) {
         throw new Error('Sale is linked to a different customer');
       }
 
       // Get sale totals
-      const saleSubtotal = new Decimal((saleData as any).sale.subtotal || 0).toNumber();
-      const saleTaxAmount = new Decimal((saleData as any).sale.tax_amount || 0).toNumber();
-      const saleTotalAmount = new Decimal((saleData as any).sale.total_amount || 0).toNumber();
+      const saleSubtotal = new Decimal(rawSale.subtotal || 0).toNumber();
+      const saleTaxAmount = new Decimal(rawSale.tax_amount || 0).toNumber();
+      const saleTotalAmount = new Decimal(rawSale.total_amount || 0).toNumber();
 
       // Calculate amount paid from payment_lines (EXCLUDING CREDIT payments)
       // Credit payments represent the invoice amount, not actual payments
-      const paymentLines = (saleData as any).paymentLines || [];
-      const creditPaymentLines = paymentLines.filter((line: any) =>
+      const paymentLines: PaymentLineRow[] = (saleData.paymentLines || []) as unknown as PaymentLineRow[];
+      const creditPaymentLines = paymentLines.filter((line: PaymentLineRow) =>
         line.payment_method === 'CREDIT' || line.paymentMethod === 'CREDIT'
       );
-      const nonCreditPaymentLines = paymentLines.filter((line: any) =>
+      const nonCreditPaymentLines = paymentLines.filter((line: PaymentLineRow) =>
         line.payment_method !== 'CREDIT' && line.paymentMethod !== 'CREDIT'
       );
 
-      const amountPaid = nonCreditPaymentLines.reduce((sum: Decimal, line: any) => {
+      const amountPaid = nonCreditPaymentLines.reduce((sum: Decimal, line: PaymentLineRow) => {
         return sum.plus(new Decimal(line.amount || 0));
       }, new Decimal(0)).toNumber();
 
-      const creditAmount = creditPaymentLines.reduce((sum: Decimal, line: any) => {
+      const creditAmount = creditPaymentLines.reduce((sum: Decimal, line: PaymentLineRow) => {
         return sum.plus(new Decimal(line.amount || 0));
       }, new Decimal(0)).toNumber();
 
@@ -122,7 +195,7 @@ export const invoiceService = {
       });
 
       // Check if this is a quote-linked sale (quote conversions should always create invoices)
-      const isQuoteLinkedSale = input.quoteId || (saleData as any).sale.quote_id;
+      const isQuoteLinkedSale = input.quoteId || rawSale.quote_id;
 
       // Invoice should only be created if there's a CREDIT payment OR if it's a quote conversion
       if (!isQuoteLinkedSale && creditAmount <= 0) {
@@ -143,7 +216,7 @@ export const invoiceService = {
 
         logger.info('Invoice amounts set for quote conversion', {
           saleId: input.saleId,
-          quoteId: input.quoteId || (saleData as any).sale.quote_id,
+          quoteId: input.quoteId || rawSale.quote_id,
           invoiceSubtotal: subtotal,
           invoiceTaxAmount: taxAmount,
           invoiceTotalAmount: totalAmount,
@@ -177,73 +250,88 @@ export const invoiceService = {
       throw new Error('saleId is required for invoice creation at this time');
     }
 
-    // Fetch customer name for invoice
-    const customerResult = await pool.query(
-      'SELECT name FROM customers WHERE id = $1',
-      [input.customerId]
-    );
-    const customerName = customerResult.rows[0]?.name || 'Unknown Customer';
-
-    const invoice = await invoiceRepository.createInvoice(pool, {
-      customerId: input.customerId,
-      customerName,
-      saleId: input.saleId || null,
-      quoteId: input.quoteId || null,
-      issueDate: input.issueDate || undefined,
-      dueDate: input.dueDate || undefined,
-      subtotal,
-      taxAmount,
-      totalAmount,
-      notes: input.notes || null,
-      createdById: input.createdById || null,
-    });
-
-    // Record initial payments: either from explicit amount OR from sale's non-credit payment lines
-    let initialPayment: any = null;
-    if (input.initialPaymentAmount && input.initialPaymentAmount > 0) {
-      // Explicit initial payment amount provided by caller
-      initialPayment = await invoiceRepository.addPayment(pool, {
-        invoiceId: invoice.id,
-        amount: input.initialPaymentAmount,
-        paymentMethod: 'CASH', // default; controller may override
-        paymentDate: new Date(),
-        referenceNumber: null,
-        notes: 'Initial payment at invoice creation',
-        processedById: input.createdById || null,
-      });
-    } else if (input.saleId && saleAmountPaid > 0) {
-      // Auto-record non-credit payment lines from the linked sale
-      // This ensures split payments (e.g. CASH 50,000 + CREDIT 50,800) are reflected on the invoice
-      for (const payLine of nonCreditPaymentLinesForInvoice) {
-        const lineAmount = new Decimal(payLine.amount || 0).toNumber();
-        if (lineAmount > 0) {
-          const lineMethod = payLine.payment_method || payLine.paymentMethod || 'CASH';
-          await invoiceRepository.addPayment(pool, {
-            invoiceId: invoice.id,
-            amount: lineAmount,
-            paymentMethod: lineMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
-            paymentDate: new Date(),
-            referenceNumber: payLine.reference || null,
-            notes: 'Initial payment from sale',
-            processedById: input.createdById || null,
-          });
-
-          logger.info('Auto-recorded sale payment on invoice', {
-            invoiceId: invoice.id,
-            amount: lineAmount,
-            paymentMethod: lineMethod,
-            saleId: input.saleId,
-          });
+    // ============================================================
+    // MUTATION PHASE (all writes inside a single transaction)
+    // Advisory xact locks in invoiceRepository are now effective
+    // ============================================================
+    const fresh = await UnitOfWork.run(pool, async (client: PoolClient) => {
+      // Re-check uniqueness inside transaction (prevent race condition)
+      if (input.saleId) {
+        const existing = await invoiceRepository.findBySaleId(client, input.saleId);
+        if (existing) {
+          throw new Error('An invoice already exists for this sale');
         }
       }
-    }
 
-    // Refresh and recalc invoice after potential payment
-    const fresh = await invoiceRepository.recalcInvoice(pool, invoice.id);
+      // Fetch customer name for invoice
+      const customerResult = await client.query(
+        'SELECT name FROM customers WHERE id = $1',
+        [input.customerId]
+      );
+      const customerName = (customerResult.rows[0]?.name as string) || 'Unknown Customer';
 
-    if (!fresh) {
-      throw new Error('Failed to refresh invoice after creation');
-    }
+      const invoice = await invoiceRepository.createInvoice(client, {
+        customerId: input.customerId,
+        customerName,
+        saleId: input.saleId || null,
+        quoteId: input.quoteId || null,
+        issueDate: input.issueDate || undefined,
+        dueDate: input.dueDate || undefined,
+        subtotal,
+        taxAmount,
+        totalAmount,
+        notes: input.notes || null,
+        createdById: input.createdById || null,
+      });
+
+      // Record initial payments: either from explicit amount OR from sale's non-credit payment lines
+      if (input.initialPaymentAmount && input.initialPaymentAmount > 0) {
+        // Explicit initial payment amount provided by caller
+        await invoiceRepository.addPayment(client, {
+          invoiceId: invoice.id,
+          amount: input.initialPaymentAmount,
+          paymentMethod: 'CASH', // default; controller may override
+          paymentDate: new Date(),
+          referenceNumber: null,
+          notes: 'Initial payment at invoice creation',
+          processedById: input.createdById || null,
+        });
+      } else if (input.saleId && saleAmountPaid > 0) {
+        // Auto-record non-credit payment lines from the linked sale
+        // This ensures split payments (e.g. CASH 50,000 + CREDIT 50,800) are reflected on the invoice
+        for (const payLine of nonCreditPaymentLinesForInvoice) {
+          const lineAmount = new Decimal(payLine.amount || 0).toNumber();
+          if (lineAmount > 0) {
+            const lineMethod = payLine.payment_method || payLine.paymentMethod || 'CASH';
+            await invoiceRepository.addPayment(client, {
+              invoiceId: invoice.id,
+              amount: lineAmount,
+              paymentMethod: lineMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
+              paymentDate: new Date(),
+              referenceNumber: payLine.reference || null,
+              notes: 'Initial payment from sale',
+              processedById: input.createdById || null,
+            });
+
+            logger.info('Auto-recorded sale payment on invoice', {
+              invoiceId: invoice.id,
+              amount: lineAmount,
+              paymentMethod: lineMethod,
+              saleId: input.saleId,
+            });
+          }
+        }
+      }
+
+      // Refresh and recalc invoice after potential payment
+      const freshInvoice = await invoiceRepository.recalcInvoice(client, invoice.id);
+
+      if (!freshInvoice) {
+        throw new Error('Failed to refresh invoice after creation');
+      }
+
+      return freshInvoice;
+    });
 
     // ============================================================
     // GL POSTING: Handled by database triggers
@@ -278,7 +366,7 @@ export const invoiceService = {
               const { createDeliveryOrder } = await import('../delivery/deliveryService.js');
 
               // Prepare delivery items from sale items
-              const deliveryItems = saleItemsResult.rows.map((item: any) => ({
+              const deliveryItems = saleItemsResult.rows.map((item: SaleItemDeliveryRow) => ({
                 productId: item.product_id,
                 productName: item.product_name,
                 quantityRequested: item.quantity,
@@ -336,16 +424,16 @@ export const invoiceService = {
             });
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error('Unexpected error in delivery integration for invoice', {
           invoiceId: fresh.id,
           invoiceNumber: fresh.invoice_number,
-          error: error.message
+          error: (error instanceof Error ? error.message : String(error))
         });
       }
     });
 
-    return { invoice: fresh, initialPayment };
+    return { invoice: fresh, initialPayment: null };
   },
 
   /**
@@ -372,12 +460,12 @@ export const invoiceService = {
     if (!inv) throw new Error(`Invoice ${id} not found`);
     const payments = await invoiceRepository.listPayments(pool, id);
     // Include sale items for visibility in UI
-    let items: any[] = [];
-    if ((inv as any).sale_id || (inv as any).saleId) {
-      const saleId = (inv as any).sale_id || (inv as any).saleId;
+    let items: InvoiceLineItem[] = [];
+    if (inv.sale_id) {
+      const saleId = inv.sale_id;
       const saleData = await salesRepository.getSaleById(pool, saleId);
       if (saleData && Array.isArray(saleData.items)) {
-        items = saleData.items.map((it: any) => ({
+        items = (saleData.items as unknown as RawSaleItemRow[]).map((it) => ({
           id: it.id,
           productId: it.product_id ?? it.productId,
           quantity: new Decimal(it.quantity ?? 0).toNumber(),
@@ -423,7 +511,7 @@ export const invoiceService = {
       // ============================================================
       // CRITICAL: VALIDATE INVOICE EXISTS (PREVENT GHOST PAYMENTS)
       // ============================================================
-      const inv = await invoiceRepository.getInvoiceById(client as any, invoiceId);
+      const inv = await invoiceRepository.getInvoiceById(client, invoiceId);
       if (!inv) {
         throw new Error(
           `GHOST PAYMENT PREVENTION: Invoice ${invoiceId} does not exist. ` +
@@ -501,7 +589,7 @@ export const invoiceService = {
       }
 
       // Record the payment
-      const payment = await invoiceRepository.addPayment(client as any, {
+      const payment = await invoiceRepository.addPayment(client, {
         invoiceId,
         amount: input.amount,
         paymentMethod: input.paymentMethod,
@@ -512,7 +600,7 @@ export const invoiceService = {
       });
 
       // Recalculate invoice aggregates & status
-      const fresh = await invoiceRepository.recalcInvoice(client as any, invoiceId);
+      const fresh = await invoiceRepository.recalcInvoice(client, invoiceId);
 
       if (!fresh) {
         throw new Error('Failed to recalculate invoice after recording payment');

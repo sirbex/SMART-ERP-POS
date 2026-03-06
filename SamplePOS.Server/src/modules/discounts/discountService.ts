@@ -279,7 +279,7 @@ export async function approveDiscount(
 /**
  * Get pending discount authorizations
  */
-export async function getPendingAuthorizations(pool: Pool): Promise<any[]> {
+export async function getPendingAuthorizations(pool: Pool): Promise<Record<string, unknown>[]> {
   const rows = await discountRepo.findPendingAuthorizations(pool);
   return rows.map((row) => ({
     id: row.id,
@@ -303,8 +303,8 @@ function normalizeDiscount(row: discountRepo.DiscountDbRow): Discount {
   return {
     id: row.id,
     name: row.name,
-    type: row.type as any,
-    scope: row.scope as any,
+    type: row.type as 'PERCENTAGE' | 'FIXED_AMOUNT' | 'BUY_X_GET_Y',
+    scope: row.scope as 'CUSTOMER' | 'LINE_ITEM' | 'CART',
     value: parseFloat(row.value),
     maxDiscountAmount: row.max_discount_amount ? parseFloat(row.max_discount_amount) : null,
     minPurchaseAmount: row.min_purchase_amount ? parseFloat(row.min_purchase_amount) : null,

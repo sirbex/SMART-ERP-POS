@@ -5,6 +5,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 // Type for either a Pool or PoolClient - allows reuse in transactions
 type DbConnection = Pool | PoolClient;
@@ -117,7 +118,7 @@ export async function getDepositsByCustomer(
     JOIN customers c ON d.customer_id = c.id
     WHERE d.customer_id = $1
   `;
-    const params: any[] = [customerId];
+    const params: unknown[] = [customerId];
 
     if (status) {
         query += ` AND d.status = $2`;
@@ -183,19 +184,10 @@ export async function applyDepositToSale(
         return applyDepositToSaleWithClient(dbConn as PoolClient, input);
     }
 
-    // Create our own transaction
-    const client = await (dbConn as Pool).connect();
-    try {
-        await client.query('BEGIN');
-        const result = await applyDepositToSaleWithClient(client, input);
-        await client.query('COMMIT');
-        return result;
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    // Create our own transaction using UnitOfWork
+    return UnitOfWork.run(dbConn as Pool, async (client) => {
+        return applyDepositToSaleWithClient(client, input);
+    });
 }
 
 /**
@@ -258,51 +250,50 @@ async function applyDepositToSaleWithClient(
 }
 
 /**
+ * Reverse a deposit application using an existing transaction client
+ */
+export async function reverseDepositApplicationInTransaction(
+    client: PoolClient,
+    applicationId: string
+): Promise<void> {
+    // Get the application
+    const appResult = await client.query<DepositApplicationDbRow>(
+        `SELECT * FROM pos_deposit_applications WHERE id = $1`,
+        [applicationId]
+    );
+
+    if (appResult.rows.length === 0) {
+        throw new Error('Deposit application not found');
+    }
+
+    const application = appResult.rows[0];
+
+    // Lock and update the deposit
+    await client.query(
+        `UPDATE pos_customer_deposits 
+     SET amount_used = amount_used - $1
+     WHERE id = $2`,
+        [application.amount_applied, application.deposit_id]
+    );
+
+    // Delete the application record
+    await client.query(
+        `DELETE FROM pos_deposit_applications WHERE id = $1`,
+        [applicationId]
+    );
+}
+
+/**
  * Reverse a deposit application (e.g., when voiding a sale)
+ * Creates its own transaction when called with a Pool.
  */
 export async function reverseDepositApplication(
     pool: Pool,
     applicationId: string
 ): Promise<void> {
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
-        // Get the application
-        const appResult = await client.query<DepositApplicationDbRow>(
-            `SELECT * FROM pos_deposit_applications WHERE id = $1`,
-            [applicationId]
-        );
-
-        if (appResult.rows.length === 0) {
-            throw new Error('Deposit application not found');
-        }
-
-        const application = appResult.rows[0];
-
-        // Lock and update the deposit
-        await client.query(
-            `UPDATE pos_customer_deposits 
-       SET amount_used = amount_used - $1
-       WHERE id = $2`,
-            [application.amount_applied, application.deposit_id]
-        );
-
-        // Delete the application record
-        await client.query(
-            `DELETE FROM pos_deposit_applications WHERE id = $1`,
-            [applicationId]
-        );
-
-        await client.query('COMMIT');
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
+    await UnitOfWork.run(pool, async (client) => {
+        await reverseDepositApplicationInTransaction(client, applicationId);
+    });
 }
 
 /**
@@ -341,7 +332,7 @@ export async function getAllDeposits(
     const offset = (page - 1) * limit;
 
     let whereClause = 'WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (options.status) {

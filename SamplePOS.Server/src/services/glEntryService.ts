@@ -59,6 +59,9 @@ export const AccountCodes = {
   // Cost of Goods Sold
   COGS: '5000',
 
+  // Revenue - Delivery
+  DELIVERY_REVENUE: '4500',
+
   // Operating Expenses
   SALARIES: '6000',
   RENT: '6100',
@@ -67,6 +70,7 @@ export const AccountCodes = {
   OFFICE_SUPPLIES: '6400',
   DEPRECIATION: '6500',
   INSURANCE: '6600',
+  DELIVERY_EXPENSE: '6750',
   GENERAL_EXPENSE: '6900'
 };
 
@@ -407,11 +411,11 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
       totalAmount: sale.totalAmount,
       costAmount: sale.costAmount
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Failed to record sale to GL', { error, sale });
     // CRITICAL: GL failure MUST throw to prevent sales without accounting entries
     // A sale without GL entries breaks double-entry accounting integrity
-    throw new Error(`GL posting failed for sale ${sale.saleNumber}: ${error.message}`);
+    throw new Error(`GL posting failed for sale ${sale.saleNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -520,10 +524,10 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData): P
       reducesAR,
       creditAccount: creditAccountCode
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Failed to record customer payment to GL', { error, payment });
     // CRITICAL: GL failure MUST throw to prevent payments without AR adjustment
-    throw new Error(`GL posting failed for customer payment ${payment.paymentNumber}: ${error.message}`);
+    throw new Error(`GL posting failed for customer payment ${payment.paymentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -603,10 +607,10 @@ export async function recordExpenseToGL(expense: ExpenseData): Promise<void> {
       amount: expense.amount,
       category: expense.categoryName
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Failed to record expense to GL', { error, expense });
     // CRITICAL: GL failure MUST throw to prevent expenses without accounting entries
-    throw new Error(`GL posting failed for expense ${expense.expenseNumber}: ${error.message}`);
+    throw new Error(`GL posting failed for expense ${expense.expenseNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -700,10 +704,10 @@ export async function recordGoodsReceiptToGL(gr: GoodsReceiptData): Promise<void
       grNumber: gr.grNumber,
       amount: gr.totalAmount
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Failed to record goods receipt to GL', { error, gr });
     // CRITICAL: GL failure MUST throw to prevent GR without inventory/AP entries
-    throw new Error(`GL posting failed for goods receipt ${gr.grNumber}: ${error.message}`);
+    throw new Error(`GL posting failed for goods receipt ${gr.grNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -779,10 +783,10 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData): P
       amount: payment.amount,
       supplierId: payment.supplierId
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Failed to record supplier payment to GL', { error, payment });
     // CRITICAL: GL failure MUST throw to prevent payments without AP adjustment
-    throw new Error(`GL posting failed for supplier payment ${payment.paymentNumber}: ${error.message}`);
+    throw new Error(`GL posting failed for supplier payment ${payment.paymentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -863,10 +867,131 @@ export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData)
       type: adjustment.adjustmentType,
       value: adjustment.totalValue
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Failed to record stock adjustment to GL', { error, adjustment });
     // CRITICAL: GL failure MUST throw to prevent inventory changes without GL entries
-    throw new Error(`GL posting failed for stock adjustment ${adjustment.adjustmentNumber}: ${error.message}`);
+    throw new Error(`GL posting failed for stock adjustment ${adjustment.adjustmentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// DELIVERY JOURNAL ENTRIES
+// =============================================================================
+
+export interface DeliveryChargeData {
+  deliveryId: string;
+  deliveryNumber: string;
+  deliveryDate: string;
+  customerId: string;
+  deliveryFee: number;
+}
+
+export interface DeliveryCompletedData {
+  deliveryId: string;
+  deliveryNumber: string;
+  completedAt: string;
+  totalCost: number;
+}
+
+/**
+ * Record delivery charge as revenue in the general ledger
+ * 
+ * When a delivery order is created with a fee, we recognise income:
+ *   DR Accounts Receivable (1200) deliveryFee
+ *   CR Delivery Revenue    (4400) deliveryFee
+ */
+export async function recordDeliveryChargeToGL(data: DeliveryChargeData): Promise<void> {
+  try {
+    if (data.deliveryFee <= 0) {
+      logger.debug('Skipping delivery charge GL posting (fee is zero)', { deliveryId: data.deliveryId });
+      return;
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.deliveryDate,
+      description: `Delivery charge: ${data.deliveryNumber}`,
+      referenceType: 'DELIVERY_CHARGE',
+      referenceId: data.deliveryId,
+      referenceNumber: data.deliveryNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+          description: `A/R for delivery ${data.deliveryNumber}`,
+          debitAmount: data.deliveryFee,
+          creditAmount: 0,
+          entityType: 'customer',
+          entityId: data.customerId
+        },
+        {
+          accountCode: AccountCodes.DELIVERY_REVENUE,
+          description: `Delivery revenue: ${data.deliveryNumber}`,
+          debitAmount: 0,
+          creditAmount: data.deliveryFee
+        }
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DELIVERY_CHARGE-${data.deliveryId}`
+    });
+
+    logger.info('Recorded delivery charge to GL', {
+      deliveryId: data.deliveryId,
+      deliveryNumber: data.deliveryNumber,
+      deliveryFee: data.deliveryFee
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record delivery charge to GL', { error, data });
+    throw new Error(`GL posting failed for delivery charge ${data.deliveryNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+/**
+ * Record delivery completion costs in the general ledger
+ * 
+ * When a delivery is completed, we recognise the costs incurred:
+ *   DR Delivery Expense (6850) totalCost
+ *   CR Cash             (1010) totalCost
+ */
+export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData): Promise<void> {
+  try {
+    if (data.totalCost <= 0) {
+      logger.debug('Skipping delivery cost GL posting (cost is zero)', { deliveryId: data.deliveryId });
+      return;
+    }
+
+    const entryDate = data.completedAt.split('T')[0]; // DATE only from ISO timestamp
+
+    await AccountingCore.createJournalEntry({
+      entryDate,
+      description: `Delivery costs: ${data.deliveryNumber}`,
+      referenceType: 'DELIVERY_COST',
+      referenceId: data.deliveryId,
+      referenceNumber: data.deliveryNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.DELIVERY_EXPENSE,
+          description: `Delivery expense: ${data.deliveryNumber}`,
+          debitAmount: data.totalCost,
+          creditAmount: 0
+        },
+        {
+          accountCode: AccountCodes.CASH,
+          description: `Cash paid for delivery ${data.deliveryNumber}`,
+          debitAmount: 0,
+          creditAmount: data.totalCost
+        }
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DELIVERY_COST-${data.deliveryId}`
+    });
+
+    logger.info('Recorded delivery cost to GL', {
+      deliveryId: data.deliveryId,
+      deliveryNumber: data.deliveryNumber,
+      totalCost: data.totalCost
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record delivery cost to GL', { error, data });
+    throw new Error(`GL posting failed for delivery cost ${data.deliveryNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -877,5 +1002,7 @@ export default {
   recordExpenseToGL,
   recordGoodsReceiptToGL,
   recordSupplierPaymentToGL,
-  recordStockAdjustmentToGL
+  recordStockAdjustmentToGL,
+  recordDeliveryChargeToGL,
+  recordDeliveryCompletedToGL
 };

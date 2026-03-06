@@ -11,6 +11,7 @@ import { SyncBatchSchema } from '../../../../shared/zod/tenant.js';
 import { authenticate } from '../../middleware/auth.js';
 import { getTenantPool, verifyTenantAccess } from '../../middleware/tenantMiddleware.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const router = Router();
 
@@ -18,8 +19,7 @@ const router = Router();
 // UPLOAD: Edge → Cloud (push local changes)
 // ============================================================
 
-router.post('/upload', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
-  try {
+router.post('/upload', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
     const parsed = SyncBatchSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, error: parsed.error.errors[0].message });
@@ -51,18 +51,13 @@ router.post('/upload', authenticate, verifyTenantAccess, async (req: Request, re
 
     res.json({ success: true, data: result });
 
-  } catch (error) {
-    logger.error('Sync upload failed', { error });
-    res.status(500).json({ success: false, error: `Sync upload failed: ${(error as Error).message}` });
-  }
-});
+}));
 
 // ============================================================
 // DOWNLOAD: Cloud → Edge (pull updates)
 // ============================================================
 
-router.get('/download', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
-  try {
+router.get('/download', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) {
       res.status(400).json({ success: false, error: 'Tenant context required for sync' });
@@ -80,18 +75,13 @@ router.get('/download', authenticate, verifyTenantAccess, async (req: Request, r
 
     res.json({ success: true, data: result });
 
-  } catch (error) {
-    logger.error('Sync download failed', { error });
-    res.status(500).json({ success: false, error: `Sync download failed: ${(error as Error).message}` });
-  }
-});
+}));
 
 // ============================================================
 // SYNC STATUS
 // ============================================================
 
-router.get('/status', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
-  try {
+router.get('/status', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) {
       res.status(400).json({ success: false, error: 'Tenant context required' });
@@ -103,18 +93,13 @@ router.get('/status', authenticate, verifyTenantAccess, async (req: Request, res
 
     res.json({ success: true, data: status });
 
-  } catch (error) {
-    logger.error('Failed to get sync status', { error });
-    res.status(500).json({ success: false, error: `Failed to get sync status: ${(error as Error).message}` });
-  }
-});
+}));
 
 // ============================================================
 // CONFLICTS
 // ============================================================
 
-router.get('/conflicts', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
-  try {
+router.get('/conflicts', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) {
       res.status(400).json({ success: false, error: 'Tenant context required' });
@@ -127,14 +112,9 @@ router.get('/conflicts', authenticate, verifyTenantAccess, async (req: Request, 
 
     res.json({ success: true, data: conflicts });
 
-  } catch (error) {
-    logger.error('Failed to get conflicts', { error });
-    res.status(500).json({ success: false, error: `Failed to get conflicts: ${(error as Error).message}` });
-  }
-});
+}));
 
-router.post('/conflicts/resolve', authenticate, verifyTenantAccess, async (req: Request, res: Response): Promise<void> => {
-  try {
+router.post('/conflicts/resolve', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) {
       res.status(400).json({ success: false, error: 'Tenant context required' });
@@ -154,11 +134,7 @@ router.post('/conflicts/resolve', authenticate, verifyTenantAccess, async (req: 
 
     res.json({ success: true, message: 'Conflict resolved' });
 
-  } catch (error) {
-    logger.error('Failed to resolve conflict', { error });
-    res.status(500).json({ success: false, error: `Failed to resolve conflict: ${(error as Error).message}` });
-  }
-});
+}));
 
 export default router;
 export { router as syncRoutes };

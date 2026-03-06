@@ -1,8 +1,9 @@
 // Product History Controller - HTTP handling and validation
 
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { productHistoryService } from './productHistoryService.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const QuerySchema = z
   .object({
@@ -38,32 +39,22 @@ const QuerySchema = z
   })
   .strict();
 
-export async function getProductHistory(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { id } = req.params;
-    const q = QuerySchema.parse(req.query);
+export const getProductHistory = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const q = QuerySchema.parse(req.query);
 
-    const result = await productHistoryService.getProductHistory(id, {
-      page: q.page,
-      limit: q.limit,
-      startDate: q.startDate,
-      endDate: q.endDate,
-      type: q.type,
-    });
+  const result = await productHistoryService.getProductHistory(id, {
+    page: q.page,
+    limit: q.limit,
+    startDate: q.startDate,
+    endDate: q.endDate,
+    type: q.type,
+  });
 
-    res.json({
-      success: true,
-      data: result.items,
-      summary: result.summary,
-      pagination: result.pagination,
-    });
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      res
-        .status(400)
-        .json({ success: false, error: 'Invalid query parameters', details: error.errors });
-      return;
-    }
-    next(error);
-  }
-}
+  res.json({
+    success: true,
+    data: result.items,
+    summary: result.summary,
+    pagination: result.pagination,
+  });
+});

@@ -21,8 +21,8 @@ async function findUserByEmail(email: string, dbPool: Pool = globalPool) {
   return result.rows[0] || null;
 }
 
-async function createUser(data: any, dbPool: Pool = globalPool) {
-  const hashedPassword = await bcrypt.hash(data.password, 12);
+async function createUser(data: Record<string, unknown>, dbPool: Pool = globalPool) {
+  const hashedPassword = await bcrypt.hash(data.password as string, 12);
   const result = await dbPool.query(
     `INSERT INTO users (email, password_hash, full_name, role)
      VALUES ($1, $2, $3, $4)

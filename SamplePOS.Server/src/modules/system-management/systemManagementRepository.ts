@@ -27,7 +27,24 @@ export interface BackupRecord {
     createdByName: string | null;
     createdAt: Date;
     isVerified: boolean;
-    statsSnapshot: Record<string, any> | null;
+    statsSnapshot: Record<string, unknown> | null;
+}
+
+interface BackupRecordDbRow {
+    id: string;
+    backup_number: string;
+    file_name: string;
+    file_path: string;
+    file_size: string;
+    checksum: string | null;
+    backup_type: string;
+    status: string;
+    reason: string | null;
+    created_by: string | null;
+    created_by_name: string | null;
+    created_at: string;
+    is_verified: boolean;
+    stats_snapshot: Record<string, unknown> | null;
 }
 
 export interface ResetResult {
@@ -130,7 +147,7 @@ export const systemManagementRepository = {
             reason: string;
             userId: string;
             userName: string;
-            statsSnapshot: Record<string, any>;
+            statsSnapshot: Record<string, unknown>;
         }
     ): Promise<BackupRecord> {
         const result = await pool.query(`
@@ -226,7 +243,7 @@ export const systemManagementRepository = {
     `, [userId, id]);
     },
 
-    mapBackupRow(row: any): BackupRecord {
+    mapBackupRow(row: BackupRecordDbRow): BackupRecord {
         return {
             id: row.id,
             backupNumber: row.backup_number,
@@ -234,8 +251,8 @@ export const systemManagementRepository = {
             filePath: row.file_path,
             fileSize: parseInt(row.file_size) || 0,
             checksum: row.checksum,
-            backupType: row.backup_type,
-            status: row.status,
+            backupType: row.backup_type as BackupRecord['backupType'],
+            status: row.status as BackupRecord['status'],
             reason: row.reason,
             createdBy: row.created_by,
             createdByName: row.created_by_name,
@@ -499,9 +516,9 @@ export const systemManagementRepository = {
                 const result = await client.query(`DELETE FROM ${tableName}`);
                 await client.query(`RELEASE SAVEPOINT sp_delete_${stepNum}`);
                 return result.rowCount || 0;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 await client.query(`ROLLBACK TO SAVEPOINT sp_delete_${stepNum}`);
-                logger.warn(`Table ${tableName} skip: ${error.message}`);
+                logger.warn(`Table ${tableName} skip: ${(error instanceof Error ? error.message : String(error))}`);
                 return 0;
             }
         };
@@ -517,9 +534,9 @@ export const systemManagementRepository = {
                 await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
                 await client.query(`RELEASE SAVEPOINT sp_trunc_${stepNum}`);
                 return count;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 await client.query(`ROLLBACK TO SAVEPOINT sp_trunc_${stepNum}`);
-                logger.warn(`Table ${tableName} truncate skip: ${error.message}`);
+                logger.warn(`Table ${tableName} truncate skip: ${(error instanceof Error ? error.message : String(error))}`);
                 return 0;
             }
         };
@@ -543,9 +560,9 @@ export const systemManagementRepository = {
             tablesCleared['bank_transactions_gl_refs_cleared'] = bankGlClearResult.rowCount || 0;
             await client.query(`RELEASE SAVEPOINT sp_clear_bank_gl_refs`);
             logger.info(`Cleared ${tablesCleared['bank_transactions_gl_refs_cleared']} GL refs from bank_transactions`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_bank_gl_refs`);
-            logger.warn(`Clear bank_transactions GL refs skipped: ${error.message}`);
+            logger.warn(`Clear bank_transactions GL refs skipped: ${(error instanceof Error ? error.message : String(error))}`);
             tablesCleared['bank_transactions_gl_refs_cleared'] = 0;
         }
 
@@ -559,7 +576,7 @@ export const systemManagementRepository = {
             `);
             tablesCleared['customer_credits_gl_refs_cleared'] = creditsClearResult.rowCount || 0;
             await client.query(`RELEASE SAVEPOINT sp_clear_credits_gl_refs`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_credits_gl_refs`);
             tablesCleared['customer_credits_gl_refs_cleared'] = 0;
         }
@@ -574,7 +591,7 @@ export const systemManagementRepository = {
             `);
             tablesCleared['customer_deposits_gl_refs_cleared'] = depositsClearResult.rowCount || 0;
             await client.query(`RELEASE SAVEPOINT sp_clear_deposits_gl_refs`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_deposits_gl_refs`);
             tablesCleared['customer_deposits_gl_refs_cleared'] = 0;
         }
@@ -589,7 +606,7 @@ export const systemManagementRepository = {
             `);
             tablesCleared['credit_applications_gl_refs_cleared'] = creditAppsClearResult.rowCount || 0;
             await client.query(`RELEASE SAVEPOINT sp_clear_credit_apps_gl_refs`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_credit_apps_gl_refs`);
             tablesCleared['credit_applications_gl_refs_cleared'] = 0;
         }
@@ -604,7 +621,7 @@ export const systemManagementRepository = {
             `);
             tablesCleared['deposit_applications_gl_refs_cleared'] = depositAppsClearResult.rowCount || 0;
             await client.query(`RELEASE SAVEPOINT sp_clear_deposit_apps_gl_refs`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_deposit_apps_gl_refs`);
             tablesCleared['deposit_applications_gl_refs_cleared'] = 0;
         }
@@ -634,9 +651,9 @@ export const systemManagementRepository = {
                 logger.info(`Accounting reset: ${row.step_name} - ${row.records_affected} records - ${row.status}`);
             }
             tablesCleared['accounting_complete_reset'] = accountingResetResult.rowCount || 0;
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_accounting_reset`);
-            logger.warn(`Complete accounting reset function failed: ${error.message}, falling back to manual reset`);
+            logger.warn(`Complete accounting reset function failed: ${(error instanceof Error ? error.message : String(error))}, falling back to manual reset`);
 
             // Fallback: Manual accounting reset
             try {
@@ -645,8 +662,8 @@ export const systemManagementRepository = {
                 await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
                 tablesCleared['accounting_manual_reset'] = 1;
                 logger.info('Fallback accounting reset completed');
-            } catch (fallbackError: any) {
-                logger.error(`Fallback accounting reset also failed: ${fallbackError.message}`);
+            } catch (fallbackError: unknown) {
+                logger.error(`Fallback accounting reset also failed: ${(fallbackError instanceof Error ? fallbackError.message : String(fallbackError))}`);
             }
         }
 
@@ -668,9 +685,9 @@ export const systemManagementRepository = {
                 WHERE reversed_by_entry_id IS NOT NULL
             `);
             await client.query(`RELEASE SAVEPOINT sp_clear_manual_journal_refs`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_manual_journal_refs`);
-            logger.warn(`Clear manual_journal_entries self-refs skipped: ${error.message}`);
+            logger.warn(`Clear manual_journal_entries self-refs skipped: ${(error instanceof Error ? error.message : String(error))}`);
         }
         tablesCleared['manual_journal_entry_lines'] = await safeDelete('manual_journal_entry_lines', step++);
         tablesCleared['manual_journal_entries'] = await safeDelete('manual_journal_entries', step++);
@@ -802,9 +819,9 @@ export const systemManagementRepository = {
                 WHERE transfer_pair_id IS NOT NULL OR reversal_transaction_id IS NOT NULL
             `);
             await client.query(`RELEASE SAVEPOINT sp_clear_bank_txn_fks`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_clear_bank_txn_fks`);
-            logger.warn(`Clear bank_transactions self-refs skipped: ${error.message}`);
+            logger.warn(`Clear bank_transactions self-refs skipped: ${(error instanceof Error ? error.message : String(error))}`);
         }
         tablesCleared['bank_transactions'] = await safeDelete('bank_transactions', step++);
 
@@ -820,9 +837,9 @@ export const systemManagementRepository = {
             tablesCleared['bank_account_balances_reset'] = bankResetResult.rowCount || 0;
             await client.query(`RELEASE SAVEPOINT sp_reset_bank_balances`);
             logger.info(`Reset ${tablesCleared['bank_account_balances_reset']} bank account balances to opening balance`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_reset_bank_balances`);
-            logger.warn(`Bank account balance reset skipped: ${error.message}`);
+            logger.warn(`Bank account balance reset skipped: ${(error instanceof Error ? error.message : String(error))}`);
             tablesCleared['bank_account_balances_reset'] = 0;
         }
 
@@ -869,9 +886,9 @@ export const systemManagementRepository = {
             balancesReset['customers'] = parseInt(custResult.rows[0]?.updated_count || '0');
             await client.query(`RELEASE SAVEPOINT sp_recalc_customers`);
             logger.info(`Recalculated ${balancesReset['customers']} customer balances`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_customers`);
-            logger.warn(`Customer balance recalculation skipped: ${error.message}`);
+            logger.warn(`Customer balance recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
             // Fallback: Direct reset if function doesn't exist
             try {
                 await client.query(`SAVEPOINT sp_reset_customers_fallback`);
@@ -896,9 +913,9 @@ export const systemManagementRepository = {
             balancesReset['suppliers'] = parseInt(suppResult.rows[0]?.updated_count || '0');
             await client.query(`RELEASE SAVEPOINT sp_recalc_suppliers`);
             logger.info(`Recalculated ${balancesReset['suppliers']} supplier balances`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_suppliers`);
-            logger.warn(`Supplier balance recalculation skipped: ${error.message}`);
+            logger.warn(`Supplier balance recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
             // Fallback: Direct reset if function doesn't exist
             try {
                 await client.query(`SAVEPOINT sp_reset_suppliers_fallback`);
@@ -924,9 +941,9 @@ export const systemManagementRepository = {
             balancesReset['inventory'] = parseInt(invResult.rows[0]?.updated_count || '0');
             await client.query(`RELEASE SAVEPOINT sp_recalc_inventory`);
             logger.info(`Recalculated ${balancesReset['inventory']} product quantities`);
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_inventory`);
-            logger.warn(`Product stock recalculation skipped: ${error.message}`);
+            logger.warn(`Product stock recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
             // Fallback: Direct reset if function doesn't exist
             try {
                 await client.query(`SAVEPOINT sp_reset_inventory_fallback`);
@@ -962,9 +979,9 @@ export const systemManagementRepository = {
             }
             balancesReset['accounts_verified'] = 1;
             logger.info('Account balances verified at zero');
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_verify_accounts`);
-            logger.warn(`Account verification skipped: ${error.message}`);
+            logger.warn(`Account verification skipped: ${(error instanceof Error ? error.message : String(error))}`);
             // Force reset all account balances to 0 as final fallback
             try {
                 await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
@@ -994,9 +1011,9 @@ export const systemManagementRepository = {
             } else {
                 logger.info('Post-reset integrity verification passed');
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             await client.query(`ROLLBACK TO SAVEPOINT sp_verify_integrity`);
-            logger.warn(`Post-reset verification skipped: ${error.message}`);
+            logger.warn(`Post-reset verification skipped: ${(error instanceof Error ? error.message : String(error))}`);
         }
 
         return { tablesCleared, balancesReset };

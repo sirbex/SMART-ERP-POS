@@ -26,7 +26,7 @@ export interface PDFTableColumn {
   key: string;
   width: number;  // Percentage of table width (e.g., 0.15 for 15%)
   align?: 'left' | 'right' | 'center';
-  format?: (value: any) => string;
+  format?: (value: unknown) => string;
 }
 
 export class ReportPDFGenerator {
@@ -152,7 +152,7 @@ export class ReportPDFGenerator {
   }
 
   // Add table with data
-  addTable(columns: PDFTableColumn[], data: any[], options?: {
+  addTable<T>(columns: PDFTableColumn[], data: T[], options?: {
     rowHeight?: number;
     alternateRowColor?: boolean;
   }): void {
@@ -236,7 +236,7 @@ export class ReportPDFGenerator {
       this.doc.fillColor(PDFColors.dark).fontSize(8).font('Helvetica');
 
       columns.forEach((col, i) => {
-        const value = row[col.key];
+        const value = (row as Record<string, unknown>)[col.key];
         let displayValue = col.format ? col.format(value) : String(value ?? '');
         // Truncate long text to prevent overflow
         const maxChars = Math.floor(colWidths[i] / 4);
@@ -291,8 +291,8 @@ export class ReportPDFGenerator {
       const centerX = this.pageWidth / 2;
 
       // Draw text without triggering pagination - use _fragment directly
-      (this.doc as any)._fragment(pageText, centerX - pageTextWidth / 2, this.doc.page.height - 40, {});
-      (this.doc as any)._fragment(companyText, centerX - companyTextWidth / 2, this.doc.page.height - 28, {});
+      (this.doc as unknown as Record<string, Function>)._fragment(pageText, centerX - pageTextWidth / 2, this.doc.page.height - 40, {});
+      (this.doc as unknown as Record<string, Function>)._fragment(companyText, centerX - companyTextWidth / 2, this.doc.page.height - 28, {});
 
       // Restore graphics state
       this.doc.restore();
@@ -307,8 +307,8 @@ export class ReportPDFGenerator {
 }
 
 // Utility function to format currency with precision
-export function formatCurrencyPDF(amount: number | string): string {
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+export function formatCurrencyPDF(amount: unknown): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
   if (isNaN(num)) return '0.00';
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }

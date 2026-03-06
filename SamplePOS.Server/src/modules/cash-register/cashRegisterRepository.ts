@@ -135,7 +135,7 @@ export const cashRegisterRepository = {
   /**
    * Get all cash registers
    */
-  async getAllRegisters(pool: Pool): Promise<CashRegister[]> {
+  async getAllRegisters(pool: Pool | PoolClient): Promise<CashRegister[]> {
     const result = await pool.query(`
       SELECT 
         id,
@@ -153,7 +153,7 @@ export const cashRegisterRepository = {
   /**
    * Get active registers only
    */
-  async getActiveRegisters(pool: Pool): Promise<CashRegister[]> {
+  async getActiveRegisters(pool: Pool | PoolClient): Promise<CashRegister[]> {
     const result = await pool.query(`
       SELECT 
         id,
@@ -173,7 +173,7 @@ export const cashRegisterRepository = {
    * Get all registers with current open session info (if any)
    * Used by the Open Register dialog to show availability
    */
-  async getRegistersWithSessionStatus(pool: Pool): Promise<Array<CashRegister & {
+  async getRegistersWithSessionStatus(pool: Pool | PoolClient): Promise<Array<CashRegister & {
     currentSessionId: string | null;
     currentSessionNumber: string | null;
     currentSessionUserId: string | null;
@@ -206,7 +206,7 @@ export const cashRegisterRepository = {
   /**
    * Get register by ID
    */
-  async getRegisterById(pool: Pool, id: string): Promise<CashRegister | null> {
+  async getRegisterById(pool: Pool | PoolClient, id: string): Promise<CashRegister | null> {
     const result = await pool.query(`
       SELECT 
         id,
@@ -224,7 +224,7 @@ export const cashRegisterRepository = {
   /**
    * Create a new register
    */
-  async createRegister(pool: Pool, data: CreateRegisterData): Promise<CashRegister> {
+  async createRegister(pool: Pool | PoolClient, data: CreateRegisterData): Promise<CashRegister> {
     const result = await pool.query(`
       INSERT INTO cash_registers (name, location)
       VALUES ($1, $2)
@@ -243,7 +243,7 @@ export const cashRegisterRepository = {
    * Update a register
    */
   async updateRegister(
-    pool: Pool,
+    pool: Pool | PoolClient,
     id: string,
     data: Partial<CreateRegisterData & { isActive: boolean }>
   ): Promise<CashRegister | null> {
@@ -291,7 +291,7 @@ export const cashRegisterRepository = {
   /**
    * Generate next session number (REG-YYYY-NNNN format)
    */
-  async generateSessionNumber(pool: Pool): Promise<string> {
+  async generateSessionNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     const result = await pool.query(`
       SELECT session_number FROM cash_register_sessions
@@ -312,7 +312,7 @@ export const cashRegisterRepository = {
   /**
    * Check if register has an open session
    */
-  async getOpenSession(pool: Pool, registerId: string): Promise<CashRegisterSession | null> {
+  async getOpenSession(pool: Pool | PoolClient, registerId: string): Promise<CashRegisterSession | null> {
     const result = await pool.query(`
       SELECT 
         s.id,
@@ -345,7 +345,7 @@ export const cashRegisterRepository = {
   /**
    * Get open session for a user (across all registers)
    */
-  async getUserOpenSession(pool: Pool, userId: string): Promise<CashRegisterSession | null> {
+  async getUserOpenSession(pool: Pool | PoolClient, userId: string): Promise<CashRegisterSession | null> {
     const result = await pool.query(`
       SELECT 
         s.id,
@@ -378,7 +378,7 @@ export const cashRegisterRepository = {
   /**
    * Open a new session
    */
-  async openSession(pool: Pool, data: OpenSessionData): Promise<CashRegisterSession> {
+  async openSession(pool: Pool | PoolClient, data: OpenSessionData): Promise<CashRegisterSession> {
     const sessionNumber = await this.generateSessionNumber(pool);
 
     const result = await pool.query(`
@@ -433,7 +433,7 @@ export const cashRegisterRepository = {
   /**
    * Get session by ID with full details
    */
-  async getSessionById(pool: Pool, sessionId: string): Promise<CashRegisterSession | null> {
+  async getSessionById(pool: Pool | PoolClient, sessionId: string): Promise<CashRegisterSession | null> {
     const result = await pool.query(`
       SELECT 
         s.id,
@@ -470,7 +470,7 @@ export const cashRegisterRepository = {
   /**
    * Calculate expected closing based on movements
    */
-  async calculateExpectedClosing(pool: Pool, sessionId: string): Promise<number> {
+  async calculateExpectedClosing(pool: Pool | PoolClient, sessionId: string): Promise<number> {
     const result = await pool.query(`
       SELECT 
         COALESCE(SUM(
@@ -494,11 +494,11 @@ export const cashRegisterRepository = {
     data: CloseSessionData
   ): Promise<CashRegisterSession> {
     // Calculate expected closing
-    const expectedClosing = await this.calculateExpectedClosing(pool as Pool, data.sessionId);
+    const expectedClosing = await this.calculateExpectedClosing(pool, data.sessionId);
     const variance = data.actualClosing - expectedClosing;
 
     // Calculate payment summary from movements
-    const paymentSummary = await this.calculatePaymentSummary(pool as Pool, data.sessionId);
+    const paymentSummary = await this.calculatePaymentSummary(pool, data.sessionId);
 
     const result = await pool.query(`
       UPDATE cash_register_sessions
@@ -552,7 +552,7 @@ export const cashRegisterRepository = {
   /**
    * Calculate payment summary by payment method
    */
-  async calculatePaymentSummary(pool: Pool, sessionId: string): Promise<PaymentSummary> {
+  async calculatePaymentSummary(pool: Pool | PoolClient, sessionId: string): Promise<PaymentSummary> {
     const result = await pool.query(`
       SELECT 
         COALESCE(payment_method, 'CASH') as method,
@@ -577,7 +577,7 @@ export const cashRegisterRepository = {
    * Reconcile a session (manager approval)
    */
   async reconcileSession(
-    pool: Pool,
+    pool: Pool | PoolClient,
     sessionId: string,
     reconciledBy: string
   ): Promise<CashRegisterSession> {
@@ -619,7 +619,7 @@ export const cashRegisterRepository = {
    * Get sessions with filters
    */
   async getSessions(
-    pool: Pool,
+    pool: Pool | PoolClient,
     filters: {
       registerId?: string;
       userId?: string;
@@ -745,7 +745,7 @@ export const cashRegisterRepository = {
   /**
    * Get movements for a session
    */
-  async getSessionMovements(pool: Pool, sessionId: string): Promise<CashMovement[]> {
+  async getSessionMovements(pool: Pool | PoolClient, sessionId: string): Promise<CashMovement[]> {
     const result = await pool.query(`
       SELECT 
         m.id,
@@ -774,7 +774,7 @@ export const cashRegisterRepository = {
   /**
    * Get session summary (for closing/reconciliation)
    */
-  async getSessionSummary(pool: Pool, sessionId: string): Promise<{
+  async getSessionSummary(pool: Pool | PoolClient, sessionId: string): Promise<{
     session: CashRegisterSession;
     movements: CashMovement[];
     summary: {

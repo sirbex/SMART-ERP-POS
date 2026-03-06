@@ -1,12 +1,11 @@
 // User Routes
 
 import { Router } from 'express';
-import type { Pool } from 'pg';
 import * as userController from './userController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 
-export function createUserRoutes(pool: Pool): Router {
+export function createUserRoutes(): Router {
   const router = Router();
 
   // All user routes require authentication and user-management permissions
@@ -14,25 +13,25 @@ export function createUserRoutes(pool: Pool): Router {
   router.use(requirePermission('system.users_read'));
 
   // GET /api/users - Get all users
-  router.get('/', (req, res, next) => userController.getAllUsers(req, res, next, pool));
+  router.get('/', userController.getAllUsers);
 
   // GET /api/users/stats - Get user statistics
-  router.get('/stats', (req, res, next) => userController.getUserStats(req, res, next, pool));
+  router.get('/stats', userController.getUserStats);
 
   // GET /api/users/:id - Get user by ID
-  router.get('/:id', (req, res, next) => userController.getUserById(req, res, next, pool));
+  router.get('/:id', userController.getUserById);
 
   // POST /api/users - Create new user
-  router.post('/', (req, res, next) => userController.createUser(req, res, next, pool));
+  router.post('/', userController.createUser);
 
   // PUT /api/users/:id - Update user
-  router.put('/:id', (req, res, next) => userController.updateUser(req, res, next, pool));
+  router.put('/:id', userController.updateUser);
 
   // POST /api/users/:id/change-password - Change user password
-  router.post('/:id/change-password', (req, res, next) => userController.changePassword(req, res, next, pool));
+  router.post('/:id/change-password', userController.changePassword);
 
   // DELETE /api/users/:id - Delete user
-  router.delete('/:id', (req, res, next) => userController.deleteUser(req, res, next, pool));
+  router.delete('/:id', userController.deleteUser);
 
   return router;
 }

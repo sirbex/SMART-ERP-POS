@@ -12,7 +12,7 @@ export interface DiscountDbRow {
   max_discount_amount: string | null;
   min_purchase_amount: string | null;
   requires_approval: boolean;
-  approval_roles: any;
+  approval_roles: string[] | null;
   is_active: boolean;
   valid_from: string | null;
   valid_until: string | null;
@@ -103,7 +103,7 @@ export async function updateDiscount(
   updates: Partial<Discount>
 ): Promise<DiscountDbRow | null> {
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramIndex = 1;
 
   if (updates.name !== undefined) {
@@ -284,7 +284,7 @@ export async function createSaleDiscount(
 /**
  * Get discounts applied to a sale
  */
-export async function findSaleDiscounts(pool: Pool, saleId: string): Promise<any[]> {
+export async function findSaleDiscounts(pool: Pool, saleId: string): Promise<Record<string, unknown>[]> {
   const result = await pool.query(
     `SELECT sd.*, d.name as discount_name
      FROM sale_discounts sd

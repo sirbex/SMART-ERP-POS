@@ -12,7 +12,7 @@ import logger from '../utils/logger.js';
 
 interface JobData {
     type: string;
-    payload: any;
+    payload: unknown;
     userId: string;
     timestamp: string;
 }
@@ -107,7 +107,7 @@ class JobQueueService {
     async addJob(
         queueName: string,
         jobType: string,
-        data: any,
+        data: unknown,
         options: Bull.JobOptions = {}
     ): Promise<Job> {
         const queue = this.getQueue(queueName);
@@ -118,7 +118,7 @@ class JobQueueService {
         const jobData: JobData = {
             type: jobType,
             payload: data,
-            userId: data.userId || 'system',
+            userId: (data && typeof data === 'object' && 'userId' in data ? String((data as Record<string, unknown>).userId) : null) || 'system',
             timestamp: new Date().toISOString(),
         };
 
@@ -133,7 +133,7 @@ class JobQueueService {
      */
     processQueue(
         queueName: string,
-        processor: (job: Job<JobData>) => Promise<any>,
+        processor: (job: Job<JobData>) => Promise<unknown>,
         concurrency: number = 1
     ) {
         const queue = this.getQueue(queueName);

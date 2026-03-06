@@ -8,6 +8,7 @@
 
 import { Router } from 'express';
 import * as deliveryController from './deliveryController.js';
+import { authenticate } from '../../middleware/auth.js';
 
 const router = Router();
 
@@ -22,7 +23,27 @@ const router = Router();
  * Body: CreateDeliveryOrderRequest
  * Response: { success: boolean, data?: DeliveryOrder, error?: string }
  */
-router.post('/orders', deliveryController.createDeliveryOrder);
+router.post('/orders', authenticate, deliveryController.createDeliveryOrder);
+
+/**
+ * POST /api/delivery/orders/from-sale/:saleId
+ * Create delivery note from a completed sale (Tally-style)
+ * Auto-populates items from sale_items, links sale_id
+ * 
+ * Params: saleId (UUID)
+ * Body: { deliveryAddress, deliveryContactName?, deliveryContactPhone?, specialInstructions?, deliveryFee?, deliveryDate? }
+ * Response: { success: boolean, data?: DeliveryOrder, error?: string }
+ */
+router.post('/orders/from-sale/:saleId', authenticate, deliveryController.createDeliveryFromSale);
+
+/**
+ * GET /api/delivery/deliverable-sales
+ * List completed sales without an active delivery order
+ * 
+ * Query: search? (sale number or customer name)
+ * Response: { success: boolean, data?: Sale[] }
+ */
+router.get('/deliverable-sales', authenticate, deliveryController.getDeliverableSales);
 
 /**
  * GET /api/delivery/orders/:identifier
@@ -31,7 +52,7 @@ router.post('/orders', deliveryController.createDeliveryOrder);
  * Params: identifier (UUID or DEL-YYYY-NNNN)
  * Response: { success: boolean, data?: DeliveryOrderWithDetails, error?: string }
  */
-router.get('/orders/:identifier', deliveryController.getDeliveryOrder);
+router.get('/orders/:identifier', authenticate, deliveryController.getDeliveryOrder);
 
 /**
  * GET /api/delivery/orders
@@ -40,7 +61,7 @@ router.get('/orders/:identifier', deliveryController.getDeliveryOrder);
  * Query: DeliveryOrderQuery (status, customerId, driverId, dateRange, search, page, limit, sortBy, sortOrder)
  * Response: { success: boolean, data?: DeliveryOrder[], pagination?: PaginationInfo, error?: string }
  */
-router.get('/orders', deliveryController.searchDeliveryOrders);
+router.get('/orders', authenticate, deliveryController.searchDeliveryOrders);
 
 /**
  * PATCH /api/delivery/orders/:identifier/status
@@ -50,7 +71,7 @@ router.get('/orders', deliveryController.searchDeliveryOrders);
  * Body: DeliveryStatusUpdateRequest
  * Response: { success: boolean, data?: DeliveryOrder, error?: string }
  */
-router.patch('/orders/:identifier/status', deliveryController.updateDeliveryStatus);
+router.patch('/orders/:identifier/status', authenticate, deliveryController.updateDeliveryStatus);
 
 /**
  * POST /api/delivery/orders/:id/assign-driver
@@ -60,7 +81,7 @@ router.patch('/orders/:identifier/status', deliveryController.updateDeliveryStat
  * Body: { driverId: string }
  * Response: { success: boolean, data?: DeliveryOrder, error?: string }
  */
-router.post('/orders/:id/assign-driver', deliveryController.assignDriver);
+router.post('/orders/:id/assign-driver', authenticate, deliveryController.assignDriver);
 
 // ====================================================
 // DELIVERY ROUTE ROUTES
@@ -73,7 +94,7 @@ router.post('/orders/:id/assign-driver', deliveryController.assignDriver);
  * Body: CreateDeliveryRouteRequest
  * Response: { success: boolean, data?: DeliveryRoute, error?: string }
  */
-router.post('/routes', deliveryController.createDeliveryRoute);
+router.post('/routes', authenticate, deliveryController.createDeliveryRoute);
 
 /**
  * GET /api/delivery/routes/:id
@@ -82,7 +103,7 @@ router.post('/routes', deliveryController.createDeliveryRoute);
  * Params: id (UUID)
  * Response: { success: boolean, data?: DeliveryRouteWithDeliveries, error?: string }
  */
-router.get('/routes/:id', deliveryController.getDeliveryRoute);
+router.get('/routes/:id', authenticate, deliveryController.getDeliveryRoute);
 
 /**
  * GET /api/delivery/routes
@@ -91,7 +112,7 @@ router.get('/routes/:id', deliveryController.getDeliveryRoute);
  * Query: DeliveryRouteQuery (status, driverId, dateRange, search, page, limit, sortBy, sortOrder)
  * Response: { success: boolean, data?: DeliveryRoute[], pagination?: PaginationInfo, error?: string }
  */
-router.get('/routes', deliveryController.searchDeliveryRoutes);
+router.get('/routes', authenticate, deliveryController.searchDeliveryRoutes);
 
 // ====================================================
 // PUBLIC TRACKING ROUTE
@@ -118,7 +139,7 @@ router.get('/track/:trackingNumber', deliveryController.trackDelivery);
  * Query: Optional date range filters
  * Response: { success: boolean, data?: DeliveryAnalytics, error?: string }
  */
-router.get('/analytics/summary', deliveryController.getDeliveryAnalytics);
+router.get('/analytics/summary', authenticate, deliveryController.getDeliveryAnalytics);
 
 // ====================================================
 // EXPORT ROUTER

@@ -110,7 +110,7 @@ export async function createUser(data: CreateUser, dbPool?: DbClient): Promise<U
 export async function updateUser(id: string, data: UpdateUser, dbPool?: DbClient): Promise<User | null> {
   const pool = dbPool || globalPool;
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramIndex = 1;
 
   if (data.email !== undefined) {

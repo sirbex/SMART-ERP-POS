@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { systemSettingsRepository } from './systemSettingsRepository.js';
 import { SystemSettings, UpdateSystemSettingsDto } from '../../../../shared/types/systemSettings.js';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export const systemSettingsService = {
     /**
@@ -34,32 +35,19 @@ export const systemSettingsService = {
         };
 
         // Transaction: Update settings atomically
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
+        return UnitOfWork.run(pool, async (_client) => {
             const updated = await systemSettingsRepository.updateSettings(
                 pool,
                 updatesWithUser
             );
 
-            await client.query('COMMIT');
             logger.info('System settings updated (transaction committed)', {
                 updatedBy: userId,
                 changes: Object.keys(updates),
             });
 
             return updated;
-        } catch (error) {
-            await client.query('ROLLBACK');
-            logger.error('System settings update failed (transaction rolled back)', {
-                userId,
-                error,
-            });
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     },
 
     /**

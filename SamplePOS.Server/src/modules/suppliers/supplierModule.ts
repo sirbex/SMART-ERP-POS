@@ -4,8 +4,10 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { Pool, PoolClient } from 'pg';
+import { z } from 'zod';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import { CreateSupplierSchema, UpdateSupplierSchema } from '../../../../shared/zod/supplier.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
@@ -93,7 +95,7 @@ const supplierRepository = {
     return result.rows;
   },
 
-  async create(client: PoolClient, data: any) {
+  async create(client: PoolClient, data: z.infer<typeof CreateSupplierSchema>) {
     // Generate a supplier code
     const codeResult = await client.query(
       `SELECT COALESCE(MAX(CAST(SUBSTRING("SupplierCode" FROM 5) AS INTEGER)), 0) + 1 as next_num 
@@ -129,9 +131,9 @@ const supplierRepository = {
     return result.rows[0];
   },
 
-  async update(client: PoolClient, id: string, data: any) {
+  async update(client: PoolClient, id: string, data: z.infer<typeof UpdateSupplierSchema>) {
     const fields: string[] = ['"UpdatedAt" = NOW()'];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (data.name !== undefined) {
@@ -279,80 +281,52 @@ const supplierService = {
     return supplierRepository.searchSuppliers(pool, searchTerm.trim(), limit);
   },
 
-  async createSupplier(pool: Pool, data: any) {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
-      // BR-PO-001: Validate supplier data
-      if (!data.name || data.name.trim().length < 2) {
-        throw new Error('Supplier name must be at least 2 characters');
-      }
-
-      logger.info('BR-PO-001: Supplier data validation passed', {
-        name: data.name,
-      });
-
-      const supplier = await supplierRepository.create(client, data);
-
-      await client.query('COMMIT');
-
-      logger.info('Supplier created successfully', { supplierId: supplier.id });
-      return supplier;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to create supplier', { error });
-      throw error;
-    } finally {
-      client.release();
+  async createSupplier(pool: Pool, data: z.infer<typeof CreateSupplierSchema>) {
+    // BR-PO-001: Validate supplier data
+    if (!data.name || data.name.trim().length < 2) {
+      throw new Error('Supplier name must be at least 2 characters');
     }
+
+    logger.info('BR-PO-001: Supplier data validation passed', {
+      name: data.name,
+    });
+
+    const supplier = await UnitOfWork.run(pool, async (client) => {
+      return supplierRepository.create(client, data);
+    });
+
+    logger.info('Supplier created successfully', { supplierId: supplier.id });
+    return supplier;
   },
 
-  async updateSupplier(pool: Pool, id: string, data: any) {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
-      // Check if supplier exists
-      const existing = await supplierRepository.findById(pool, id);
-      if (!existing) {
-        throw new Error(`Supplier with ID ${id} not found`);
-      }
-
-      // BR-PO-001: Validate supplier data if name is being updated
-      if (data.name !== undefined && data.name.trim().length < 2) {
-        throw new Error('Supplier name must be at least 2 characters');
-      }
-
-      const supplier = await supplierRepository.update(client, id, data);
-
-      await client.query('COMMIT');
-
-      logger.info('Supplier updated successfully', { supplierId: id });
-      return supplier;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to update supplier', { error });
-      throw error;
-    } finally {
-      client.release();
+  async updateSupplier(pool: Pool, id: string, data: z.infer<typeof UpdateSupplierSchema>) {
+    // Check if supplier exists
+    const existing = await supplierRepository.findById(pool, id);
+    if (!existing) {
+      throw new Error(`Supplier with ID ${id} not found`);
     }
+
+    // BR-PO-001: Validate supplier data if name is being updated
+    if (data.name !== undefined && data.name.trim().length < 2) {
+      throw new Error('Supplier name must be at least 2 characters');
+    }
+
+    const supplier = await UnitOfWork.run(pool, async (client) => {
+      return supplierRepository.update(client, id, data);
+    });
+
+    logger.info('Supplier updated successfully', { supplierId: id });
+    return supplier;
   },
 
   async deleteSupplier(pool: Pool, id: string) {
-    const client = await pool.connect();
+    // Check if supplier exists
+    const existing = await supplierRepository.findById(pool, id);
+    if (!existing) {
+      throw new Error(`Supplier with ID ${id} not found`);
+    }
 
-    try {
-      await client.query('BEGIN');
-
-      // Check if supplier exists
-      const existing = await supplierRepository.findById(pool, id);
-      if (!existing) {
-        throw new Error(`Supplier with ID ${id} not found`);
-      }
-
+    const success = await UnitOfWork.run(pool, async (client) => {
       // Check if supplier has active purchase orders
       const poCheck = await client.query(
         `SELECT COUNT(*) as count FROM purchase_orders 
@@ -364,19 +338,11 @@ const supplierService = {
         throw new Error('Cannot delete supplier with active purchase orders');
       }
 
-      const success = await supplierRepository.softDelete(client, id);
+      return supplierRepository.softDelete(client, id);
+    });
 
-      await client.query('COMMIT');
-
-      logger.info('Supplier deleted successfully', { supplierId: id });
-      return success;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to delete supplier', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+    logger.info('Supplier deleted successfully', { supplierId: id });
+    return success;
   },
 };
 

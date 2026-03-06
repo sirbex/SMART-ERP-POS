@@ -5,7 +5,7 @@ import bcrypt from 'bcrypt';
 import { Pool } from 'pg';
 // import { LoginSchema, CreateUserSchema } from '../../../../shared/zod/user.js'; // Temporarily disabled - path issue
 import { generateToken } from '../../middleware/auth.js';
-import { findUserByEmail, findUserById, createUser } from './authRepository.js';
+import { findUserByEmail, findUserById, createUser, type UserRole } from './authRepository.js';
 import * as passwordPolicy from './passwordPolicyService.js';
 import logger from '../../utils/logger.js';
 
@@ -18,7 +18,7 @@ export interface RegisterData {
   email: string;
   password: string;
   fullName: string;
-  role: string;
+  role: UserRole;
 }
 
 export interface AuthResponse {
@@ -26,7 +26,7 @@ export interface AuthResponse {
     id: string;
     email: string;
     fullName: string;
-    role: string;
+    role: UserRole;
     isActive: boolean;
     createdAt: string;
     updatedAt: string;

@@ -11,10 +11,11 @@
  * Uses AccountingCore as the single source of truth for GL postings.
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { v4 as uuidv4 } from 'uuid';
 import { AccountingCore } from './accountingCore.js';
+import { UnitOfWork } from '../db/unitOfWork.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID, getValidUserId } from '../utils/constants.js';
 
@@ -98,11 +99,7 @@ export class JournalEntryService {
      * 5. Each line must have either debit OR credit, not both
      */
     async createJournalEntry(request: CreateJournalEntryRequest): Promise<JournalEntry> {
-        const client = await this.pool.connect();
-
-        try {
-            await client.query('BEGIN');
-
+        return UnitOfWork.run(this.pool, async (client) => {
             // =================================================================
             // VALIDATION 1: Check period is open
             // =================================================================
@@ -267,8 +264,6 @@ export class JournalEntryService {
                 totalDebit: totalDebit.toNumber()
             });
 
-            await client.query('COMMIT');
-
             logger.info(`Journal entry created: ${entryNumber}`, {
                 entryId,
                 totalDebit: totalDebit.toNumber(),
@@ -294,14 +289,7 @@ export class JournalEntryService {
                     lineNumber: index + 1
                 }))
             };
-
-        } catch (error) {
-            await client.query('ROLLBACK');
-            logger.error('Failed to create journal entry', { error, request });
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     /**
@@ -312,11 +300,8 @@ export class JournalEntryService {
      * Reversal must be in an open period
      */
     async reverseJournalEntry(request: ReversalRequest): Promise<JournalEntry> {
-        const client = await this.pool.connect();
-
-        try {
-            await client.query('BEGIN');
-
+        // Step 1: Mark original as reversed (atomic)
+        const original = await UnitOfWork.run(this.pool, async (client) => {
             // Get original entry
             const originalResult = await client.query(`
                 SELECT je.*, 
@@ -339,9 +324,9 @@ export class JournalEntryService {
                 throw new Error(`Journal entry not found: ${request.journalEntryId}`);
             }
 
-            const original = originalResult.rows[0];
+            const entry = originalResult.rows[0];
 
-            if (original.status === 'REVERSED') {
+            if (entry.status === 'REVERSED') {
                 throw new Error('Journal entry has already been reversed');
             }
 
@@ -363,41 +348,34 @@ export class JournalEntryService {
                 WHERE id = $1
             `, [request.journalEntryId, request.reason]);
 
-            await client.query('COMMIT');
+            return entry;
+        });
 
-            // Create reversal entry (swap debits and credits)
-            const reversalLines = original.lines.map((line: any) => ({
-                accountId: line.accountId,
-                debitAmount: line.creditAmount, // Swap
-                creditAmount: line.debitAmount, // Swap
-                description: `Reversal: ${line.description}`,
-                entityId: line.entityId,
-                entityType: line.entityType
-            }));
+        // Step 2: Create reversal entry (swap debits and credits) — separate transaction
+        const reversalLines = original.lines.map((line: Record<string, unknown>) => ({
+            accountId: line.accountId,
+            debitAmount: line.creditAmount, // Swap
+            creditAmount: line.debitAmount, // Swap
+            description: `Reversal: ${line.description}`,
+            entityId: line.entityId,
+            entityType: line.entityType
+        }));
 
-            const reversalEntry = await this.createJournalEntry({
-                entryDate: request.reversalDate,
-                reference: `REV-${original.entry_number}`,
-                narration: `Reversal of ${original.entry_number}: ${request.reason}`,
-                lines: reversalLines,
-                createdBy: request.reversedBy
-            });
+        const reversalEntry = await this.createJournalEntry({
+            entryDate: request.reversalDate,
+            reference: `REV-${original.entry_number}`,
+            narration: `Reversal of ${original.entry_number}: ${request.reason}`,
+            lines: reversalLines,
+            createdBy: request.reversedBy
+        });
 
-            logger.info(`Journal entry reversed: ${original.entry_number} -> ${reversalEntry.entryNumber}`, {
-                originalId: request.journalEntryId,
-                reversalId: reversalEntry.id,
-                reason: request.reason
-            });
+        logger.info(`Journal entry reversed: ${original.entry_number} -> ${reversalEntry.entryNumber}`, {
+            originalId: request.journalEntryId,
+            reversalId: reversalEntry.id,
+            reason: request.reason
+        });
 
-            return reversalEntry;
-
-        } catch (error) {
-            await client.query('ROLLBACK');
-            logger.error('Failed to reverse journal entry', { error, request });
-            throw error;
-        } finally {
-            client.release();
-        }
+        return reversalEntry;
     }
 
     /**
@@ -471,7 +449,7 @@ export class JournalEntryService {
         const offset = (page - 1) * limit;
 
         let whereClause = '1=1';
-        const queryParams: any[] = [];
+        const queryParams: unknown[] = [];
         let paramIndex = 1;
 
         if (dateFrom) {
@@ -561,7 +539,7 @@ export class JournalEntryService {
     /**
      * Generate unique journal entry number
      */
-    private async generateEntryNumber(client: any): Promise<string> {
+    private async generateEntryNumber(client: PoolClient): Promise<string> {
         const year = new Date().getFullYear();
         const prefix = `JE-${year}-`;
 

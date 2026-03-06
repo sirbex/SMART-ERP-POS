@@ -120,7 +120,7 @@ export const productHistoryService = {
           referenceId: r.reference_id ?? undefined,
           notes: r.notes ?? undefined,
         },
-      } as any);
+      } as unknown as ProductHistoryItem);
     }
 
     // Optional type filter applied across all events

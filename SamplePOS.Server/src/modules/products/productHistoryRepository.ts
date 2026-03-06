@@ -14,7 +14,7 @@ export const productHistoryRepository = {
   async getGoodsReceiptEvents(productId: string, filters?: HistoryFilters, dbPool?: pg.Pool) {
     const pool = dbPool || globalPool;
     const where: string[] = ['gri.product_id = $1'];
-    const params: any[] = [productId];
+    const params: unknown[] = [productId];
     let i = 2;
 
     if (filters?.startDate) {
@@ -76,7 +76,7 @@ export const productHistoryRepository = {
   async getSaleEvents(productId: string, filters?: HistoryFilters, dbPool?: pg.Pool) {
     const pool = dbPool || globalPool;
     const where: string[] = ['si.product_id = $1'];
-    const params: any[] = [productId];
+    const params: unknown[] = [productId];
     let i = 2;
 
     if (filters?.startDate) {
@@ -130,7 +130,7 @@ export const productHistoryRepository = {
       // Exclude system-generated GR and SALE movements to avoid duplicates.
       "sm.movement_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT','TRANSFER_IN','TRANSFER_OUT','RETURN','DAMAGE','EXPIRY')",
     ];
-    const params: any[] = [productId];
+    const params: unknown[] = [productId];
     let i = 2;
 
     if (filters?.startDate) {

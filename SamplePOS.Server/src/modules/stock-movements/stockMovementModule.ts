@@ -180,7 +180,7 @@ export const stockMovementRepository = {
   ): Promise<{ movements: StockMovement[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters?.movementType) {
@@ -399,7 +399,7 @@ export const stockMovementController = {
         data: result,
         message: 'Stock movement recorded successfully',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof z.ZodError) {
         res.status(400).json({
           success: false,
@@ -412,7 +412,7 @@ export const stockMovementController = {
       console.error('Error recording stock movement:', error);
       res.status(500).json({
         success: false,
-        error: error.message || 'Failed to record stock movement',
+        error: error instanceof Error ? error.message : 'Failed to record stock movement',
       });
     }
   },
@@ -439,11 +439,11 @@ export const stockMovementController = {
           totalPages: Math.ceil(result.total / limit),
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error getting product movements:', error);
       res.status(500).json({
         success: false,
-        error: `Failed to get product movements: ${error.message}`,
+        error: `Failed to get product movements: ${(error instanceof Error ? error.message : String(error))}`,
       });
     }
   },
@@ -470,11 +470,11 @@ export const stockMovementController = {
           totalPages: Math.ceil(result.total / limit),
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error getting batch movements:', error);
       res.status(500).json({
         success: false,
-        error: `Failed to get batch movements: ${error.message}`,
+        error: `Failed to get batch movements: ${(error instanceof Error ? error.message : String(error))}`,
       });
     }
   },
@@ -502,7 +502,7 @@ export const stockMovementController = {
           totalPages: Math.ceil(result.total / query.limit),
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof z.ZodError) {
         res.status(400).json({
           success: false,
@@ -515,7 +515,7 @@ export const stockMovementController = {
       console.error('Error getting movements:', error);
       res.status(500).json({
         success: false,
-        error: `Failed to get movements: ${error.message}`,
+        error: `Failed to get movements: ${(error instanceof Error ? error.message : String(error))}`,
       });
     }
   },

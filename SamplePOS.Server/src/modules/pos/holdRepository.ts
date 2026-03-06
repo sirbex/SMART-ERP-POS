@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 /**
  * Hold Order Repository
@@ -17,7 +18,7 @@ export interface CreateHoldOrderData {
     totalAmount: number;
     holdReason?: string | null;
     notes?: string | null;
-    metadata?: Record<string, any> | null;
+    metadata?: Record<string, unknown> | null;
     expiresAt?: Date | null;
 }
 
@@ -41,7 +42,7 @@ export interface CreateHoldOrderItemData {
     uomId?: string | null;
     uomName?: string | null;
     uomConversionFactor?: number | null;
-    metadata?: Record<string, any> | null;
+    metadata?: Record<string, unknown> | null;
     lineOrder: number;
 }
 
@@ -53,12 +54,8 @@ export const holdRepository = {
         pool: Pool,
         holdData: CreateHoldOrderData,
         items: CreateHoldOrderItemData[]
-    ): Promise<any> {
-        const client = await pool.connect();
-
-        try {
-            await client.query('BEGIN');
-
+    ): Promise<Record<string, unknown>> {
+        return UnitOfWork.run(pool, async (client: PoolClient) => {
             // Insert hold order
             const holdResult = await client.query(
                 `INSERT INTO pos_held_orders (
@@ -122,8 +119,6 @@ export const holdRepository = {
                 );
             }
 
-            await client.query('COMMIT');
-
             logger.info('Hold order created', {
                 holdId: hold.id,
                 holdNumber: hold.hold_number,
@@ -133,13 +128,7 @@ export const holdRepository = {
             });
 
             return hold;
-        } catch (error) {
-            await client.query('ROLLBACK');
-            logger.error('Failed to create hold order', { error });
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     },
 
     /**
@@ -152,9 +141,9 @@ export const holdRepository = {
             terminalId?: string;
             includeExpired?: boolean;
         }
-    ): Promise<any[]> {
+    ): Promise<Record<string, unknown>[]> {
         const conditions: string[] = ["h.status = 'ACTIVE'"];
-        const params: any[] = [];
+        const params: unknown[] = [];
         let paramIndex = 1;
 
         if (filters.userId) {
@@ -189,7 +178,7 @@ export const holdRepository = {
     /**
      * Get held order by ID with items
      */
-    async getHoldOrderById(pool: Pool, holdId: string): Promise<any | null> {
+    async getHoldOrderById(pool: Pool, holdId: string): Promise<Record<string, unknown> | null> {
         const holdResult = await pool.query(
             'SELECT * FROM pos_held_orders WHERE id = $1 AND status = $2',
             [holdId, 'ACTIVE']
@@ -217,7 +206,7 @@ export const holdRepository = {
     /**
      * Get held order by hold number
      */
-    async getHoldOrderByNumber(pool: Pool, holdNumber: string): Promise<any | null> {
+    async getHoldOrderByNumber(pool: Pool, holdNumber: string): Promise<Record<string, unknown> | null> {
         const holdResult = await pool.query(
             'SELECT * FROM pos_held_orders WHERE hold_number = $1 AND status = $2',
             [holdNumber, 'ACTIVE']

@@ -161,7 +161,7 @@ export class ProfitLossReportService {
                 summary
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to generate P&L report', { dateFrom, dateTo, error });
             throw error;
         }
@@ -196,7 +196,7 @@ export class ProfitLossReportService {
 
             return customers;
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to generate P&L by customer', { dateFrom, dateTo, error });
             throw error;
         }
@@ -232,7 +232,7 @@ export class ProfitLossReportService {
 
             return products;
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to generate P&L by product', { dateFrom, dateTo, error });
             throw error;
         }
@@ -300,7 +300,7 @@ export class ProfitLossReportService {
                 difference
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             logger.error('Failed to verify P&L consistency', { dateFrom, dateTo, error });
             throw error;
         }

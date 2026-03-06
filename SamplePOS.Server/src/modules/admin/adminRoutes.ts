@@ -9,7 +9,7 @@ const router = express.Router();
 
 // Middleware to attach pool to request
 router.use((req, res, next) => {
-  (req as any).pool = req.tenantPool || globalPool;
+  req.pool = req.tenantPool || globalPool;
   next();
 });
 

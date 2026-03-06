@@ -1,4 +1,5 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export interface InventoryBatch {
   id: string;
@@ -25,6 +26,22 @@ export interface StockLevel {
 }
 
 export const inventoryRepository = {
+  /**
+   * Get all active batches across all products (for offline sync)
+   */
+  async getAllActiveBatches(pool: Pool): Promise<Record<string, unknown>[]> {
+    const result = await pool.query(
+      `SELECT ib.id, ib.product_id, p.name AS product_name,
+              ib.batch_number, ib.expiry_date,
+              ib.remaining_quantity, ib.cost_price AS unit_cost
+       FROM inventory_batches ib
+       JOIN products p ON p.id = ib.product_id
+       WHERE ib.remaining_quantity > 0
+       ORDER BY p.name ASC, ib.expiry_date ASC NULLS LAST`
+    );
+    return result.rows;
+  },
+
   /**
    * Get all batches for a product (FEFO order: earliest expiry first)
    */
@@ -73,8 +90,9 @@ export const inventoryRepository = {
 
   /**
    * Update batch quantity
+   * Accepts Pool or PoolClient to participate in caller's transaction
    */
-  async updateBatchQuantity(pool: Pool, batchId: string, newQuantity: number): Promise<void> {
+  async updateBatchQuantity(pool: Pool | PoolClient, batchId: string, newQuantity: number): Promise<void> {
     await pool.query(
       'UPDATE inventory_batches SET remaining_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       [newQuantity, batchId]
@@ -109,9 +127,12 @@ export const inventoryRepository = {
          p.name as product_name,
          p.sku,
          p.barcode,
+         p.generic_name,
          p.selling_price,
          p.is_taxable,
          p.tax_rate,
+         p.min_days_before_expiry_sale,
+         p.product_type,
          COALESCE(NULLIF(p.average_cost, 0), p.cost_price) as average_cost,
          COALESCE(SUM(b.remaining_quantity), p.quantity_on_hand) as total_stock,
          MIN(b.expiry_date) as nearest_expiry,
@@ -136,7 +157,7 @@ export const inventoryRepository = {
        FROM products p
        LEFT JOIN inventory_batches b ON p.id = b.product_id AND b.status = 'ACTIVE'
        WHERE p.is_active = true
-       GROUP BY p.id, p.name, p.sku, p.barcode, p.selling_price, p.is_taxable, p.tax_rate, p.average_cost, p.cost_price, p.reorder_level
+       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, p.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, p.average_cost, p.cost_price, p.reorder_level
        ORDER BY needs_reorder DESC, p.name ASC`
     );
     return result.rows;
@@ -165,6 +186,7 @@ export const inventoryRepository = {
 
   /**
    * Adjust batch quantity (for corrections/adjustments)
+   * Uses FOR UPDATE to prevent lost updates under concurrency
    */
   async adjustBatchQuantity(
     pool: Pool,
@@ -173,13 +195,13 @@ export const inventoryRepository = {
     reason: string,
     userId: string
   ): Promise<InventoryBatch> {
-    const client = await pool.connect();
+    return UnitOfWork.run(pool, async (client) => {
+      // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
+      // This function already creates proper stock_movements for the adjustment
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
-    try {
-      await client.query('BEGIN');
-
-      // Get current batch
-      const batchResult = await client.query('SELECT * FROM inventory_batches WHERE id = $1', [
+      // Get current batch WITH ROW LOCK to prevent concurrent lost updates
+      const batchResult = await client.query('SELECT * FROM inventory_batches WHERE id = $1 FOR UPDATE', [
         batchId,
       ]);
 
@@ -187,7 +209,7 @@ export const inventoryRepository = {
         throw new Error(`Batch ${batchId} not found`);
       }
 
-      const batch = batchResult.rows[0];
+      const batch = batchResult.rows[0] as InventoryBatch & { product_id: string; remaining_quantity: number };
       const newQuantity = batch.remaining_quantity + adjustment;
 
       if (newQuantity < 0) {
@@ -217,24 +239,18 @@ export const inventoryRepository = {
         ]
       );
 
-      await client.query('COMMIT');
-
       // Get updated batch
       const updatedResult = await client.query('SELECT * FROM inventory_batches WHERE id = $1', [
         batchId,
       ]);
 
-      return updatedResult.rows[0];
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      return updatedResult.rows[0] as InventoryBatch;
+    });
   },
 
   /**
    * Create new inventory batch
+   * Accepts Pool or PoolClient to participate in caller's transaction
    * 
    * BUG FIX: Batches MUST be created with a valid source reference to prevent ghost batches.
    * Valid sources:
@@ -245,7 +261,7 @@ export const inventoryRepository = {
    * @throws Error if no valid source is provided (prevents ghost batches)
    */
   async createBatch(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: {
       productId: string;
       batchNumber: string;
@@ -258,6 +274,7 @@ export const inventoryRepository = {
       purchaseOrderItemId?: string | null;
       adjustmentId?: string | null;       // For stock adjustments
       isOpeningBalance?: boolean;          // For initial system setup
+      isBonus?: boolean;                   // Bonus stock from supplier (cost = 0)
     }
   ): Promise<InventoryBatch> {
     // BUG FIX: Validate that batch has a valid source to prevent ghost batches
@@ -278,8 +295,8 @@ export const inventoryRepository = {
       `INSERT INTO inventory_batches (
         product_id, batch_number, quantity, remaining_quantity,
         expiry_date, cost_price, goods_receipt_id, goods_receipt_item_id,
-        purchase_order_id, purchase_order_item_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        purchase_order_id, purchase_order_item_id, is_bonus
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *`,
       [
         data.productId,
@@ -292,6 +309,7 @@ export const inventoryRepository = {
         data.goodsReceiptItemId || null,
         data.purchaseOrderId || null,
         data.purchaseOrderItemId || null,
+        data.isBonus ?? false,
       ]
     );
     return result.rows[0];

@@ -6,12 +6,21 @@ export interface SaleRecord {
   saleNumber: string;
   customerId: string | null;
   customerName: string | null;
+  subtotal?: number;
+  taxAmount?: number;
+  discountAmount?: number;
   totalAmount: number;
+  totalCost?: number;
+  profit?: number;
+  profitMargin?: number;
   paymentMethod: string;
   paymentReceived: number;
+  amountPaid?: number;
   changeAmount: number;
   status: string;
   soldBy: string;
+  cashierId?: string;
+  quoteId?: string | null;
   createdAt: Date;
   saleDate?: string;
 }
@@ -26,6 +35,21 @@ export interface SaleItemRecord {
   lineTotal: number;
   costPrice: number;
   profit: number;
+}
+
+export interface VoidSaleItemRecord {
+  id: string;
+  saleId: string;
+  productId: string;
+  batchId: string | null;
+  quantity: string;
+  unitPrice: string;
+  unitCost: string;
+  totalPrice: string;
+  profit: string;
+  uomId: string | null;
+  productName: string;
+  sku: string;
 }
 
 export interface CreateSaleData {
@@ -61,8 +85,10 @@ export interface CreateSaleItemData {
 export const salesRepository = {
   /**
    * Generate next sale number (SALE-YYYY-NNNN format)
+   * Accepts Pool or PoolClient — MUST be called on the transaction client
+   * so the advisory lock is held until COMMIT.
    */
-  async generateSaleNumber(pool: Pool): Promise<string> {
+  async generateSaleNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     // Advisory lock prevents concurrent duplicate sale number generation (held until TX commit)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('sale_number_seq'))`);
@@ -85,9 +111,10 @@ export const salesRepository = {
 
   /**
    * Create a new sale (transaction wrapper should be handled in service)
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    * Maps to actual sales table schema from 001_initial_schema.sql
    */
-  async createSale(pool: Pool, data: CreateSaleData): Promise<SaleRecord> {
+  async createSale(pool: Pool | PoolClient, data: CreateSaleData): Promise<SaleRecord> {
     const saleNumber = await this.generateSaleNumber(pool);
 
     // Schema fields: sale_number, customer_id, sale_date, subtotal, tax_amount,
@@ -162,11 +189,12 @@ export const salesRepository = {
 
   /**
    * Add items to a sale
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    * Schema fields: sale_id, product_id, product_name, item_type, batch_id, quantity, unit_price,
    * unit_cost, discount_amount, total_price, profit
    */
-  async addSaleItems(pool: Pool, items: CreateSaleItemData[]): Promise<SaleItemRecord[]> {
-    const values: any[] = [];
+  async addSaleItems(pool: Pool | PoolClient, items: CreateSaleItemData[]): Promise<SaleItemRecord[]> {
+    const values: unknown[] = [];
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
@@ -218,9 +246,9 @@ export const salesRepository = {
    * Get sale by ID with items
    */
   async getSaleById(
-    pool: Pool,
+    pool: Pool | PoolClient,
     id: string
-  ): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines?: any[] } | null> {
+  ): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines?: Record<string, unknown>[] } | null> {
     const saleResult = await pool.query('SELECT * FROM sales WHERE id = $1', [id]);
 
     if (saleResult.rows.length === 0) {
@@ -274,7 +302,7 @@ export const salesRepository = {
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters?.status) {
@@ -340,12 +368,14 @@ export const salesRepository = {
 
   /**
    * Get FIFO cost layers for a product (oldest first)
+   * Uses FOR UPDATE to prevent concurrent depletion by parallel sales.
    */
-  async getFIFOCostLayers(pool: Pool, productId: string): Promise<any[]> {
+  async getFIFOCostLayers(pool: Pool | PoolClient, productId: string): Promise<Record<string, unknown>[]> {
     const result = await pool.query(
       `SELECT * FROM cost_layers 
        WHERE product_id = $1 AND remaining_quantity > 0 
-       ORDER BY created_at ASC`,
+       ORDER BY created_at ASC
+       FOR UPDATE`,
       [productId]
     );
     return result.rows;
@@ -373,7 +403,7 @@ export const salesRepository = {
       quantity: number;
       unitCost: number; // aligned with schema
     }
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     // Note: Prefer using costLayerService.createCostLayer; this is a fallback aligned to schema
     const result = await pool.query(
       `INSERT INTO cost_layers (product_id, quantity, remaining_quantity, unit_cost, batch_number)
@@ -394,9 +424,9 @@ export const salesRepository = {
       endDate?: string;
       groupBy?: string;
     }
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     const whereClauses: string[] = ['status = $1'];
-    const values: any[] = ['COMPLETED'];
+    const values: unknown[] = ['COMPLETED'];
     let paramIndex = 2;
 
     if (filters?.startDate) {
@@ -461,9 +491,9 @@ export const salesRepository = {
       productId?: string;
       customerId?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     const whereClauses: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     // Join sales with sale_items to get product-level data
@@ -473,11 +503,11 @@ export const salesRepository = {
         si.product_name,
         COUNT(DISTINCT s.id) as transaction_count,
         ROUND(SUM(si.quantity)::numeric, 2) as total_quantity_sold,
-        ROUND(SUM(si.line_total)::numeric, 2) as total_revenue,
-        ROUND(SUM(si.cost_price * si.quantity)::numeric, 2) as total_cost,
+        ROUND(SUM(si.total_price)::numeric, 2) as total_revenue,
+        ROUND(SUM(si.unit_cost * si.quantity)::numeric, 2) as total_cost,
         ROUND(SUM(si.profit)::numeric, 2) as total_profit,
         ROUND(AVG(si.unit_price)::numeric, 2) as avg_selling_price,
-        ROUND(AVG(si.cost_price)::numeric, 2) as avg_cost_price,
+        ROUND(AVG(si.unit_cost)::numeric, 2) as avg_cost_price,
         TO_CHAR(MIN(s.sale_date), 'Mon DD, YYYY') as first_sale_date,
         TO_CHAR(MAX(s.sale_date), 'Mon DD, YYYY') as last_sale_date
       FROM sale_items si
@@ -519,12 +549,16 @@ export const salesRepository = {
     const result = await pool.query(query, values);
 
     // Calculate profit margin percentage for each product
-    return result.rows.map((row: any) => ({
-      ...row,
-      profit_margin_pct: row.total_revenue > 0
-        ? ((row.total_profit / row.total_revenue) * 100).toFixed(2)
-        : '0.00',
-    }));
+    return result.rows.map((row: Record<string, unknown>) => {
+      const totalRevenue = Number(row.total_revenue) || 0;
+      const totalProfit = Number(row.total_profit) || 0;
+      return {
+        ...row,
+        profit_margin_pct: totalRevenue > 0
+          ? ((totalProfit / totalRevenue) * 100).toFixed(2)
+          : '0.00',
+      };
+    });
   },
 
   /**
@@ -537,9 +571,9 @@ export const salesRepository = {
       startDate?: string;
       endDate?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     const whereClauses: string[] = ['s.status = \'COMPLETED\''];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters?.startDate) {
@@ -557,7 +591,7 @@ export const salesRepository = {
         si.product_id,
         si.product_name,
         ROUND(SUM(si.quantity)::numeric, 2) as total_quantity,
-        ROUND(SUM(si.line_total)::numeric, 2) as total_revenue,
+        ROUND(SUM(si.total_price)::numeric, 2) as total_revenue,
         COUNT(DISTINCT s.id) as sale_count
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
@@ -581,9 +615,9 @@ export const salesRepository = {
       startDate?: string;
       endDate?: string;
     }
-  ): Promise<any[]> {
+  ): Promise<Record<string, unknown>[]> {
     const whereClauses: string[] = ['status = \'COMPLETED\''];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters?.startDate) {
@@ -634,9 +668,9 @@ export const salesRepository = {
   /**
    * Get sales details report - aggregated by date and product with revenue/cost metrics
    */
-  async getSalesDetailsReport(pool: Pool, filters: any = {}): Promise<any[]> {
+  async getSalesDetailsReport(pool: Pool, filters: Record<string, unknown> = {}): Promise<Record<string, unknown>[]> {
     const whereClauses = ['s.status = $1'];
-    const values: any[] = ['COMPLETED'];
+    const values: unknown[] = ['COMPLETED'];
     let paramIndex = 2;
 
     if (filters.startDate) {
@@ -684,9 +718,9 @@ export const salesRepository = {
   /**
    * Get sales by cashier report - shows sales performance by user/cashier
    */
-  async getSalesByCashier(pool: Pool, filters: any = {}): Promise<any[]> {
+  async getSalesByCashier(pool: Pool, filters: Record<string, unknown> = {}): Promise<Record<string, unknown>[]> {
     const whereClauses = ['s.status = $1'];
-    const values: any[] = ['COMPLETED'];
+    const values: unknown[] = ['COMPLETED'];
     let paramIndex = 2;
 
     if (filters.startDate) {
@@ -736,15 +770,16 @@ export const salesRepository = {
 
   /**
    * Void a sale (mark as VOID, record who/when/why)
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    * Returns updated sale record with void details
    */
   async voidSale(
-    pool: Pool,
+    pool: Pool | PoolClient,
     saleId: string,
     voidedById: string,
     voidReason: string,
     approvedById?: string
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     const result = await pool.query(
       `UPDATE sales 
        SET status = 'VOID',
@@ -775,8 +810,9 @@ export const salesRepository = {
 
   /**
    * Get sale items for a sale (needed for inventory restoration)
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    */
-  async getSaleItemsForVoid(pool: Pool, saleId: string): Promise<any[]> {
+  async getSaleItemsForVoid(pool: Pool | PoolClient, saleId: string): Promise<VoidSaleItemRecord[]> {
     const result = await pool.query(
       `SELECT 
         si.id,
@@ -803,7 +839,7 @@ export const salesRepository = {
   /**
    * Check if user has manager role (required for void approval)
    */
-  async isManager(pool: Pool, userId: string): Promise<boolean> {
+  async isManager(pool: Pool | PoolClient, userId: string): Promise<boolean> {
     const result = await pool.query(
       `SELECT role FROM users WHERE id = $1`,
       [userId]

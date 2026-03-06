@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import * as userRepository from './userRepository.js';
 import type { User, CreateUser, UpdateUser, ChangePassword } from '../../../../shared/zod/user.js';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 /**
  * Get all users (admin/manager only)
@@ -75,33 +76,15 @@ export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
   }
 
   // Transaction: Create user atomically with role assignment
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
+  return UnitOfWork.run(pool, async (client) => {
     const user = await userRepository.createUser(data, client);
-
-    // Future: Add role/permission assignments within transaction if needed
-    // await assignUserRoles(client, user.id, data.roles);
-
-    await client.query('COMMIT');
     logger.info('User created (transaction committed)', {
       userId: user.id,
       email: user.email,
       role: user.role
     });
-
     return user;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('User creation failed (transaction rolled back)', {
-      email: data.email,
-      error
-    });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -138,38 +121,20 @@ export async function updateUser(pool: Pool, id: string, data: UpdateUser): Prom
   }
 
   // Transaction: Update user atomically with role changes
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
+  return UnitOfWork.run(pool, async (client) => {
     const user = await userRepository.updateUser(id, data, client);
 
     if (!user) {
       throw new Error('User not found');
     }
 
-    // Future: Add role/permission updates within transaction if needed
-    // if (data.role) {
-    //   await updateUserRoles(client, user.id, data.role);
-    // }
-
-    await client.query('COMMIT');
     logger.info('User updated (transaction committed)', {
       userId: user.id,
       updates: Object.keys(data)
     });
 
     return user;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('User update failed (transaction rolled back)', {
-      userId: id,
-      error
-    });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**

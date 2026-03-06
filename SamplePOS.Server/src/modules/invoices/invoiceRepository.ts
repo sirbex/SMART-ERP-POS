@@ -1,24 +1,25 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 // Helper to normalize Pascal case database columns to camelCase
-function normalizeInvoiceRow(row: any): InvoiceRecord {
+function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
+  const status = String(row.Status || '').toUpperCase();
   return {
-    id: row.Id,
-    invoice_number: row.InvoiceNumber,
-    customer_id: row.CustomerId,
-    sale_id: row.SaleId,
-    issue_date: row.InvoiceDate,
-    due_date: row.DueDate,
-    status: row.Status.toUpperCase() === 'PAID' ? 'PAID' : row.Status.toUpperCase() === 'PARTIALLYPAID' ? 'PARTIALLY_PAID' : 'UNPAID',
-    subtotal: row.Subtotal,
-    tax_amount: row.TaxAmount,
-    total_amount: row.TotalAmount,
-    amount_paid: row.AmountPaid,
-    balance: row.OutstandingBalance,
-    notes: row.Notes,
+    id: row.Id as string,
+    invoice_number: row.InvoiceNumber as string,
+    customer_id: row.CustomerId as string,
+    sale_id: (row.SaleId as string) || null,
+    issue_date: row.InvoiceDate as Date,
+    due_date: row.DueDate as Date,
+    status: status === 'PAID' ? 'PAID' : status === 'PARTIALLYPAID' ? 'PARTIALLY_PAID' : 'UNPAID',
+    subtotal: row.Subtotal as number,
+    tax_amount: row.TaxAmount as number,
+    total_amount: row.TotalAmount as number,
+    amount_paid: row.AmountPaid as number,
+    balance: row.OutstandingBalance as number,
+    notes: (row.Notes as string) || null,
     created_by_id: null,
-    created_at: row.CreatedAt,
-    updated_at: row.UpdatedAt,
+    created_at: row.CreatedAt as Date,
+    updated_at: row.UpdatedAt as Date,
   };
 }
 
@@ -56,11 +57,11 @@ export interface InvoicePaymentRecord {
 }
 
 export const invoiceRepository = {
-  async findBySaleId(pool: Pool, saleId: string): Promise<InvoiceRecord | null> {
+  async findBySaleId(pool: Pool | PoolClient, saleId: string): Promise<InvoiceRecord | null> {
     const res = await pool.query('SELECT * FROM invoices WHERE "SaleId" = $1 LIMIT 1', [saleId]);
     return res.rows[0] ? normalizeInvoiceRow(res.rows[0]) : null;
   },
-  async generateInvoiceNumber(pool: Pool): Promise<string> {
+  async generateInvoiceNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     // Advisory lock prevents concurrent duplicate invoice number generation
     // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
@@ -82,7 +83,7 @@ export const invoiceRepository = {
     return `INV-${year}-${seq.toString().padStart(4, '0')}`;
   },
 
-  async generateReceiptNumber(pool: Pool): Promise<string> {
+  async generateReceiptNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     // Advisory lock prevents concurrent duplicate receipt number generation
     // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
@@ -105,7 +106,7 @@ export const invoiceRepository = {
   },
 
   async createInvoice(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: {
       customerId: string;
       customerName: string;
@@ -156,7 +157,7 @@ export const invoiceRepository = {
    * Create invoice from sale (for quote conversion)
    */
   async createInvoiceFromSale(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: {
       saleId: string;
       saleNumber: string;
@@ -195,7 +196,7 @@ export const invoiceRepository = {
     return normalizeInvoiceRow(result.rows[0]);
   },
 
-  async getInvoiceById(pool: Pool, id: string): Promise<InvoiceRecord | null> {
+  async getInvoiceById(pool: Pool | PoolClient, id: string): Promise<InvoiceRecord | null> {
     const result = await pool.query(
       `SELECT i.* FROM invoices i 
        WHERE i."Id" = $1`,
@@ -207,14 +208,14 @@ export const invoiceRepository = {
   },
 
   async listInvoices(
-    pool: Pool,
+    pool: Pool | PoolClient,
     page: number,
     limit: number,
     filters?: { customerId?: string; status?: string }
   ): Promise<{ invoices: InvoiceRecord[]; total: number }> {
     const offset = (page - 1) * limit;
     const where: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let idx = 1;
 
     if (filters?.customerId) {
@@ -244,7 +245,7 @@ export const invoiceRepository = {
   },
 
   async addPayment(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: {
       invoiceId: string;
       amount: number;
@@ -277,7 +278,7 @@ export const invoiceRepository = {
     return res.rows[0];
   },
 
-  async listPayments(pool: Pool, invoiceId: string): Promise<InvoicePaymentRecord[]> {
+  async listPayments(pool: Pool | PoolClient, invoiceId: string): Promise<InvoicePaymentRecord[]> {
     const res = await pool.query(
       'SELECT * FROM invoice_payments WHERE invoice_id = $1 ORDER BY created_at ASC',
       [invoiceId]
@@ -288,7 +289,7 @@ export const invoiceRepository = {
   /**
    * Recalculate and persist aggregate payment metrics & status for an invoice.
    */
-  async recalcInvoice(pool: Pool, invoiceId: string): Promise<InvoiceRecord | null> {
+  async recalcInvoice(pool: Pool | PoolClient, invoiceId: string): Promise<InvoiceRecord | null> {
     const payAgg = await pool.query(
       'SELECT COALESCE(SUM(amount),0) AS amount_paid FROM invoice_payments WHERE invoice_id = $1',
       [invoiceId]

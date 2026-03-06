@@ -27,14 +27,14 @@ let cacheMisses = 0;
  * @param reportType - Type of report (e.g., 'SALES_REPORT', 'INVENTORY_VALUATION')
  * @param parameters - Report parameters object
  */
-function generateKey(reportType: string, parameters: Record<string, any>): string {
+function generateKey(reportType: string, parameters: Record<string, unknown>): string {
   // Sort parameters for consistent hash
   const sortedParams = Object.keys(parameters)
     .sort()
     .reduce((acc, key) => {
       acc[key] = parameters[key];
       return acc;
-    }, {} as Record<string, any>);
+    }, {} as Record<string, unknown>);
 
   // Generate hash of parameters
   const paramHash = crypto
@@ -52,7 +52,7 @@ function generateKey(reportType: string, parameters: Record<string, any>): strin
  * @param reportType - Type of report
  * @param parameters - Report parameters
  */
-export function get<T = any>(reportType: string, parameters: Record<string, any>): T | null {
+export function get<T = unknown>(reportType: string, parameters: Record<string, unknown>): T | null {
   const key = generateKey(reportType, parameters);
   const value = reportCache.get<T>(key);
 
@@ -74,9 +74,9 @@ export function get<T = any>(reportType: string, parameters: Record<string, any>
  * @param value - Report result data
  * @param ttl - Time to live in seconds (defaults to 5 minutes)
  */
-export function set<T = any>(
+export function set<T = unknown>(
   reportType: string,
-  parameters: Record<string, any>,
+  parameters: Record<string, unknown>,
   value: T,
   ttl: number = DEFAULT_TTL
 ): void {
@@ -177,7 +177,7 @@ export const TTL_PRESETS = {
  * @param parameters - Report parameters
  * @returns Recommended TTL in seconds
  */
-export function getRecommendedTTL(reportType: string, parameters: Record<string, any>): number {
+export function getRecommendedTTL(reportType: string, parameters: Record<string, unknown>): number {
   // Real-time reports (today's data)
   const today = new Date().toISOString().split('T')[0];
   if (parameters.startDate === today || parameters.asOfDate === today) {
@@ -185,7 +185,7 @@ export function getRecommendedTTL(reportType: string, parameters: Record<string,
   }
 
   // Historical reports (past data unlikely to change)
-  const endDate = new Date(parameters.endDate || parameters.asOfDate || Date.now());
+  const endDate = new Date(String(parameters.endDate || parameters.asOfDate || Date.now()));
   const daysOld = Math.floor((Date.now() - endDate.getTime()) / (1000 * 60 * 60 * 24));
 
   if (daysOld > 30) {
@@ -211,7 +211,7 @@ export function invalidateEntity(entityType: string, entityId: string): void {
     // Check if cached report parameters contain the entity
     const cachedValue = reportCache.get(key);
     if (cachedValue && typeof cachedValue === 'object') {
-      const params = (cachedValue as any).parameters || {};
+      const params = (cachedValue as Record<string, unknown>).parameters as Record<string, unknown> || {};
       const entityIdKey = `${entityType}Id`;
 
       if (params[entityIdKey] === entityId) {

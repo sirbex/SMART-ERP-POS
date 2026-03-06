@@ -4,297 +4,177 @@ import { Request, Response } from 'express';
 import { pool as globalPool } from '../../db/pool.js';
 import * as discountService from './discountService';
 import { DiscountSchema, ApplyDiscountSchema } from '@shared/zod/discount';
-import { z } from 'zod';
+import { asyncHandler, NotFoundError, ValidationError, ForbiddenError } from '../../middleware/errorHandler.js';
 
 /**
  * GET /api/discounts - Get all active discounts
  */
-export async function listDiscounts(req: Request, res: Response) {
-  try {
-    const pool = req.tenantPool || globalPool;
-    const discounts = await discountService.getActiveDiscounts(pool);
-
-    res.json({
-      success: true,
-      data: discounts,
-    });
-  } catch (error: any) {
-    console.error('Error fetching discounts:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to fetch discounts',
-    });
-  }
-}
+export const listDiscounts = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const discounts = await discountService.getActiveDiscounts(pool);
+  res.json({ success: true, data: discounts });
+});
 
 /**
  * GET /api/discounts/:id - Get discount by ID
  */
-export async function getDiscount(req: Request, res: Response) {
-  try {
-    const pool = req.tenantPool || globalPool;
-    const { id } = req.params;
-    const discount = await discountService.getDiscountById(pool, id);
+export const getDiscount = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = req.params;
+  const discount = await discountService.getDiscountById(pool, id);
 
-    if (!discount) {
-      return res.status(404).json({
-        success: false,
-        error: 'Discount not found',
-      });
-    }
-
-    res.json({
-      success: true,
-      data: discount,
-    });
-  } catch (error: any) {
-    console.error('Error fetching discount:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to fetch discount',
-    });
+  if (!discount) {
+    throw new NotFoundError('Discount');
   }
-}
+
+  res.json({ success: true, data: discount });
+});
 
 /**
  * POST /api/discounts - Create new discount (ADMIN only)
  */
-export async function createDiscount(req: Request, res: Response) {
+export const createDiscount = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const validatedData = DiscountSchema.omit({ id: true, createdAt: true, updatedAt: true }).parse(req.body);
+  const user = req.user!;
+
   try {
-    const pool = req.tenantPool || globalPool;
-    // Validate request body
-    const validatedData = DiscountSchema.omit({ id: true, createdAt: true, updatedAt: true }).parse(req.body);
-
-    const user = (req as any).user;
-
     const discount = await discountService.createDiscount(pool, validatedData, user.role);
-
-    res.status(201).json({
-      success: true,
-      data: discount,
-      message: 'Discount created successfully',
-    });
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid discount data',
-        details: error.errors,
-      });
+    res.status(201).json({ success: true, data: discount, message: 'Discount created successfully' });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Only ADMIN')) {
+      throw new ForbiddenError(error.message);
     }
-
-    console.error('Error creating discount:', error);
-    res.status(error.message.includes('Only ADMIN') ? 403 : 500).json({
-      success: false,
-      error: error.message || 'Failed to create discount',
-    });
+    throw error;
   }
-}
+});
 
 /**
  * PUT /api/discounts/:id - Update discount (ADMIN only)
  */
-export async function updateDiscount(req: Request, res: Response) {
+export const updateDiscount = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = req.params;
+  const updates = req.body;
+  const user = req.user!;
+
   try {
-    const pool = req.tenantPool || globalPool;
-    const { id } = req.params;
-    const updates = req.body;
-
-    const user = (req as any).user;
-
     const discount = await discountService.updateDiscount(pool, id, updates, user.role);
-
     if (!discount) {
-      return res.status(404).json({
-        success: false,
-        error: 'Discount not found',
-      });
+      throw new NotFoundError('Discount');
     }
-
-    res.json({
-      success: true,
-      data: discount,
-      message: 'Discount updated successfully',
-    });
-  } catch (error: any) {
-    console.error('Error updating discount:', error);
-    res.status(error.message.includes('Only ADMIN') ? 403 : 500).json({
-      success: false,
-      error: error.message || 'Failed to update discount',
-    });
+    res.json({ success: true, data: discount, message: 'Discount updated successfully' });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Only ADMIN')) {
+      throw new ForbiddenError(error.message);
+    }
+    throw error;
   }
-}
+});
 
 /**
  * DELETE /api/discounts/:id - Delete (deactivate) discount (ADMIN only)
  */
-export async function deleteDiscount(req: Request, res: Response) {
+export const deleteDiscount = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = req.params;
+  const user = req.user!;
+
   try {
-    const pool = req.tenantPool || globalPool;
-    const { id } = req.params;
-    const user = (req as any).user;
-
     const success = await discountService.deleteDiscount(pool, id, user.role);
-
     if (!success) {
-      return res.status(404).json({
-        success: false,
-        error: 'Discount not found',
-      });
+      throw new NotFoundError('Discount');
     }
-
-    res.json({
-      success: true,
-      message: 'Discount deactivated successfully',
-    });
-  } catch (error: any) {
-    console.error('Error deleting discount:', error);
-    res.status(error.message.includes('Only ADMIN') ? 403 : 500).json({
-      success: false,
-      error: error.message || 'Failed to delete discount',
-    });
+    res.json({ success: true, message: 'Discount deactivated successfully' });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Only ADMIN')) {
+      throw new ForbiddenError(error.message);
+    }
+    throw error;
   }
-}
+});
 
 /**
  * POST /api/discounts/apply - Apply discount to current sale
  */
-export async function applyDiscount(req: Request, res: Response) {
-  try {
-    const pool = req.tenantPool || globalPool;
-    // Validate request body
-    const discountData = ApplyDiscountSchema.parse(req.body);
-    const { saleId, originalAmount, saleNumber } = req.body;
+export const applyDiscount = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const discountData = ApplyDiscountSchema.parse(req.body);
+  const { saleId, originalAmount, saleNumber } = req.body;
 
-    if (!saleId || !originalAmount) {
-      return res.status(400).json({
-        success: false,
-        error: 'saleId and originalAmount required',
-      });
-    }
-
-    const user = (req as any).user;
-
-    // Build audit context
-    const auditContext = {
-      userId: user.id,
-      userName: user.fullName || user.name,
-      userRole: user.role,
-      ipAddress: req.ip || req.socket.remoteAddress,
-      userAgent: req.headers['user-agent'],
-      sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-    };
-
-    const result = await discountService.applyDiscount(
-      pool,
-      saleId,
-      discountData,
-      originalAmount,
-      user.id,
-      user.name,
-      user.role,
-      auditContext,
-      saleNumber
-    );
-
-    res.json({
-      success: true,
-      data: result,
-      message: result.requiresApproval
-        ? 'Discount applied. Manager approval required.'
-        : 'Discount applied successfully',
-    });
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid discount data',
-        details: error.errors,
-      });
-    }
-
-    console.error('Error applying discount:', error);
-    res.status(400).json({
-      success: false,
-      error: error.message || 'Failed to apply discount',
-    });
+  if (!saleId || !originalAmount) {
+    throw new ValidationError('saleId and originalAmount required');
   }
-}
+
+  const user = req.user!;
+  const auditContext = {
+    userId: user.id,
+    userName: user.fullName,
+    userRole: user.role,
+    ipAddress: req.ip || req.socket.remoteAddress,
+    userAgent: req.headers['user-agent'],
+    sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+  };
+
+  const result = await discountService.applyDiscount(
+    pool, saleId, discountData, originalAmount,
+    user.id, user.fullName, user.role, auditContext, saleNumber
+  );
+
+  res.json({
+    success: true,
+    data: result,
+    message: result.requiresApproval
+      ? 'Discount applied. Manager approval required.'
+      : 'Discount applied successfully',
+  });
+});
 
 /**
  * POST /api/discounts/approve - Approve discount with manager PIN
  */
-export async function approveDiscount(req: Request, res: Response) {
+export const approveDiscount = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { authorizationId, managerPin } = req.body;
+
+  if (!authorizationId || !managerPin) {
+    throw new ValidationError('authorizationId and managerPin required');
+  }
+
+  const user = req.user!;
+  const auditContext = {
+    userId: user.id,
+    userName: user.fullName,
+    userRole: user.role,
+    ipAddress: req.ip || req.socket.remoteAddress,
+    userAgent: req.headers['user-agent'],
+    sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+  };
+
   try {
-    const pool = req.tenantPool || globalPool;
-    const { authorizationId, managerPin } = req.body;
-
-    if (!authorizationId || !managerPin) {
-      return res.status(400).json({
-        success: false,
-        error: 'authorizationId and managerPin required',
-      });
-    }
-
-    const user = (req as any).user;
-
-    // Build audit context
-    const auditContext = {
-      userId: user.id,
-      userName: user.fullName || user.name,
-      userRole: user.role,
-      ipAddress: req.ip || req.socket.remoteAddress,
-      userAgent: req.headers['user-agent'],
-      sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-    };
-
     const approved = await discountService.approveDiscount(
-      pool,
-      authorizationId,
-      managerPin,
-      user.id,
-      user.name,
-      user.role,
-      auditContext
+      pool, authorizationId, managerPin,
+      user.id, user.fullName, user.role, auditContext
     );
 
     if (!approved) {
-      return res.status(400).json({
-        success: false,
-        error: 'Failed to approve discount',
-      });
+      throw new ValidationError('Failed to approve discount');
     }
 
-    res.json({
-      success: true,
-      message: 'Discount approved successfully',
-    });
-  } catch (error: any) {
-    console.error('Error approving discount:', error);
-    res.status(error.message.includes('Only MANAGER') ? 403 : 400).json({
-      success: false,
-      error: error.message || 'Failed to approve discount',
-    });
+    res.json({ success: true, message: 'Discount approved successfully' });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Only MANAGER')) {
+      throw new ForbiddenError(error.message);
+    }
+    throw error;
   }
-}
+});
 
 /**
  * GET /api/discounts/pending - Get pending discount authorizations
  */
-export async function getPendingAuthorizations(req: Request, res: Response) {
-  try {
-    const pool = req.tenantPool || globalPool;
-    const authorizations = await discountService.getPendingAuthorizations(pool);
-
-    res.json({
-      success: true,
-      data: authorizations,
-    });
-  } catch (error: any) {
-    console.error('Error fetching pending authorizations:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to fetch pending authorizations',
-    });
-  }
-}
+export const getPendingAuthorizations = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const authorizations = await discountService.getPendingAuthorizations(pool);
+  res.json({ success: true, data: authorizations });
+});

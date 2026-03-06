@@ -37,9 +37,9 @@ export const adminRepository = {
           );
           await client.query(`RELEASE SAVEPOINT sp_${step}`);
           return result.rowCount || 0;
-        } catch (error: any) {
+        } catch (error: unknown) {
           await client.query(`ROLLBACK TO SAVEPOINT sp_${step}`);
-          logger.warn(`Table ${tableName} not found or error: ${error.message}`);
+          logger.warn(`Table ${tableName} not found or error: ${(error instanceof Error ? error.message : String(error))}`);
           return 0;
         }
       };
@@ -53,9 +53,9 @@ export const adminRepository = {
           await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
           await client.query(`RELEASE SAVEPOINT sp_trunc_${step}`);
           return count;
-        } catch (error: any) {
+        } catch (error: unknown) {
           await client.query(`ROLLBACK TO SAVEPOINT sp_trunc_${step}`);
-          logger.warn(`Table ${tableName} truncate skip: ${error.message}`);
+          logger.warn(`Table ${tableName} truncate skip: ${(error instanceof Error ? error.message : String(error))}`);
           return 0;
         }
       };
@@ -76,9 +76,9 @@ export const adminRepository = {
         await client.query(`RELEASE SAVEPOINT sp_accounting_reset`);
         deletedRecords.accounting_complete_reset = accountingResetResult.rowCount || 0;
         logger.info('Accounting reset via fn_reset_accounting_complete() completed');
-      } catch (error: any) {
+      } catch (error: unknown) {
         await client.query(`ROLLBACK TO SAVEPOINT sp_accounting_reset`);
-        logger.warn(`fn_reset_accounting_complete() failed: ${error.message}, using manual reset`);
+        logger.warn(`fn_reset_accounting_complete() failed: ${(error instanceof Error ? error.message : String(error))}, using manual reset`);
 
         // Fallback: Manual accounting reset
         deletedRecords.ledger_entries = await safeDelete('ledger_entries', step++);
@@ -254,9 +254,9 @@ export const adminRepository = {
         resetInventory = parseInt(invResult.rows[0]?.updated_count || '0');
         await client.query('RELEASE SAVEPOINT sp_recalc_inventory');
         logger.info(`Recalculated ${resetInventory} product quantities`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT sp_recalc_inventory');
-        logger.warn(`Product stock recalculation skipped: ${error.message}`);
+        logger.warn(`Product stock recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
         // Fallback: Direct reset if function doesn't exist
         try {
           await client.query('SAVEPOINT sp_reset_inventory_fallback');
@@ -284,9 +284,9 @@ export const adminRepository = {
         const customerCount = parseInt(custResult.rows[0]?.updated_count || '0');
         await client.query('RELEASE SAVEPOINT sp_recalc_customers');
         logger.info(`Recalculated ${customerCount} customer balances`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT sp_recalc_customers');
-        logger.warn(`Customer balance recalculation skipped: ${error.message}`);
+        logger.warn(`Customer balance recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
         // Fallback: Direct reset if function doesn't exist
         try {
           await client.query('SAVEPOINT sp_reset_customers_fallback');
@@ -312,9 +312,9 @@ export const adminRepository = {
         const supplierCount = parseInt(suppResult.rows[0]?.updated_count || '0');
         await client.query('RELEASE SAVEPOINT sp_recalc_suppliers');
         logger.info(`Recalculated ${supplierCount} supplier balances`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT sp_recalc_suppliers');
-        logger.warn(`Supplier balance recalculation skipped: ${error.message}`);
+        logger.warn(`Supplier balance recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
         // Fallback: Direct reset if function doesn't exist (correct column name)
         try {
           await client.query('SAVEPOINT sp_reset_suppliers_fallback');
@@ -348,9 +348,9 @@ export const adminRepository = {
         } else {
           logger.info('Post-reset integrity verification passed');
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT sp_verify_integrity');
-        logger.warn(`Post-reset verification skipped: ${error.message}`);
+        logger.warn(`Post-reset verification skipped: ${(error instanceof Error ? error.message : String(error))}`);
       }
 
       // ========== RESET SEQUENCES ==========
@@ -529,11 +529,11 @@ export const adminRepository = {
    * Export master data to JSON (for portable backups)
    */
   async exportMasterDataToJSON(pool: Pool): Promise<{
-    customers: any[];
-    suppliers: any[];
-    products: any[];
-    categories: any[];
-    uoms: any[];
+    customers: Record<string, unknown>[];
+    suppliers: Record<string, unknown>[];
+    products: Record<string, unknown>[];
+    categories: Record<string, unknown>[];
+    uoms: Record<string, unknown>[];
   }> {
     const customers = await pool.query('SELECT * FROM customers ORDER BY id');
     const suppliers = await pool.query('SELECT * FROM suppliers ORDER BY id');

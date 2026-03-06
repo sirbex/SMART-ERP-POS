@@ -13,7 +13,7 @@ export interface Document {
   uploadedBy: string;
   uploadedAt: string;
   tags?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   isActive: boolean;
 }
 
@@ -27,7 +27,7 @@ export interface DocumentCreateData {
   entityId?: string;
   uploadedBy: string;
   tags?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export class DocumentRepository {
@@ -191,7 +191,7 @@ export class DocumentRepository {
     offset?: number;
   }): Promise<{ documents: Document[]; total: number }> {
     let whereConditions = ['is_active = true'];
-    const queryParams: any[] = [];
+    const queryParams: unknown[] = [];
     let paramCount = 0;
 
     if (filters.entityType) {

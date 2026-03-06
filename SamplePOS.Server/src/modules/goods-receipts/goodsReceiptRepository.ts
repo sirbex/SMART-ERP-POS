@@ -1,30 +1,43 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger';
 
 export interface GoodsReceipt {
   id: string;
   grNumber: string;
   purchaseOrderId: string;
-  receiptDate: Date;
+  receivedDate: string;  // DATE column — returned as YYYY-MM-DD string (timezone strategy)
   status: 'DRAFT' | 'COMPLETED' | 'CANCELLED';
-  notes: string | null;
+  supplierDeliveryNote: string | null;
   receivedBy: string;
   receivedByName?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
+  // Join fields — present when fetched via getGRById / listGRs
+  poNumber?: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
 }
 
 export interface GoodsReceiptItem {
   id: string;
   goodsReceiptId: string;
-  poItemId: string;
+  poItemId: string | null;
   productId: string;
   productName: string;
   orderedQuantity: number;
   receivedQuantity: number;
   unitCost: number;
   batchNumber: string | null;
-  expiryDate: Date | null;
+  expiryDate: string | null;  // DATE column — returned as YYYY-MM-DD string
+  isBonus: boolean;
+  // Computed join fields — present from getGRById items query
+  poUnitPrice?: number | null;
+  productCostPrice?: number | null;
+  qtyVariance?: number | null;
+  costVariance?: number | null;
+  uomName?: string | null;
+  uomSymbol?: string | null;
+  conversionFactor?: number;
 }
 
 export interface CreateGRData {
@@ -51,15 +64,20 @@ export interface UpdateGRItemData {
   receivedQuantity?: number;
   unitCost?: number;
   batchNumber?: string | null;
+  isBonus?: boolean;
   expiryDate?: Date | null;
 }
 
 export const goodsReceiptRepository = {
   /**
    * Generate next GR number (GR-YYYY-NNNN format)
+   * Accepts Pool or PoolClient — MUST be called on transaction client
+   * so the advisory lock is held until COMMIT.
    */
-  async generateGRNumber(pool: Pool): Promise<string> {
+  async generateGRNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
+    // Advisory lock prevents concurrent duplicate GR number generation
+    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('gr_number_seq'))`);
     const result = await pool.query(
       `SELECT receipt_number FROM goods_receipts 
        WHERE receipt_number LIKE $1 
@@ -79,8 +97,9 @@ export const goodsReceiptRepository = {
 
   /**
    * Create goods receipt
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    */
-  async createGR(pool: Pool, data: CreateGRData): Promise<GoodsReceipt> {
+  async createGR(pool: Pool | PoolClient, data: CreateGRData): Promise<GoodsReceipt> {
     const grNumber = await this.generateGRNumber(pool);
 
     const result = await pool.query(
@@ -112,9 +131,10 @@ export const goodsReceiptRepository = {
 
   /**
    * Add items to goods receipt
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    */
-  async addGRItems(pool: Pool, items: CreateGRItemData[]): Promise<GoodsReceiptItem[]> {
-    const values: any[] = [];
+  async addGRItems(pool: Pool | PoolClient, items: CreateGRItemData[]): Promise<GoodsReceiptItem[]> {
+    const values: unknown[] = [];
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
@@ -156,9 +176,10 @@ export const goodsReceiptRepository = {
 
   /**
    * Get GR by ID with items
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    */
   async getGRById(
-    pool: Pool,
+    pool: Pool | PoolClient,
     id: string
   ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] } | null> {
     const grResult = await pool.query(
@@ -208,6 +229,7 @@ export const goodsReceiptRepository = {
          gri.batch_number as "batchNumber",
          gri.expiry_date as "expiryDate",
          ROUND(gri.cost_price::numeric, 2) as "unitCost",
+         gri.is_bonus as "isBonus",
          ROUND(poi.po_unit_price::numeric, 2) as "poUnitPrice",
          ROUND(p.cost_price::numeric, 2) as "productCostPrice",
          ROUND((gri.received_quantity - COALESCE(poi.ordered_quantity, gri.received_quantity))::numeric, 2) as "qtyVariance",
@@ -237,32 +259,60 @@ export const goodsReceiptRepository = {
    * Get a single GR item by id with parent GR
    */
   async getGRItemWithParent(
-    pool: Pool,
+    pool: Pool | PoolClient,
     itemId: string
-  ): Promise<{ item: GoodsReceiptItem & { ordered_quantity: number }; gr: GoodsReceipt } | null> {
-    // Fetch item
-    const itemRes = await pool.query('SELECT * FROM goods_receipt_items WHERE id = $1', [itemId]);
+  ): Promise<{ item: GoodsReceiptItem & { ordered_quantity?: number }; gr: GoodsReceipt } | null> {
+    // Fetch item with proper camelCase aliases
+    const itemRes = await pool.query(
+      `SELECT 
+         gri.id,
+         gri.goods_receipt_id as "goodsReceiptId",
+         gri.po_item_id as "poItemId",
+         gri.product_id as "productId",
+         p.name as "productName",
+         gri.received_quantity as "receivedQuantity",
+         gri.batch_number as "batchNumber",
+         gri.expiry_date as "expiryDate",
+         gri.cost_price as "unitCost",
+         COALESCE(gri.is_bonus, false) as "isBonus",
+         gri.received_quantity as "orderedQuantity"
+       FROM goods_receipt_items gri
+       JOIN products p ON gri.product_id = p.id
+       WHERE gri.id = $1`,
+      [itemId]
+    );
     if (itemRes.rows.length === 0) return null;
-    const item = itemRes.rows[0];
+    const item = itemRes.rows[0] as GoodsReceiptItem & { ordered_quantity?: number };
     // Fetch parent GR
-    const grRes = await pool.query('SELECT * FROM goods_receipts WHERE id = $1', [
-      item.goods_receipt_id,
-    ]);
+    const grRes = await pool.query(
+      `SELECT 
+         id,
+         receipt_number as "grNumber",
+         purchase_order_id as "purchaseOrderId",
+         received_date as "receivedDate",
+         status,
+         notes as "supplierDeliveryNote",
+         received_by_id as "receivedBy",
+         created_at as "createdAt",
+         updated_at as "updatedAt"
+       FROM goods_receipts WHERE id = $1`,
+      [item.goodsReceiptId]
+    );
     if (grRes.rows.length === 0) return null;
-    const gr = grRes.rows[0];
-    return { item, gr } as any;
+    const gr: GoodsReceipt = grRes.rows[0];
+    return { item, gr };
   },
 
   /**
    * Update goods receipt item fields
    */
   async updateGRItem(
-    pool: Pool,
+    pool: Pool | PoolClient,
     itemId: string,
     data: UpdateGRItemData
   ): Promise<GoodsReceiptItem> {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let idx = 1;
 
     if (data.receivedQuantity !== undefined) {
@@ -277,14 +327,31 @@ export const goodsReceiptRepository = {
       fields.push(`batch_number = $${idx++}`);
       values.push(data.batchNumber);
     }
+    if (data.isBonus !== undefined) {
+      fields.push(`is_bonus = $${idx++}`);
+      values.push(data.isBonus);
+    }
     if (data.expiryDate !== undefined) {
       fields.push(`expiry_date = $${idx++}`);
       values.push(data.expiryDate);
     }
 
     if (fields.length === 0) {
-      // Nothing to update, return current row
-      const current = await pool.query('SELECT * FROM goods_receipt_items WHERE id = $1', [itemId]);
+      // Nothing to update, return current row with aliases
+      const current = await pool.query(
+        `SELECT 
+           id,
+           goods_receipt_id as "goodsReceiptId",
+           product_id as "productId",
+           received_quantity as "receivedQuantity",
+           batch_number as "batchNumber",
+           expiry_date as "expiryDate",
+           cost_price as "unitCost",
+           COALESCE(is_bonus, false) as "isBonus",
+           created_at as "createdAt"
+         FROM goods_receipt_items WHERE id = $1`,
+        [itemId]
+      );
       if (current.rows.length === 0) throw new Error(`Goods receipt item ${itemId} not found`);
       return current.rows[0];
     }
@@ -301,6 +368,7 @@ export const goodsReceiptRepository = {
          batch_number as "batchNumber",
          expiry_date as "expiryDate",
          cost_price as "unitCost",
+         is_bonus as "isBonus",
          created_at as "createdAt"`,
       [...values, itemId]
     );
@@ -323,7 +391,7 @@ export const goodsReceiptRepository = {
   ): Promise<{ grs: GoodsReceipt[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters?.status) {
@@ -375,8 +443,9 @@ export const goodsReceiptRepository = {
 
   /**
    * Finalize goods receipt
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    */
-  async finalizeGR(pool: Pool, id: string): Promise<GoodsReceipt> {
+  async finalizeGR(pool: Pool | PoolClient, id: string): Promise<GoodsReceipt> {
     const result = await pool.query(
       `UPDATE goods_receipts 
        SET status = $1, updated_at = CURRENT_TIMESTAMP 
@@ -403,9 +472,10 @@ export const goodsReceiptRepository = {
 
   /**
    * Update PO item received quantity
+   * Accepts Pool or PoolClient to participate in caller's transaction.
    */
   async updatePOItemReceivedQuantity(
-    pool: Pool,
+    pool: Pool | PoolClient,
     poItemId: string,
     additionalQuantity: number
   ): Promise<void> {
@@ -426,7 +496,7 @@ export const goodsReceiptRepository = {
   /**
    * Check if PO is fully received
    */
-  async isPOFullyReceived(pool: Pool, poId: string): Promise<boolean> {
+  async isPOFullyReceived(pool: Pool | PoolClient, poId: string): Promise<boolean> {
     const result = await pool.query(
       `SELECT 
          COUNT(*) FILTER (WHERE ordered_quantity > received_quantity) as pending_items

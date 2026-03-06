@@ -10,7 +10,7 @@
  * - Follow Controller → Service → Repository layering
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { pool as globalPool } from '../../db/pool.js';
 import {
   AuditLog,
@@ -115,7 +115,7 @@ function normalizeFailedTransaction(row: FailedTransactionDbRow): FailedTransact
  * Create a new audit log entry
  */
 export async function createAuditEntry(
-  pool: Pool,
+  pool: Pool | PoolClient,
   data: CreateAuditEntry
 ): Promise<AuditLog> {
   const query = `
@@ -172,7 +172,7 @@ export async function getAuditLogs(
   filters: AuditLogQuery
 ): Promise<{ data: AuditLog[]; total: number }> {
   const conditions: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramCount = 1;
 
   // Build WHERE clause dynamically

@@ -20,6 +20,7 @@ import { Money } from '../utils/money.js';
 import Decimal from 'decimal.js';
 import { AccountingCore, JournalEntryRequest } from './accountingCore.js';
 import logger from '../utils/logger.js';
+import { UnitOfWork } from '../db/unitOfWork.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
 
 import type {
@@ -68,6 +69,32 @@ import {
 } from '../../../shared/types/banking.js';
 
 // SYSTEM_USER_ID imported from ../utils/constants.js
+
+// Typed interfaces for statement import (replacing any[])
+interface ParsedStatementLine {
+    id: string;
+    lineNumber: number;
+    transactionDate: string | null;
+    description: string;
+    reference: string | null;
+    amount: number;
+    runningBalance: number | null;
+    suggestedCategoryId?: string | null;
+    suggestedCategoryName?: string | null;
+    matchConfidence?: number | null;
+}
+
+interface ColumnMappings {
+    dateColumn?: number;
+    dateFormat: string;
+    descriptionColumn?: number;
+    amountColumn?: number;
+    debitColumn?: number;
+    creditColumn?: number;
+    balanceColumn?: number;
+    referenceColumn?: number;
+    negativeIsDebit?: boolean;
+}
 
 // =============================================================================
 // BANK ACCOUNT OPERATIONS
@@ -140,9 +167,7 @@ export class BankingService {
      */
     static async createAccount(dto: CreateBankAccountDto, userId: string, dbPool?: pg.Pool): Promise<BankAccount> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        return UnitOfWork.run(pool, async (client) => {
 
             // Verify GL account exists
             const glAccount = await client.query(`
@@ -212,8 +237,6 @@ export class BankingService {
         VALUES ($1, 'CREATE', 'SETTINGS', $2, $3, $4)
       `, [uuidv4(), id, userId, JSON.stringify({ name: dto.name, bank: dto.bankName })]);
 
-            await client.query('COMMIT');
-
             logger.info('Bank account created', { id, name: dto.name });
 
             return normalizeBankAccount({
@@ -222,12 +245,7 @@ export class BankingService {
                 gl_account_name: glAccount.rows[0].AccountName
             });
 
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     /**
@@ -466,9 +484,7 @@ export class BankingService {
         dbPool?: pg.Pool
     ): Promise<BankTransaction> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        return UnitOfWork.run(pool, async (client) => {
 
             // Get bank account and its GL account
             const bankAccount = await client.query(`
@@ -590,8 +606,6 @@ export class BankingService {
                 })
             ]);
 
-            await client.query('COMMIT');
-
             logger.info('Bank transaction created', {
                 transactionId,
                 transactionNumber,
@@ -601,13 +615,10 @@ export class BankingService {
 
             return (await this.getTransactionById(transactionId))!;
 
-        } catch (error) {
-            await client.query('ROLLBACK');
+        }).catch((error: unknown) => {
             logger.error('Failed to create bank transaction', { error, dto });
             throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     /**
@@ -619,9 +630,7 @@ export class BankingService {
         inTransaction: BankTransaction;
     }> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        return UnitOfWork.run(pool, async (client) => {
 
             // Get both bank accounts
             const fromAccount = await client.query(`
@@ -746,8 +755,6 @@ export class BankingService {
         UPDATE bank_transactions SET transfer_pair_id = $1 WHERE id = $2
       `, [inTxnId, outTxnId]);
 
-            await client.query('COMMIT');
-
             logger.info('Bank transfer created', {
                 outTxnId,
                 inTxnId,
@@ -759,12 +766,7 @@ export class BankingService {
                 inTransaction: (await this.getTransactionById(inTxnId))!
             };
 
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     /**
@@ -777,9 +779,7 @@ export class BankingService {
         dbPool?: pg.Pool
     ): Promise<BankTransaction> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        return UnitOfWork.run(pool, async (client) => {
 
             // Get original transaction
             const original = await client.query<BankTransactionDbRow>(`
@@ -863,8 +863,6 @@ export class BankingService {
         `, [origTxn.transfer_pair_id, userId, dto.reason]);
             }
 
-            await client.query('COMMIT');
-
             logger.info('Bank transaction reversed', {
                 originalId: dto.transactionId,
                 reversalId: revTxnId,
@@ -873,12 +871,7 @@ export class BankingService {
 
             return (await this.getTransactionById(revTxnId))!;
 
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     // ---------------------------------------------------------------------------
@@ -1172,9 +1165,7 @@ export class BankingService {
         dbPool?: pg.Pool
     ): Promise<{ reconciledCount: number; difference: number }> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        return UnitOfWork.run(pool, async (client) => {
 
             // Mark transactions as reconciled
             const updateResult = await client.query(`
@@ -1231,19 +1222,12 @@ export class BankingService {
                 );
             }
 
-            await client.query('COMMIT');
-
             return {
                 reconciledCount: updateResult.rowCount || 0,
                 difference
             };
 
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     // ---------------------------------------------------------------------------
@@ -2003,14 +1987,14 @@ export class BankingService {
     /**
      * Get all import templates
      */
-    static async getTemplates(dbPool?: pg.Pool): Promise<any[]> {
+    static async getTemplates(dbPool?: pg.Pool): Promise<BankTemplate[]> {
         const pool = dbPool || globalPool;
-        const result = await pool.query(`
+        const result = await pool.query<BankTemplateDbRow>(`
       SELECT * FROM bank_templates
       WHERE is_active = TRUE
       ORDER BY name
     `);
-        return result.rows;
+        return result.rows.map(normalizeBankTemplate);
     }
 
     /**
@@ -2033,10 +2017,10 @@ export class BankingService {
         skipHeaderRows?: number;
         skipFooterRows?: number;
         delimiter?: string;
-    }, dbPool?: pg.Pool): Promise<any> {
+    }, dbPool?: pg.Pool): Promise<BankTemplate> {
         const pool = dbPool || globalPool;
         const id = uuidv4();
-        const result = await pool.query(`
+        const result = await pool.query<BankTemplateDbRow>(`
       INSERT INTO bank_templates (
         id, name, bank_name, column_mappings,
         skip_header_rows, skip_footer_rows, delimiter
@@ -2052,7 +2036,7 @@ export class BankingService {
             data.skipFooterRows || 0,
             data.delimiter || ','
         ]);
-        return result.rows[0];
+        return normalizeBankTemplate(result.rows[0]);
     }
 
     /**
@@ -2074,12 +2058,10 @@ export class BankingService {
         statementId: string;
         statementNumber: string;
         totalLines: number;
-        parsedLines: any[];
+        parsedLines: ParsedStatementLine[];
     }> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+        return UnitOfWork.run(pool, async (client) => {
 
             // Get template
             const templateResult = await client.query(`
@@ -2090,16 +2072,16 @@ export class BankingService {
                 throw new Error(`Template ${templateId} not found`);
             }
 
-            const template = templateResult.rows[0];
+            const template = templateResult.rows[0] as Record<string, unknown>;
             const mappings = typeof template.column_mappings === 'string'
-                ? JSON.parse(template.column_mappings)
-                : template.column_mappings;
+                ? JSON.parse(template.column_mappings as string) as ColumnMappings
+                : template.column_mappings as ColumnMappings;
 
             // Parse CSV
-            const lines = this.parseCSV(csvContent, template.delimiter || ',');
+            const lines = this.parseCSV(csvContent, String(template.delimiter || ','));
             const dataLines = lines.slice(
-                template.skip_header_rows || 1,
-                lines.length - (template.skip_footer_rows || 0)
+                Number(template.skip_header_rows || 1),
+                lines.length - Number(template.skip_footer_rows || 0)
             );
 
             // Generate statement number
@@ -2129,7 +2111,7 @@ export class BankingService {
             ]);
 
             // Parse and insert statement lines
-            const parsedLines: any[] = [];
+            const parsedLines: ParsedStatementLine[] = [];
             let lineNumber = 1;
 
             for (const row of dataLines) {
@@ -2222,8 +2204,6 @@ export class BankingService {
                 });
             }
 
-            await client.query('COMMIT');
-
             logger.info('Bank statement imported', {
                 statementId,
                 statementNumber,
@@ -2238,12 +2218,7 @@ export class BankingService {
                 parsedLines
             };
 
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     /**
@@ -2253,7 +2228,7 @@ export class BankingService {
         statementId: string,
         status?: 'UNMATCHED' | 'MATCHED' | 'CREATED' | 'SKIPPED',
         dbPool?: pg.Pool
-    ): Promise<any[]> {
+    ): Promise<BankStatementLine[]> {
         const pool = dbPool || globalPool;
         const conditions = ['sl.statement_id = $1'];
         const params: string[] = [statementId];
@@ -2263,7 +2238,7 @@ export class BankingService {
             params.push(status);
         }
 
-        const result = await pool.query(`
+        const result = await pool.query<BankStatementLineDbRow>(`
       SELECT 
         sl.*,
         bc.name as suggested_category_name,
@@ -2275,7 +2250,7 @@ export class BankingService {
       ORDER BY sl.line_number
     `, params);
 
-        return result.rows;
+        return result.rows.map(normalizeBankStatementLine);
     }
 
     /**
@@ -2292,55 +2267,69 @@ export class BankingService {
             skipReason?: string;       // For SKIP
         } = {},
         dbPool?: pg.Pool
-    ): Promise<any> {
+    ): Promise<Record<string, unknown>> {
         const pool = dbPool || globalPool;
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
 
-            // Get the line
-            const lineResult = await client.query(`
-        SELECT sl.*, bs.bank_account_id
-        FROM bank_statement_lines sl
-        JOIN bank_statements bs ON bs.id = sl.statement_id
-        WHERE sl.id = $1
-      `, [lineId]);
+        if (action === 'CREATE') {
+            // Phase 1: Lock and mark as PROCESSING (short transaction)
+            const line = await UnitOfWork.run(pool, async (client) => {
+                const lineResult = await client.query(`
+          SELECT sl.*, bs.bank_account_id
+          FROM bank_statement_lines sl
+          JOIN bank_statements bs ON bs.id = sl.statement_id
+          WHERE sl.id = $1
+          FOR UPDATE OF sl
+        `, [lineId]);
 
-            if (lineResult.rows.length === 0) {
-                throw new Error(`Statement line ${lineId} not found`);
-            }
+                if (lineResult.rows.length === 0) {
+                    throw new Error(`Statement line ${lineId} not found`);
+                }
 
-            const line = lineResult.rows[0];
+                const ln = lineResult.rows[0] as Record<string, unknown>;
 
-            if (line.match_status !== 'UNMATCHED') {
-                throw new Error(`Line already processed with status: ${line.match_status}`);
-            }
+                if (ln.match_status !== 'UNMATCHED') {
+                    throw new Error(`Line already processed with status: ${ln.match_status}`);
+                }
 
-            let result: any = { lineId, action };
+                await client.query(`
+          UPDATE bank_statement_lines
+          SET match_status = 'PROCESSING'
+          WHERE id = $1
+        `, [lineId]);
 
-            if (action === 'CREATE') {
-                // Create a new bank transaction from this line
-                const txnType = line.amount >= 0 ? 'DEPOSIT' : 'WITHDRAWAL';
-                const amount = Math.abs(parseFloat(line.amount));
+                return ln;
+            });
 
-                // We need to commit current transaction to call createTransaction
-                await client.query('COMMIT');
+            // Phase 2: Create transaction (manages its own UnitOfWork)
+            const txnType = (line.amount as number) >= 0 ? 'DEPOSIT' : 'WITHDRAWAL';
+            const amount = Math.abs(parseFloat(String(line.amount)));
+            let txn: BankTransaction;
 
-                const txn = await this.createTransaction({
-                    bankAccountId: line.bank_account_id,
-                    transactionDate: line.transaction_date || new Date().toISOString().split('T')[0],
+            try {
+                txn = await this.createTransaction({
+                    bankAccountId: line.bank_account_id as string,
+                    transactionDate: (line.transaction_date as string) || new Date().toISOString().split('T')[0],
                     type: txnType,
-                    categoryId: options.categoryId || line.suggested_category_id,
-                    description: line.description || 'Imported transaction',
-                    reference: line.reference,
+                    categoryId: (options.categoryId || line.suggested_category_id) as string | undefined,
+                    description: (line.description as string) || 'Imported transaction',
+                    reference: line.reference as string | undefined,
                     amount,
-                    contraAccountId: options.contraAccountId || line.suggested_account_id,
+                    contraAccountId: (options.contraAccountId || line.suggested_account_id) as string | undefined,
                     sourceType: 'STATEMENT_IMPORT',
                     sourceId: lineId
                 }, userId);
-
-                // Update line status
+            } catch (txnError) {
+                // Rollback line status to UNMATCHED on failure
                 await pool.query(`
+            UPDATE bank_statement_lines
+            SET match_status = 'UNMATCHED'
+            WHERE id = $1
+          `, [lineId]);
+                throw txnError;
+            }
+
+            // Phase 3: Update line to CREATED with reference to new transaction
+            await pool.query(`
           UPDATE bank_statement_lines
           SET match_status = 'CREATED',
               matched_transaction_id = $2,
@@ -2349,26 +2338,49 @@ export class BankingService {
           WHERE id = $1
         `, [lineId, txn.id, userId]);
 
-                // Learn pattern from this categorization
-                if (options.categoryId && line.description) {
-                    try {
-                        await this.learnPattern(
-                            line.description,
-                            amount,
-                            txnType === 'DEPOSIT' ? 'IN' : 'OUT',
-                            options.categoryId,
-                            options.contraAccountId || null,
-                            userId
-                        );
-                    } catch (patternError) {
-                        // Non-fatal
-                        logger.debug('Could not learn pattern', { error: patternError });
-                    }
+            // Learn pattern from this categorization (non-fatal)
+            if (options.categoryId && line.description) {
+                try {
+                    await this.learnPattern(
+                        line.description as string,
+                        amount,
+                        txnType === 'DEPOSIT' ? 'IN' : 'OUT',
+                        options.categoryId,
+                        options.contraAccountId || null,
+                        userId
+                    );
+                } catch (patternError) {
+                    logger.debug('Could not learn pattern', { error: patternError });
                 }
+            }
 
-                result.transaction = txn;
+            return { lineId, action, transaction: txn };
+        }
 
-            } else if (action === 'MATCH') {
+        // MATCH and SKIP actions use a single UnitOfWork transaction
+        return UnitOfWork.run(pool, async (client) => {
+            // Lock the line with FOR UPDATE to prevent concurrent processing
+            const lineResult = await client.query(`
+        SELECT sl.*, bs.bank_account_id
+        FROM bank_statement_lines sl
+        JOIN bank_statements bs ON bs.id = sl.statement_id
+        WHERE sl.id = $1
+        FOR UPDATE OF sl
+      `, [lineId]);
+
+            if (lineResult.rows.length === 0) {
+                throw new Error(`Statement line ${lineId} not found`);
+            }
+
+            const line = lineResult.rows[0] as Record<string, unknown>;
+
+            if (line.match_status !== 'UNMATCHED') {
+                throw new Error(`Line already processed with status: ${line.match_status}`);
+            }
+
+            const result: Record<string, unknown> = { lineId, action };
+
+            if (action === 'MATCH') {
                 if (!options.transactionId) {
                     throw new Error('transactionId required for MATCH action');
                 }
@@ -2402,7 +2414,6 @@ export class BankingService {
           WHERE id = $2
         `, [lineId, options.transactionId]);
 
-                await client.query('COMMIT');
                 result.matchedTransactionId = options.transactionId;
 
             } else if (action === 'SKIP') {
@@ -2415,27 +2426,32 @@ export class BankingService {
           WHERE id = $1
         `, [lineId, options.skipReason || 'Manually skipped', userId]);
 
-                await client.query('COMMIT');
                 result.skipReason = options.skipReason;
             }
 
             return result;
-
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
     /**
      * Complete statement processing
+     * Uses SELECT FOR UPDATE to prevent race condition between count check and status update
      */
     static async completeStatement(statementId: string, userId: string, dbPool?: pg.Pool): Promise<void> {
         const pool = dbPool || globalPool;
-        // Count processed lines
-        const countResult = await pool.query(`
+        await UnitOfWork.run(pool, async (client) => {
+
+            // Lock the statement row to prevent concurrent completion
+            const stmtLock = await client.query(`
+      SELECT id FROM bank_statements WHERE id = $1 FOR UPDATE
+    `, [statementId]);
+
+            if (stmtLock.rows.length === 0) {
+                throw new Error(`Statement ${statementId} not found`);
+            }
+
+            // Count processed lines (within the same transaction as the lock)
+            const countResult = await client.query(`
       SELECT 
         COUNT(*) FILTER (WHERE match_status = 'MATCHED') as matched,
         COUNT(*) FILTER (WHERE match_status = 'CREATED') as created,
@@ -2445,13 +2461,13 @@ export class BankingService {
       WHERE statement_id = $1
     `, [statementId]);
 
-        const counts = countResult.rows[0];
+            const counts = countResult.rows[0] as Record<string, string>;
 
-        if (parseInt(counts.unmatched) > 0) {
-            throw new Error(`Cannot complete statement: ${counts.unmatched} lines still unmatched`);
-        }
+            if (parseInt(counts.unmatched) > 0) {
+                throw new Error(`Cannot complete statement: ${counts.unmatched} lines still unmatched`);
+            }
 
-        await pool.query(`
+            await client.query(`
       UPDATE bank_statements
       SET status = 'COMPLETED',
           matched_lines = $2,
@@ -2460,17 +2476,18 @@ export class BankingService {
           completed_at = NOW()
       WHERE id = $1
     `, [
-            statementId,
-            parseInt(counts.matched),
-            parseInt(counts.created),
-            parseInt(counts.skipped)
-        ]);
+                statementId,
+                parseInt(counts.matched),
+                parseInt(counts.created),
+                parseInt(counts.skipped)
+            ]);
 
-        logger.info('Statement processing completed', {
-            statementId,
-            matched: counts.matched,
-            created: counts.created,
-            skipped: counts.skipped
+            logger.info('Statement processing completed', {
+                statementId,
+                matched: counts.matched,
+                created: counts.created,
+                skipped: counts.skipped
+            });
         });
     }
 

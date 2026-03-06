@@ -1,10 +1,13 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
   goodsReceiptRepository,
   CreateGRData,
   CreateGRItemData,
   UpdateGRItemData,
+  GoodsReceipt,
+  GoodsReceiptItem,
 } from './goodsReceiptRepository.js';
 import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
 import { inventoryRepository } from '../inventory/inventoryRepository.js';
@@ -12,6 +15,8 @@ import * as supplierPaymentRepository from '../supplier-payments/supplierPayment
 import * as costLayerService from '../../services/costLayerService.js';
 import * as pricingService from '../../services/pricingService.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
+import { batchFetchProducts, type ProductBatchRow } from '../../db/batchFetch.js';
 import logger from '../../utils/logger.js';
 import {
   InventoryBusinessRules,
@@ -27,6 +32,33 @@ export interface CostPriceChangeAlert {
   changeAmount: number;
   changePercentage: number;
   batchNumber?: string | null;
+}
+
+// Service return types — proper contracts, no `any`
+export interface CreateGRResult {
+  gr: GoodsReceipt;
+  items: GoodsReceiptItem[];
+  manualPO?: {
+    id: string;
+    poNumber: string;
+    supplierId: string;
+    status: string;
+    totalAmount: number;
+  };
+}
+
+export interface FinalizeGRResult {
+  gr: GoodsReceipt;
+  items: GoodsReceiptItem[];
+  costPriceChangeAlerts: CostPriceChangeAlert[] | null;
+  hasAlerts: boolean;
+  alertSummary: string | null;
+  warnings?: string[];
+}
+
+export interface ListGRsResult {
+  grs: GoodsReceipt[];
+  total: number;
 }
 
 export const goodsReceiptService = {
@@ -69,11 +101,8 @@ export const goodsReceiptService = {
         expiryDate?: Date | null;
       }>;
     }
-  ): Promise<{ gr: any; items: any[]; manualPO?: any }> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
+  ): Promise<CreateGRResult> {
+    const txResult = await UnitOfWork.run(pool, async (client) => {
       let purchaseOrderId = data.purchaseOrderId || null;
       let manualPO = null;
 
@@ -91,7 +120,7 @@ export const goodsReceiptService = {
         }));
 
         // Create manual PO with items
-        const poResult = await purchaseOrderRepository.createManualPO(client as any, {
+        const poResult = await purchaseOrderRepository.createManualPO(client, {
           supplierId: data.supplierId,
           orderDate: data.receiptDate,
           expectedDate: data.receiptDate, // Same as receipt date for manual
@@ -113,7 +142,7 @@ export const goodsReceiptService = {
       }
 
       // Create GR header (now with purchaseOrderId from manual PO if created)
-      const gr = await goodsReceiptRepository.createGR(client as any, {
+      const gr = await goodsReceiptRepository.createGR(client, {
         purchaseOrderId: purchaseOrderId,
         receiptDate: data.receiptDate,
         notes: data.notes ?? null,
@@ -123,6 +152,11 @@ export const goodsReceiptService = {
 
       // Validate and insert items
       const itemsToInsert: CreateGRItemData[] = [];
+
+      // ========== BATCH PRE-FETCH (N+1 elimination) ==========
+      const grProductIds = data.items.map(it => it.productId);
+      const grProductsMap = await batchFetchProducts(client, grProductIds);
+
       for (const it of data.items) {
         const orderedQty = it.orderedQuantity;
         const receivedQty = it.receivedQuantity;
@@ -142,12 +176,10 @@ export const goodsReceiptService = {
         });
 
         // Server-side normalization: ensure unitCost is base unit cost
-        // If it looks like a UoM multiple of product base cost, normalize it
-        const productRes = await client.query('SELECT cost_price FROM products WHERE id = $1', [
-          it.productId,
-        ]);
-        if (productRes.rows.length > 0) {
-          const baseCost = Number(productRes.rows[0].cost_price || 0);
+        // Uses pre-fetched product data instead of per-item query
+        const productData = grProductsMap.get(it.productId);
+        if (productData) {
+          const baseCost = Number(productData.cost_price || 0);
           if (baseCost > 0 && unitCost > 0) {
             const ratio = unitCost / baseCost;
             const rounded = Math.round(ratio);
@@ -189,9 +221,9 @@ export const goodsReceiptService = {
           }
 
           // BR-PO-007: Check cost variance (if base cost exists)
-          if (productRes.rows.length > 0 && productRes.rows[0].cost_price) {
+          if (productData && productData.cost_price) {
             const costVariance = PurchaseOrderBusinessRules.validateCostVariance(
-              Number(productRes.rows[0].cost_price),
+              Number(productData.cost_price),
               unitCost,
               10
             );
@@ -223,7 +255,7 @@ export const goodsReceiptService = {
 
           // BR-INV-010: Check batch expiry sequence
           await InventoryBusinessRules.validateBatchExpirySequence(
-            client as any,
+            client,
             it.productId,
             expiry
           );
@@ -232,7 +264,7 @@ export const goodsReceiptService = {
         // BR-PO-010: Validate batch number uniqueness
         if (it.batchNumber) {
           await PurchaseOrderBusinessRules.validateBatchNumber(
-            client as any,
+            client,
             it.productId,
             it.batchNumber
           );
@@ -240,7 +272,7 @@ export const goodsReceiptService = {
 
         // BR-INV-009: Check if receiving would exceed max stock
         await InventoryBusinessRules.validateMaxStockLevel(
-          client as any,
+          client,
           it.productId,
           receivedQty
         );
@@ -258,16 +290,11 @@ export const goodsReceiptService = {
         });
       }
 
-      const items = await goodsReceiptRepository.addGRItems(client as any, itemsToInsert);
-
-      await client.query('COMMIT');
-
-      // Return via repository to include joins/aliases if needed
-      const full = await goodsReceiptRepository.getGRById(pool, gr.id);
+      const items = await goodsReceiptRepository.addGRItems(client, itemsToInsert);
 
       return {
-        ...full,
-        manualPO: manualPO
+        grId: gr.id,
+        manualPOData: manualPO
           ? {
             id: manualPO.id,
             poNumber: manualPO.poNumber,
@@ -276,26 +303,36 @@ export const goodsReceiptService = {
             totalAmount: manualPO.totalAmount,
           }
           : undefined,
-      } as any;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      };
+    });
+
+    // Return via repository to include joins/aliases if needed
+    const full = await goodsReceiptRepository.getGRById(pool, txResult.grId);
+    if (!full) throw new Error(`Goods receipt ${txResult.grId} not found after creation`);
+
+    return {
+      gr: full.gr,
+      items: full.items,
+      manualPO: txResult.manualPOData,
+    };
   },
 
   // Finalize a goods receipt: create batches, stock movements, cost layers, pricing updates
-  async finalizeGR(pool: Pool, id: string): Promise<any> {
-    const client = await pool.connect();
-    const warnings: string[] = [];
-    try {
-      await client.query('BEGIN');
+  async finalizeGR(pool: Pool, id: string): Promise<FinalizeGRResult> {
+    const { alerts, warnings } = await UnitOfWork.run(pool, async (client) => {
+      const warnings: string[] = [];
 
-      const grResult = await goodsReceiptRepository.getGRById(client as any, id);
+      const grResult = await goodsReceiptRepository.getGRById(client, id);
       if (!grResult) throw new Error(`Goods receipt ${id} not found`);
 
-      const { gr, items } = grResult as any;
+      const { gr, items } = grResult;
+
+      // Lock the GR row to prevent double-finalization by concurrent requests
+      await client.query(
+        `SELECT id FROM goods_receipts WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+
       // High-level validations before side effects
       if (gr.status === 'COMPLETED') throw new Error('Goods receipt is already completed');
 
@@ -306,24 +343,23 @@ export const goodsReceiptService = {
 
       // Every item must have positive received quantity (no zero or negative lines)
       const nonPositiveLines = items
-        .map((raw: any) => ({
-          name: raw.productName ?? raw.product_name ?? 'Unknown product',
-          qty: Number(raw.receivedQuantity ?? raw.received_quantity ?? 0),
+        .map((item) => ({
+          name: item.productName ?? 'Unknown product',
+          qty: Number(item.receivedQuantity ?? 0),
         }))
-        .filter((x: any) => !Number.isFinite(x.qty) || x.qty <= 0);
+        .filter((x) => !Number.isFinite(x.qty) || x.qty <= 0);
       if (nonPositiveLines.length > 0) {
-        const names = nonPositiveLines.map((x: any) => x.name).join(', ');
+        const names = nonPositiveLines.map((x) => x.name).join(', ');
         throw new Error(`All items must have received quantity > 0. Fix: ${names}`);
       }
 
       // Collect per-item validation errors (do not mutate state yet)
       const preValidationErrors: string[] = [];
-      for (const raw of items as any[]) {
-        const productName: string = raw.productName ?? raw.product_name ?? 'Unknown product';
-        const receivedQty: number = Number(raw.receivedQuantity ?? raw.received_quantity ?? 0);
-        const unitCost: number = Number(raw.unitCost ?? raw.unit_cost ?? raw.cost_price ?? 0);
-        const expiryRaw = raw.expiryDate ?? raw.expiry_date ?? null;
-        const expiryDate: Date | null = expiryRaw ? new Date(expiryRaw) : null;
+      for (const item of items) {
+        const productName: string = item.productName ?? 'Unknown product';
+        const receivedQty: number = Number(item.receivedQuantity ?? 0);
+        const unitCost: number = Number(item.unitCost ?? 0);
+        const expiryDate: Date | null = item.expiryDate ? new Date(item.expiryDate) : null;
 
         if (receivedQty <= 0)
           preValidationErrors.push(`${productName}: received quantity must be greater than 0`);
@@ -337,8 +373,8 @@ export const goodsReceiptService = {
         throw new Error(`Validation failed: ${preValidationErrors.join('; ')}`);
       }
 
-      const grNumber: string | undefined = gr.grNumber ?? gr.gr_number ?? gr.receipt_number;
-      const receivedBy: string | undefined = gr.receivedBy ?? gr.received_by ?? gr.received_by_id;
+      const grNumber: string = gr.grNumber ?? '';
+      const receivedBy: string = gr.receivedBy ?? '';
 
       const alerts: CostPriceChangeAlert[] = [];
       // Collect cost layer data to process AFTER main transaction commits
@@ -351,16 +387,25 @@ export const goodsReceiptService = {
         batchNumber: string;
       }> = [];
 
-      for (const raw of items as any[]) {
-        const productId: string = raw.productId ?? raw.product_id;
-        const productName: string = raw.productName ?? raw.product_name;
-        const poItemId: string | undefined = raw.poItemId ?? raw.po_item_id ?? undefined;
-        const orderedQty: number = Number(raw.orderedQuantity ?? raw.ordered_quantity ?? 0);
-        const receivedQty: number = Number(raw.receivedQuantity ?? raw.received_quantity ?? 0);
-        const unitCost: number = Number(raw.unitCost ?? raw.unit_cost ?? raw.cost_price ?? 0);
+      // Tell the fn_log_stock_movement trigger to skip — the app code below
+      // already creates proper MOV- stock movements alongside batch inserts.
+      // Without this guard the trigger creates duplicate SM- movements for each batch INSERT.
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
+
+      for (const item of items) {
+        const productId: string = item.productId;
+        const productName: string = item.productName;
+        const poItemId: string | null = item.poItemId ?? null;
+        const orderedQty: number = Number(item.orderedQuantity ?? 0);
+        const receivedQty: number = Number(item.receivedQuantity ?? 0);
+        const unitCost: number = Number(item.unitCost ?? 0);
+        const isBonus: boolean = !!item.isBonus;
+
+        // Bonus stock: cost recorded as 0 for inventory batches (free goods from supplier)
+        const effectiveCost: number = isBonus ? 0 : unitCost;
 
         // Generate human-readable batch number: BATCH-YYYYMMDD-001
-        let batchNumber: string = raw.batchNumber ?? raw.batch_number;
+        let batchNumber: string = item.batchNumber ?? '';
         if (!batchNumber) {
           const today = new Date();
           const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
@@ -380,8 +425,7 @@ export const goodsReceiptService = {
           batchNumber = `${prefix}${seqNum}`;
         }
 
-        const expiryRaw = raw.expiryDate ?? raw.expiry_date ?? null;
-        const expiryDate: Date | null = expiryRaw ? new Date(expiryRaw) : null;
+        const expiryDate: Date | null = item.expiryDate ? new Date(item.expiryDate) : null;
 
         if (receivedQty <= 0) continue;
 
@@ -389,7 +433,7 @@ export const goodsReceiptService = {
         InventoryBusinessRules.validatePositiveQuantity(receivedQty, 'goods receipt item');
         PurchaseOrderBusinessRules.validateUnitCost(unitCost);
         // Only validate against ordered quantity if this GR is linked to a PO and we have an ordered quantity reference
-        if (gr.purchaseOrderId && (raw.orderedQuantity != null || raw.ordered_quantity != null)) {
+        if (gr.purchaseOrderId && item.orderedQuantity != null) {
           PurchaseOrderBusinessRules.validateReceivedQuantity(orderedQty, receivedQty, false);
         }
         if (expiryDate) InventoryBusinessRules.validateExpiryDate(expiryDate, false);
@@ -419,16 +463,17 @@ export const goodsReceiptService = {
         }
 
         // Create inventory batch for received quantity
-        const batch = await inventoryRepository.createBatch(client as any, {
+        const batch = await inventoryRepository.createBatch(client, {
           productId,
           batchNumber,
           quantity: receivedQty,
           expiryDate,
-          costPrice: unitCost,
+          costPrice: effectiveCost,
           goodsReceiptId: gr.id,
-          goodsReceiptItemId: raw.id ?? raw.itemId ?? null,
+          goodsReceiptItemId: item.id ?? null,
           purchaseOrderId: gr.purchaseOrderId ?? null,
           purchaseOrderItemId: poItemId ?? null,
+          isBonus,
         });
 
         // Record stock movement (RECEIVE)
@@ -456,10 +501,10 @@ export const goodsReceiptService = {
             batch.id,
             'GOODS_RECEIPT',
             receivedQty,
-            unitCost,
+            effectiveCost,
             'GOODS_RECEIPT',
             gr.id,
-            `GR ${grNumber || gr.id} - Batch ${batchNumber}`,
+            `GR ${grNumber || gr.id} - Batch ${batchNumber}${isBonus ? ' (BONUS)' : ''}`,
             receivedBy || null,
           ]
         );
@@ -473,7 +518,7 @@ export const goodsReceiptService = {
             productName,
           });
           await goodsReceiptRepository.updatePOItemReceivedQuantity(
-            client as any,
+            client,
             poItemId,
             receivedQty
           );
@@ -484,26 +529,59 @@ export const goodsReceiptService = {
 
         // Collect cost layer data - will be processed AFTER transaction commits
         // This avoids nested transactions which cause connection pool exhaustion and deadlocks
-        costLayerData.push({
-          productId,
-          quantity: receivedQty,
-          unitCost,
-          goodsReceiptId: gr.id,
-          batchNumber,
-        });
+        // Skip cost layers for bonus items (cost = 0, no cost valuation impact)
+        if (!isBonus) {
+          costLayerData.push({
+            productId,
+            quantity: receivedQty,
+            unitCost: effectiveCost,
+            goodsReceiptId: gr.id,
+            batchNumber,
+          });
+        }
+      }
+
+      // ============================================================
+      // SUPPLIER PRICE TRACKING
+      // Auto-update supplier_product_prices for each product received
+      // ============================================================
+      const supplierId = gr.supplierId ?? null;
+      const receiptDateStr: string = gr.receivedDate ?? '';
+      if (supplierId) {
+        for (const item of items) {
+          // Only track non-bonus items for price history (bonus = free goods, not real pricing)
+          if (!item.isBonus && Number(item.unitCost ?? 0) > 0) {
+            try {
+              await supplierProductPriceRepository.upsertSupplierPrice(
+                client,
+                supplierId,
+                item.productId,
+                Number(item.unitCost),
+                receiptDateStr || null
+              );
+            } catch (priceErr: unknown) {
+              const errMsg = priceErr instanceof Error ? priceErr.message : String(priceErr);
+              logger.warn('Failed to track supplier price (non-fatal)', {
+                supplierId,
+                productId: item.productId,
+                error: errMsg,
+              });
+            }
+          }
+        }
       }
 
       // Complete the GR
-      await goodsReceiptRepository.finalizeGR(client as any, id);
+      await goodsReceiptRepository.finalizeGR(client, id);
 
       // If PO fully received, mark completed
       const fully = await goodsReceiptRepository.isPOFullyReceived(
-        client as any,
+        client,
         gr.purchaseOrderId
       );
       if (fully) {
         await purchaseOrderRepository.updatePOStatus(
-          client as any,
+          client,
           gr.purchaseOrderId,
           'COMPLETED'
         );
@@ -514,32 +592,32 @@ export const goodsReceiptService = {
       // This creates a payable in the supplier payments module
       // IDEMPOTENCY: Check if invoice already exists for this GR
       // ============================================================
-      const totalAmountDec = (items as Array<Record<string, unknown>>).reduce(
-        (sum: Decimal, item: Record<string, unknown>) => {
-          const qty = new Decimal(String(item.receivedQuantity ?? item.received_quantity ?? 0));
-          const cost = new Decimal(String(item.unitCost ?? item.unit_cost ?? item.cost_price ?? 0));
+      const totalAmountDec = items.reduce(
+        (sum: Decimal, item: GoodsReceiptItem) => {
+          if (item.isBonus) return sum; // Bonus items are free, excluded from invoice
+          const qty = new Decimal(String(item.receivedQuantity ?? 0));
+          const cost = new Decimal(String(item.unitCost ?? 0));
           return sum.plus(qty.times(cost));
         },
         new Decimal(0)
       );
       const totalAmount = totalAmountDec.toNumber();
 
-      if (totalAmount > 0) {
-        const supplierId = gr.supplierId ?? gr.supplier_id;
-        const grNumber = gr.grNumber ?? gr.gr_number ?? gr.receipt_number ?? id;
-        const receiptDate: string = gr.receiptDate ?? gr.receipt_date ?? '';
+      if (totalAmount > 0 && supplierId) {
+        const invoiceGrNumber = grNumber || id;
+        const invoiceReceiptDate: string = receiptDateStr;
 
         // IDEMPOTENCY CHECK: Don't create duplicate invoice for same GR
         const existingInvoice = await client.query(
           `SELECT "Id" FROM supplier_invoices 
            WHERE "InternalReferenceNumber" = $1 AND deleted_at IS NULL`,
-          [grNumber]
+          [invoiceGrNumber]
         );
 
         if (existingInvoice.rows.length > 0) {
           logger.info('Supplier invoice already exists for GR, skipping creation', {
             grId: id,
-            grNumber,
+            grNumber: invoiceGrNumber,
             existingInvoiceId: existingInvoice.rows[0].Id,
           });
         } else {
@@ -556,41 +634,40 @@ export const goodsReceiptService = {
             `SELECT 
                COALESCE($1::date, CURRENT_DATE)::text as invoice_date,
                (COALESCE($1::date, CURRENT_DATE) + ($2 || ' days')::interval)::date::text as due_date`,
-            [receiptDate || null, paymentTermsDays]
+            [invoiceReceiptDate || null, paymentTermsDays]
           );
           const invoiceDateStr = dateCalcResult.rows[0].invoice_date;
           const dueDateStr = dateCalcResult.rows[0].due_date;
 
           try {
-            const createdInvoice = await supplierPaymentRepository.createInvoice(client as any, {
+            const createdInvoice = await supplierPaymentRepository.createInvoice(client, {
               supplierId,
-              supplierInvoiceNumber: grNumber, // Use GR number as reference
+              supplierInvoiceNumber: invoiceGrNumber, // Use GR number as reference
               invoiceDate: invoiceDateStr,
               dueDate: dueDateStr,
               subtotal: totalAmount,
               taxAmount: 0,
               totalAmount,
-              notes: `Auto-created from Goods Receipt ${grNumber}`,
+              notes: `Auto-created from Goods Receipt ${invoiceGrNumber}`,
             });
 
             // Insert line items from GR items into the invoice
-            const invoiceLineItems = (items as Array<Record<string, unknown>>).filter((raw) => {
-              const qty = Number(raw.receivedQuantity ?? raw.received_quantity ?? 0);
-              return qty > 0;
-            }).map((raw) => ({
-              productId: String(raw.productId ?? raw.product_id ?? ''),
-              productName: String(raw.productName ?? raw.product_name ?? 'Unknown product'),
-              description: `From GR ${grNumber}`,
-              quantity: new Decimal(String(raw.receivedQuantity ?? raw.received_quantity ?? 0)).toNumber(),
-              unitOfMeasure: String(raw.unitOfMeasure ?? raw.unit_of_measure ?? 'EA'),
-              unitCost: new Decimal(String(raw.unitCost ?? raw.unit_cost ?? raw.cost_price ?? 0)).toNumber(),
-              taxRate: 0,
-              taxAmount: 0,
-            }));
+            const invoiceLineItems = items
+              .filter((lineItem) => Number(lineItem.receivedQuantity ?? 0) > 0)
+              .map((lineItem) => ({
+                productId: lineItem.productId,
+                productName: lineItem.productName ?? 'Unknown product',
+                description: `From GR ${invoiceGrNumber}`,
+                quantity: new Decimal(String(lineItem.receivedQuantity ?? 0)).toNumber(),
+                unitOfMeasure: 'EA',
+                unitCost: new Decimal(String(lineItem.unitCost ?? 0)).toNumber(),
+                taxRate: 0,
+                taxAmount: 0,
+              }));
 
             if (invoiceLineItems.length > 0) {
               await supplierPaymentRepository.createInvoiceLineItems(
-                client as any,
+                client,
                 createdInvoice.id,
                 invoiceLineItems
               );
@@ -598,19 +675,20 @@ export const goodsReceiptService = {
 
             logger.info('Supplier invoice created from GR with line items', {
               grId: id,
-              grNumber,
+              grNumber: invoiceGrNumber,
               supplierId,
               totalAmount,
               lineItemCount: invoiceLineItems.length,
             });
-          } catch (invoiceError: any) {
+          } catch (invoiceError: unknown) {
+            const errMsg = invoiceError instanceof Error ? invoiceError.message : String(invoiceError);
             logger.error('Failed to create supplier invoice from GR', {
               grId: id,
-              error: invoiceError.message,
+              error: errMsg,
             });
             // Don't fail the GR finalization if invoice creation fails
             // The invoice can be created manually
-            warnings.push(`Supplier invoice creation failed: ${invoiceError.message}. AP tracking requires manual action.`);
+            warnings.push(`Supplier invoice creation failed: ${errMsg}. AP tracking requires manual action.`);
           }
         }
       }
@@ -621,55 +699,53 @@ export const goodsReceiptService = {
       // ============================================================
       for (const costData of costLayerData) {
         try {
-          await costLayerService.createCostLayer(costData as any, undefined, client as any);
+          await costLayerService.createCostLayer(costData, undefined, client);
           await pricingService.onCostChange(costData.productId);
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           // CRITICAL: Cost layer creation failed - GR exists but cost valuation incomplete
           // This affects FIFO/AVCO costing for future sales
           logger.error('CRITICAL: Cost layer creation failed - REQUIRES MANUAL REMEDIATION', {
             grId: id,
-            grNumber: gr.gr_number,
+            grNumber,
             productId: costData.productId,
             quantity: costData.quantity,
             unitCost: costData.unitCost,
-            error: err.message,
+            error: errMsg,
             remediation: 'Manually create cost layer via system management or re-process GR',
           });
-          warnings.push(`Cost layer creation failed for product ${costData.productId}: ${err.message}. Manual remediation required.`);
+          warnings.push(`Cost layer creation failed for product ${costData.productId}: ${errMsg}. Manual remediation required.`);
           // Note: Not throwing - cost layer failure should not block GR
           // Missing cost layer affects costing, not inventory quantity
         }
       }
 
-      await client.query('COMMIT');
+      return { alerts, warnings };
+    });
 
-      // ============================================================
-      // GL POSTING: Handled by database trigger (trg_post_goods_receipt_to_ledger)
-      // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
-      // This ensures atomicity - if GR exists, GL entry exists
-      // DO NOT add glEntryService calls here - it causes duplicate entries
-      // ============================================================
+    // ============================================================
+    // GL POSTING: Handled by database trigger (trg_post_goods_receipt_to_ledger)
+    // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
+    // This ensures atomicity - if GR exists, GL entry exists
+    // DO NOT add glEntryService calls here - it causes duplicate entries
+    // ============================================================
 
-      // Reload completed GR outside transaction
-      const finalized = await goodsReceiptRepository.getGRById(pool, id);
-      return {
-        ...finalized,
-        costPriceChangeAlerts: alerts.length > 0 ? alerts : null,
-        hasAlerts: alerts.length > 0,
-        alertSummary:
-          alerts.length > 0 ? `${alerts.length} product(s) with cost price changes` : null,
-        warnings: warnings.length > 0 ? warnings : undefined,
-      };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    // Reload completed GR outside transaction
+    const finalized = await goodsReceiptRepository.getGRById(pool, id);
+    if (!finalized) throw new Error(`Goods receipt ${id} not found after finalization`);
+    return {
+      gr: finalized.gr,
+      items: finalized.items,
+      costPriceChangeAlerts: alerts.length > 0 ? alerts : null,
+      hasAlerts: alerts.length > 0,
+      alertSummary:
+        alerts.length > 0 ? `${alerts.length} product(s) with cost price changes` : null,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
   },
 
   /** Get GR by ID */
-  async getGRById(pool: Pool, id: string): Promise<any> {
+  async getGRById(pool: Pool, id: string): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
     const result = await goodsReceiptRepository.getGRById(pool, id);
     if (!result) throw new Error(`Goods receipt ${id} not found`);
     return result;
@@ -681,7 +757,7 @@ export const goodsReceiptService = {
     page: number = 1,
     limit: number = 50,
     filters?: { status?: string; purchaseOrderId?: string }
-  ): Promise<any> {
+  ): Promise<ListGRsResult> {
     return goodsReceiptRepository.listGRs(pool, page, limit, filters);
   },
 
@@ -691,13 +767,11 @@ export const goodsReceiptService = {
     grId: string,
     itemId: string,
     data: UpdateGRItemData
-  ): Promise<any> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const existing = await goodsReceiptRepository.getGRItemWithParent(client as any, itemId);
+  ): Promise<GoodsReceiptItem> {
+    return UnitOfWork.run(pool, async (client) => {
+      const existing = await goodsReceiptRepository.getGRItemWithParent(client, itemId);
       if (!existing) throw new Error(`Goods receipt item ${itemId} not found`);
-      const { item, gr } = existing as any;
+      const { item, gr } = existing;
 
       if (gr.id !== grId) throw new Error('Item does not belong to the specified goods receipt');
       if (gr.status !== 'DRAFT')
@@ -709,7 +783,7 @@ export const goodsReceiptService = {
           'goods receipt item'
         );
         PurchaseOrderBusinessRules.validateReceivedQuantity(
-          item.ordered_quantity ?? item.orderedQuantity,
+          item.orderedQuantity ?? item.receivedQuantity,
           data.receivedQuantity,
           false
         );
@@ -721,7 +795,7 @@ export const goodsReceiptService = {
         PurchaseOrderBusinessRules.validateUnitCost(data.unitCost);
 
         // Check if unitCost is a UoM multiple of product base cost
-        const productId = item.product_id || item.productId;
+        const productId = item.productId;
         const productRes = await client.query('SELECT cost_price FROM products WHERE id = $1', [
           productId,
         ]);
@@ -750,45 +824,48 @@ export const goodsReceiptService = {
         updateData.unitCost = normalizedUnitCost;
       }
 
-      const updated = await goodsReceiptRepository.updateGRItem(client as any, itemId, updateData);
-      await client.query('COMMIT');
+      const updated = await goodsReceiptRepository.updateGRItem(client, itemId, updateData);
       return updated;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /** Hydrate a DRAFT GR's items from its Purchase Order (for GRs created without items) */
-  async hydrateFromPO(pool: Pool, grId: string): Promise<any> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const grResult = await goodsReceiptRepository.getGRById(client as any, grId);
+  async hydrateFromPO(pool: Pool, grId: string): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
+    await UnitOfWork.run(pool, async (client) => {
+      const grResult = await goodsReceiptRepository.getGRById(client, grId);
       if (!grResult) throw new Error(`Goods receipt ${grId} not found`);
-      const { gr, items } = grResult as any;
+      const { gr, items } = grResult;
 
       if (gr.status !== 'DRAFT') {
         throw new Error('Can only hydrate items for DRAFT goods receipts');
       }
 
       if (Array.isArray(items) && items.length > 0) {
-        // Already has items; return as-is
-        await client.query('COMMIT');
-        return grResult;
+        // Already has items; nothing to do
+        return;
       }
 
       // Load PO with items (includes product_name alias via repository)
-      const poDetail = await purchaseOrderRepository.getPOById(client as any, gr.purchaseOrderId);
+      // NOTE: PO items use `SELECT *` which returns snake_case — defensive fallbacks required
+      const poDetail = await purchaseOrderRepository.getPOById(client, gr.purchaseOrderId);
       if (!poDetail) throw new Error(`Purchase order ${gr.purchaseOrderId} not found`);
 
-      const toInsert: CreateGRItemData[] = (poDetail.items || []).map((poi: any) => ({
+      interface POItemRow {
+        id: string;
+        product_id?: string;
+        productId?: string;
+        product_name?: string;
+        productName?: string;
+        ordered_quantity?: number;
+        quantity?: number;
+        unit_price?: number;
+        unitCost?: number;
+      }
+
+      const toInsert: CreateGRItemData[] = ((poDetail.items || []) as POItemRow[]).map((poi) => ({
         goodsReceiptId: gr.id,
         poItemId: poi.id,
-        productId: poi.product_id ?? poi.productId,
+        productId: poi.product_id ?? poi.productId ?? '',
         productName: poi.product_name ?? poi.productName ?? 'Unknown Product',
         orderedQuantity: Number(poi.ordered_quantity ?? poi.quantity ?? 0),
         receivedQuantity: 0,
@@ -798,20 +875,14 @@ export const goodsReceiptService = {
       }));
 
       if (toInsert.length === 0) {
-        await client.query('COMMIT');
-        return { gr, items: [] };
+        return;
       }
 
-      await goodsReceiptRepository.addGRItems(client as any, toInsert);
+      await goodsReceiptRepository.addGRItems(client, toInsert);
+    });
 
-      await client.query('COMMIT');
-      const refreshed = await goodsReceiptRepository.getGRById(pool, grId);
-      return refreshed as any;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    const refreshed = await goodsReceiptRepository.getGRById(pool, grId);
+    if (!refreshed) throw new Error(`Goods receipt ${grId} not found after hydration`);
+    return refreshed;
   },
 };

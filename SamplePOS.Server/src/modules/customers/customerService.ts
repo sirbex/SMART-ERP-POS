@@ -367,48 +367,75 @@ export async function getCustomerStatement(
     periodEnd
   );
 
-  const mapped = rawEntries.map((r: any) => {
-    const debit = new Decimal(r.debit || 0);
-    const credit = new Decimal(r.credit || 0);
-    // Liability perspective: debit increases what customer owes; credit decreases.
-    running = running.plus(debit).minus(credit);
-    // Only invoice ledger types
-    const validTypes = ['INVOICE', 'PAYMENT', 'ADJUSTMENT'];
-    const normalizedType = validTypes.includes(r.type) ? r.type : 'ADJUSTMENT';
-    return {
-      date: new Date(r.date).toISOString(),
-      type: normalizedType,
-      reference: r.reference || null,
-      description: r.description || null,
-      debit: debit.toNumber(),
-      credit: credit.toNumber(),
-      balanceAfter: running.toNumber(),
-    };
-  });
-
-  const totalEntries = mapped.length;
-  const startIndex = Math.max(0, (page - 1) * limit);
-  const endIndex = Math.min(totalEntries, startIndex + limit);
-  const entries = mapped.slice(startIndex, endIndex);
-  const closingBalance = running.toNumber();
-
-  // Get deposit activity (separate tracking - does NOT affect invoice balance)
+  // Get deposit activity
   const depositEntries = await customerRepository.getDepositEntries(
     customerId,
     periodStart,
     periodEnd
   );
 
+  // Convert deposit entries to statement format
+  // DEPOSIT_IN → credit (customer gave us money / prepayment)
+  // DEPOSIT_OUT → debit (deposit applied to a sale)
+  const depositAsMapped = depositEntries.map((r: Record<string, unknown>) => {
+    const amount = new Decimal(r.amount || 0);
+    const isDepositIn = r.type === 'DEPOSIT_IN';
+    return {
+      date: new Date(String(r.date)).toISOString(),
+      type: isDepositIn ? 'DEPOSIT' : 'DEPOSIT_APPLIED',
+      reference: r.reference || null,
+      description: r.description || null,
+      debit: isDepositIn ? 0 : amount.abs().toNumber(),
+      credit: isDepositIn ? amount.abs().toNumber() : 0,
+    };
+  });
+
+  // Map AR entries
+  const arMapped = rawEntries.map((r: Record<string, unknown>) => {
+    const validTypes = ['INVOICE', 'PAYMENT', 'ADJUSTMENT'];
+    const normalizedType = validTypes.includes(String(r.type)) ? r.type : 'ADJUSTMENT';
+    return {
+      date: new Date(String(r.date)).toISOString(),
+      type: normalizedType,
+      reference: r.reference || null,
+      description: r.description || null,
+      debit: new Decimal(r.debit || 0).toNumber(),
+      credit: new Decimal(r.credit || 0).toNumber(),
+    };
+  });
+
+  // Merge all entries and sort by date
+  const allEntries = [...arMapped, ...depositAsMapped].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  // Calculate running balance across all entries
+  const entriesWithBalance = allEntries.map((entry) => {
+    const debit = new Decimal(entry.debit);
+    const credit = new Decimal(entry.credit);
+    running = running.plus(debit).minus(credit);
+    return {
+      ...entry,
+      balanceAfter: running.toNumber(),
+    };
+  });
+
+  const totalEntries = entriesWithBalance.length;
+  const startIndex = Math.max(0, (page - 1) * limit);
+  const endIndex = Math.min(totalEntries, startIndex + limit);
+  const entries = entriesWithBalance.slice(startIndex, endIndex);
+  const closingBalance = running.toNumber();
+
   // Get deposit summary
   const depositSummary = await customerRepository.getCustomerDepositSummary(customerId);
 
-  // Map deposit entries
+  // Map deposit entries for the separate deposit section
   let depositRunning = new Decimal(0);
-  const mappedDeposits = depositEntries.map((r: any) => {
+  const mappedDeposits = depositEntries.map((r: Record<string, unknown>) => {
     const amount = new Decimal(r.amount || 0);
     depositRunning = depositRunning.plus(amount);
     return {
-      date: new Date(r.date).toISOString(),
+      date: new Date(String(r.date)).toISOString(),
       type: r.type,
       reference: r.reference || null,
       description: r.description || null,

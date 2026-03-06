@@ -1,162 +1,112 @@
 // User Controller - HTTP request handlers
 
-import type { Request, Response, NextFunction } from 'express';
-import type { Pool } from 'pg';
+import type { Request, Response } from 'express';
+import { pool as globalPool } from '../../db/pool.js';
 import * as userService from './userService.js';
 import { CreateUserSchema, UpdateUserSchema, ChangePasswordSchema } from '../../../../shared/zod/user.js';
-import logger from '../../utils/logger.js';
+import { asyncHandler, NotFoundError, ValidationError, ConflictError, UnauthorizedError } from '../../middleware/errorHandler.js';
+
+/** Map service-layer error messages to appropriate AppError subclasses */
+function mapServiceError(error: unknown): never {
+  if (!(error instanceof Error)) throw error;
+  switch (error.message) {
+    case 'User not found': throw new NotFoundError('User');
+    case 'Email already in use': throw new ConflictError('Email already in use');
+    case 'Current password is incorrect': throw new UnauthorizedError('Current password is incorrect');
+    case 'Cannot delete your own account': throw new ValidationError('Cannot delete your own account');
+    default: throw error;
+  }
+}
 
 /**
  * GET /api/users
- * Get all users
  */
-export async function getAllUsers(req: Request, res: Response, next: NextFunction, pool: Pool) {
-  try {
-    const users = await userService.getAllUsers(pool);
-    res.json({ success: true, data: users });
-  } catch (error: any) {
-    logger.error('Failed to get users', { error: error.message });
-    res.status(500).json({ success: false, error: `Failed to retrieve users: ${error.message}` });
-  }
-}
+export const getAllUsers = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const users = await userService.getAllUsers(pool);
+  res.json({ success: true, data: users });
+});
 
 /**
  * GET /api/users/:id
- * Get user by ID
  */
-export async function getUserById(req: Request, res: Response, next: NextFunction, pool: Pool) {
+export const getUserById = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   try {
-    const { id } = req.params;
-    const user = await userService.getUserById(pool, id);
+    const user = await userService.getUserById(pool, req.params.id);
     res.json({ success: true, data: user });
-  } catch (error: any) {
-    logger.error('Failed to get user', { error: error.message });
-    const status = error.message === 'User not found' ? 404 : 500;
-    res.status(status).json({ success: false, error: error.message });
+  } catch (error) {
+    mapServiceError(error);
   }
-}
+});
 
 /**
  * POST /api/users
- * Create new user
  */
-export async function createUser(req: Request, res: Response, next: NextFunction, pool: Pool) {
+export const createUser = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const data = CreateUserSchema.parse(req.body);
   try {
-    const data = CreateUserSchema.parse(req.body);
     const user = await userService.createUser(pool, data);
     res.status(201).json({ success: true, data: user });
-  } catch (error: any) {
-    logger.error('Failed to create user', { error: error.message });
-
-    if (error.name === 'ZodError') {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid input data',
-        details: error.errors,
-      });
-    }
-
-    const status = error.message === 'Email already in use' ? 400 : 500;
-    res.status(status).json({ success: false, error: error.message });
+  } catch (error) {
+    mapServiceError(error);
   }
-}
+});
 
 /**
  * PUT /api/users/:id
- * Update user
  */
-export async function updateUser(req: Request, res: Response, next: NextFunction, pool: Pool) {
+export const updateUser = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const data = UpdateUserSchema.parse(req.body);
   try {
-    const { id } = req.params;
-    const data = UpdateUserSchema.parse(req.body);
-    const user = await userService.updateUser(pool, id, data);
+    const user = await userService.updateUser(pool, req.params.id, data);
     res.json({ success: true, data: user });
-  } catch (error: any) {
-    logger.error('Failed to update user', { error: error.message });
-
-    if (error.name === 'ZodError') {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid input data',
-        details: error.errors,
-      });
-    }
-
-    const status = error.message === 'User not found' ? 404
-      : error.message === 'Email already in use' ? 400
-        : 500;
-    res.status(status).json({ success: false, error: error.message });
+  } catch (error) {
+    mapServiceError(error);
   }
-}
+});
 
 /**
  * POST /api/users/:id/change-password
- * Change user password
  */
-export async function changePassword(req: Request, res: Response, next: NextFunction, pool: Pool) {
+export const changePassword = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const data = ChangePasswordSchema.parse(req.body);
   try {
-    const { id } = req.params;
-    const data = ChangePasswordSchema.parse(req.body);
-    await userService.changePassword(pool, id, data);
+    await userService.changePassword(pool, req.params.id, data);
     res.json({ success: true, message: 'Password changed successfully' });
-  } catch (error: any) {
-    logger.error('Failed to change password', { error: error.message });
-
-    if (error.name === 'ZodError') {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid input data',
-        details: error.errors,
-      });
-    }
-
-    const status = error.message === 'User not found' ? 404
-      : error.message === 'Current password is incorrect' ? 401
-        : 500;
-    res.status(status).json({ success: false, error: error.message });
+  } catch (error) {
+    mapServiceError(error);
   }
-}
+});
 
 /**
  * DELETE /api/users/:id?permanent=true
- * Delete user (soft delete by default, hard delete if permanent=true)
  */
-export async function deleteUser(req: Request, res: Response, next: NextFunction, pool: Pool) {
-  try {
-    const { id } = req.params;
-    const hardDelete = req.query.permanent === 'true';
+export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = req.params;
+  const hardDelete = req.query.permanent === 'true';
 
-    // Prevent self-deletion
-    if (req.user?.id === id) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete your own account'
-      });
-    }
-
-    const result = await userService.deleteUser(pool, id, hardDelete);
-    res.json({
-      success: true,
-      message: result.message,
-      permanentlyDeleted: result.deleted
-    });
-  } catch (error: any) {
-    logger.error('Failed to delete user', { error: error.message });
-    const status = error.message === 'User not found' ? 404 : 500;
-    res.status(status).json({ success: false, error: error.message });
+  if (req.user?.id === id) {
+    throw new ValidationError('Cannot delete your own account');
   }
-}
+
+  try {
+    const result = await userService.deleteUser(pool, id, hardDelete);
+    res.json({ success: true, message: result.message, permanentlyDeleted: result.deleted });
+  } catch (error) {
+    mapServiceError(error);
+  }
+});
 
 /**
  * GET /api/users/stats
- * Get user statistics
  */
-export async function getUserStats(req: Request, res: Response, next: NextFunction, pool: Pool) {
-  try {
-    const stats = await userService.getUserStats(pool);
-    res.json({ success: true, data: stats });
-  } catch (error: any) {
-    logger.error('Failed to get user stats', { error: error.message });
-    res.status(500).json({ success: false, error: `Failed to retrieve user statistics: ${error.message}` });
-  }
-}
+export const getUserStats = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const stats = await userService.getUserStats(pool);
+  res.json({ success: true, data: stats });
+});

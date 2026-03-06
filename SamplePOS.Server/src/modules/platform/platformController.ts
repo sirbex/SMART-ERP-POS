@@ -10,6 +10,7 @@ import { tenantRepository } from './tenantRepository.js';
 import { CreateTenantSchema, UpdateTenantSchema, TenantListQuerySchema, TenantStatusUpdateSchema, SuperAdminLoginSchema, CreateSuperAdminSchema, UpdateSuperAdminSchema, ChangePlanSchema, BillingPeriodSchema } from '../../../../shared/zod/tenant.js';
 import { billingService } from './billingService.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler, ValidationError, NotFoundError, ConflictError, UnauthorizedError, ForbiddenError, AppError } from '../../middleware/errorHandler.js';
 
 const PLATFORM_JWT_SECRET = process.env.PLATFORM_JWT_SECRET || process.env.JWT_SECRET || 'platform-secret-change-me';
 
@@ -30,8 +31,8 @@ function safeErrorMessage(error: unknown, fallback: string): string {
       /^Cannot delete your own account$/,
       /^Invalid credentials$/,
     ];
-    if (safePatterns.some(p => p.test(error.message))) {
-      return error.message;
+    if (safePatterns.some(p => p.test((error instanceof Error ? error.message : String(error))))) {
+      return (error instanceof Error ? error.message : String(error));
     }
   }
   return fallback;
@@ -39,13 +40,11 @@ function safeErrorMessage(error: unknown, fallback: string): string {
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Validate that a param is a valid UUID to prevent SQL injection or bad queries */
-function validateUuidParam(res: Response, id: string, label = 'ID'): boolean {
+/** Validate that a param is a valid UUID — throws ValidationError if invalid */
+function validateUuidParam(id: string, label = 'ID'): void {
   if (!UUID_REGEX.test(id)) {
-    res.status(400).json({ success: false, error: `Invalid ${label} format` });
-    return false;
+    throw new ValidationError(`Invalid ${label} format`);
   }
-  return true;
 }
 
 /**
@@ -97,222 +96,161 @@ export const platformController = {
   // SUPER ADMIN AUTH
   // ============================================================
 
-  async login(req: Request, res: Response): Promise<void> {
-    try {
-      const parsed = SuperAdminLoginSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
+  login: asyncHandler(async (req: Request, res: Response) => {
+    const parsed = SuperAdminLoginSchema.parse(req.body);
 
-      const masterPool = connectionManager.getMasterPool();
-      const admin = await tenantRepository.findSuperAdminByEmail(masterPool, parsed.data.email);
+    const masterPool = connectionManager.getMasterPool();
+    const admin = await tenantRepository.findSuperAdminByEmail(masterPool, parsed.email);
 
-      if (!admin || !admin.isActive) {
-        res.status(401).json({ success: false, error: 'Invalid credentials' });
-        return;
-      }
-
-      const validPassword = await bcrypt.compare(parsed.data.password, admin.passwordHash);
-      if (!validPassword) {
-        res.status(401).json({ success: false, error: 'Invalid credentials' });
-        return;
-      }
-
-      await tenantRepository.updateSuperAdminLastLogin(masterPool, admin.id);
-
-      const token = jwt.sign(
-        { adminId: admin.id, email: admin.email, scope: 'platform' },
-        PLATFORM_JWT_SECRET,
-        { expiresIn: '8h' }
-      );
-
-      res.json({
-        success: true,
-        data: {
-          token,
-          admin: {
-            id: admin.id,
-            email: admin.email,
-            fullName: admin.fullName,
-          },
-        },
-      });
-    } catch (error) {
-      logger.error('Super admin login failed', { error });
-      res.status(500).json({ success: false, error: 'Login failed. Please try again.' });
+    if (!admin || !admin.isActive) {
+      throw new UnauthorizedError('Invalid credentials');
     }
-  },
+
+    const validPassword = await bcrypt.compare(parsed.password, admin.passwordHash);
+    if (!validPassword) {
+      throw new UnauthorizedError('Invalid credentials');
+    }
+
+    await tenantRepository.updateSuperAdminLastLogin(masterPool, admin.id);
+
+    const token = jwt.sign(
+      { adminId: admin.id, email: admin.email, scope: 'platform' },
+      PLATFORM_JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({
+      success: true,
+      data: {
+        token,
+        admin: {
+          id: admin.id,
+          email: admin.email,
+          fullName: admin.fullName,
+        },
+      },
+    });
+  }),
 
   // ============================================================
   // TENANT CRUD
   // ============================================================
 
-  async listTenants(req: Request, res: Response): Promise<void> {
-    try {
-      const parsed = TenantListQuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
+  listTenants: asyncHandler(async (req: Request, res: Response) => {
+    const parsed = TenantListQuerySchema.parse(req.query);
 
-      const masterPool = connectionManager.getMasterPool();
-      const result = await tenantService.listTenants(masterPool, parsed.data);
+    const masterPool = connectionManager.getMasterPool();
+    const result = await tenantService.listTenants(masterPool, parsed);
 
-      res.json({
-        success: true,
-        data: result.tenants,
-        pagination: {
-          page: result.page,
-          totalPages: result.totalPages,
-          total: result.total,
-        },
-      });
-    } catch (error) {
-      logger.error('Failed to list tenants', { error });
-      res.status(500).json({ success: false, error: 'Failed to list tenants' });
+    res.json({
+      success: true,
+      data: result.tenants,
+      pagination: {
+        page: result.page,
+        totalPages: result.totalPages,
+        total: result.total,
+      },
+    });
+  }),
+
+  getTenant: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const masterPool = connectionManager.getMasterPool();
+    const tenant = await tenantService.getTenant(masterPool, req.params.id);
+
+    if (!tenant) {
+      throw new NotFoundError('Tenant');
     }
-  },
 
-  async getTenant(req: Request, res: Response): Promise<void> {
+    res.json({ success: true, data: tenant });
+  }),
+
+  createTenant: asyncHandler(async (req: Request, res: Response) => {
+    const parsed = CreateTenantSchema.parse(req.body);
+
+    const admin = getSuperAdmin(req);
+    const masterPool = connectionManager.getMasterPool();
+
     try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const tenant = await tenantService.getTenant(masterPool, req.params.id);
-
-      if (!tenant) {
-        res.status(404).json({ success: false, error: 'Tenant not found' });
-        return;
-      }
-
-      res.json({ success: true, data: tenant });
-    } catch (error) {
-      logger.error('Failed to get tenant', { error });
-      res.status(500).json({ success: false, error: 'Failed to get tenant' });
-    }
-  },
-
-  async createTenant(req: Request, res: Response): Promise<void> {
-    try {
-      const parsed = CreateTenantSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
-
-      const admin = getSuperAdmin(req);
-      const masterPool = connectionManager.getMasterPool();
-
       const tenant = await tenantService.provisionTenant(
         masterPool,
-        parsed.data,
+        parsed,
         admin?.email || 'system'
       );
-
       res.status(201).json({ success: true, data: tenant, message: 'Tenant provisioned successfully' });
-    } catch (error) {
-      logger.error('Failed to create tenant', { error });
+    } catch (error: unknown) {
+      if (error instanceof AppError) throw error;
       const message = safeErrorMessage(error, 'Failed to create tenant');
-      res.status(400).json({ success: false, error: message });
+      throw new ValidationError(message);
     }
-  },
+  }),
 
-  async updateTenant(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const parsed = UpdateTenantSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
+  updateTenant: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const parsed = UpdateTenantSchema.parse(req.body);
 
-      const admin = getSuperAdmin(req);
-      const masterPool = connectionManager.getMasterPool();
+    const admin = getSuperAdmin(req);
+    const masterPool = connectionManager.getMasterPool();
 
-      const tenant = await tenantService.updateTenant(
-        masterPool,
-        req.params.id,
-        parsed.data,
-        admin?.email || 'system'
-      );
+    const tenant = await tenantService.updateTenant(
+      masterPool,
+      req.params.id,
+      parsed,
+      admin?.email || 'system'
+    );
 
-      res.json({ success: true, data: tenant });
-    } catch (error) {
-      logger.error('Failed to update tenant', { error });
-      res.status(500).json({ success: false, error: 'Failed to update tenant' });
+    res.json({ success: true, data: tenant });
+  }),
+
+  updateTenantStatus: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const parsed = TenantStatusUpdateSchema.parse(req.body);
+
+    const admin = getSuperAdmin(req);
+    const masterPool = connectionManager.getMasterPool();
+
+    let tenant;
+    if (parsed.status === 'SUSPENDED') {
+      tenant = await tenantService.suspendTenant(masterPool, req.params.id, admin?.email || 'system', parsed.reason);
+    } else if (parsed.status === 'ACTIVE') {
+      tenant = await tenantService.activateTenant(masterPool, req.params.id, admin?.email || 'system');
+    } else if (parsed.status === 'DEACTIVATED') {
+      tenant = await tenantService.deactivateTenant(masterPool, req.params.id, admin?.email || 'system', parsed.reason);
+    } else {
+      throw new ValidationError('Only ACTIVE, SUSPENDED, and DEACTIVATED status changes are supported');
     }
-  },
 
-  async updateTenantStatus(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const parsed = TenantStatusUpdateSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
-
-      const admin = getSuperAdmin(req);
-      const masterPool = connectionManager.getMasterPool();
-
-      let tenant;
-      if (parsed.data.status === 'SUSPENDED') {
-        tenant = await tenantService.suspendTenant(masterPool, req.params.id, admin?.email || 'system', parsed.data.reason);
-      } else if (parsed.data.status === 'ACTIVE') {
-        tenant = await tenantService.activateTenant(masterPool, req.params.id, admin?.email || 'system');
-      } else if (parsed.data.status === 'DEACTIVATED') {
-        tenant = await tenantService.deactivateTenant(masterPool, req.params.id, admin?.email || 'system', parsed.data.reason);
-      } else {
-        res.status(400).json({ success: false, error: 'Only ACTIVE, SUSPENDED, and DEACTIVATED status changes are supported' });
-        return;
-      }
-
-      res.json({ success: true, data: tenant });
-    } catch (error) {
-      logger.error('Failed to update tenant status', { error });
-      res.status(500).json({ success: false, error: 'Failed to update tenant status' });
-    }
-  },
+    res.json({ success: true, data: tenant });
+  }),
 
   // ============================================================
   // TENANT USAGE & AUDIT
   // ============================================================
 
-  async getTenantUsage(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const usage = await tenantService.getTenantUsage(masterPool, req.params.id);
-      res.json({ success: true, data: usage });
-    } catch (error) {
-      logger.error('Failed to get tenant usage', { error });
-      res.status(500).json({ success: false, error: 'Failed to get tenant usage' });
-    }
-  },
+  getTenantUsage: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const masterPool = connectionManager.getMasterPool();
+    const usage = await tenantService.getTenantUsage(masterPool, req.params.id);
+    res.json({ success: true, data: usage });
+  }),
 
-  async getTenantAuditLog(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const rawLimit = parseInt(req.query.limit as string || '50', 10);
-      const limit = Math.max(1, Math.min(rawLimit, 500)); // Clamp between 1 and 500
-      const log = await tenantRepository.getAuditLog(masterPool, req.params.id, limit);
-      res.json({ success: true, data: log });
-    } catch (error) {
-      logger.error('Failed to get tenant audit log', { error });
-      res.status(500).json({ success: false, error: 'Failed to get audit log' });
-    }
-  },
+  getTenantAuditLog: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const masterPool = connectionManager.getMasterPool();
+    const rawLimit = parseInt(req.query.limit as string || '50', 10);
+    const limit = Math.max(1, Math.min(rawLimit, 500));
+    const log = await tenantRepository.getAuditLog(masterPool, req.params.id, limit);
+    res.json({ success: true, data: log });
+  }),
 
   // ============================================================
   // PLATFORM HEALTH
   // ============================================================
 
-  async platformHealth(req: Request, res: Response): Promise<void> {
+  platformHealth: asyncHandler(async (_req: Request, res: Response) => {
+    const masterPool = connectionManager.getMasterPool();
     try {
-      const masterPool = connectionManager.getMasterPool();
       await masterPool.query('SELECT 1');
-
       res.json({
         success: true,
         data: {
@@ -322,266 +260,195 @@ export const platformController = {
           timestamp: new Date().toISOString(),
         },
       });
-    } catch (error) {
+    } catch {
+      // Health check intentionally returns error body with 500
       res.status(500).json({
         success: false,
         data: { status: 'unhealthy' },
-        error: (error as Error).message || 'Master database unreachable',
+        error: 'Master database unreachable',
       });
     }
-  },
+  }),
 
   // ============================================================
   // BILLING
   // ============================================================
 
-  async getBillingEvents(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const parsed = BillingPeriodSchema.safeParse(req.query);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
-      const masterPool = connectionManager.getMasterPool();
-      const events = await tenantRepository.getBillingEvents(masterPool, req.params.id, parsed.data.period);
-      res.json({ success: true, data: events });
-    } catch (error) {
-      logger.error('Failed to get billing events', { error });
-      res.status(500).json({ success: false, error: 'Failed to get billing events' });
+  getBillingEvents: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const parsed = BillingPeriodSchema.parse(req.query);
+    const masterPool = connectionManager.getMasterPool();
+    const events = await tenantRepository.getBillingEvents(masterPool, req.params.id, parsed.period);
+    res.json({ success: true, data: events });
+  }),
+
+  getBillingInfo: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const masterPool = connectionManager.getMasterPool();
+    const info = await billingService.getBillingInfo(masterPool, req.params.id);
+    res.json({ success: true, data: info });
+  }),
+
+  changePlan: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const parsed = ChangePlanSchema.parse(req.body);
+
+    const admin = getSuperAdmin(req);
+    const masterPool = connectionManager.getMasterPool();
+    await billingService.changePlan(masterPool, req.params.id, parsed.plan, admin?.email || 'system');
+
+    res.json({ success: true, message: `Plan changed to ${parsed.plan}` });
+  }),
+
+  checkLimits: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'tenant ID');
+    const masterPool = connectionManager.getMasterPool();
+    const tenantRow = await tenantRepository.findById(masterPool, req.params.id);
+    if (!tenantRow) {
+      throw new NotFoundError('Tenant');
     }
-  },
 
-  async getBillingInfo(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const info = await billingService.getBillingInfo(masterPool, req.params.id);
-      res.json({ success: true, data: info });
-    } catch (error) {
-      logger.error('Failed to get billing info', { error });
-      res.status(500).json({ success: false, error: 'Failed to get billing info' });
-    }
-  },
+    const tenantPool = connectionManager.getPool({
+      tenantId: tenantRow.id,
+      slug: tenantRow.slug,
+      databaseName: tenantRow.database_name,
+      databaseHost: tenantRow.database_host,
+      databasePort: tenantRow.database_port,
+    });
 
-  async changePlan(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const parsed = ChangePlanSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
-
-      const admin = getSuperAdmin(req);
-      const masterPool = connectionManager.getMasterPool();
-      await billingService.changePlan(masterPool, req.params.id, parsed.data.plan, admin?.email || 'system');
-
-      res.json({ success: true, message: `Plan changed to ${parsed.data.plan}` });
-    } catch (error) {
-      logger.error('Failed to change plan', { error });
-      res.status(500).json({ success: false, error: 'Failed to change plan' });
-    }
-  },
-
-  async checkLimits(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'tenant ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const tenantRow = await tenantRepository.findById(masterPool, req.params.id);
-      if (!tenantRow) {
-        res.status(404).json({ success: false, error: 'Tenant not found' });
-        return;
-      }
-
-      const tenantPool = connectionManager.getPool({
-        tenantId: tenantRow.id,
-        slug: tenantRow.slug,
-        databaseName: tenantRow.database_name,
-        databaseHost: tenantRow.database_host,
-        databasePort: tenantRow.database_port,
-      });
-
-      const limits = await billingService.checkLimits(masterPool, tenantPool, req.params.id);
-      res.json({ success: true, data: limits });
-    } catch (error) {
-      logger.error('Failed to check limits', { error });
-      res.status(500).json({ success: false, error: 'Failed to check limits' });
-    }
-  },
+    const limits = await billingService.checkLimits(masterPool, tenantPool, req.params.id);
+    res.json({ success: true, data: limits });
+  }),
 
   // ============================================================
   // DASHBOARD SUMMARY
   // ============================================================
 
-  async dashboardSummary(req: Request, res: Response): Promise<void> {
-    try {
-      const masterPool = connectionManager.getMasterPool();
+  dashboardSummary: asyncHandler(async (_req: Request, res: Response) => {
+    const masterPool = connectionManager.getMasterPool();
 
-      const [tenantCounts, planDistribution, recentTenants] = await Promise.all([
-        masterPool.query(
-          `SELECT status, COUNT(*)::int as count FROM tenants GROUP BY status`
-        ),
-        masterPool.query(
-          `SELECT plan, COUNT(*)::int as count FROM tenants WHERE status = 'ACTIVE' GROUP BY plan`
-        ),
-        masterPool.query(
-          `SELECT id, slug, name, plan, status, created_at as "createdAt"
-           FROM tenants ORDER BY created_at DESC LIMIT 10`
-        ),
-      ]);
+    const [tenantCounts, planDistribution, recentTenants] = await Promise.all([
+      masterPool.query(
+        `SELECT status, COUNT(*)::int as count FROM tenants GROUP BY status`
+      ),
+      masterPool.query(
+        `SELECT plan, COUNT(*)::int as count FROM tenants WHERE status = 'ACTIVE' GROUP BY plan`
+      ),
+      masterPool.query(
+        `SELECT id, slug, name, plan, status, created_at as "createdAt"
+         FROM tenants ORDER BY created_at DESC LIMIT 10`
+      ),
+    ]);
 
-      const statusMap: Record<string, number> = {};
-      for (const row of tenantCounts.rows) {
-        statusMap[row.status] = row.count;
-      }
-
-      const planMap: Record<string, number> = {};
-      for (const row of planDistribution.rows) {
-        planMap[row.plan] = row.count;
-      }
-
-      res.json({
-        success: true,
-        data: {
-          tenants: {
-            total: Object.values(statusMap).reduce((a, b) => a + b, 0),
-            byStatus: statusMap,
-            byPlan: planMap,
-          },
-          activePools: connectionManager.getActivePoolCount(),
-          recentTenants: recentTenants.rows,
-        },
-      });
-    } catch (error) {
-      logger.error('Failed to get dashboard summary', { error });
-      res.status(500).json({ success: false, error: 'Failed to get dashboard summary' });
+    const statusMap: Record<string, number> = {};
+    for (const row of tenantCounts.rows) {
+      statusMap[row.status] = row.count;
     }
-  },
+
+    const planMap: Record<string, number> = {};
+    for (const row of planDistribution.rows) {
+      planMap[row.plan] = row.count;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        tenants: {
+          total: Object.values(statusMap).reduce((a, b) => a + b, 0),
+          byStatus: statusMap,
+          byPlan: planMap,
+        },
+        activePools: connectionManager.getActivePoolCount(),
+        recentTenants: recentTenants.rows,
+      },
+    });
+  }),
 
   // ============================================================
   // SUPER ADMIN CRUD
   // ============================================================
 
-  async listAdmins(req: Request, res: Response): Promise<void> {
-    try {
-      const masterPool = connectionManager.getMasterPool();
-      const admins = await tenantRepository.listSuperAdmins(masterPool);
-      res.json({ success: true, data: admins });
-    } catch (error) {
-      logger.error('Failed to list super admins', { error });
-      res.status(500).json({ success: false, error: 'Failed to list admins' });
+  listAdmins: asyncHandler(async (_req: Request, res: Response) => {
+    const masterPool = connectionManager.getMasterPool();
+    const admins = await tenantRepository.listSuperAdmins(masterPool);
+    res.json({ success: true, data: admins });
+  }),
+
+  getAdmin: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'admin ID');
+    const masterPool = connectionManager.getMasterPool();
+    const admin = await tenantRepository.findSuperAdminById(masterPool, req.params.id);
+    if (!admin) {
+      throw new NotFoundError('Admin');
     }
-  },
+    res.json({ success: true, data: admin });
+  }),
 
-  async getAdmin(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'admin ID')) return;
-      const masterPool = connectionManager.getMasterPool();
-      const admin = await tenantRepository.findSuperAdminById(masterPool, req.params.id);
-      if (!admin) {
-        res.status(404).json({ success: false, error: 'Admin not found' });
-        return;
-      }
-      res.json({ success: true, data: admin });
-    } catch (error) {
-      logger.error('Failed to get super admin', { error });
-      res.status(500).json({ success: false, error: 'Failed to get admin' });
+  createAdmin: asyncHandler(async (req: Request, res: Response) => {
+    const parsed = CreateSuperAdminSchema.parse(req.body);
+
+    const masterPool = connectionManager.getMasterPool();
+
+    // Check for duplicate email
+    const existing = await tenantRepository.findSuperAdminByEmail(masterPool, parsed.email);
+    if (existing) {
+      throw new ConflictError('An admin with this email already exists');
     }
-  },
 
-  async createAdmin(req: Request, res: Response): Promise<void> {
-    try {
-      const parsed = CreateSuperAdminSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
+    const passwordHash = await bcrypt.hash(parsed.password, 12);
+    const admin = await tenantRepository.createSuperAdmin(masterPool, {
+      email: parsed.email,
+      passwordHash,
+      fullName: parsed.fullName,
+    });
 
-      const masterPool = connectionManager.getMasterPool();
+    logger.info('Super admin created', { email: parsed.email, createdBy: (req as unknown as Record<string, unknown>).superAdmin });
+    res.status(201).json({ success: true, data: admin, message: 'Super admin created successfully' });
+  }),
 
-      // Check for duplicate email
-      const existing = await tenantRepository.findSuperAdminByEmail(masterPool, parsed.data.email);
-      if (existing) {
-        res.status(409).json({ success: false, error: 'An admin with this email already exists' });
-        return;
-      }
+  updateAdmin: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'admin ID');
 
-      const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-      const admin = await tenantRepository.createSuperAdmin(masterPool, {
-        email: parsed.data.email,
-        passwordHash,
-        fullName: parsed.data.fullName,
-      });
+    const parsed = UpdateSuperAdminSchema.parse(req.body);
 
-      logger.info('Super admin created', { email: parsed.data.email, createdBy: (req as unknown as Record<string, unknown>).superAdmin });
-      res.status(201).json({ success: true, data: admin, message: 'Super admin created successfully' });
-    } catch (error) {
-      logger.error('Failed to create super admin', { error });
-      res.status(500).json({ success: false, error: 'Failed to create admin' });
+    const masterPool = connectionManager.getMasterPool();
+
+    const updateData: { email?: string; fullName?: string; isActive?: boolean; passwordHash?: string } = {};
+    if (parsed.email !== undefined) updateData.email = parsed.email;
+    if (parsed.fullName !== undefined) updateData.fullName = parsed.fullName;
+    if (parsed.isActive !== undefined) updateData.isActive = parsed.isActive;
+    if (parsed.password !== undefined) {
+      updateData.passwordHash = await bcrypt.hash(parsed.password, 12);
     }
-  },
 
-  async updateAdmin(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'admin ID')) return;
+    const admin = await tenantRepository.updateSuperAdmin(masterPool, req.params.id, updateData);
 
-      const parsed = UpdateSuperAdminSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-        return;
-      }
-
-      const masterPool = connectionManager.getMasterPool();
-
-      const updateData: { email?: string; fullName?: string; isActive?: boolean; passwordHash?: string } = {};
-      if (parsed.data.email !== undefined) updateData.email = parsed.data.email;
-      if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName;
-      if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
-      if (parsed.data.password !== undefined) {
-        updateData.passwordHash = await bcrypt.hash(parsed.data.password, 12);
-      }
-
-      const admin = await tenantRepository.updateSuperAdmin(masterPool, req.params.id, updateData);
-
-      if (!admin) {
-        res.status(404).json({ success: false, error: 'Admin not found' });
-        return;
-      }
-
-      logger.info('Super admin updated', { id: req.params.id, updatedBy: (req as unknown as Record<string, unknown>).superAdmin });
-      res.json({ success: true, data: admin, message: 'Super admin updated successfully' });
-    } catch (error) {
-      logger.error('Failed to update super admin', { error });
-      res.status(500).json({ success: false, error: 'Failed to update admin' });
+    if (!admin) {
+      throw new NotFoundError('Admin');
     }
-  },
 
-  async deleteAdmin(req: Request, res: Response): Promise<void> {
-    try {
-      if (!validateUuidParam(res, req.params.id, 'admin ID')) return;
-      // Prevent self-deletion
-      const currentAdmin = (req as unknown as Record<string, unknown>).superAdmin as { id: string } | undefined;
-      if (currentAdmin?.id === req.params.id) {
-        res.status(400).json({ success: false, error: 'Cannot delete your own account' });
-        return;
-      }
+    logger.info('Super admin updated', { id: req.params.id, updatedBy: (req as unknown as Record<string, unknown>).superAdmin });
+    res.json({ success: true, data: admin, message: 'Super admin updated successfully' });
+  }),
 
-      const masterPool = connectionManager.getMasterPool();
-
-      // Soft-delete: deactivate instead of hard-deleting to preserve audit trail
-      const admin = await tenantRepository.updateSuperAdmin(masterPool, req.params.id, { isActive: false });
-
-      if (!admin) {
-        res.status(404).json({ success: false, error: 'Admin not found' });
-        return;
-      }
-
-      logger.info('Super admin deactivated (soft-deleted)', { id: req.params.id, deletedBy: currentAdmin });
-      res.json({ success: true, message: 'Super admin deactivated successfully' });
-    } catch (error) {
-      logger.error('Failed to deactivate super admin', { error });
-      res.status(500).json({ success: false, error: 'Failed to delete admin' });
+  deleteAdmin: asyncHandler(async (req: Request, res: Response) => {
+    validateUuidParam(req.params.id, 'admin ID');
+    // Prevent self-deletion
+    const currentAdmin = (req as unknown as Record<string, unknown>).superAdmin as { id: string } | undefined;
+    if (currentAdmin?.id === req.params.id) {
+      throw new ForbiddenError('Cannot delete your own account');
     }
-  },
+
+    const masterPool = connectionManager.getMasterPool();
+
+    // Soft-delete: deactivate instead of hard-deleting to preserve audit trail
+    const admin = await tenantRepository.updateSuperAdmin(masterPool, req.params.id, { isActive: false });
+
+    if (!admin) {
+      throw new NotFoundError('Admin');
+    }
+
+    logger.info('Super admin deactivated (soft-deleted)', { id: req.params.id, deletedBy: currentAdmin });
+    res.json({ success: true, message: 'Super admin deactivated successfully' });
+  }),
 };

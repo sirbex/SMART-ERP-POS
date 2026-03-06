@@ -31,7 +31,7 @@ export function auditContextMiddleware(req: Request, res: Response, next: NextFu
     req.requestId = requestId;
 
     // Extract user information from JWT (set by auth middleware)
-    const user = (req as any).user; // Assuming auth middleware sets req.user
+    const user = req.user; // Assuming auth middleware sets req.user
 
     // Extract session ID from cookie or header
     const sessionId = req.cookies?.sessionId || req.headers['x-session-id'] as string;
@@ -48,7 +48,7 @@ export function auditContextMiddleware(req: Request, res: Response, next: NextFu
     // Build audit context
     const auditContext: AuditContext = {
       userId: user?.id || '00000000-0000-0000-0000-000000000000', // Use null UUID instead of 'SYSTEM'
-      userName: user?.full_name || user?.fullName || user?.username || undefined,
+      userName: user?.fullName || undefined,
       userRole: user?.role || undefined,
       sessionId: sessionId || undefined,
       ipAddress,
@@ -91,7 +91,7 @@ export async function createUserSessionMiddleware(
   next: NextFunction
 ): Promise<void> {
   try {
-    const user = (req as any).user;
+    const user = req.user;
 
     if (user && req.auditContext) {
       // Import dynamically to avoid circular dependencies
@@ -102,7 +102,7 @@ export async function createUserSessionMiddleware(
       const session = await logUserLogin(
         pool,
         user.id,
-        user.full_name || user.username,
+        user.fullName || 'Unknown',
         user.role,
         {
           ipAddress: req.auditContext.ipAddress,

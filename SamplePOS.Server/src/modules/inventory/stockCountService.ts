@@ -18,6 +18,7 @@ import { stockCountRepository } from './stockCountRepository.js';
 import { StockMovementHandler } from './stockMovementHandler.js';
 import { inventoryRepository } from './inventoryRepository.js';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export const stockCountService = {
   /**
@@ -36,11 +37,7 @@ export const stockCountService = {
       createdById: string;
     }
   ) {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       // Create stock count
       const stockCount = await stockCountRepository.createStockCount(client, {
         name: data.name,
@@ -62,7 +59,7 @@ export const stockCountService = {
         WHERE p.is_active = true
       `;
 
-      const queryParams: any[] = [];
+      const queryParams: unknown[] = [];
       let paramIndex = 1;
 
       if (data.categoryId) {
@@ -94,8 +91,6 @@ export const stockCountService = {
       // Update state to 'counting'
       await stockCountRepository.updateStockCountState(client, stockCount.id, 'counting');
 
-      await client.query('COMMIT');
-
       // Refetch to get updated state
       const updatedCount = await stockCountRepository.getStockCountById(client, stockCount.id);
 
@@ -108,13 +103,7 @@ export const stockCountService = {
         stockCount: updatedCount || stockCount,
         linesCreated,
       };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to create stock count', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**
@@ -184,11 +173,7 @@ export const stockCountService = {
       userId: string;
     }
   ) {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       // Validate stock count is in counting state
       const stockCount = await stockCountRepository.getStockCountByIdForUpdate(
         client,
@@ -256,8 +241,6 @@ export const stockCountService = {
         });
       }
 
-      await client.query('COMMIT');
-
       logger.info('Count line updated', {
         stockCountId: data.stockCountId,
         lineId: line.id,
@@ -265,20 +248,14 @@ export const stockCountService = {
       });
 
       return line;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to update count line', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**
    * Convert quantity from UOM to base units
    */
   async convertToBaseUnits(
-    client: any,
+    client: PoolClient,
     productId: string,
     quantity: number,
     uom: string
@@ -319,15 +296,12 @@ export const stockCountService = {
       validatedById: string;
     }
   ) {
-    const client = await pool.connect();
     const handler = new StockMovementHandler(pool);
     const movementIds: string[] = [];
     const warnings: string[] = [];
     const errors: string[] = [];
 
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       // Lock stock count for update
       const stockCount = await stockCountRepository.getStockCountByIdForUpdate(
         client,
@@ -425,7 +399,7 @@ export const stockCountService = {
           const result = await handler.processMovement({
             productId: line.product_id,
             batchId: line.batch_id,
-            movementType: movementType as any,
+            movementType: movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT',
             quantity: absoluteDiff,
             reason: `Stocktake reconciliation - ${data.notes || 'Physical count adjustment'}`,
             referenceType: 'STOCK_COUNT',
@@ -451,7 +425,6 @@ export const stockCountService = {
 
       // If there were errors and we want strict validation, rollback
       if (errors.length > 0) {
-        await client.query('ROLLBACK');
         throw new Error(
           `Validation failed with ${errors.length} errors:\n${errors.join('\n')}`
         );
@@ -464,8 +437,6 @@ export const stockCountService = {
         'done',
         data.validatedById
       );
-
-      await client.query('COMMIT');
 
       logger.info('Stock count validated successfully', {
         stockCountId: data.stockCountId,
@@ -482,16 +453,7 @@ export const stockCountService = {
         warnings,
         errors,
       };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Stock count validation failed', {
-        stockCountId: data.stockCountId,
-        error,
-      });
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**
@@ -503,11 +465,7 @@ export const stockCountService = {
     notes: string | null,
     userId: string
   ) {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       const stockCount = await stockCountRepository.getStockCountByIdForUpdate(
         client,
         stockCountId
@@ -527,18 +485,10 @@ export const stockCountService = {
 
       await stockCountRepository.updateStockCountState(client, stockCountId, 'cancelled');
 
-      await client.query('COMMIT');
-
       logger.info('Stock count cancelled', { stockCountId, userId });
 
       return { success: true, message: 'Stock count cancelled successfully' };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to cancel stock count', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**

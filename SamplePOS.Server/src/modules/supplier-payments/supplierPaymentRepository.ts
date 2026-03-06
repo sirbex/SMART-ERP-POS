@@ -149,7 +149,7 @@ export async function findAllPayments(
 /**
  * Find supplier payment by ID
  */
-export async function findPaymentById(pool: Pool, id: string): Promise<SupplierPayment | null> {
+export async function findPaymentById(pool: Pool | PoolClient, id: string): Promise<SupplierPayment | null> {
     const result = await pool.query(
         `SELECT 
        sp."Id" as id,
@@ -266,7 +266,7 @@ export async function updatePayment(
         params.push(data.notes);
     }
 
-    if (updates.length === 0) return findPaymentById(client as any, id);
+    if (updates.length === 0) return findPaymentById(client, id);
 
     updates.push('"UpdatedAt" = NOW()');
     params.push(id);
@@ -410,7 +410,7 @@ export async function findAllInvoices(
 /**
  * Find supplier invoice by ID
  */
-export async function findInvoiceById(pool: Pool, id: string): Promise<SupplierInvoice | null> {
+export async function findInvoiceById(pool: Pool | PoolClient, id: string): Promise<SupplierInvoice | null> {
     const result = await pool.query(
         `SELECT 
        si."Id" as id,
@@ -440,7 +440,7 @@ export async function findInvoiceById(pool: Pool, id: string): Promise<SupplierI
 /**
  * Get outstanding invoices for a supplier
  */
-export async function findOutstandingInvoices(pool: Pool, supplierId: string): Promise<SupplierInvoice[]> {
+export async function findOutstandingInvoices(pool: Pool | PoolClient, supplierId: string): Promise<SupplierInvoice[]> {
     const result = await pool.query(
         `SELECT 
        si."Id" as id,
@@ -474,7 +474,7 @@ export async function findOutstandingInvoices(pool: Pool, supplierId: string): P
 /**
  * Find supplier invoice by ID with line items and payment allocations
  */
-export async function findInvoiceWithDetails(pool: Pool, id: string): Promise<{
+export async function findInvoiceWithDetails(pool: Pool | PoolClient, id: string): Promise<{
     invoice: SupplierInvoice & { supplierContactName?: string; supplierEmail?: string; supplierPhone?: string; supplierAddress?: string };
     lineItems: Array<{
         id: string;
@@ -588,7 +588,7 @@ export async function findInvoiceWithDetails(pool: Pool, id: string): Promise<{
 /**
  * Find all invoices for a supplier with line items count
  */
-export async function findInvoicesBySupplier(pool: Pool, supplierId: string): Promise<Array<SupplierInvoice & { lineItemCount: number }>> {
+export async function findInvoicesBySupplier(pool: Pool | PoolClient, supplierId: string): Promise<Array<SupplierInvoice & { lineItemCount: number }>> {
     const result = await pool.query(
         `SELECT 
        si."Id" as id,
@@ -822,20 +822,10 @@ export async function createAllocation(
         [allocationAmount.toNumber(), data.supplierPaymentId]
     );
 
-    // Get the invoice's current paid amount
-    const invoiceResult = await client.query(
-        'SELECT COALESCE("AmountPaid", 0) as "AmountPaid" FROM supplier_invoices WHERE "Id" = $1',
-        [data.supplierInvoiceId]
-    );
-
-    // Use Decimal.js for precise paid amount calculation
-    const currentPaid = new Decimal(invoiceResult.rows[0].AmountPaid);
-    const newPaidAmount = currentPaid.plus(allocationAmount);
-    await updateInvoicePaidAmount(client, data.supplierInvoiceId, newPaidAmount.toNumber());
-
-    // NOTE: Supplier outstanding balance is automatically updated by database trigger
-    // trg_sync_supplier_on_invoice -> fn_recalculate_supplier_ap_balance
-    // DO NOT manually update here - it causes double-counting
+    // NOTE: Invoice AmountPaid/OutstandingBalance/Status are automatically updated by
+    // the trg_supplier_payment_allocation_sync trigger on supplier_payment_allocations.
+    // It SUMs all allocations and sets the correct values.
+    // DO NOT manually call updateInvoicePaidAmount here - it causes double-counting.
 
     return result.rows[0];
 }
@@ -843,7 +833,7 @@ export async function createAllocation(
 /**
  * Get allocations for a payment
  */
-export async function findAllocationsByPaymentId(pool: Pool, paymentId: string): Promise<SupplierPaymentAllocation[]> {
+export async function findAllocationsByPaymentId(pool: Pool | PoolClient, paymentId: string): Promise<SupplierPaymentAllocation[]> {
     const result = await pool.query(
         `SELECT 
        spa."Id" as id,
@@ -900,15 +890,10 @@ export async function deleteAllocation(client: PoolClient, id: string): Promise<
         [deallocateAmount.toNumber(), PaymentId]
     );
 
-    // Update invoice paid amount using Decimal.js for precision
-    const currentPaid = new Decimal(invoiceResult.rows[0].AmountPaid);
-    const calculatedPaid = currentPaid.minus(deallocateAmount);
-    const newPaidAmount = calculatedPaid.lessThan(0) ? new Decimal(0) : calculatedPaid;
-    await updateInvoicePaidAmount(client, SupplierInvoiceId, newPaidAmount.toNumber());
-
-    // NOTE: Supplier outstanding balance is automatically updated by database trigger
-    // trg_sync_supplier_on_invoice -> fn_recalculate_supplier_ap_balance
-    // DO NOT manually update here - it causes double-counting
+    // NOTE: Invoice AmountPaid/OutstandingBalance/Status are automatically updated by
+    // the trg_supplier_payment_allocation_sync trigger on supplier_payment_allocations.
+    // The trigger SUMs all allocations (WHERE deleted_at IS NULL) and sets the correct values.
+    // DO NOT manually call updateInvoicePaidAmount here - it causes double-counting.
 
     return true;
 }
@@ -959,4 +944,28 @@ export async function createInvoiceLineItems(
             ]
         );
     }
+}
+
+/**
+ * Get invoice summary statistics (total count, unpaid count, total outstanding)
+ */
+export async function getInvoiceSummary(pool: Pool | PoolClient): Promise<{
+    totalInvoices: number;
+    unpaidInvoices: number;
+    totalOutstanding: number;
+}> {
+    const result = await pool.query(`
+        SELECT
+            COUNT(*)::int AS total_invoices,
+            COUNT(*) FILTER (WHERE "Status" IN ('UNPAID', 'PARTIALLY_PAID', 'OVERDUE'))::int AS unpaid_invoices,
+            COALESCE(SUM("OutstandingBalance") FILTER (WHERE "Status" IN ('UNPAID', 'PARTIALLY_PAID', 'OVERDUE')), 0) AS total_outstanding
+        FROM supplier_invoices
+        WHERE deleted_at IS NULL
+    `);
+    const row = result.rows[0];
+    return {
+        totalInvoices: row.total_invoices,
+        unpaidInvoices: row.unpaid_invoices,
+        totalOutstanding: new Decimal(row.total_outstanding || 0).toNumber(),
+    };
 }

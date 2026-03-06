@@ -5,6 +5,7 @@
 import Decimal from 'decimal.js';
 import { VM } from 'vm2';
 import { pool as globalPool } from '../db/pool.js';
+import { UnitOfWork } from '../db/unitOfWork.js';
 import type pg from 'pg';
 import logger from '../utils/logger.js';
 import * as pricingCache from './pricingCacheService.js';
@@ -83,7 +84,7 @@ interface ProductPricing {
  * Performance: Sub-millisecond with cache, ~5-10ms cache miss
  * Precision: Bank-grade using Decimal.js (20 digits, ROUND_HALF_UP)
  */
-export async function calculatePrice(context: PricingContext, dbPool?: pg.Pool): Promise<CalculatedPrice> {
+export async function calculatePrice(context: PricingContext, dbPool?: pg.Pool | pg.PoolClient): Promise<CalculatedPrice> {
   const pool = dbPool || globalPool;
   const { productId, customerGroupId, quantity = 1 } = context;
 
@@ -196,7 +197,7 @@ async function findApplicableTier(
   productId: string,
   customerGroupId: string | null | undefined,
   quantity: number,
-  dbPool?: pg.Pool
+  dbPool?: pg.Pool | pg.PoolClient
 ): Promise<PricingTierRow | null> {
   const pool = dbPool || globalPool;
   const now = new Date();
@@ -230,7 +231,7 @@ export async function evaluateFormula(
   formula: string,
   productId: string,
   quantity: number = 1,
-  dbPool?: pg.Pool
+  dbPool?: pg.Pool | pg.PoolClient
 ): Promise<number> {
   const pool = dbPool || globalPool;
   // Get product cost data
@@ -321,65 +322,60 @@ export function validateFormula(formula: string): { valid: boolean; error?: stri
 }
 
 /**
+ * Update calculated_price for all pricing tiers of a product (using existing client)
+ * Core logic that can run within an external transaction.
+ */
+async function updatePricingTiersWithClient(client: pg.PoolClient, productId: string): Promise<void> {
+  const tiersResult = await client.query<PricingTierRow>(
+    `SELECT * FROM pricing_tiers WHERE product_id = $1 AND is_active = TRUE`,
+    [productId]
+  );
+
+  for (const tier of tiersResult.rows) {
+    try {
+      const calculatedPrice = await evaluateFormula(tier.pricing_formula, productId, 1, client);
+
+      await client.query(
+        `UPDATE pricing_tiers 
+         SET calculated_price = $1, updated_at = NOW() 
+         WHERE id = $2`,
+        [calculatedPrice, tier.id]
+      );
+
+      logger.debug('Pricing tier updated', {
+        tierId: tier.id,
+        formula: tier.pricing_formula,
+        calculatedPrice,
+      });
+    } catch (error) {
+      logger.error('Failed to update pricing tier', {
+        tierId: tier.id,
+        formula: tier.pricing_formula,
+        error,
+      });
+      // Continue with other tiers even if one fails
+    }
+  }
+
+  logger.info('Pricing tiers updated', { productId, tierCount: tiersResult.rows.length });
+}
+
+/**
  * Update calculated_price for all pricing tiers of a product
- * Called when product cost changes
+ * Called when product cost changes. Creates its own transaction.
  */
 export async function updatePricingTiers(productId: string, dbPool?: pg.Pool): Promise<void> {
   const pool = dbPool || globalPool;
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
-    // Get all active tiers for product
-    const tiersResult = await client.query<PricingTierRow>(
-      `SELECT * FROM pricing_tiers WHERE product_id = $1 AND is_active = TRUE`,
-      [productId]
-    );
-
-    for (const tier of tiersResult.rows) {
-      try {
-        const calculatedPrice = await evaluateFormula(tier.pricing_formula, productId);
-
-        await client.query(
-          `UPDATE pricing_tiers 
-           SET calculated_price = $1, updated_at = NOW() 
-           WHERE id = $2`,
-          [calculatedPrice, tier.id]
-        );
-
-        logger.debug('Pricing tier updated', {
-          tierId: tier.id,
-          formula: tier.pricing_formula,
-          calculatedPrice,
-        });
-      } catch (error) {
-        logger.error('Failed to update pricing tier', {
-          tierId: tier.id,
-          formula: tier.pricing_formula,
-          error,
-        });
-        // Continue with other tiers even if one fails
-      }
-    }
-
-    await client.query('COMMIT');
-
-    logger.info('Pricing tiers updated', { productId, tierCount: tiersResult.rows.length });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to update pricing tiers', { error, productId });
-    throw error;
-  } finally {
-    client.release();
-  }
+  await UnitOfWork.run<void>(pool, async (client) => {
+    await updatePricingTiersWithClient(client, productId);
+  });
 }
 
 /**
  * Update product selling_price using its pricing formula
  * Called when auto_update_price is true and cost changes
  */
-export async function updateProductPrice(productId: string, dbPool?: pg.Pool): Promise<void> {
+export async function updateProductPrice(productId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<void> {
   const pool = dbPool || globalPool;
   const result = await pool.query<ProductPricing>(
     `SELECT pricing_formula, auto_update_price FROM products WHERE id = $1`,
@@ -421,17 +417,18 @@ export async function updateProductPrice(productId: string, dbPool?: pg.Pool): P
 
 /**
  * Handle cost change event - update prices and invalidate cache
- * Called after goods receipt finalization
+ * Called after goods receipt finalization.
+ * Both tier updates and product price update are atomic.
  */
 export async function onCostChange(productId: string): Promise<void> {
   try {
-    // Update pricing tiers
-    await updatePricingTiers(productId);
+    // Pricing tier updates + product price update in single transaction
+    await UnitOfWork.run<void>(globalPool, async (client) => {
+      await updatePricingTiersWithClient(client, productId);
+      await updateProductPrice(productId, client);
+    });
 
-    // Update product price if auto-update enabled
-    await updateProductPrice(productId);
-
-    // Invalidate cache
+    // Invalidate cache after successful commit
     pricingCache.invalidateProduct(productId);
 
     logger.info('Cost change processed', { productId });

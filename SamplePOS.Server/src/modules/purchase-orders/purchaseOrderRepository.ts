@@ -1,5 +1,6 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export interface PurchaseOrder {
   id: string;
@@ -49,7 +50,7 @@ export const purchaseOrderRepository = {
   /**
    * Generate next PO number (PO-YYYY-NNNN format)
    */
-  async generatePONumber(pool: Pool): Promise<string> {
+  async generatePONumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     // Advisory lock prevents concurrent duplicate PO number generation (held until TX commit)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('po_number_seq'))`);
@@ -73,7 +74,7 @@ export const purchaseOrderRepository = {
   /**
    * Create purchase order
    */
-  async createPO(pool: Pool, data: CreatePOData): Promise<PurchaseOrder> {
+  async createPO(pool: Pool | PoolClient, data: CreatePOData): Promise<PurchaseOrder> {
     const poNumber = await this.generatePONumber(pool);
 
     const result = await pool.query(
@@ -92,7 +93,7 @@ export const purchaseOrderRepository = {
    * Creates PO in COMPLETED status with manual_receipt flag set to true
    */
   async createManualPO(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: CreatePOData & { items: CreatePOItemData[] }
   ): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
     const poNumber = await this.generatePONumber(pool);
@@ -150,8 +151,8 @@ export const purchaseOrderRepository = {
   /**
    * Add items to purchase order
    */
-  async addPOItems(pool: Pool, items: CreatePOItemData[]): Promise<PurchaseOrderItem[]> {
-    const values: any[] = [];
+  async addPOItems(pool: Pool | PoolClient, items: CreatePOItemData[]): Promise<PurchaseOrderItem[]> {
+    const values: unknown[] = [];
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
@@ -187,7 +188,7 @@ export const purchaseOrderRepository = {
    * Get PO by ID with items
    */
   async getPOById(
-    pool: Pool,
+    pool: Pool | PoolClient,
     id: string
   ): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] } | null> {
     const poResult = await pool.query(
@@ -225,14 +226,14 @@ export const purchaseOrderRepository = {
    * List purchase orders with pagination
    */
   async listPOs(
-    pool: Pool,
+    pool: Pool | PoolClient,
     page: number = 1,
     limit: number = 50,
     filters?: { status?: string; supplierId?: string }
   ): Promise<{ pos: PurchaseOrder[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters?.status) {
@@ -279,7 +280,7 @@ export const purchaseOrderRepository = {
   /**
    * Update PO status
    */
-  async updatePOStatus(pool: Pool, id: string, status: string): Promise<PurchaseOrder> {
+  async updatePOStatus(pool: Pool | PoolClient, id: string, status: string): Promise<PurchaseOrder> {
     const result = await pool.query(
       'UPDATE purchase_orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       [status, id]
@@ -295,7 +296,7 @@ export const purchaseOrderRepository = {
   /**
    * Update PO total amount
    */
-  async updatePOTotal(pool: Pool, id: string): Promise<void> {
+  async updatePOTotal(pool: Pool | PoolClient, id: string): Promise<void> {
     await pool.query(
       `UPDATE purchase_orders 
        SET total_amount = (
@@ -312,10 +313,7 @@ export const purchaseOrderRepository = {
    * Delete PO (only if DRAFT)
    */
   async deletePO(pool: Pool, id: string): Promise<void> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    await UnitOfWork.run(pool, async (client) => {
       // Check if there are any goods receipts for this PO
       const grCheck = await client.query(
         'SELECT COUNT(*) FROM goods_receipts WHERE purchase_order_id = $1',
@@ -340,13 +338,6 @@ export const purchaseOrderRepository = {
       }
 
       // Note: PO items are preserved for audit trail since the PO still exists
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 };

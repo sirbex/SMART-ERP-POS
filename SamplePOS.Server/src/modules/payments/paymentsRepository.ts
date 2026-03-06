@@ -5,7 +5,7 @@
  * ARCHITECTURE: Repository layer - SQL queries ONLY, no business logic
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 
 // ============================================================================
@@ -78,7 +78,7 @@ export const paymentsRepository = {
   /**
    * Get all active payment methods
    */
-  async getPaymentMethods(pool: Pool): Promise<PaymentMethodRow[]> {
+  async getPaymentMethods(pool: Pool | PoolClient): Promise<PaymentMethodRow[]> {
     const query = `
       SELECT 
         id, code, name, description, is_active, requires_reference,
@@ -102,7 +102,7 @@ export const paymentsRepository = {
   /**
    * Get payment method by code
    */
-  async getPaymentMethodByCode(pool: Pool, code: string): Promise<PaymentMethodRow | null> {
+  async getPaymentMethodByCode(pool: Pool | PoolClient, code: string): Promise<PaymentMethodRow | null> {
     const query = `
       SELECT 
         id, code, name, description, is_active, requires_reference,
@@ -123,7 +123,7 @@ export const paymentsRepository = {
    * Create a single sale payment record
    */
   async createSalePayment(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: CreateSalePaymentData
   ): Promise<SalePaymentRow> {
     const query = `
@@ -154,7 +154,7 @@ export const paymentsRepository = {
    * Uses UNNEST for batch insert efficiency
    */
   async createSalePayments(
-    pool: Pool,
+    pool: Pool | PoolClient,
     payments: CreateSalePaymentData[]
   ): Promise<SalePaymentRow[]> {
     if (payments.length === 0) return [];
@@ -195,7 +195,7 @@ export const paymentsRepository = {
   /**
    * Get all payments for a sale
    */
-  async getSalePayments(pool: Pool, saleId: string): Promise<SalePaymentRow[]> {
+  async getSalePayments(pool: Pool | PoolClient, saleId: string): Promise<SalePaymentRow[]> {
     const query = `
       SELECT 
         id, sale_id, payment_method_code, amount::text, reference_number,
@@ -212,7 +212,7 @@ export const paymentsRepository = {
   /**
    * Get total paid amount for a sale
    */
-  async getTotalPaid(pool: Pool, saleId: string): Promise<number> {
+  async getTotalPaid(pool: Pool | PoolClient, saleId: string): Promise<number> {
     const query = `
       SELECT COALESCE(SUM(amount), 0) as total
       FROM sale_payments
@@ -226,7 +226,7 @@ export const paymentsRepository = {
   /**
    * Delete sale payments (for transaction rollback scenarios)
    */
-  async deleteSalePayments(pool: Pool, saleId: string): Promise<void> {
+  async deleteSalePayments(pool: Pool | PoolClient, saleId: string): Promise<void> {
     const query = `DELETE FROM sale_payments WHERE sale_id = $1`;
     await pool.query(query, [saleId]);
   },
@@ -238,7 +238,7 @@ export const paymentsRepository = {
   /**
    * Get customer current credit balance
    */
-  async getCustomerBalance(pool: Pool, customerId: string): Promise<number> {
+  async getCustomerBalance(pool: Pool | PoolClient, customerId: string): Promise<number> {
     const query = `
       SELECT COALESCE(balance_after, 0) as balance
       FROM customer_credit_transactions
@@ -257,7 +257,7 @@ export const paymentsRepository = {
    * Create customer credit transaction
    */
   async createCreditTransaction(
-    pool: Pool,
+    pool: Pool | PoolClient,
     data: CreateCreditTransactionData
   ): Promise<CustomerCreditTransactionRow> {
     const query = `

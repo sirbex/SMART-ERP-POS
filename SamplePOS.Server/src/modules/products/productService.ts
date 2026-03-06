@@ -5,6 +5,7 @@ import Decimal from 'decimal.js';
 import { Pool } from 'pg';
 import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as productRepository from './productRepository.js';
 import * as uomRepository from './uomRepository.js';
 import { ProductWithUom } from './ProductWithUom.js';
@@ -166,7 +167,7 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
 
   // BR-INV-005: Validate reorder level (if provided)
   if (data.reorderLevel !== undefined && data.reorderLevel !== null) {
-    const maxStock = (data as any).maxStock || null;
+    const maxStock = (data as Record<string, unknown>).maxStock as number || null;
     InventoryBusinessRules.validateReorderLevel(data.reorderLevel, maxStock);
     logger.info('BR-INV-005: Reorder level validation passed', {
       sku: data.sku,
@@ -183,32 +184,19 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   };
 
   // Transaction: Create product atomically
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
+  return UnitOfWork.run(pool, async (client) => {
     const product = await productRepository.createProduct(productData);
 
     // If product has UoM data, create it within the transaction
     // (UoM creation would be added here if needed)
 
-    await client.query('COMMIT');
     logger.info('Product created successfully (transaction committed)', {
       productId: product.id,
       sku: product.sku
     });
 
     return product;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Product creation failed (transaction rolled back)', {
-      sku: data.sku,
-      error
-    });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product> {
@@ -266,7 +254,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
 
   // BR-INV-005: Validate reorder level (if provided)
   if (data.reorderLevel !== undefined && data.reorderLevel !== null) {
-    const maxStock = (data as any).maxStock || (existing as any).maxStock || null;
+    const maxStock = (data as Record<string, unknown>).maxStock as number || (existing as Record<string, unknown>).maxStock as number || null;
     InventoryBusinessRules.validateReorderLevel(data.reorderLevel, maxStock);
     logger.info('BR-INV-005: Reorder level validation passed', {
       productId: id,
@@ -283,10 +271,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   };
 
   // Transaction: Update product atomically
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
+  return UnitOfWork.run(pool, async (client) => {
     const updated = await productRepository.updateProduct(id, updateData);
 
     if (!updated) {
@@ -296,20 +281,10 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
     // If product UoM changes are included, update them within the transaction
     // (UoM updates would be added here if needed)
 
-    await client.query('COMMIT');
     logger.info('Product updated successfully (transaction committed)', { productId: id });
 
     return updated;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Product update failed (transaction rolled back)', {
-      productId: id,
-      error
-    });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function deleteProduct(id: string): Promise<void> {

@@ -52,7 +52,7 @@ export async function updateUom(id: string, data: {
 }, dbPool?: pg.Pool): Promise<DbUom | null> {
   const pool = dbPool || globalPool;
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let i = 1;
 
   if (data.name !== undefined) {
@@ -178,7 +178,7 @@ export async function updateProductUom(
 ): Promise<DbProductUom | null> {
   const pool = dbPool || globalPool;
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let i = 1;
 
   if (data.conversionFactor !== undefined) {

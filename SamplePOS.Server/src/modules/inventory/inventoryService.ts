@@ -34,6 +34,13 @@ export const inventoryService = {
   },
 
   /**
+   * Get all active batches across all products (for offline pre-warm)
+   */
+  async getAllActiveBatches(pool: Pool) {
+    return inventoryRepository.getAllActiveBatches(pool);
+  },
+
+  /**
    * Get batches expiring soon with urgency classification
    * @param pool - Database connection pool
    * @param daysThreshold - Days until expiry threshold (default: 30)
@@ -142,44 +149,28 @@ export const inventoryService = {
     const movementType = adjustment > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
     const absoluteQuantity = Math.abs(adjustment);
 
-    // Transaction: Wrap adjustment in transaction for atomicity
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    // Delegate directly to StockMovementHandler which manages its own transaction.
+    // No outer transaction wrapper — the handler's BEGIN/COMMIT is the real boundary.
+    const handler = new StockMovementHandler(pool);
+    const result = await handler.processMovement({
+      productId,
+      movementType,
+      quantity: absoluteQuantity,
+      reason,
+      userId,
+      referenceType: 'ADJUSTMENT',
+    });
 
-      // Use unified stock movement handler
-      const handler = new StockMovementHandler(pool);
-      const result = await handler.processMovement({
-        productId,
-        movementType,
-        quantity: absoluteQuantity,
-        reason,
-        userId,
-        referenceType: 'ADJUSTMENT',
-      });
+    logger.info('Inventory adjusted successfully', {
+      productId,
+      adjustment,
+      reason,
+      userId,
+      movementId: result.movementId,
+      movementNumber: result.movementNumber,
+    });
 
-      await client.query('COMMIT');
-      logger.info('Inventory adjusted successfully (transaction committed)', {
-        productId,
-        adjustment,
-        reason,
-        userId,
-        movementId: result.movementId,
-        movementNumber: result.movementNumber,
-      });
-
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Inventory adjustment failed (transaction rolled back)', {
-        productId,
-        adjustment,
-        error,
-      });
-      throw error;
-    } finally {
-      client.release();
-    }
+    return result;
   },
 
   /**
@@ -204,7 +195,7 @@ export const inventoryService = {
       WHERE p.is_active = true
     `;
 
-    const params: any[] = [];
+    const params: unknown[] = [];
     if (productId) {
       query += ' AND p.id = $1';
       params.push(productId);

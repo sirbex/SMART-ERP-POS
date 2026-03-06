@@ -4,6 +4,7 @@ import { holdService } from './holdService.js';
 import { CreateHoldOrderSchema } from '../../../../shared/zod/hold-order.schema.js';
 import { authenticate } from '../../middleware/auth.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 /**
  * Hold Order Routes
@@ -28,47 +29,30 @@ export function createHoldRoutes(pool: Pool): Router {
      * - NO stock movements created
      * - Expires in 24 hours by default
      */
-    router.post('/', async (req: Request, res: Response) => {
-        try {
-            const userId = (req as any).user?.id; // From auth middleware
+    router.post('/', asyncHandler(async (req, res) => {
+        const userId = req.user?.id; // From auth middleware
 
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized - user ID required',
-                });
-            }
-
-            // Inject userId from auth context
-            const input = {
-                ...req.body,
-                userId,
-            };
-
-            const hold = await holdService.holdCart(pool, input);
-
-            res.status(201).json({
-                success: true,
-                data: hold,
-                message: `Cart held as ${hold.holdNumber}`,
-            });
-        } catch (error: any) {
-            logger.error('Failed to hold cart', { error: error.message, body: req.body });
-
-            if (error.name === 'ZodError') {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Validation failed',
-                    details: error.errors,
-                });
-            }
-
-            res.status(500).json({
+        if (!userId) {
+            return res.status(401).json({
                 success: false,
-                error: error.message || 'Failed to hold cart',
+                error: 'Unauthorized - user ID required',
             });
         }
-    });
+
+        // Inject userId from auth context
+        const input = {
+            ...req.body,
+            userId,
+        };
+
+        const hold = await holdService.holdCart(pool, input);
+
+        res.status(201).json({
+            success: true,
+            data: hold,
+            message: `Cart held as ${hold.holdNumber}`,
+        });
+    }));
 
     /**
      * GET /api/pos/hold
@@ -79,36 +63,28 @@ export function createHoldRoutes(pool: Pool): Router {
      * 
      * Returns: Array of held orders with item counts
      */
-    router.get('/', async (req: Request, res: Response) => {
-        try {
-            const userId = (req as any).user?.id;
+    router.get('/', asyncHandler(async (req, res) => {
+        const userId = req.user?.id;
 
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized',
-                });
-            }
-
-            const terminalId = req.query.terminalId as string | undefined;
-
-            const holds = await holdService.listHolds(pool, {
-                userId,
-                terminalId,
-            });
-
-            res.json({
-                success: true,
-                data: holds,
-            });
-        } catch (error: any) {
-            logger.error('Failed to list holds', { error: error.message });
-            res.status(500).json({
+        if (!userId) {
+            return res.status(401).json({
                 success: false,
-                error: error.message || 'Failed to list holds',
+                error: 'Unauthorized',
             });
         }
-    });
+
+        const terminalId = req.query.terminalId as string | undefined;
+
+        const holds = await holdService.listHolds(pool, {
+            userId,
+            terminalId,
+        });
+
+        res.json({
+            success: true,
+            data: holds,
+        });
+    }));
 
     /**
      * GET /api/pos/hold/:id
@@ -119,48 +95,25 @@ export function createHoldRoutes(pool: Pool): Router {
      * 
      * Returns: Full hold order with items
      */
-    router.get('/:id', async (req: Request, res: Response) => {
-        try {
-            const { id } = req.params;
-            const userId = (req as any).user?.id;
+    router.get('/:id', asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const userId = req.user?.id;
 
-            const hold = await holdService.getHoldById(pool, id);
+        const hold = await holdService.getHoldById(pool, id);
 
-            // Verify ownership (user can only load their own holds)
-            if (hold.userId !== userId) {
-                return res.status(403).json({
-                    success: false,
-                    error: 'Forbidden - not your hold order',
-                });
-            }
-
-            res.json({
-                success: true,
-                data: hold,
-            });
-        } catch (error: any) {
-            logger.error('Failed to get hold', { error: error.message, holdId: req.params.id });
-
-            if (error.message.includes('not found')) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Hold order not found',
-                });
-            }
-
-            if (error.message.includes('expired')) {
-                return res.status(410).json({
-                    success: false,
-                    error: 'Hold order has expired',
-                });
-            }
-
-            res.status(500).json({
+        // Verify ownership (user can only load their own holds)
+        if (hold.userId !== userId) {
+            return res.status(403).json({
                 success: false,
-                error: error.message || 'Failed to get hold',
+                error: 'Forbidden - not your hold order',
             });
         }
-    });
+
+        res.json({
+            success: true,
+            data: hold,
+        });
+    }));
 
     /**
      * DELETE /api/pos/hold/:id
@@ -171,43 +124,27 @@ export function createHoldRoutes(pool: Pool): Router {
      * 
      * Use Case: After loading hold into POS cart
      */
-    router.delete('/:id', async (req: Request, res: Response) => {
-        try {
-            const { id } = req.params;
-            const userId = (req as any).user?.id;
+    router.delete('/:id', asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const userId = req.user?.id;
 
-            // Verify ownership before deletion
-            const hold = await holdService.getHoldById(pool, id);
+        // Verify ownership before deletion
+        const hold = await holdService.getHoldById(pool, id);
 
-            if (hold.userId !== userId) {
-                return res.status(403).json({
-                    success: false,
-                    error: 'Forbidden - not your hold order',
-                });
-            }
-
-            await holdService.deleteHold(pool, id);
-
-            res.json({
-                success: true,
-                message: 'Hold order deleted',
-            });
-        } catch (error: any) {
-            logger.error('Failed to delete hold', { error: error.message, holdId: req.params.id });
-
-            if (error.message.includes('not found')) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Hold order not found',
-                });
-            }
-
-            res.status(500).json({
+        if (hold.userId !== userId) {
+            return res.status(403).json({
                 success: false,
-                error: error.message || 'Failed to delete hold',
+                error: 'Forbidden - not your hold order',
             });
         }
-    });
+
+        await holdService.deleteHold(pool, id);
+
+        res.json({
+            success: true,
+            message: 'Hold order deleted',
+        });
+    }));
 
     return router;
 }

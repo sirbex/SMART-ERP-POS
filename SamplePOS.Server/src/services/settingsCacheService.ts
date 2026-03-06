@@ -35,7 +35,7 @@ function generateKey(settingKey: string, subKey?: string): string {
  * @param settingKey - Setting identifier
  * @param subKey - Optional sub-key
  */
-export function get<T = any>(settingKey: string, subKey?: string): T | null {
+export function get<T = unknown>(settingKey: string, subKey?: string): T | null {
   const key = generateKey(settingKey, subKey);
   const value = settingsCache.get<T>(key);
 
@@ -57,7 +57,7 @@ export function get<T = any>(settingKey: string, subKey?: string): T | null {
  * @param subKey - Optional sub-key
  * @param ttl - Time to live in seconds (defaults to 10 minutes)
  */
-export function set<T = any>(
+export function set<T = unknown>(
   settingKey: string,
   value: T,
   subKey?: string,
@@ -157,7 +157,7 @@ export const SETTING_KEYS = {
  * Call on server startup for optimal performance
  * @param settingsData - Object with setting key-value pairs
  */
-export function preWarm(settingsData: Record<string, any>): void {
+export function preWarm(settingsData: Record<string, unknown>): void {
   let count = 0;
 
   for (const [key, value] of Object.entries(settingsData)) {

@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { RbacController } from './controller.js';
 import { RbacService } from './service.js';
 import { authenticate } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
 import {
   requirePermission,
   attachRbacService,
@@ -38,7 +39,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.permissions_read'),
-    (req, res) => getController(req).getPermissionCatalog(req, res)
+    asyncHandler(async (req, res) => getController(req).getPermissionCatalog(req, res))
   );
 
   router.post(
@@ -46,7 +47,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.roles_create'),
-    (req, res) => getController(req).createRole(req, res)
+    asyncHandler(async (req, res) => getController(req).createRole(req, res))
   );
 
   router.get(
@@ -54,7 +55,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.roles_read'),
-    (req, res) => getController(req).getAllRoles(req, res)
+    asyncHandler(async (req, res) => getController(req).getAllRoles(req, res))
   );
 
   router.get(
@@ -62,7 +63,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.roles_read'),
-    (req, res) => getController(req).getRole(req, res)
+    asyncHandler(async (req, res) => getController(req).getRole(req, res))
   );
 
   router.put(
@@ -70,7 +71,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.roles_update'),
-    (req, res) => getController(req).updateRole(req, res)
+    asyncHandler(async (req, res) => getController(req).updateRole(req, res))
   );
 
   router.delete(
@@ -78,7 +79,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.roles_delete'),
-    (req, res) => getController(req).deleteRole(req, res)
+    asyncHandler(async (req, res) => getController(req).deleteRole(req, res))
   );
 
   router.post(
@@ -86,7 +87,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.users_update'),
-    (req, res) => getController(req).assignRoleToUser(req, res)
+    asyncHandler(async (req, res) => getController(req).assignRoleToUser(req, res))
   );
 
   router.delete(
@@ -94,7 +95,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.users_update'),
-    (req, res) => getController(req).removeRoleFromUser(req, res)
+    asyncHandler(async (req, res) => getController(req).removeRoleFromUser(req, res))
   );
 
   router.get(
@@ -102,7 +103,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.users_read'),
-    (req, res) => getController(req).getUserRoles(req, res)
+    asyncHandler(async (req, res) => getController(req).getUserRoles(req, res))
   );
 
   router.get(
@@ -110,28 +111,28 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.users_read'),
-    (req, res) => getController(req).getUserPermissions(req, res)
+    asyncHandler(async (req, res) => getController(req).getUserPermissions(req, res))
   );
 
   router.get(
     '/me/roles',
     authenticate,
     loadAuthorizationContext,
-    (req, res) => getController(req).getMyRoles(req, res)
+    asyncHandler(async (req, res) => getController(req).getMyRoles(req, res))
   );
 
   router.get(
     '/me/permissions',
     authenticate,
     loadAuthorizationContext,
-    (req, res) => getController(req).getMyPermissions(req, res)
+    asyncHandler(async (req, res) => getController(req).getMyPermissions(req, res))
   );
 
   router.get(
     '/me/check-permission',
     authenticate,
     loadAuthorizationContext,
-    (req, res) => getController(req).checkPermission(req, res)
+    asyncHandler(async (req, res) => getController(req).checkPermission(req, res))
   );
 
   router.get(
@@ -139,7 +140,7 @@ export function createRbacRoutes(pool: Pool): Router {
     authenticate,
     loadAuthorizationContext,
     requirePermission('system.audit_read'),
-    (req, res) => getController(req).getAuditLogs(req, res)
+    asyncHandler(async (req, res) => getController(req).getAuditLogs(req, res))
   );
 
   return router;

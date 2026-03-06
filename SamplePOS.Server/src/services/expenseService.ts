@@ -3,6 +3,9 @@ import { ExpenseFilters, CreateExpenseData, UpdateExpenseData } from '../types/e
 import logger from '../utils/logger.js';
 import * as glEntryService from './glEntryService.js';
 import { BankingService } from './bankingService.js';
+import { pool as globalPool } from '../db/pool.js';
+import { UnitOfWork } from '../db/unitOfWork.js';
+import { PoolClient } from 'pg';
 
 /**
  * Get expenses with filtering and pagination
@@ -53,12 +56,17 @@ export const createExpense = async (data: CreateExpenseData) => {
       status: 'DRAFT' as const
     };
 
-    const expense = await expenseRepository.createExpense(expenseData);
+    // Wrap create + approval in a single transaction
+    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+      const created = await expenseRepository.createExpense(expenseData, client);
 
-    // Create initial approval record if needed
-    if (data.submit_for_approval && data.created_by) {
-      await expenseRepository.createApprovalRecord(expense.id, data.created_by);
-    }
+      // Create initial approval record if needed
+      if (data.submit_for_approval && data.created_by) {
+        await expenseRepository.createApprovalRecord(created.id, data.created_by, client);
+      }
+
+      return created;
+    });
 
     return expense;
   } catch (error) {
@@ -151,15 +159,20 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
       throw new Error('Cannot approve expense in current status');
     }
 
-    // Update expense status
-    const expense = await expenseRepository.updateExpense(id, {
-      status: 'APPROVED',
-      approved_by: approverId,
-      approved_at: new Date().toISOString()
-    });
+    // Wrap status update + approval record in a single transaction
+    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+      // Update expense status
+      const updated = await expenseRepository.updateExpense(id, {
+        status: 'APPROVED',
+        approved_by: approverId,
+        approved_at: new Date().toISOString()
+      }, client);
 
-    // Update approval record
-    await expenseRepository.updateApprovalRecord(id, approverId, 'APPROVED', comments);
+      // Update approval record
+      await expenseRepository.updateApprovalRecord(id, approverId, 'APPROVED', comments, client);
+
+      return updated;
+    });
 
     return expense;
   } catch (error) {
@@ -183,16 +196,21 @@ export const rejectExpense = async (id: string, rejectorId: string, reason: stri
       throw new Error('Cannot reject expense in current status');
     }
 
-    // Update expense status
-    const expense = await expenseRepository.updateExpense(id, {
-      status: 'REJECTED',
-      rejected_by: rejectorId,
-      rejected_at: new Date().toISOString(),
-      rejection_reason: reason
-    });
+    // Wrap status update + approval record in a single transaction
+    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+      // Update expense status
+      const updated = await expenseRepository.updateExpense(id, {
+        status: 'REJECTED',
+        rejected_by: rejectorId,
+        rejected_at: new Date().toISOString(),
+        rejection_reason: reason
+      }, client);
 
-    // Update approval record
-    await expenseRepository.updateApprovalRecord(id, rejectorId, 'REJECTED', reason);
+      // Update approval record
+      await expenseRepository.updateApprovalRecord(id, rejectorId, 'REJECTED', reason, client);
+
+      return updated;
+    });
 
     return expense;
   } catch (error) {
@@ -242,28 +260,33 @@ export const markExpensePaid = async (
       payment_account_id: paymentAccountId || null
     };
 
-    const updatedExpense = await expenseRepository.updateExpense(id, updateData);
+    // ============================================================
+    // CRITICAL: Wrap expense update + bank transaction in UnitOfWork
+    // Prevents PAID expense with missing bank record
+    // ============================================================
+    const updatedExpense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+      const updated = await expenseRepository.updateExpense(id, updateData, client);
 
-    // ============================================================
-    // GL POSTING: Handled by database trigger (trg_post_expense_to_ledger)
-    // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
-    // This ensures atomicity - if expense exists, GL entry exists
-    // DO NOT add glEntryService calls here - it causes duplicate entries
-    // ============================================================
+      // ============================================================
+      // GL POSTING: Handled by database trigger (trg_post_expense_to_ledger)
+      // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
+      // This ensures atomicity - if expense exists, GL entry exists
+      // DO NOT add glEntryService calls here - it causes duplicate entries
+      // ============================================================
 
-    // ============================================================
-    // BANKING INTEGRATION: Create bank transaction for paid expense
-    // CRITICAL: Must be synchronous to prevent PAID expense without bank record
-    // ============================================================
-    if (updatedExpense && existingExpense.paymentMethod !== 'CASH') {
-      try {
+      // ============================================================
+      // BANKING INTEGRATION: Create bank transaction for paid expense
+      // Now inside the same transaction — if bank call fails, expense
+      // update is rolled back, preventing orphaned PAID status.
+      // ============================================================
+      if (updated && existingExpense.paymentMethod !== 'CASH') {
         const bankTxn = await BankingService.createFromExpense(
           id,
           existingExpense.expenseNumber,
           existingExpense.amount,
           existingExpense.paymentMethod || 'BANK_TRANSFER',
           updateData.paid_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-          existingExpense.categoryId || undefined // Use expense category as contra account if available
+          existingExpense.categoryId || undefined
         );
         if (bankTxn) {
           logger.info('Bank transaction created for expense', {
@@ -273,15 +296,10 @@ export const markExpensePaid = async (
             amount: existingExpense.amount,
           });
         }
-      } catch (bankError: any) {
-        // CRITICAL: Rethrow to prevent PAID expense without bank transaction
-        logger.error('Failed to create bank transaction for expense', {
-          expenseId: id,
-          error: bankError.message,
-        });
-        throw new Error(`Expense ${existingExpense.expenseNumber} marked paid but bank transaction failed: ${bankError.message}`);
       }
-    }
+
+      return updated;
+    });
 
     return updatedExpense;
   } catch (error) {
@@ -402,13 +420,18 @@ export const submitForApproval = async (id: string, userId: string) => {
       throw new Error('Cannot submit expense in current status for approval');
     }
 
-    // Update expense status
-    const expense = await expenseRepository.updateExpense(id, {
-      status: 'PENDING_APPROVAL'
-    });
+    // Wrap status update + approval record creation in a single transaction
+    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+      // Update expense status
+      const updated = await expenseRepository.updateExpense(id, {
+        status: 'PENDING_APPROVAL'
+      }, client);
 
-    // Create approval record
-    await expenseRepository.createApprovalRecord(id, userId);
+      // Create approval record
+      await expenseRepository.createApprovalRecord(id, userId, client);
+
+      return updated;
+    });
 
     return expense;
   } catch (error) {
@@ -492,7 +515,7 @@ export const getExpenseSummary = async (filters: { startDate?: string; endDate?:
 /**
  * Update expense category
  */
-export const updateExpenseCategory = async (id: string, updateData: any, userId: string) => {
+export const updateExpenseCategory = async (id: string, updateData: Record<string, unknown>, userId: string) => {
   try {
     const category = await expenseRepository.updateExpenseCategory(id, updateData);
 

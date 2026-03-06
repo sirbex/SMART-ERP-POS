@@ -54,7 +54,7 @@ export class DistributedCacheService {
      */
     async set(
         key: string,
-        value: any,
+        value: unknown,
         options: {
             ttl?: number;
             tags?: string[];

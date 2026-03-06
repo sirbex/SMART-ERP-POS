@@ -41,7 +41,7 @@ export const stockCountRepository = {
    * Get stock count by ID with lock (FOR UPDATE)
    */
   async getStockCountByIdForUpdate(
-    client: any,
+    client: PoolClient,
     id: string
   ): Promise<StockCountDbRow | null> {
     const result = await client.query(
@@ -67,7 +67,7 @@ export const stockCountRepository = {
     const offset = (page - 1) * limit;
 
     const whereClauses: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (state) {
@@ -104,7 +104,7 @@ export const stockCountRepository = {
    * Update stock count state
    */
   async updateStockCountState(
-    client: any,
+    client: PoolClient,
     id: string,
     state: string,
     validatedById?: string | null
@@ -125,7 +125,7 @@ export const stockCountRepository = {
    * Create stock count line
    */
   async createStockCountLine(
-    client: any,
+    client: PoolClient,
     data: {
       stockCountId: string;
       productId: string;
@@ -160,7 +160,7 @@ export const stockCountRepository = {
    * Update stock count line (counted quantity)
    */
   async updateStockCountLine(
-    client: any,
+    client: PoolClient,
     lineId: string,
     data: {
       countedQtyBase?: number | null;
@@ -218,7 +218,7 @@ export const stockCountRepository = {
     stockCountId: string,
     page: number = 1,
     limit: number = 100
-  ): Promise<{ lines: any[]; total: number }> {
+  ): Promise<{ lines: Record<string, unknown>[]; total: number }> {
     const offset = (page - 1) * limit;
 
     const countResult = await pool.query(
@@ -253,7 +253,7 @@ export const stockCountRepository = {
    * Find stock count line by product and batch
    */
   async findStockCountLine(
-    client: any,
+    client: PoolClient,
     stockCountId: string,
     productId: string,
     batchId?: string | null

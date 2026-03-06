@@ -11,7 +11,7 @@
  * - Enrich audit entries with context
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import {
   AuditLog,
   CreateAuditEntry,
@@ -33,7 +33,7 @@ import * as auditRepo from './auditRepository';
 /**
  * Calculate diff between old and new values
  */
-function calculateChanges(oldValues: Record<string, any>, newValues: Record<string, any>): ChangesDiff {
+function calculateChanges(oldValues: Record<string, unknown>, newValues: Record<string, unknown>): ChangesDiff {
   const changes: ChangesDiff = {};
 
   // Check all keys from both objects
@@ -62,7 +62,7 @@ function calculateChanges(oldValues: Record<string, any>, newValues: Record<stri
  * If audit logging fails, log error but don't break the operation
  */
 async function safeLogAudit(
-  pool: Pool,
+  pool: Pool | PoolClient,
   data: CreateAuditEntry
 ): Promise<AuditLog | null> {
   try {
@@ -83,7 +83,7 @@ async function safeLogAudit(
  * Generic audit action logging
  */
 export async function logAction(
-  pool: Pool,
+  pool: Pool | PoolClient,
   data: Omit<CreateAuditEntry, 'changes' | 'userId' | 'userName' | 'userRole' | 'sessionId' | 'ipAddress' | 'userAgent' | 'requestId'>,
   context: AuditContext
 ): Promise<AuditLog | null> {
@@ -120,7 +120,7 @@ export async function logSaleCreated(
   pool: Pool,
   saleId: string,
   saleNumber: string,
-  saleData: any,
+  saleData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -130,7 +130,7 @@ export async function logSaleCreated(
       entityId: saleId,
       entityNumber: saleNumber,
       action: 'CREATE',
-      actionDetails: `Sale ${saleNumber} created with ${saleData.itemCount || 0} items, total ${saleData.totalAmount}`,
+      actionDetails: `Sale ${saleNumber} created with ${(saleData.itemCount as number) || 0} items, total ${saleData.totalAmount as number}`,
       newValues: saleData,
       severity: 'INFO',
       category: 'FINANCIAL',
@@ -148,7 +148,7 @@ export async function logSaleVoided(
   saleId: string,
   saleNumber: string,
   reason: string,
-  originalSaleData: any,
+  originalSaleData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -177,8 +177,8 @@ export async function logSaleUpdated(
   pool: Pool,
   saleId: string,
   saleNumber: string,
-  oldData: any,
-  newData: any,
+  oldData: Record<string, unknown>,
+  newData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -210,7 +210,7 @@ export async function logPurchaseOrderCreated(
   pool: Pool,
   poId: string,
   poNumber: string,
-  poData: any,
+  poData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -220,7 +220,7 @@ export async function logPurchaseOrderCreated(
       entityId: poId,
       entityNumber: poNumber,
       action: 'CREATE',
-      actionDetails: `Purchase Order ${poNumber} created with ${poData.itemCount || 0} items, total ${poData.totalAmount}`,
+      actionDetails: `Purchase Order ${poNumber} created with ${(poData.itemCount as number) || 0} items, total ${poData.totalAmount as number}`,
       newValues: poData,
       severity: 'INFO',
       category: 'FINANCIAL',
@@ -270,7 +270,7 @@ export async function logGoodsReceiptCreated(
   pool: Pool,
   grId: string,
   grNumber: string,
-  grData: any,
+  grData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -280,7 +280,7 @@ export async function logGoodsReceiptCreated(
       entityId: grId,
       entityNumber: grNumber,
       action: 'CREATE',
-      actionDetails: `Goods Receipt ${grNumber} created with ${grData.itemCount || 0} items, total ${grData.totalAmount}`,
+      actionDetails: `Goods Receipt ${grNumber} created with ${(grData.itemCount as number) || 0} items, total ${grData.totalAmount as number}`,
       newValues: grData,
       severity: 'INFO',
       category: 'INVENTORY',
@@ -297,7 +297,7 @@ export async function logGoodsReceiptFinalized(
   pool: Pool,
   grId: string,
   grNumber: string,
-  grData: any,
+  grData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -307,7 +307,7 @@ export async function logGoodsReceiptFinalized(
       entityId: grId,
       entityNumber: grNumber,
       action: 'FINALIZE',
-      actionDetails: `Goods Receipt ${grNumber} finalized - ${grData.itemCount || 0} items added to inventory`,
+      actionDetails: `Goods Receipt ${grNumber} finalized - ${(grData.itemCount as number) || 0} items added to inventory`,
       newValues: grData,
       severity: 'INFO',
       category: 'INVENTORY',
@@ -327,7 +327,7 @@ export async function logGoodsReceiptFinalized(
 export async function logCustomerCreated(
   pool: Pool,
   customerId: string,
-  customerData: any,
+  customerData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -335,9 +335,9 @@ export async function logCustomerCreated(
     {
       entityType: 'CUSTOMER',
       entityId: customerId,
-      entityNumber: customerData.customerNumber,
+      entityNumber: customerData.customerNumber as string,
       action: 'CREATE',
-      actionDetails: `Customer ${customerData.name} created`,
+      actionDetails: `Customer ${customerData.name as string} created`,
       newValues: customerData,
       severity: 'INFO',
       category: 'MASTER_DATA',
@@ -353,8 +353,8 @@ export async function logCustomerCreated(
 export async function logCustomerUpdated(
   pool: Pool,
   customerId: string,
-  oldData: any,
-  newData: any,
+  oldData: Record<string, unknown>,
+  newData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -362,9 +362,9 @@ export async function logCustomerUpdated(
     {
       entityType: 'CUSTOMER',
       entityId: customerId,
-      entityNumber: newData.customerNumber,
+      entityNumber: newData.customerNumber as string,
       action: 'UPDATE',
-      actionDetails: `Customer ${newData.name} updated`,
+      actionDetails: `Customer ${newData.name as string} updated`,
       oldValues: oldData,
       newValues: newData,
       severity: 'INFO',
@@ -385,7 +385,7 @@ export async function logCustomerUpdated(
 export async function logProductCreated(
   pool: Pool,
   productId: string,
-  productData: any,
+  productData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -393,9 +393,9 @@ export async function logProductCreated(
     {
       entityType: 'PRODUCT',
       entityId: productId,
-      entityNumber: productData.sku || productData.productCode,
+      entityNumber: (productData.sku || productData.productCode) as string,
       action: 'CREATE',
-      actionDetails: `Product ${productData.name} created (SKU: ${productData.sku || productData.productCode})`,
+      actionDetails: `Product ${productData.name as string} created (SKU: ${(productData.sku || productData.productCode) as string})`,
       newValues: productData,
       severity: 'INFO',
       category: 'MASTER_DATA',
@@ -411,8 +411,8 @@ export async function logProductCreated(
 export async function logProductUpdated(
   pool: Pool,
   productId: string,
-  oldData: any,
-  newData: any,
+  oldData: Record<string, unknown>,
+  newData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -420,9 +420,9 @@ export async function logProductUpdated(
     {
       entityType: 'PRODUCT',
       entityId: productId,
-      entityNumber: newData.sku || newData.productCode,
+      entityNumber: (newData.sku || newData.productCode) as string,
       action: 'UPDATE',
-      actionDetails: `Product ${newData.name} updated`,
+      actionDetails: `Product ${newData.name as string} updated`,
       oldValues: oldData,
       newValues: newData,
       severity: 'INFO',
@@ -443,7 +443,7 @@ export async function logProductUpdated(
 export async function logSupplierCreated(
   pool: Pool,
   supplierId: string,
-  supplierData: any,
+  supplierData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -451,9 +451,9 @@ export async function logSupplierCreated(
     {
       entityType: 'SUPPLIER',
       entityId: supplierId,
-      entityNumber: supplierData.supplierCode,
+      entityNumber: supplierData.supplierCode as string,
       action: 'CREATE',
-      actionDetails: `Supplier ${supplierData.name} created`,
+      actionDetails: `Supplier ${supplierData.name as string} created`,
       newValues: supplierData,
       severity: 'INFO',
       category: 'MASTER_DATA',
@@ -471,9 +471,9 @@ export async function logSupplierCreated(
  * Log payment recorded
  */
 export async function logPaymentRecorded(
-  pool: Pool,
+  pool: Pool | PoolClient,
   paymentId: string,
-  paymentData: any,
+  paymentData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -482,12 +482,12 @@ export async function logPaymentRecorded(
       entityType: 'PAYMENT',
       entityId: paymentId,
       action: 'CREATE',
-      actionDetails: `Payment recorded: ${paymentData.paymentMethod} ${paymentData.amount}`,
+      actionDetails: `Payment recorded: ${paymentData.paymentMethod as string} ${paymentData.amount as number}`,
       newValues: paymentData,
       severity: 'INFO',
       category: 'FINANCIAL',
       tags: ['payment', 'create'],
-      referenceNumber: paymentData.referenceNumber,
+      referenceNumber: paymentData.referenceNumber as string,
     },
     context
   );
@@ -499,8 +499,8 @@ export async function logPaymentRecorded(
 export async function logPaymentRefunded(
   pool: Pool,
   paymentId: string,
-  refundData: any,
-  originalPaymentData: any,
+  refundData: Record<string, unknown>,
+  originalPaymentData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -509,13 +509,13 @@ export async function logPaymentRefunded(
       entityType: 'PAYMENT',
       entityId: paymentId,
       action: 'REFUND',
-      actionDetails: `Payment refunded: ${refundData.refundMethod} ${refundData.refundAmount}`,
+      actionDetails: `Payment refunded: ${refundData.refundMethod as string} ${refundData.refundAmount as number}`,
       oldValues: originalPaymentData,
       newValues: refundData,
       severity: 'WARNING',
       category: 'FINANCIAL',
       tags: ['payment', 'refund'],
-      notes: refundData.reason,
+      notes: refundData.reason as string,
     },
     context
   );
@@ -532,7 +532,7 @@ export async function logInvoiceCreated(
   pool: Pool,
   invoiceId: string,
   invoiceNumber: string,
-  invoiceData: any,
+  invoiceData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -542,7 +542,7 @@ export async function logInvoiceCreated(
       entityId: invoiceId,
       entityNumber: invoiceNumber,
       action: 'CREATE',
-      actionDetails: `Invoice ${invoiceNumber} created for customer ${invoiceData.customerName}`,
+      actionDetails: `Invoice ${invoiceNumber} created for customer ${invoiceData.customerName as string}`,
       newValues: invoiceData,
       severity: 'INFO',
       category: 'FINANCIAL',
@@ -559,7 +559,7 @@ export async function logInvoicePayment(
   pool: Pool,
   invoiceId: string,
   invoiceNumber: string,
-  paymentData: any,
+  paymentData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -569,7 +569,7 @@ export async function logInvoicePayment(
       entityId: invoiceId,
       entityNumber: invoiceNumber,
       action: 'UPDATE',
-      actionDetails: `Payment ${paymentData.amount} applied to invoice ${invoiceNumber}`,
+      actionDetails: `Payment ${paymentData.amount as number} applied to invoice ${invoiceNumber}`,
       newValues: paymentData,
       severity: 'INFO',
       category: 'FINANCIAL',
@@ -590,7 +590,7 @@ export async function logInventoryAdjustment(
   pool: Pool,
   adjustmentId: string,
   adjustmentNumber: string,
-  adjustmentData: any,
+  adjustmentData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -600,12 +600,12 @@ export async function logInventoryAdjustment(
       entityId: adjustmentId,
       entityNumber: adjustmentNumber,
       action: 'ADJUST_INVENTORY',
-      actionDetails: `Inventory adjusted: ${adjustmentData.reason}`,
+      actionDetails: `Inventory adjusted: ${adjustmentData.reason as string}`,
       newValues: adjustmentData,
       severity: 'WARNING',
       category: 'INVENTORY',
       tags: ['inventory', 'adjustment'],
-      notes: adjustmentData.notes,
+      notes: adjustmentData.notes as string,
     },
     context
   );
@@ -1029,7 +1029,7 @@ export async function logCashDrawerOpened(
  */
 export async function logShiftClosed(
   pool: Pool,
-  shiftData: any,
+  shiftData: Record<string, unknown>,
   context: AuditContext
 ): Promise<AuditLog | null> {
   return await logAction(
@@ -1085,7 +1085,7 @@ export async function recordFailedTransaction(
 export async function getAuditLogs(
   pool: Pool,
   filters: AuditLogQuery
-): Promise<{ data: AuditLog[]; pagination: any }> {
+): Promise<{ data: AuditLog[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
   const { data, total } = await auditRepo.getAuditLogs(pool, filters);
 
   const page = filters.page || 1;

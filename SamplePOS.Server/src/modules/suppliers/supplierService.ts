@@ -4,6 +4,7 @@
 import { Pool } from 'pg';
 import * as supplierRepository from './supplierRepository.js';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 /**
  * Get all suppliers with pagination
@@ -111,33 +112,20 @@ export async function createSupplier(
     paymentTerms?: string;
   }
 ) {
-  const client = await pool.connect();
+  // BR-PO-001: Validate supplier data
+  if (!data.name || data.name.trim().length < 2) {
+    throw new Error('Supplier name must be at least 2 characters');
+  }
 
-  try {
-    await client.query('BEGIN');
+  logger.info('BR-PO-001: Supplier data validation passed', {
+    name: data.name,
+  });
 
-    // BR-PO-001: Validate supplier data
-    if (!data.name || data.name.trim().length < 2) {
-      throw new Error('Supplier name must be at least 2 characters');
-    }
-
-    logger.info('BR-PO-001: Supplier data validation passed', {
-      name: data.name,
-    });
-
+  return UnitOfWork.run(pool, async (client) => {
     const supplier = await supplierRepository.create(client, data);
-
-    await client.query('COMMIT');
-
     logger.info('Supplier created successfully', { supplierId: supplier.id });
     return supplier;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to create supplier', { error });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -156,11 +144,7 @@ export async function updateSupplier(
     paymentTerms: string;
   }>
 ) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
+  return UnitOfWork.run(pool, async (client) => {
     // Check if supplier exists
     const existing = await supplierRepository.findById(pool, id);
     if (!existing) {
@@ -173,18 +157,9 @@ export async function updateSupplier(
     }
 
     const supplier = await supplierRepository.update(client, id, data);
-
-    await client.query('COMMIT');
-
     logger.info('Supplier updated successfully', { supplierId: id });
     return supplier;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to update supplier', { error });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -192,11 +167,7 @@ export async function updateSupplier(
  * @throws Error if supplier not found or has active purchase orders
  */
 export async function deleteSupplier(pool: Pool, id: string) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
+  return UnitOfWork.run(pool, async (client) => {
     // Check if supplier exists
     const existing = await supplierRepository.findById(pool, id);
     if (!existing) {
@@ -210,16 +181,7 @@ export async function deleteSupplier(pool: Pool, id: string) {
     }
 
     const success = await supplierRepository.softDeleteSupplier(client, id);
-
-    await client.query('COMMIT');
-
     logger.info('Supplier deleted successfully', { supplierId: id });
     return success;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Failed to delete supplier', { error });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }

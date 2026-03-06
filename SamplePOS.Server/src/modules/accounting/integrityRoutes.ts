@@ -16,6 +16,7 @@
 import { Router, Request, Response } from 'express';
 import { glValidationService } from '../../services/glValidationService.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const router = Router();
 
@@ -41,7 +42,7 @@ function isValidUUID(id: string): boolean {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     // Log full error internally, return safe message externally
-    return error.message.includes('ECONNREFUSED')
+    return (error instanceof Error ? error.message : String(error)).includes('ECONNREFUSED')
       ? 'Database connection error'
       : 'Internal server error';
   }
@@ -129,7 +130,7 @@ router.get('/', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error('Integrity check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -162,7 +163,7 @@ router.get('/ar', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error('AR reconciliation check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -195,7 +196,7 @@ router.get('/ap', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error('AP reconciliation check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -232,7 +233,7 @@ router.get('/inventory', async (_req: Request, res: Response) => {
   } catch (error) {
     logger.error('Inventory reconciliation check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -244,8 +245,7 @@ router.get('/inventory', async (_req: Request, res: Response) => {
  * 
  * Checks that a sale has proper journal entries with correct amounts.
  */
-router.post('/validate/sale/:id', async (req: Request, res: Response) => {
-  try {
+router.post('/validate/sale/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     // Validate UUID format - prevents SQL injection and invalid lookups
@@ -268,15 +268,7 @@ router.post('/validate/sale/:id', async (req: Request, res: Response) => {
       errors: result.errors ?? [],
       warnings: result.warnings ?? []
     });
-  } catch (error) {
-    logger.error('Sale validation failed', {
-      saleId: req.params.id,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    sendError(res, 500, getErrorMessage(error));
-  }
-});
+}));
 
 /**
  * POST /api/accounting/integrity/validate/payment/:id
@@ -284,8 +276,7 @@ router.post('/validate/sale/:id', async (req: Request, res: Response) => {
  * 
  * Checks that a payment has proper journal entries with correct amounts.
  */
-router.post('/validate/payment/:id', async (req: Request, res: Response) => {
-  try {
+router.post('/validate/payment/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     // Validate UUID format - prevents SQL injection and invalid lookups
@@ -308,14 +299,6 @@ router.post('/validate/payment/:id', async (req: Request, res: Response) => {
       errors: result.errors ?? [],
       warnings: result.warnings ?? []
     });
-  } catch (error) {
-    logger.error('Payment validation failed', {
-      paymentId: req.params.id,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    sendError(res, 500, getErrorMessage(error));
-  }
-});
+}));
 
 export default router;

@@ -30,7 +30,7 @@ export const holdService = {
      * 4. NO stock movements
      * 5. NO payment processing
      */
-    async holdCart(pool: Pool, input: any) {
+    async holdCart(pool: Pool, input: Record<string, unknown>) {
         // Validate input
         const validated = CreateHoldOrderSchema.parse(input);
 
@@ -89,7 +89,7 @@ export const holdService = {
 
         const hold = await holdRepository.createHoldOrder(pool, holdData, items);
 
-        return this.getHoldById(pool, hold.id);
+        return this.getHoldById(pool, hold.id as string);
     },
 
     /**
@@ -104,24 +104,27 @@ export const holdService = {
             includeExpired: false, // Don't show expired holds
         });
 
-        return holds.map((hold) => ({
-            id: hold.id,
-            holdNumber: hold.hold_number,
-            terminalId: hold.terminal_id,
-            userId: hold.user_id,
-            customerId: hold.customer_id,
-            customerName: hold.customer_name,
-            subtotal: parseFloat(hold.subtotal || '0'),
-            taxAmount: parseFloat(hold.tax_amount || '0'),
-            discountAmount: parseFloat(hold.discount_amount || '0'),
-            totalAmount: parseFloat(hold.total_amount || '0'),
-            holdReason: hold.hold_reason,
-            notes: hold.notes,
-            metadata: hold.metadata,
-            createdAt: hold.created_at,
-            expiresAt: hold.expires_at,
-            itemCount: parseInt(hold.item_count || '0', 10),
-        }));
+        return holds.map((raw) => {
+            const hold = raw as Record<string, string | number | boolean | null | undefined>;
+            return {
+                id: hold.id as string,
+                holdNumber: hold.hold_number as string,
+                terminalId: hold.terminal_id as string,
+                userId: hold.user_id as string,
+                customerId: hold.customer_id as string | null,
+                customerName: hold.customer_name as string | null,
+                subtotal: parseFloat(String(hold.subtotal || 0)),
+                taxAmount: parseFloat(String(hold.tax_amount || 0)),
+                discountAmount: parseFloat(String(hold.discount_amount || 0)),
+                totalAmount: parseFloat(String(hold.total_amount || 0)),
+                holdReason: hold.hold_reason as string | null,
+                notes: hold.notes as string | null,
+                metadata: hold.metadata,
+                createdAt: hold.created_at as string,
+                expiresAt: hold.expires_at as string | null,
+                itemCount: parseInt(String(hold.item_count || 0), 10),
+            }
+        });
     },
 
     /**
@@ -135,55 +138,57 @@ export const holdService = {
      * Next Steps: Load into POS cart + delete hold
      */
     async getHoldById(pool: Pool, holdId: string) {
-        const hold = await holdRepository.getHoldOrderById(pool, holdId);
+        const raw = await holdRepository.getHoldOrderById(pool, holdId);
 
-        if (!hold) {
+        if (!raw) {
             throw new Error(`Hold order ${holdId} not found`);
         }
 
+        const hold = raw as Record<string, string | number | boolean | null | undefined | Record<string, unknown>[]>;
+
         // Check expiration
-        if (hold.expires_at && new Date(hold.expires_at) < new Date()) {
+        if (hold.expires_at && new Date(String(hold.expires_at)) < new Date()) {
             throw new Error('Hold order has expired');
         }
 
         return {
-            id: hold.id,
-            holdNumber: hold.hold_number,
-            terminalId: hold.terminal_id,
-            userId: hold.user_id,
-            customerId: hold.customer_id,
-            customerName: hold.customer_name,
-            subtotal: parseFloat(hold.subtotal || '0'),
-            taxAmount: parseFloat(hold.tax_amount || '0'),
-            discountAmount: parseFloat(hold.discount_amount || '0'),
-            totalAmount: parseFloat(hold.total_amount || '0'),
-            holdReason: hold.hold_reason,
-            notes: hold.notes,
+            id: hold.id as string,
+            holdNumber: hold.hold_number as string,
+            terminalId: hold.terminal_id as string,
+            userId: hold.user_id as string,
+            customerId: hold.customer_id as string | null,
+            customerName: hold.customer_name as string | null,
+            subtotal: parseFloat(String(hold.subtotal || 0)),
+            taxAmount: parseFloat(String(hold.tax_amount || 0)),
+            discountAmount: parseFloat(String(hold.discount_amount || 0)),
+            totalAmount: parseFloat(String(hold.total_amount || 0)),
+            holdReason: hold.hold_reason as string | null,
+            notes: hold.notes as string | null,
             metadata: hold.metadata,
-            createdAt: hold.created_at,
-            expiresAt: hold.expires_at,
-            items: hold.items.map((item: any) => ({
-                id: item.id,
-                productId: item.product_id,
-                productName: item.product_name,
-                productSku: item.product_sku,
-                productType: item.product_type,
-                quantity: parseFloat(item.quantity || '0'),
-                unitPrice: parseFloat(item.unit_price || '0'),
-                costPrice: parseFloat(item.cost_price || '0'),
-                subtotal: parseFloat(item.subtotal || '0'),
-                isTaxable: item.is_taxable,
-                taxRate: parseFloat(item.tax_rate || '0'),
-                taxAmount: parseFloat(item.tax_amount || '0'),
-                discountType: item.discount_type,
-                discountValue: item.discount_value ? parseFloat(item.discount_value) : null,
-                discountAmount: parseFloat(item.discount_amount || '0'),
-                discountReason: item.discount_reason,
-                uomId: item.uom_id,
-                uomName: item.uom_name,
-                uomConversionFactor: item.uom_conversion_factor ? parseFloat(item.uom_conversion_factor) : null,
+            createdAt: hold.created_at as string,
+            expiresAt: hold.expires_at as string | null,
+            items: (hold.items as Record<string, unknown>[]).map((item) => ({
+                id: item.id as string,
+                productId: item.product_id as string,
+                productName: item.product_name as string,
+                productSku: item.product_sku as string | null,
+                productType: item.product_type as string,
+                quantity: parseFloat(String(item.quantity || 0)),
+                unitPrice: parseFloat(String(item.unit_price || 0)),
+                costPrice: parseFloat(String(item.cost_price || 0)),
+                subtotal: parseFloat(String(item.subtotal || 0)),
+                isTaxable: item.is_taxable as boolean,
+                taxRate: parseFloat(String(item.tax_rate || 0)),
+                taxAmount: parseFloat(String(item.tax_amount || 0)),
+                discountType: item.discount_type as string | null,
+                discountValue: item.discount_value ? parseFloat(String(item.discount_value)) : null,
+                discountAmount: parseFloat(String(item.discount_amount || 0)),
+                discountReason: item.discount_reason as string | null,
+                uomId: item.uom_id as string | null,
+                uomName: item.uom_name as string | null,
+                uomConversionFactor: item.uom_conversion_factor ? parseFloat(String(item.uom_conversion_factor)) : null,
                 metadata: item.metadata,
-                lineOrder: item.line_order,
+                lineOrder: item.line_order as number,
             })),
         };
     },

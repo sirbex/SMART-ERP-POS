@@ -8,7 +8,7 @@ const router = Router();
 interface HealthCheckResult {
   service: string;
   status: 'healthy' | 'unhealthy';
-  details?: any;
+  details?: unknown;
   timestamp: string;
   responseTime?: number;
 }
@@ -216,9 +216,9 @@ router.get('/legacy', async (req: Request, res: Response) => {
       success: true,
       data: result,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     result.status = 'unhealthy';
-    result.warnings.push(`Database error: ${error.message}`);
+    result.warnings.push(`Database error: ${(error instanceof Error ? error.message : String(error))}`);
 
     res.status(503).json({
       success: false,
@@ -332,7 +332,7 @@ async function checkDatabaseSchema(): Promise<HealthCheckResult> {
 
   try {
     let hasIssues = false;
-    const details: any = {
+    const details: { tables: Record<string, boolean>; columns: Record<string, boolean>; integrityWarnings: string[] } = {
       tables: {},
       columns: {},
       integrityWarnings: []

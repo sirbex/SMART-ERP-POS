@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 
@@ -33,7 +33,7 @@ export class InventoryBusinessRules {
    * BR-INV-001: Cannot sell more than available stock
    */
   static async validateStockAvailability(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     requestedQuantity: number,
     batchId?: string
@@ -102,7 +102,7 @@ export class InventoryBusinessRules {
    * BR-INV-004: Cannot modify finalized goods receipts
    */
   static async validateGoodsReceiptStatus(
-    pool: Pool,
+    pool: Pool | PoolClient,
     grId: string,
     allowedStatuses: string[]
   ): Promise<void> {
@@ -143,7 +143,7 @@ export class InventoryBusinessRules {
    * BR-INV-006: FEFO - Must use oldest expiring batch first
    */
   static async validateFEFOCompliance(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     selectedBatchId: string
   ): Promise<void> {
@@ -228,7 +228,7 @@ export class InventoryBusinessRules {
    * Run migration then uncomment validation logic below.
    */
   static async validateMaxStockLevel(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     additionalQuantity: number
   ): Promise<void> {
@@ -271,7 +271,7 @@ export class InventoryBusinessRules {
    * BR-INV-010: Batch expiry must be later than existing stock
    */
   static async validateBatchExpirySequence(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     newExpiryDate: Date | null
   ): Promise<void> {
@@ -371,7 +371,7 @@ export class SalesBusinessRules {
   /**
    * BR-SAL-002: Sale must have at least one item
    */
-  static validateSaleItems(items: any[]): void {
+  static validateSaleItems(items: readonly unknown[]): void {
     if (!items || items.length === 0) {
       throw new BusinessRuleViolation(
         'BR-SAL-002',
@@ -385,7 +385,7 @@ export class SalesBusinessRules {
    * BR-SAL-003: Credit sales require customer with credit limit
    */
   static async validateCreditSale(
-    pool: Pool,
+    pool: Pool | PoolClient,
     customerId: string | null,
     totalAmount: number,
     paymentMethod: string
@@ -433,7 +433,7 @@ export class SalesBusinessRules {
    * BR-SAL-004: Selling price must be >= minimum price (if set)
    */
   static async validateMinimumPrice(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     sellingPrice: number
   ): Promise<void> {
@@ -454,7 +454,7 @@ export class SalesBusinessRules {
   /**
    * BR-SAL-005: Cannot create sale for inactive product
    */
-  static async validateProductActive(pool: Pool, productId: string): Promise<void> {
+  static async validateProductActive(pool: Pool | PoolClient, productId: string): Promise<void> {
     const result = await pool.query('SELECT is_active FROM products WHERE id = $1', [productId]);
 
     if (result.rows.length === 0) {
@@ -478,7 +478,7 @@ export class SalesBusinessRules {
    * BR-SAL-006: Discount cannot exceed maximum allowed
    */
   static async validateDiscount(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     sellingPrice: number,
     originalPrice: number
@@ -533,7 +533,7 @@ export class PurchaseOrderBusinessRules {
   /**
    * BR-PO-001: Cannot approve PO without active supplier
    */
-  static async validateSupplierExists(pool: Pool, supplierId: string): Promise<void> {
+  static async validateSupplierExists(pool: Pool | PoolClient, supplierId: string): Promise<void> {
     const result = await pool.query(
       'SELECT "Id", "CompanyName", "IsActive" FROM suppliers WHERE "Id" = $1',
       [supplierId]
@@ -560,7 +560,7 @@ export class PurchaseOrderBusinessRules {
   /**
    * BR-PO-002: PO must have at least one item
    */
-  static validatePOItems(items: any[]): void {
+  static validatePOItems(items: readonly unknown[]): void {
     if (!items || items.length === 0) {
       throw new BusinessRuleViolation(
         'BR-PO-002',
@@ -587,7 +587,7 @@ export class PurchaseOrderBusinessRules {
    * BR-PO-004: Cannot modify completed or cancelled PO
    */
   static async validatePOStatus(
-    pool: Pool,
+    pool: Pool | PoolClient,
     poId: string,
     allowedStatuses: string[]
   ): Promise<void> {
@@ -703,7 +703,7 @@ export class PurchaseOrderBusinessRules {
    * BR-PO-009: Duplicate PO detection (same supplier + similar total within 24 hours)
    */
   static async validateDuplicatePO(
-    pool: Pool,
+    pool: Pool | PoolClient,
     supplierId: string,
     totalAmount: number,
     createdBy: string,
@@ -750,7 +750,7 @@ export class PurchaseOrderBusinessRules {
    * BR-PO-010: Batch number uniqueness per product
    */
   static async validateBatchNumber(
-    pool: Pool,
+    pool: Pool | PoolClient,
     productId: string,
     batchNumber: string
   ): Promise<void> {
@@ -795,7 +795,7 @@ export class PurchaseOrderBusinessRules {
    * Run migration then uncomment validation logic below.
    */
   static async validateLeadTime(
-    pool: Pool,
+    pool: Pool | PoolClient,
     supplierId: string,
     orderDate: Date,
     expectedDate: Date | null
@@ -842,7 +842,7 @@ export class PurchaseOrderBusinessRules {
    * Run migration then uncomment validation logic below.
    */
   static async validateMinimumOrderValue(
-    pool: Pool,
+    pool: Pool | PoolClient,
     supplierId: string,
     totalAmount: number
   ): Promise<void> {

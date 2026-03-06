@@ -1,127 +1,76 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { systemSettingsService } from './systemSettingsService.js';
 import { pool as globalPool } from '../../db/pool.js';
-import logger from '../../utils/logger.js';
+
+// Async wrapper — catches thrown errors and forwards to Express error handler
+function asyncHandler(
+    fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
+) {
+    return (req: Request, res: Response, next: NextFunction) => {
+        Promise.resolve(fn(req, res, next)).catch(next);
+    };
+}
 
 export const systemSettingsController = {
     /**
      * GET /api/system-settings
      * Get system settings
      */
-    async getSettings(req: Request, res: Response) {
-        try {
-            const pool = req.tenantPool || globalPool;
-            const settings = await systemSettingsService.getSettings(pool);
-
-            res.json({
-                success: true,
-                data: settings,
-            });
-        } catch (error: any) {
-            logger.error('Error fetching system settings', { error: error.message });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch system settings',
-            });
-        }
-    },
+    getSettings: asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const settings = await systemSettingsService.getSettings(pool);
+        res.json({ success: true, data: settings });
+    }),
 
     /**
      * PATCH /api/system-settings
      * Update system settings
      */
-    async updateSettings(req: Request, res: Response) {
-        try {
-            const pool = req.tenantPool || globalPool;
-            const userId = (req as any).user?.id;
-            const updates = req.body;
+    updateSettings: asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const userId = req.user?.id;
+        const updates = req.body;
 
-            const settings = await systemSettingsService.updateSettings(
-                pool,
-                updates,
-                userId
-            );
+        const settings = await systemSettingsService.updateSettings(
+            pool,
+            updates,
+            userId
+        );
 
-            res.json({
-                success: true,
-                data: settings,
-                message: 'System settings updated successfully',
-            });
-        } catch (error: any) {
-            logger.error('Error updating system settings', {
-                error: error.message,
-                userId: (req as any).user?.id,
-            });
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to update system settings',
-            });
-        }
-    },
+        res.json({
+            success: true,
+            data: settings,
+            message: 'System settings updated successfully',
+        });
+    }),
 
     /**
      * GET /api/system-settings/tax
      * Get tax configuration
      */
-    async getTaxConfig(req: Request, res: Response) {
-        try {
-            const pool = req.tenantPool || globalPool;
-            const taxConfig = await systemSettingsService.getTaxConfig(pool);
-
-            res.json({
-                success: true,
-                data: taxConfig,
-            });
-        } catch (error: any) {
-            logger.error('Error fetching tax config', { error: error.message });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch tax configuration',
-            });
-        }
-    },
+    getTaxConfig: asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const taxConfig = await systemSettingsService.getTaxConfig(pool);
+        res.json({ success: true, data: taxConfig });
+    }),
 
     /**
      * GET /api/system-settings/printing/receipt
      * Get receipt printing configuration
      */
-    async getReceiptPrintConfig(req: Request, res: Response) {
-        try {
-            const pool = req.tenantPool || globalPool;
-            const config = await systemSettingsService.getReceiptPrintConfig(pool);
-
-            res.json({
-                success: true,
-                data: config,
-            });
-        } catch (error: any) {
-            logger.error('Error fetching receipt print config', { error: error.message });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch receipt printing configuration',
-            });
-        }
-    },
+    getReceiptPrintConfig: asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const config = await systemSettingsService.getReceiptPrintConfig(pool);
+        res.json({ success: true, data: config });
+    }),
 
     /**
      * GET /api/system-settings/printing/invoice
      * Get invoice printing configuration
      */
-    async getInvoicePrintConfig(req: Request, res: Response) {
-        try {
-            const pool = req.tenantPool || globalPool;
-            const config = await systemSettingsService.getInvoicePrintConfig(pool);
-
-            res.json({
-                success: true,
-                data: config,
-            });
-        } catch (error: any) {
-            logger.error('Error fetching invoice print config', { error: error.message });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch invoice printing configuration',
-            });
-        }
-    },
+    getInvoicePrintConfig: asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const config = await systemSettingsService.getInvoicePrintConfig(pool);
+        res.json({ success: true, data: config });
+    }),
 };

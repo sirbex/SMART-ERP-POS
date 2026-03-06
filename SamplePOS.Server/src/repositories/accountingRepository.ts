@@ -20,6 +20,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { Money } from '../utils/money.js';
+import { UnitOfWork } from '../db/unitOfWork.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -150,7 +151,7 @@ export async function getAccounts(filters: AccountFilters = {}, dbPool?: pg.Pool
       FROM accounts
       WHERE 1=1
     `;
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (filters.accountType) {
@@ -311,21 +312,18 @@ export interface CreateLedgerTransactionData {
  */
 export async function createLedgerTransaction(data: CreateLedgerTransactionData, dbPool?: pg.Pool): Promise<{ transactionId: string; transactionNumber: string }> {
   const pool = dbPool || globalPool;
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
+  // Validate double-entry: total debits must equal total credits
+  const totalDebits = data.lines.reduce((sum, line) =>
+    sum.plus(line.debitAmount), new Decimal(0)).toNumber();
+  const totalCredits = data.lines.reduce((sum, line) =>
+    sum.plus(line.creditAmount), new Decimal(0)).toNumber();
 
-    // Validate double-entry: total debits must equal total credits
-    const totalDebits = data.lines.reduce((sum, line) =>
-      sum.plus(line.debitAmount), new Decimal(0)).toNumber();
-    const totalCredits = data.lines.reduce((sum, line) =>
-      sum.plus(line.creditAmount), new Decimal(0)).toNumber();
+  if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
+    throw new Error(`Ledger transaction is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
+  }
 
-    if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
-      throw new Error(`Ledger transaction is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
-    }
-
+  return UnitOfWork.run(pool, async (client) => {
     // Generate transaction number (auto-increment style)
     const countResult = await client.query(`SELECT COUNT(*) + 1 as next_num FROM ledger_transactions`);
     const nextNum = parseInt(countResult.rows[0].next_num);
@@ -386,8 +384,6 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
       ]);
     }
 
-    await client.query('COMMIT');
-
     logger.info('Created ledger transaction', {
       transactionId,
       transactionNumber,
@@ -397,13 +393,7 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
     });
 
     return { transactionId, transactionNumber };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Error creating ledger transaction', { error, data });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 // =============================================================================
@@ -416,11 +406,18 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
  */
 export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: pg.Pool): Promise<JournalEntry> {
   const pool = dbPool || globalPool;
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
+  // Validate double-entry: total debits must equal total credits
+  const totalDebits = data.lines.reduce((sum, line) =>
+    sum.plus(line.debitAmount), new Decimal(0)).toNumber();
+  const totalCredits = data.lines.reduce((sum, line) =>
+    sum.plus(line.creditAmount), new Decimal(0)).toNumber();
 
+  if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
+    throw new Error(`Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
+  }
+
+  return UnitOfWork.run(pool, async (client) => {
     // Check for idempotency - prevent duplicate entries
     if (data.idempotencyKey) {
       const existing = await client.query(`
@@ -428,19 +425,8 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
       `, [data.idempotencyKey]);
 
       if (existing.rows.length > 0) {
-        await client.query('ROLLBACK');
         throw new Error(`Journal entry already exists for idempotency key: ${data.idempotencyKey}`);
       }
-    }
-
-    // Validate double-entry: total debits must equal total credits
-    const totalDebits = data.lines.reduce((sum, line) =>
-      sum.plus(line.debitAmount), new Decimal(0)).toNumber();
-    const totalCredits = data.lines.reduce((sum, line) =>
-      sum.plus(line.creditAmount), new Decimal(0)).toNumber();
-
-    if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
-      throw new Error(`Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
     }
 
     // Create journal entry header
@@ -518,8 +504,6 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
       journalEntry.lines.push(lineResult.rows[0]);
     }
 
-    await client.query('COMMIT');
-
     logger.info('Created journal entry', {
       entryId,
       transactionId,
@@ -529,13 +513,7 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
     });
 
     return journalEntry;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error('Error creating journal entry', { error, data });
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -607,7 +585,7 @@ export async function getLedgerEntries(filters: LedgerFilters, dbPool?: pg.Pool)
   const pool = dbPool || globalPool;
   try {
     let whereClause = '';
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (filters.accountId) {

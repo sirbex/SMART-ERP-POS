@@ -32,7 +32,7 @@ import auditRoutes from './modules/audit/auditRoutes.js';
 import { createHoldRoutes } from './modules/pos/holdRoutes.js';
 import { createOfflineSyncRoutes } from './modules/pos/offlineSyncRoutes.js';
 import quotationRoutes from './modules/quotations/quotationRoutes.js';
-// import deliveryRoutes from './modules/delivery/deliveryRoutes.js'; // Temporarily disabled - SQL syntax errors
+import deliveryRoutes from './modules/delivery/deliveryRoutes.js';
 import { accountingRoutes } from './modules/accounting/accountingRoutes.js';
 import depositsRoutes from './modules/deposits/depositsRoutes.js';
 import { comprehensiveAccountingRoutes } from './modules/accounting/comprehensiveAccountingRoutes.js';
@@ -119,12 +119,12 @@ app.get('/health', async (req, res) => {
         server: 'healthy'
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       success: false,
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
-      error: error.message,
+      error: (error instanceof Error ? error.message : String(error)),
       services: {
         database: 'unhealthy'
       }
@@ -160,11 +160,11 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/settings/invoice', invoiceSettingsRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/reports', createReportsRouter(pool));
-app.use('/api/users', createUserRoutes(pool));
+app.use('/api/users', createUserRoutes());
 app.use('/api/admin', adminRoutes);
 app.use('/api/system', systemManagementRoutes);  // ERP-grade backup, reset, restore
 app.use('/api/discounts', discountRoutes);
-app.use('/api/payments', createPaymentsRoutes(pool));
+app.use('/api/payments', createPaymentsRoutes());
 app.use('/api/audit', auditRoutes);
 app.use('/api/deposits', depositsRoutes);  // Customer deposits management
 app.use('/api/pos/hold', createHoldRoutes(pool));
@@ -173,7 +173,7 @@ app.use('/api/supplier-payments', createSupplierPaymentRoutes(pool));  // Suppli
 app.use('/api/cash-registers', cashRegisterRoutes);  // Cash register management
 app.use('/api/rbac', createRbacRoutes(pool));  // Role-based access control
 app.use('/api', quotationRoutes);
-// app.use('/api/delivery', deliveryRoutes); // Temporarily disabled - SQL syntax errors  
+app.use('/api/delivery', deliveryRoutes);
 // Accounting routes moved above for better priority
 
 
@@ -237,6 +237,7 @@ async function startServer() {
       console.log('   - Supplier Payments (/api/supplier-payments)');
       console.log('   - Banking (/api/banking)');
       console.log('   - RBAC (/api/rbac)');
+      console.log('   - Delivery (/api/delivery)');
       console.log('   - Platform (/api/platform)');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
@@ -244,7 +245,7 @@ async function startServer() {
       logger.info(`Server started on port ${PORT}`);
     });
 
-    server.on('error', (error: any) => {
+    server.on('error', (error: Error) => {
       logger.error('Server error:', error);
       console.error('Server error:', error);
     });

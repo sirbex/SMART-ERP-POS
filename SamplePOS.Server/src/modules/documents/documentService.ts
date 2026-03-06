@@ -117,7 +117,7 @@ export class DocumentService {
       entityType?: string;
       entityId?: string;
       tags?: string[];
-      metadata?: Record<string, any>;
+      metadata?: Record<string, unknown>;
     } = {}
   ): Promise<FileUploadResult> {
     // Validate file

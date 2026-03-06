@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { isService, requiresInventoryTracking } from '../products/product.utils.js';
 import logger from '../../utils/logger.js';
@@ -101,7 +101,7 @@ export async function processSaleItems(
     pool: Pool,
     saleId: string,
     items: SaleLineItem[],
-    client?: any
+    client?: PoolClient
 ): Promise<void> {
     const dbClient = client || pool;
     const { inventoryItems, serviceItems, consumableItems } = separateSaleItems(items);

@@ -1,7 +1,7 @@
 // Stock Movement Repository - Raw SQL queries only
 // No business logic, pure data access
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import {
   StockMovement,
   StockMovementWithDetails,
@@ -11,13 +11,26 @@ import {
 
 /**
  * Record stock movement
+ * Accepts Pool or PoolClient to participate in caller's transaction.
+ * Generates movement_number atomically with advisory lock.
  */
-export async function recordMovement(pool: Pool, data: RecordMovementData): Promise<StockMovement> {
+export async function recordMovement(pool: Pool | PoolClient, data: RecordMovementData): Promise<StockMovement> {
+  // Generate movement number with advisory lock to prevent duplicates
+  await pool.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
+  const movNumRes = await pool.query(
+    `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+     LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0') 
+     AS movement_number
+     FROM stock_movements 
+     WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
+  );
+  const movementNumber = movNumRes.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+
   const result = await pool.query(
     `INSERT INTO stock_movements (
-      product_id, batch_id, movement_type, quantity, unit_cost,
+      movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
       reference_type, reference_id, notes, created_by_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING 
       id,
       movement_number as "movementNumber",
@@ -32,6 +45,7 @@ export async function recordMovement(pool: Pool, data: RecordMovementData): Prom
       created_by_id as "createdById",
       created_at as "createdAt"`,
     [
+      movementNumber,
       data.productId,
       data.batchId || null,
       data.movementType,
@@ -149,7 +163,7 @@ export async function getAllMovements(
 ): Promise<{ movements: StockMovementWithDetails[]; total: number }> {
   const offset = (page - 1) * limit;
   const whereClauses: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramIndex = 1;
 
   if (filters?.movementType) {

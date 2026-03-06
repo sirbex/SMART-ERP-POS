@@ -13,6 +13,7 @@ import type { AuditContext } from '../../../../shared/types/audit.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 
 // Payment segment type (local definition)
@@ -99,23 +100,18 @@ export const paymentsService = {
     pool: Pool,
     input: ProcessSplitPaymentInput
   ): Promise<ProcessSplitPaymentResult> {
-    const client = await pool.connect();
+    // Calculate totals upfront for validation
+    const totalPaid = input.payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
+    const totalAmount = new Decimal(input.totalAmount);
+    const paidDecimal = new Decimal(totalPaid);
 
-    try {
-      // Start transaction
-      await client.query('BEGIN');
+    // Validate payment amount
+    const hasCreditPayment = input.payments.some(p => p.method === 'CUSTOMER_CREDIT');
+    if (!hasCreditPayment && paidDecimal.lessThan(totalAmount.minus(0.01))) {
+      throw new Error('Insufficient payment amount');
+    }
 
-      // Calculate totals
-      const totalPaid = input.payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
-      const totalAmount = new Decimal(input.totalAmount);
-      const paidDecimal = new Decimal(totalPaid);
-
-      // Validate payment amount
-      const hasCreditPayment = input.payments.some(p => p.method === 'CUSTOMER_CREDIT');
-      if (!hasCreditPayment && paidDecimal.lessThan(totalAmount.minus(0.01))) {
-        throw new Error('Insufficient payment amount');
-      }
-
+    const txResult = await UnitOfWork.run(pool, async (client) => {
       // Process each payment segment
       const paymentRecords: CreateSalePaymentData[] = input.payments.map(p => ({
         saleId: input.saleId,
@@ -126,7 +122,7 @@ export const paymentsService = {
         processedBy: input.processedBy || null,
       }));
 
-      const createdPayments = await paymentsRepository.createSalePayments(client as any, paymentRecords);
+      const createdPayments = await paymentsRepository.createSalePayments(client, paymentRecords);
 
       // Handle customer credit if applicable
       let creditTransaction: { id: string; newBalance: number } | undefined;
@@ -138,7 +134,7 @@ export const paymentsService = {
         }
 
         // Get current balance
-        const currentBalance = await paymentsRepository.getCustomerBalance(client as any, input.customerId);
+        const currentBalance = await paymentsRepository.getCustomerBalance(client, input.customerId);
         const creditAmount = new Decimal(creditPayment.amount);
         const newBalance = new Decimal(currentBalance).plus(creditAmount);
 
@@ -148,7 +144,7 @@ export const paymentsService = {
         );
 
         // Create credit transaction record
-        const creditTxn = await paymentsRepository.createCreditTransaction(client as any, {
+        const creditTxn = await paymentsRepository.createCreditTransaction(client, {
           customerId: input.customerId,
           transactionType: 'CREDIT_SALE',
           amount: creditPayment.amount,
@@ -165,65 +161,57 @@ export const paymentsService = {
         };
       }
 
-      // Calculate change (only from cash overpayment)
-      const changeAmount = this.calculateChange(input.payments, input.totalAmount);
+      return { createdPayments, creditTransaction };
+    });
 
-      // Commit transaction
-      await client.query('COMMIT');
+    // Calculate change (only from cash overpayment)
+    const changeAmount = this.calculateChange(input.payments, input.totalAmount);
 
-      // Log payment to audit trail (non-blocking)
-      if (input.auditContext) {
-        try {
-          for (const payment of createdPayments) {
-            await auditService.logPaymentRecorded(
-              client as any,
-              payment.id,
-              {
-                saleId: input.saleId,
-                saleNumber: input.saleNumber || input.saleId,
-                paymentMethod: payment.payment_method_code,
-                amount: parseFloat(payment.amount),
-                referenceNumber: payment.reference_number,
-                isSplitPayment: createdPayments.length > 1,
-                processedBy: input.processedBy,
-              },
-              input.auditContext
-            );
-          }
-        } catch (auditError) {
-          console.error('⚠️ Audit logging failed for payment (non-fatal):', auditError);
+    // Log payment to audit trail (non-blocking, after transaction committed)
+    if (input.auditContext) {
+      try {
+        for (const payment of txResult.createdPayments) {
+          await auditService.logPaymentRecorded(
+            pool,
+            payment.id,
+            {
+              saleId: input.saleId,
+              saleNumber: input.saleNumber || input.saleId,
+              paymentMethod: payment.payment_method_code,
+              amount: parseFloat(payment.amount),
+              referenceNumber: payment.reference_number,
+              isSplitPayment: txResult.createdPayments.length > 1,
+              processedBy: input.processedBy,
+            },
+            input.auditContext
+          );
         }
+      } catch (auditError) {
+        console.error('⚠️ Audit logging failed for payment (non-fatal):', auditError);
       }
-
-      const result = {
-        success: true,
-        salePayments: createdPayments.map(p => ({
-          id: p.id,
-          method: p.payment_method_code,
-          amount: parseFloat(p.amount),
-          reference: p.reference_number,
-        })),
-        creditTransaction,
-        totalPaid: paidDecimal.toNumber(),
-        changeAmount: changeAmount,
-      };
-
-      // ============================================================
-      // GL POSTING: Handled by database trigger (trg_post_customer_payment_to_ledger)
-      // The trigger fires on INSERT and posts to ledger_transactions
-      // This ensures atomicity - if payment exists, GL entry exists
-      // DO NOT add glEntryService calls here - it causes duplicate entries
-      // ============================================================
-
-      return result;
-
-    } catch (error) {
-      // Rollback on error
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
     }
+
+    const result: ProcessSplitPaymentResult = {
+      success: true,
+      salePayments: txResult.createdPayments.map(p => ({
+        id: p.id,
+        method: p.payment_method_code,
+        amount: parseFloat(p.amount),
+        reference: p.reference_number,
+      })),
+      creditTransaction: txResult.creditTransaction,
+      totalPaid: paidDecimal.toNumber(),
+      changeAmount: changeAmount,
+    };
+
+    // ============================================================
+    // GL POSTING: Handled by database trigger (trg_post_customer_payment_to_ledger)
+    // The trigger fires on INSERT and posts to ledger_transactions
+    // This ensures atomicity - if payment exists, GL entry exists
+    // DO NOT add glEntryService calls here - it causes duplicate entries
+    // ============================================================
+
+    return result;
   },
 
   /**
@@ -240,13 +228,9 @@ export const paymentsService = {
       processedBy?: string;
     }
   ): Promise<{ newBalance: number; transactionId: string }> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+    return UnitOfWork.run(pool, async (client) => {
       // Get current balance
-      const currentBalance = await paymentsRepository.getCustomerBalance(client as any, input.customerId);
+      const currentBalance = await paymentsRepository.getCustomerBalance(client, input.customerId);
       const paymentAmount = new Decimal(input.amount);
       const newBalance = new Decimal(currentBalance).minus(paymentAmount);
 
@@ -255,7 +239,7 @@ export const paymentsService = {
       }
 
       // Create credit transaction
-      const transaction = await paymentsRepository.createCreditTransaction(client as any, {
+      const transaction = await paymentsRepository.createCreditTransaction(client, {
         customerId: input.customerId,
         transactionType: 'PAYMENT',
         amount: -paymentAmount.toNumber(), // Negative for payment
@@ -265,19 +249,11 @@ export const paymentsService = {
         processedBy: input.processedBy || null,
       });
 
-      await client.query('COMMIT');
-
       return {
         newBalance: Math.max(0, newBalance.toNumber()),
         transactionId: transaction.id,
       };
-
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**

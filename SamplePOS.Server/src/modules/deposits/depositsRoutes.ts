@@ -9,6 +9,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import * as depositsService from './depositsService.js';
 import { authenticate } from '../../middleware/auth.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -34,250 +35,177 @@ const ApplyDepositSchema = z.object({
  * GET /api/deposits
  * Get all deposits with pagination
  */
-router.get('/', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 20;
-        const status = req.query.status as string;
-        const customerId = req.query.customerId as string;
+router.get('/', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const status = req.query.status as string;
+    const customerId = req.query.customerId as string;
 
-        const result = await depositsService.getAllDeposits(pool, {
-            page,
-            limit,
-            status,
-            customerId
-        });
+    const result = await depositsService.getAllDeposits(pool, {
+        page,
+        limit,
+        status,
+        customerId
+    });
 
-        res.json({
-            success: true,
-            data: result
-        });
-    } catch (error: any) {
-        logger.error('Error fetching deposits', { error: error.message });
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: result
+    });
+}));
 
 /**
  * GET /api/deposits/:id
  * Get deposit by ID
  */
-router.get('/:id', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const deposit = await depositsService.getDepositById(pool, req.params.id);
+router.get('/:id', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const deposit = await depositsService.getDepositById(pool, req.params.id);
 
-        if (!deposit) {
-            return res.status(404).json({
-                success: false,
-                error: 'Deposit not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: deposit
-        });
-    } catch (error: any) {
-        logger.error('Error fetching deposit', { id: req.params.id, error: error.message });
-        res.status(500).json({
+    if (!deposit) {
+        return res.status(404).json({
             success: false,
-            error: error.message
+            error: 'Deposit not found'
         });
     }
-});
+
+    res.json({
+        success: true,
+        data: deposit
+    });
+}));
 
 /**
  * GET /api/deposits/customer/:customerId
  * Get all deposits for a customer
  */
-router.get('/customer/:customerId', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const status = req.query.status as 'ACTIVE' | 'DEPLETED' | 'REFUNDED' | 'CANCELLED' | undefined;
-        const deposits = await depositsService.getCustomerDeposits(
-            pool,
-            req.params.customerId,
-            status
-        );
+router.get('/customer/:customerId', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const status = req.query.status as 'ACTIVE' | 'DEPLETED' | 'REFUNDED' | 'CANCELLED' | undefined;
+    const deposits = await depositsService.getCustomerDeposits(
+        pool,
+        req.params.customerId,
+        status
+    );
 
-        res.json({
-            success: true,
-            data: deposits
-        });
-    } catch (error: any) {
-        logger.error('Error fetching customer deposits', {
-            customerId: req.params.customerId,
-            error: error.message
-        });
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: deposits
+    });
+}));
 
 /**
  * GET /api/deposits/customer/:customerId/balance
  * Get customer's deposit balance (for POS checkout)
  */
-router.get('/customer/:customerId/balance', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        logger.info('Fetching deposit balance for customer', { customerId: req.params.customerId });
+router.get('/customer/:customerId/balance', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    logger.info('Fetching deposit balance for customer', { customerId: req.params.customerId });
 
-        const balance = await depositsService.getCustomerDepositBalance(
-            pool,
-            req.params.customerId
-        );
+    const balance = await depositsService.getCustomerDepositBalance(
+        pool,
+        req.params.customerId
+    );
 
-        logger.info('Deposit balance result', { customerId: req.params.customerId, balance });
+    logger.info('Deposit balance result', { customerId: req.params.customerId, balance });
 
-        res.json({
-            success: true,
-            data: balance
-        });
-    } catch (error: any) {
-        logger.error('Error fetching customer deposit balance', {
-            customerId: req.params.customerId,
-            error: error.message
-        });
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: balance
+    });
+}));
 
 /**
  * POST /api/deposits
  * Create a new deposit
  */
-router.post('/', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const parsed = CreateDepositSchema.safeParse(req.body);
-        if (!parsed.success) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation failed',
-                details: parsed.error.errors
-            });
-        }
-
-        const user = (req as any).user;
-        const deposit = await depositsService.createDeposit(pool, {
-            ...parsed.data,
-            createdBy: user?.id
-        });
-
-        res.status(201).json({
-            success: true,
-            data: deposit,
-            message: `Deposit ${deposit.depositNumber} created successfully`
-        });
-    } catch (error: any) {
-        logger.error('Error creating deposit', { error: error.message });
-        res.status(400).json({
+router.post('/', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const parsed = CreateDepositSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({
             success: false,
-            error: error.message
+            error: 'Validation failed',
+            details: parsed.error.errors
         });
     }
-});
+
+    const user = req.user;
+    const deposit = await depositsService.createDeposit(pool, {
+        ...parsed.data,
+        createdBy: user?.id
+    });
+
+    res.status(201).json({
+        success: true,
+        data: deposit,
+        message: `Deposit ${deposit.depositNumber} created successfully`
+    });
+}));
 
 /**
  * POST /api/deposits/apply
  * Apply deposits to a sale
  */
-router.post('/apply', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const parsed = ApplyDepositSchema.safeParse(req.body);
-        if (!parsed.success) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation failed',
-                details: parsed.error.errors
-            });
-        }
-
-        const user = (req as any).user;
-        const result = await depositsService.applyDepositsToSale(
-            pool,
-            parsed.data.customerId,
-            parsed.data.saleId,
-            parsed.data.amount,
-            user?.id
-        );
-
-        res.json({
-            success: true,
-            data: result,
-            message: `Applied ${result.totalApplied.toFixed(2)} from deposits to sale`
-        });
-    } catch (error: any) {
-        logger.error('Error applying deposit', { error: error.message });
-        res.status(400).json({
+router.post('/apply', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const parsed = ApplyDepositSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({
             success: false,
-            error: error.message
+            error: 'Validation failed',
+            details: parsed.error.errors
         });
     }
-});
+
+    const user = req.user;
+    const result = await depositsService.applyDepositsToSale(
+        pool,
+        parsed.data.customerId,
+        parsed.data.saleId,
+        parsed.data.amount,
+        user?.id
+    );
+
+    res.json({
+        success: true,
+        data: result,
+        message: `Applied ${result.totalApplied.toFixed(2)} from deposits to sale`
+    });
+}));
 
 /**
  * POST /api/deposits/:id/refund
  * Refund a deposit
  */
-router.post('/:id/refund', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const reason = req.body.reason;
-        const deposit = await depositsService.refundDeposit(pool, req.params.id, reason);
+router.post('/:id/refund', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const reason = req.body.reason;
+    const deposit = await depositsService.refundDeposit(pool, req.params.id, reason);
 
-        res.json({
-            success: true,
-            data: deposit,
-            message: `Deposit ${deposit.depositNumber} refunded successfully`
-        });
-    } catch (error: any) {
-        logger.error('Error refunding deposit', { id: req.params.id, error: error.message });
-        res.status(400).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: deposit,
+        message: `Deposit ${deposit.depositNumber} refunded successfully`
+    });
+}));
 
 /**
  * GET /api/deposits/sale/:saleId/applications
  * Get deposit applications for a sale
  */
-router.get('/sale/:saleId/applications', async (req, res) => {
-    try {
-        const pool = req.tenantPool || globalPool;
-        const applications = await depositsService.getSaleDepositApplications(
-            pool,
-            req.params.saleId
-        );
+router.get('/sale/:saleId/applications', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const applications = await depositsService.getSaleDepositApplications(
+        pool,
+        req.params.saleId
+    );
 
-        res.json({
-            success: true,
-            data: applications
-        });
-    } catch (error: any) {
-        logger.error('Error fetching sale deposit applications', {
-            saleId: req.params.saleId,
-            error: error.message
-        });
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: applications
+    });
+}));
 
 export default router;

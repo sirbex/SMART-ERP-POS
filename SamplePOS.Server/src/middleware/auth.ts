@@ -12,9 +12,11 @@ import { User, UserRole, hasPermission, UserPermissions } from '../../../shared/
 import { pool } from '../db/pool.js';
 import logger from '../utils/logger.js';
 
-// JWT Payload interface
+// JWT Payload interface — must match the shape produced by generateToken()
 interface JwtPayload {
   userId: string;
+  email: string;
+  fullName: string;
   username?: string;
   role: UserRole;
   tenantId?: string;
@@ -157,14 +159,18 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
     const token = authHeader.substring(7);
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as {
-        id: string;
-        email: string;
-        fullName: string;
-        role: UserRole;
-      };
+      const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
 
-      req.user = decoded;
+      // Map JWT payload field names to req.user shape
+      // JWT uses 'userId' but req.user expects 'id'
+      req.user = {
+        id: decoded.userId,
+        email: decoded.email ?? '',
+        fullName: decoded.fullName ?? '',
+        role: decoded.role,
+        tenantId: decoded.tenantId,
+        tenantSlug: decoded.tenantSlug,
+      };
     } catch (error) {
       // Token invalid/expired, but we don't fail - just continue without user
       logger.debug('Optional auth failed, continuing without user', { error });

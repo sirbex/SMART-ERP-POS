@@ -17,6 +17,7 @@
 
 import { pool as globalPool } from '../../db/pool.js';
 import { Pool, PoolClient } from 'pg';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
     cashRegisterRepository,
     CashRegister,
@@ -198,7 +199,7 @@ export const cashRegisterService = {
      * - User must not have an open session on a DIFFERENT register
      */
     async openSession(data: OpenSessionData): Promise<CashRegisterSession> {
-        // Validate register exists and is active
+        // Validate register exists and is active (read outside txn is fine)
         const register = await cashRegisterRepository.getRegisterById(globalPool, data.registerId);
         if (!register) {
             throw new RegisterNotFoundError(data.registerId);
@@ -210,34 +211,36 @@ export const cashRegisterService = {
             );
         }
 
-        // Check if register already has open session
-        const existingRegisterSession = await cashRegisterRepository.getOpenSession(globalPool, data.registerId);
-        if (existingRegisterSession) {
-            // If the SAME user already has this session → auto-resume it
-            if (existingRegisterSession.userId === data.userId) {
-                logger.info('Auto-resuming existing session for same user', {
-                    sessionId: existingRegisterSession.id,
-                    sessionNumber: existingRegisterSession.sessionNumber,
-                    registerId: data.registerId,
-                    userId: data.userId
-                });
-                return existingRegisterSession;
+        // Wrap all session checks + creation in a transaction for atomicity.
+        // Without this, INSERT + recordMovement (opening float) are non-atomic,
+        // and concurrent openSession calls could race past the checks.
+        const session = await UnitOfWork.run<CashRegisterSession>(globalPool, async (client) => {
+            // Re-check inside transaction for snapshot consistency
+            const existingRegisterSession = await cashRegisterRepository.getOpenSession(client, data.registerId);
+            if (existingRegisterSession) {
+                if (existingRegisterSession.userId === data.userId) {
+                    logger.info('Auto-resuming existing session for same user', {
+                        sessionId: existingRegisterSession.id,
+                        sessionNumber: existingRegisterSession.sessionNumber,
+                        registerId: data.registerId,
+                        userId: data.userId
+                    });
+                    return existingRegisterSession;
+                }
+                throw new RegisterBusyError(data.registerId, existingRegisterSession.sessionNumber);
             }
-            // Different user has the register → blocked
-            throw new RegisterBusyError(data.registerId, existingRegisterSession.sessionNumber);
-        }
 
-        // Check if user already has an open session on a DIFFERENT register
-        const existingUserSession = await cashRegisterRepository.getUserOpenSession(globalPool, data.userId);
-        if (existingUserSession) {
-            throw new UserAlreadyHasSessionError(
-                existingUserSession.sessionNumber,
-                existingUserSession.registerName || 'Unknown Register'
-            );
-        }
+            const existingUserSession = await cashRegisterRepository.getUserOpenSession(client, data.userId);
+            if (existingUserSession) {
+                throw new UserAlreadyHasSessionError(
+                    existingUserSession.sessionNumber,
+                    existingUserSession.registerName || 'Unknown Register'
+                );
+            }
 
-        // Open the session
-        const session = await cashRegisterRepository.openSession(globalPool, data);
+            // INSERT session + recordMovement (opening float) — now atomic
+            return cashRegisterRepository.openSession(client, data);
+        });
 
         logger.info('Cash register session opened', {
             sessionId: session.id,
@@ -280,13 +283,13 @@ export const cashRegisterService = {
      * - If variance exists, create GL entries for overage/shortage
      */
     async closeSession(data: CloseSessionData, userId: string): Promise<CashRegisterSession> {
-        const client = await globalPool.connect();
-
-        try {
-            await client.query('BEGIN');
-
-            // Get and validate session
-            const session = await cashRegisterRepository.getSessionById(globalPool, data.sessionId);
+        // Validate + close in one atomic transaction
+        const { closedSession, variance } = await UnitOfWork.run<{
+            closedSession: CashRegisterSession;
+            variance: Decimal;
+        }>(globalPool, async (client) => {
+            // Get and validate session inside transaction
+            const session = await cashRegisterRepository.getSessionById(client, data.sessionId);
             if (!session) {
                 throw new SessionNotFoundError(data.sessionId);
             }
@@ -294,40 +297,33 @@ export const cashRegisterService = {
                 throw new SessionNotOpenError(data.sessionId, session.status);
             }
 
-            // Close the session
-            const closedSession = await cashRegisterRepository.closeSession(client, data);
+            // Close the session (calculateExpectedClosing + UPDATE atomic)
+            const closed = await cashRegisterRepository.closeSession(client, data);
+            const v = new Decimal(closed.variance || 0);
 
-            // Handle variance with GL entries if significant (> 0.01)
-            const variance = new Decimal(closedSession.variance || 0);
-            const VARIANCE_THRESHOLD = new Decimal('0.01');
+            return { closedSession: closed, variance: v };
+        });
 
-            await client.query('COMMIT');
-
-            // Create GL entry AFTER commit (AccountingCore manages its own transaction)
-            if (variance.abs().greaterThan(VARIANCE_THRESHOLD)) {
-                await this.createVarianceGLEntry(
-                    closedSession,
-                    variance,
-                    userId
-                );
-            }
-
-            logger.info('Cash register session closed', {
-                sessionId: closedSession.id,
-                sessionNumber: closedSession.sessionNumber,
-                expectedClosing: closedSession.expectedClosing,
-                actualClosing: closedSession.actualClosing,
-                variance: closedSession.variance,
-                closedBy: userId
-            });
-
-            return closedSession;
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
+        // Create GL entry AFTER commit (AccountingCore manages its own transaction)
+        const VARIANCE_THRESHOLD = new Decimal('0.01');
+        if (variance.abs().greaterThan(VARIANCE_THRESHOLD)) {
+            await this.createVarianceGLEntry(
+                closedSession,
+                variance,
+                userId
+            );
         }
+
+        logger.info('Cash register session closed', {
+            sessionId: closedSession.id,
+            sessionNumber: closedSession.sessionNumber,
+            expectedClosing: closedSession.expectedClosing,
+            actualClosing: closedSession.actualClosing,
+            variance: closedSession.variance,
+            closedBy: userId
+        });
+
+        return closedSession;
     },
 
     /**
@@ -411,7 +407,7 @@ export const cashRegisterService = {
             });
         } catch (error: unknown) {
             // If idempotency conflict, entry already exists (safe to ignore)
-            if (error instanceof Error && error.message.includes('IDEMPOTENCY_CONFLICT')) {
+            if (error instanceof Error && (error instanceof Error ? error.message : String(error)).includes('IDEMPOTENCY_CONFLICT')) {
                 logger.warn('Variance GL entry already exists', { sessionId: session.id });
                 return;
             }
@@ -427,7 +423,7 @@ export const cashRegisterService = {
      * Logged as administrative action for audit trail.
      */
     async forceCloseSession(sessionId: string, closedByUserId: string): Promise<CashRegisterSession> {
-        // Get and validate session
+        // Validate session outside txn (read-only)
         const session = await cashRegisterRepository.getSessionById(globalPool, sessionId);
         if (!session) {
             throw new SessionNotFoundError(sessionId);
@@ -436,17 +432,19 @@ export const cashRegisterService = {
             throw new SessionNotOpenError(sessionId, session.status);
         }
 
-        // Force close with expected = actual (zero variance)
+        // calculateExpectedClosing + UPDATE must be atomic
         const expectedClosing = session.expectedClosing ?? session.openingFloat;
-        const closedSession = await cashRegisterRepository.closeSession(
-            globalPool,
-            {
-                sessionId,
-                actualClosing: expectedClosing,
-                varianceReason: undefined,
-                notes: `Force-closed by administrator. Original cashier: ${session.userName || session.userId}`
-            }
-        );
+        const closedSession = await UnitOfWork.run<CashRegisterSession>(globalPool, async (client) => {
+            return cashRegisterRepository.closeSession(
+                client,
+                {
+                    sessionId,
+                    actualClosing: expectedClosing,
+                    varianceReason: undefined,
+                    notes: `Force-closed by administrator. Original cashier: ${session.userName || session.userId}`
+                }
+            );
+        });
 
         logger.warn('Cash register session FORCE-CLOSED by admin', {
             sessionId: closedSession.id,
@@ -628,7 +626,7 @@ export const cashRegisterService = {
             });
         } catch (error: unknown) {
             // If idempotency conflict, entry already exists (safe to ignore)
-            if (error instanceof Error && error.message.includes('IDEMPOTENCY_CONFLICT')) {
+            if (error instanceof Error && (error instanceof Error ? error.message : String(error)).includes('IDEMPOTENCY_CONFLICT')) {
                 logger.warn('Movement GL entry already exists', { movementId: movement.id });
                 return;
             }

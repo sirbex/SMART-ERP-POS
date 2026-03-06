@@ -17,6 +17,9 @@ router.get('/:id', authenticate, productController.getProduct);
 router.post('/:id/convert-quantity', authenticate, productController.convertProductQuantity);
 router.get('/:id/history', authenticate, getProductHistory);
 
+// Supplier price tracking: get all supplier prices for a product
+router.get('/:id/supplier-prices', authenticate, productController.getProductSupplierPrices);
+
 // UoM endpoints
 router.get('/uoms/master', authenticate, uomController.listUoms);
 router.post('/uoms/master', authenticate, requirePermission('inventory.create'), uomController.createUom);

@@ -21,7 +21,7 @@ export interface UserSession {
 export interface SessionData {
   user: User;
   permissions: string[];
-  preferences?: Record<string, any>;
+  preferences?: Record<string, unknown>;
   lastActivity: string;
 }
 
@@ -124,15 +124,12 @@ export class SessionService {
     const row = result.rows[0];
     const user: User = {
       id: row.id,
-      username: row.username,
+      fullName: row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim(),
       email: row.email,
-      firstName: row.first_name,
-      lastName: row.last_name,
       role: row.role,
       isActive: row.is_active,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      lastLoginAt: row.last_login_at
     };
 
     // Get user permissions based on role

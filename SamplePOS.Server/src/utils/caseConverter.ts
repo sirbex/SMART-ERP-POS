@@ -19,7 +19,7 @@ export function camelToSnake(str: string): string {
 /**
  * Check if value is a numeric string (PostgreSQL NUMERIC/DECIMAL)
  */
-function isNumericString(value: any): boolean {
+function isNumericString(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   // Match patterns like "1000.00", "0.50", "-123.45"
   return /^-?\d+(\.\d+)?$/.test(value);
@@ -28,7 +28,7 @@ function isNumericString(value: any): boolean {
 /**
  * Parse numeric strings to numbers, leave other values unchanged
  */
-function parseNumericValue(value: any): any {
+function parseNumericValue(value: unknown): unknown {
   if (isNumericString(value)) {
     return parseFloat(value);
   }
@@ -40,7 +40,7 @@ function parseNumericValue(value: any): any {
  * Recursively handles nested objects and arrays
  * Parses numeric strings to numbers
  */
-export function convertKeysToCamelCase(obj: any): any {
+export function convertKeysToCamelCase(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -51,8 +51,8 @@ export function convertKeysToCamelCase(obj: any): any {
   }
 
   // Handle objects
-  if (typeof obj === 'object' && obj.constructor === Object) {
-    const converted: Record<string, any> = {};
+  if (typeof obj === 'object' && (obj as object).constructor === Object) {
+    const converted: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(obj)) {
       const camelKey = snakeToCamel(key);
@@ -77,7 +77,7 @@ export function convertKeysToCamelCase(obj: any): any {
  * Convert object keys from camelCase to snake_case
  * Used for incoming request data that needs to match database schema
  */
-export function convertKeysToSnakeCase(obj: any): any {
+export function convertKeysToSnakeCase(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -88,8 +88,8 @@ export function convertKeysToSnakeCase(obj: any): any {
   }
 
   // Handle objects
-  if (typeof obj === 'object' && obj.constructor === Object) {
-    const converted: Record<string, any> = {};
+  if (typeof obj === 'object' && (obj as object).constructor === Object) {
+    const converted: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(obj)) {
       const snakeKey = camelToSnake(key);
@@ -114,7 +114,7 @@ export function convertKeysToSnakeCase(obj: any): any {
  * Converts snake_case to camelCase and parses numeric strings
  * Use this before sending responses to frontend
  */
-export function normalizeResponse<T = any>(data: any): T {
+export function normalizeResponse<T = unknown>(data: unknown): T {
   return convertKeysToCamelCase(data) as T;
 }
 
@@ -122,12 +122,12 @@ export function normalizeResponse<T = any>(data: any): T {
  * Normalize paginated response
  * Handles common pagination structure with data array
  */
-export function normalizePaginatedResponse<T = any>(response: {
-  data: any[];
-  pagination: any;
+export function normalizePaginatedResponse<T = unknown>(response: {
+  data: unknown[];
+  pagination: Record<string, unknown>;
 }): {
   data: T[];
-  pagination: any;
+  pagination: Record<string, unknown>;
 } {
   return {
     data: response.data.map((item) => normalizeResponse<T>(item)),

@@ -4,17 +4,11 @@
  * ARCHITECTURE: Controller layer - HTTP handling, validation, calls service
  */
 
-import { Request, Response } from 'express';
-import { Pool } from 'pg';
+import type { Request, Response } from 'express';
+import { pool as globalPool } from '../../db/pool.js';
 import { paymentsService } from './paymentsService.js';
+import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 
-// Payment validation (simplified for now)
-interface PaymentSegment {
-  method: string;
-  amount: number;
-  reference?: string;
-  notes?: string;
-}
 import { z } from 'zod';
 
 // ============================================================================
@@ -53,229 +47,154 @@ export const paymentsController = {
    * GET /api/payments/methods
    * Get all available payment methods
    */
-  async getPaymentMethods(req: Request, res: Response, pool: Pool) {
-    try {
-      const methods = await paymentsService.getPaymentMethods(pool);
+  getPaymentMethods: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const methods = await paymentsService.getPaymentMethods(pool);
 
-      res.json({
-        success: true,
-        data: methods,
-      });
-    } catch (error: any) {
-      console.error('Error fetching payment methods:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to fetch payment methods',
-      });
-    }
-  },
+    res.json({
+      success: true,
+      data: methods,
+    });
+  }),
 
   /**
    * POST /api/payments/process-split
    * Process a split payment for a sale
    */
-  async processSplitPayment(req: Request, res: Response, pool: Pool) {
-    try {
-      // Validate request body
-      const validation = ProcessSplitPaymentSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid request data',
-          details: validation.error.errors,
-        });
-      }
+  processSplitPayment: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
 
-      const { saleId, saleNumber, totalAmount, payments, customerId } = validation.data;
-      const user = (req as any).user; // From JWT middleware
+    // Validate request body — ZodError caught by global handler
+    const { saleId, saleNumber, totalAmount, payments, customerId } = ProcessSplitPaymentSchema.parse(req.body);
+    const user = req.user; // From JWT middleware
 
-      // Build audit context
-      const auditContext = {
-        userId: user?.id || '00000000-0000-0000-0000-000000000000',
-        userName: user?.fullName || user?.name || 'System',
-        userRole: user?.role || 'STAFF',
-        ipAddress: req.ip || req.socket.remoteAddress,
-        userAgent: req.headers['user-agent'],
-        sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-      };
+    // Build audit context
+    const auditContext = {
+      userId: user?.id || '00000000-0000-0000-0000-000000000000',
+      userName: user?.fullName || 'System',
+      userRole: user?.role || 'STAFF',
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+    };
 
-      // Validate payment distribution
-      const validationResult = paymentsService.validatePayments(
-        payments,
-        totalAmount,
-        customerId
-      );
+    // Validate payment distribution
+    const validationResult = paymentsService.validatePayments(
+      payments,
+      totalAmount,
+      customerId
+    );
 
-      if (!validationResult.valid) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid payment distribution',
-          details: validationResult.errors,
-        });
-      }
-
-      // Process split payment
-      const result = await paymentsService.processSplitPayment(pool, {
-        saleId,
-        saleNumber,
-        totalAmount,
-        payments,
-        customerId,
-        processedBy: user?.id,
-        auditContext,
-      });
-
-      res.json({
-        success: true,
-        data: result,
-      });
-    } catch (error: any) {
-      console.error('Error processing split payment:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to process split payment',
-      });
+    if (!validationResult.valid) {
+      throw new ValidationError(`Invalid payment distribution: ${validationResult.errors?.join(', ')}`);
     }
-  },
+
+    // Process split payment
+    const result = await paymentsService.processSplitPayment(pool, {
+      saleId,
+      saleNumber,
+      totalAmount,
+      payments,
+      customerId,
+      processedBy: user?.id,
+      auditContext,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  }),
 
   /**
    * GET /api/payments/sale/:saleId
    * Get payment breakdown for a sale
    */
-  async getSalePayments(req: Request, res: Response, pool: Pool) {
-    try {
-      const { saleId } = req.params;
+  getSalePayments: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { saleId } = req.params;
 
-      if (!saleId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Sale ID required',
-        });
-      }
-
-      const breakdown = await paymentsService.getSalePaymentBreakdown(pool, saleId);
-
-      res.json({
-        success: true,
-        data: breakdown,
-      });
-    } catch (error: any) {
-      console.error('Error fetching sale payments:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to fetch sale payments',
-      });
+    if (!saleId) {
+      throw new ValidationError('Sale ID required');
     }
-  },
+
+    const breakdown = await paymentsService.getSalePaymentBreakdown(pool, saleId);
+
+    res.json({
+      success: true,
+      data: breakdown,
+    });
+  }),
 
   /**
    * GET /api/payments/customer/:customerId/balance
    * Get customer current credit balance
    */
-  async getCustomerBalance(req: Request, res: Response, pool: Pool) {
-    try {
-      const { customerId } = req.params;
+  getCustomerBalance: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { customerId } = req.params;
 
-      if (!customerId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Customer ID required',
-        });
-      }
-
-      const balance = await paymentsService.getCustomerCreditBalance(pool, customerId);
-
-      res.json({
-        success: true,
-        data: { balance },
-      });
-    } catch (error: any) {
-      console.error('Error fetching customer balance:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to fetch customer balance',
-      });
+    if (!customerId) {
+      throw new ValidationError('Customer ID required');
     }
-  },
+
+    const balance = await paymentsService.getCustomerCreditBalance(pool, customerId);
+
+    res.json({
+      success: true,
+      data: { balance },
+    });
+  }),
 
   /**
    * GET /api/payments/customer/:customerId/history
    * Get customer credit transaction history
    */
-  async getCustomerCreditHistory(req: Request, res: Response, pool: Pool) {
-    try {
-      const { customerId } = req.params;
-      const limit = parseInt(req.query.limit as string) || 50;
+  getCustomerCreditHistory: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { customerId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 50;
 
-      if (!customerId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Customer ID required',
-        });
-      }
-
-      const history = await paymentsService.getCustomerCreditHistory(pool, customerId, limit);
-
-      res.json({
-        success: true,
-        data: history,
-      });
-    } catch (error: any) {
-      console.error('Error fetching credit history:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to fetch credit history',
-      });
+    if (!customerId) {
+      throw new ValidationError('Customer ID required');
     }
-  },
+
+    const history = await paymentsService.getCustomerCreditHistory(pool, customerId, limit);
+
+    res.json({
+      success: true,
+      data: history,
+    });
+  }),
 
   /**
    * POST /api/payments/customer/:customerId/payment
    * Record a customer credit payment
    */
-  async recordCustomerPayment(req: Request, res: Response, pool: Pool) {
-    try {
-      const { customerId } = req.params;
-      const userId = (req as any).user?.id;
+  recordCustomerPayment: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { customerId } = req.params;
+    const userId = req.user?.id;
 
-      if (!customerId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Customer ID required',
-        });
-      }
-
-      // Validate request body
-      const validation = RecordCustomerPaymentSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid request data',
-          details: validation.error.errors,
-        });
-      }
-
-      const { amount, paymentMethod, reference, notes } = validation.data;
-
-      const result = await paymentsService.recordCustomerPayment(pool, {
-        customerId,
-        amount,
-        paymentMethod,
-        reference,
-        notes,
-        processedBy: userId,
-      });
-
-      res.json({
-        success: true,
-        data: result,
-      });
-    } catch (error: any) {
-      console.error('Error recording customer payment:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to record customer payment',
-      });
+    if (!customerId) {
+      throw new ValidationError('Customer ID required');
     }
-  },
+
+    // Validate request body — ZodError caught by global handler
+    const { amount, paymentMethod, reference, notes } = RecordCustomerPaymentSchema.parse(req.body);
+
+    const result = await paymentsService.recordCustomerPayment(pool, {
+      customerId,
+      amount,
+      paymentMethod,
+      reference,
+      notes,
+      processedBy: userId,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  }),
 };

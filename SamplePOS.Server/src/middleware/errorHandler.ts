@@ -59,10 +59,34 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ): void {
+  // If headers already sent (e.g., PDF streaming), cannot send error response
+  if (res.headersSent) {
+    logger.error('Error after headers sent', {
+      error: error instanceof Error ? error.message : String(error),
+      path: req.path,
+      method: req.method,
+    });
+    return next(error);
+  }
+
   // Log error details
   if (error instanceof AppError) {
     logger.error('Application error', {
       statusCode: error.statusCode,
+      message: (error instanceof Error ? error.message : String(error)),
+      path: req.path,
+      method: req.method,
+      user: req.user?.id,
+    });
+  } else if (
+    error instanceof Error &&
+    'statusCode' in error &&
+    typeof (error as Error & { statusCode: number }).statusCode === 'number'
+  ) {
+    const statusError = error as Error & { statusCode: number; code?: string };
+    logger.error('Domain error', {
+      statusCode: statusError.statusCode,
+      code: statusError.code,
       message: error.message,
       path: req.path,
       method: req.method,
@@ -75,8 +99,8 @@ export function errorHandler(
     });
   } else {
     logger.error('Unhandled error', {
-      error: error.message,
-      stack: error.stack,
+      error: (error instanceof Error ? error.message : String(error)),
+      stack: (error instanceof Error ? error.stack : undefined),
       path: req.path,
       method: req.method,
     });
@@ -101,7 +125,22 @@ export function errorHandler(
   if (error instanceof AppError) {
     res.status(error.statusCode).json({
       success: false,
+      error: (error instanceof Error ? error.message : String(error)),
+    });
+    return;
+  }
+
+  // Handle domain-specific errors with statusCode property (e.g., RbacError)
+  if (
+    error instanceof Error &&
+    'statusCode' in error &&
+    typeof (error as Error & { statusCode: number }).statusCode === 'number'
+  ) {
+    const statusError = error as Error & { statusCode: number; code?: string };
+    res.status(statusError.statusCode).json({
+      success: false,
       error: error.message,
+      ...(statusError.code ? { code: statusError.code } : {}),
     });
     return;
   }
@@ -111,8 +150,8 @@ export function errorHandler(
 
   res.status(500).json({
     success: false,
-    error: error.message || 'Internal server error',
-    ...(isDevelopment && { stack: error.stack }),
+    error: error instanceof Error ? error.message : 'Internal server error',
+    ...(isDevelopment && { stack: (error instanceof Error ? error.stack : undefined) }),
   });
 }
 
@@ -135,7 +174,7 @@ export function notFoundHandler(req: Request, res: Response): void {
  * Async route wrapper to catch errors in async route handlers
  */
 export function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 ) {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);

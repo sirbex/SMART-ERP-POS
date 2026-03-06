@@ -1,15 +1,18 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import {
   purchaseOrderRepository,
   CreatePOData,
   CreatePOItemData,
+  PurchaseOrder,
+  PurchaseOrderItem,
 } from './purchaseOrderRepository.js';
 import {
   PurchaseOrderBusinessRules,
   InventoryBusinessRules,
 } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -57,14 +60,10 @@ export const purchaseOrderService = {
    * 
    * Financial Precision: Uses Decimal.js for all cost calculations
    */
-  async createPO(pool: Pool, input: CreatePOInput): Promise<any> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+  async createPO(pool: Pool, input: CreatePOInput): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
+    return UnitOfWork.run(pool, async (client) => {
       // BR-PO-001: Validate supplier exists and is active
-      await PurchaseOrderBusinessRules.validateSupplierExists(client as any, input.supplierId);
+      await PurchaseOrderBusinessRules.validateSupplierExists(client, input.supplierId);
       logger.info('BR-PO-001: Supplier validation passed', { supplierId: input.supplierId });
 
       // BR-PO-002: Validate PO has items
@@ -122,7 +121,7 @@ export const purchaseOrderService = {
       // BR-PO-007 & BR-PO-011: Validate supplier lead time
       if (input.expectedDate) {
         await PurchaseOrderBusinessRules.validateLeadTime(
-          client as any,
+          client,
           input.supplierId,
           input.orderDate,
           input.expectedDate
@@ -132,7 +131,7 @@ export const purchaseOrderService = {
 
       // BR-PO-009: Check for duplicate PO (warning only)
       await PurchaseOrderBusinessRules.validateDuplicatePO(
-        client as any,
+        client,
         input.supplierId,
         totalAmount,
         input.createdBy,
@@ -141,7 +140,7 @@ export const purchaseOrderService = {
 
       // BR-PO-012: Validate minimum order value
       await PurchaseOrderBusinessRules.validateMinimumOrderValue(
-        client as any,
+        client,
         input.supplierId,
         totalAmount
       );
@@ -156,7 +155,7 @@ export const purchaseOrderService = {
         createdBy: input.createdBy,
       };
 
-      const po = await purchaseOrderRepository.createPO(client as any, poData);
+      const po = await purchaseOrderRepository.createPO(client, poData);
 
       // Create PO items with Decimal precision
       const poItems: CreatePOItemData[] = input.items.map((item) => ({
@@ -167,31 +166,23 @@ export const purchaseOrderService = {
         unitCost: new Decimal(item.unitCost).toNumber(), // Bank-grade precision
       }));
 
-      const items = await purchaseOrderRepository.addPOItems(client as any, poItems);
+      const items = await purchaseOrderRepository.addPOItems(client, poItems);
 
       // Update PO total
-      await purchaseOrderRepository.updatePOTotal(client as any, po.id);
+      await purchaseOrderRepository.updatePOTotal(client, po.id);
 
       // Get updated PO
-      const updatedPO = await purchaseOrderRepository.getPOById(client as any, po.id);
-
-      await client.query('COMMIT');
+      const updatedPO = await purchaseOrderRepository.getPOById(client, po.id);
 
       logger.info('Purchase order created successfully', { poId: po.id, itemCount: items.length });
-      return updatedPO;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to create purchase order', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+      return updatedPO!;
+    });
   },
 
   /**
    * Get PO by ID
    */
-  async getPOById(pool: Pool, id: string): Promise<any> {
+  async getPOById(pool: Pool, id: string): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
     const result = await purchaseOrderRepository.getPOById(pool, id);
 
     if (!result) {
@@ -209,14 +200,14 @@ export const purchaseOrderService = {
     page: number = 1,
     limit: number = 50,
     filters?: { status?: string; supplierId?: string }
-  ): Promise<any> {
+  ): Promise<{ pos: PurchaseOrder[]; total: number }> {
     return purchaseOrderRepository.listPOs(pool, page, limit, filters);
   },
 
   /**
    * Update PO status with validation
    */
-  async updatePOStatus(pool: Pool, id: string, newStatus: string): Promise<any> {
+  async updatePOStatus(pool: Pool, id: string, newStatus: string): Promise<PurchaseOrder> {
     // Validate status transition
     const validStatuses = ['DRAFT', 'PENDING', 'COMPLETED', 'CANCELLED'];
 
@@ -252,14 +243,14 @@ export const purchaseOrderService = {
   /**
    * Cancel purchase order
    */
-  async cancelPO(pool: Pool, id: string): Promise<any> {
+  async cancelPO(pool: Pool, id: string): Promise<PurchaseOrder> {
     return this.updatePOStatus(pool, id, 'CANCELLED');
   },
 
   /**
    * Submit purchase order (DRAFT -> PENDING)
    */
-  async submitPO(pool: Pool, id: string): Promise<any> {
+  async submitPO(pool: Pool, id: string): Promise<PurchaseOrder> {
     return this.updatePOStatus(pool, id, 'PENDING');
   },
 
@@ -284,14 +275,10 @@ export const purchaseOrderService = {
    * Send PO to supplier and auto-create goods receipt draft
    * This implements the workflow: PO Sent → Awaiting Delivery → Goods Receipt
    */
-  async sendPOToSupplier(pool: Pool, id: string, userId: string): Promise<any> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+  async sendPOToSupplier(pool: Pool, id: string, userId: string): Promise<{ po: PurchaseOrder & { sent_date: Date }; goodsReceipt: { id: string; receiptNumber: string; status: string; message: string } }> {
+    return UnitOfWork.run(pool, async (client) => {
       // Get PO with items
-      const poResult = await purchaseOrderRepository.getPOById(client as any, id);
+      const poResult = await purchaseOrderRepository.getPOById(client, id);
 
       if (!poResult) {
         throw new Error(`Purchase order ${id} not found`);
@@ -311,7 +298,7 @@ export const purchaseOrderService = {
       );
 
       // Auto-create DRAFT goods receipt for receiving
-      const grNumber = await this.generateGRNumber(client as any);
+      const grNumber = await this.generateGRNumber(client);
 
       const grResult = await client.query(
         `INSERT INTO goods_receipts (
@@ -324,11 +311,11 @@ export const purchaseOrderService = {
       const goodsReceipt = grResult.rows[0];
 
       // Create GR items from PO items (with 0 received quantity initially)
-      const grItems = items.map((item: any) => ({
+      const grItems = items.map((item: PurchaseOrderItem & { product_id?: string; unit_price?: number }) => ({
         goods_receipt_id: goodsReceipt.id,
-        product_id: item.product_id,
+        product_id: item.product_id || item.productId,
         received_quantity: 0,
-        cost_price: item.unit_price,
+        cost_price: item.unit_price ?? item.unitCost,
       }));
 
       const grItemPlaceholders = grItems
@@ -352,8 +339,6 @@ export const purchaseOrderService = {
         grItemValues
       );
 
-      await client.query('COMMIT');
-
       logger.info('PO sent to supplier and goods receipt created', {
         poId: id,
         grId: goodsReceipt.id,
@@ -369,19 +354,13 @@ export const purchaseOrderService = {
           message: 'Goods receipt draft created. Confirm quantities when delivery arrives.',
         },
       };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to send PO to supplier', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   },
 
   /**
    * Generate Goods Receipt number (GR-YYYY-NNNN format)
    */
-  async generateGRNumber(pool: Pool): Promise<string> {
+  async generateGRNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     const result = await pool.query(
       `SELECT receipt_number FROM goods_receipts 
@@ -417,12 +396,8 @@ export const purchaseOrderService = {
       notes?: string;
       createdBy: string;
     }
-  ): Promise<any> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+  ): Promise<Record<string, unknown>> {
+    return UnitOfWork.run(pool, async (client) => {
       // Create invoice
       const result = await client.query(
         `INSERT INTO supplier_invoices (
@@ -445,18 +420,10 @@ export const purchaseOrderService = {
         ]
       );
 
-      await client.query('COMMIT');
-
       logger.info('Supplier invoice created', { invoiceId: result.rows[0].id });
 
-      return result.rows[0];
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to create supplier invoice', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+      return result.rows[0] as Record<string, unknown>;
+    });
   },
 
   /**
@@ -474,14 +441,10 @@ export const purchaseOrderService = {
       notes?: string;
       createdBy: string;
     }
-  ): Promise<any> {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
+  ): Promise<Record<string, unknown>> {
+    return UnitOfWork.run(pool, async (client) => {
       // Generate payment number
-      const paymentNumber = await this.generatePaymentNumber(client as any);
+      const paymentNumber = await this.generatePaymentNumber(client);
 
       // Create payment record
       const result = await client.query(
@@ -505,24 +468,16 @@ export const purchaseOrderService = {
 
       // Trigger will automatically update invoice outstanding amount and status
 
-      await client.query('COMMIT');
-
       logger.info('Payment recorded', { paymentId: result.rows[0].id, amount: data.amount });
 
-      return result.rows[0];
-    } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Failed to record payment', { error });
-      throw error;
-    } finally {
-      client.release();
-    }
+      return result.rows[0] as Record<string, unknown>;
+    });
   },
 
   /**
    * Generate Payment number (PAY-YYYY-NNNN format)
    */
-  async generatePaymentNumber(pool: Pool): Promise<string> {
+  async generatePaymentNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     const result = await pool.query(
       `SELECT payment_number FROM payments 

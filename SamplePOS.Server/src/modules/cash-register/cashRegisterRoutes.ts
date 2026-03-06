@@ -11,6 +11,7 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { cashRegisterService } from './cashRegisterService.js';
 import logger from '../../utils/logger.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -92,148 +93,102 @@ router.get('/health', (_req, res) => {
  * Get all registers with current session status
  * Managers/admins see all registers; staff see active only (with session info)
  */
-router.get('/', authenticate, async (req, res) => {
-    try {
-        const user = req.user as { role: string };
-        const isManager = ['ADMIN', 'MANAGER'].includes(user.role);
+router.get('/', authenticate, asyncHandler(async (req, res) => {
+    const user = req.user as { role: string };
+    const isManager = ['ADMIN', 'MANAGER'].includes(user.role);
 
-        // Always include session status so the Open Register dialog knows availability
-        const registersWithStatus = await cashRegisterService.getRegistersWithStatus();
+    // Always include session status so the Open Register dialog knows availability
+    const registersWithStatus = await cashRegisterService.getRegistersWithStatus();
 
-        // Staff only see active registers (already filtered in query)
-        // Managers see all (need to include inactive too)
-        const registers = isManager
-            ? await cashRegisterService.getAllRegisters()
-            : [];
+    // Staff only see active registers (already filtered in query)
+    // Managers see all (need to include inactive too)
+    const registers = isManager
+        ? await cashRegisterService.getAllRegisters()
+        : [];
 
-        // Merge: for managers, enrich all registers with session info
-        if (isManager && registers.length > 0) {
-            const statusMap = new Map(registersWithStatus.map(r => [r.id, r]));
-            const enriched = registers.map(reg => {
-                const status = statusMap.get(reg.id);
-                return {
-                    ...reg,
-                    currentSessionId: status?.currentSessionId || null,
-                    currentSessionNumber: status?.currentSessionNumber || null,
-                    currentSessionUserId: status?.currentSessionUserId || null,
-                    currentSessionUserName: status?.currentSessionUserName || null,
-                    currentSessionOpenedAt: status?.currentSessionOpenedAt || null,
-                };
-            });
-            return res.json({ success: true, data: enriched });
-        }
-
-        res.json({
-            success: true,
-            data: registersWithStatus
+    // Merge: for managers, enrich all registers with session info
+    if (isManager && registers.length > 0) {
+        const statusMap = new Map(registersWithStatus.map(r => [r.id, r]));
+        const enriched = registers.map(reg => {
+            const status = statusMap.get(reg.id);
+            return {
+                ...reg,
+                currentSessionId: status?.currentSessionId || null,
+                currentSessionNumber: status?.currentSessionNumber || null,
+                currentSessionUserId: status?.currentSessionUserId || null,
+                currentSessionUserName: status?.currentSessionUserName || null,
+                currentSessionOpenedAt: status?.currentSessionOpenedAt || null,
+            };
         });
-    } catch (error) {
-        logger.error('Error getting registers:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to get registers'
-        });
+        return res.json({ success: true, data: enriched });
     }
-});
+
+    res.json({
+        success: true,
+        data: registersWithStatus
+    });
+}));
 
 /**
  * GET /api/cash-registers/:id
  * Get register by ID
  */
-router.get('/:id', authenticate, async (req, res) => {
-    try {
-        const register = await cashRegisterService.getRegisterById(req.params.id);
+router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+    const register = await cashRegisterService.getRegisterById(req.params.id);
 
-        if (!register) {
-            return res.status(404).json({
-                success: false,
-                error: 'Register not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: register
-        });
-    } catch (error) {
-        logger.error('Error getting register:', error);
-        res.status(500).json({
+    if (!register) {
+        return res.status(404).json({
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to get register'
+            error: 'Register not found'
         });
     }
-});
+
+    res.json({
+        success: true,
+        data: register
+    });
+}));
 
 /**
  * POST /api/cash-registers
  * Create a new register (admin/manager only)
  */
-router.post('/', authenticate, requirePermission('pos.create'), async (req, res) => {
-    try {
-        const data = CreateRegisterSchema.parse(req.body);
-        const user = req.user as { id: string };
+router.post('/', authenticate, requirePermission('pos.create'), asyncHandler(async (req, res) => {
+    const data = CreateRegisterSchema.parse(req.body);
+    const user = req.user as { id: string };
 
-        const register = await cashRegisterService.createRegister(data, user.id);
+    const register = await cashRegisterService.createRegister(data, user.id);
 
-        res.status(201).json({
-            success: true,
-            data: register,
-            message: 'Register created successfully'
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
-        }
-        logger.error('Error creating register:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to create register'
-        });
-    }
-});
+    res.status(201).json({
+        success: true,
+        data: register,
+        message: 'Register created successfully'
+    });
+}));
 
 /**
  * PUT /api/cash-registers/:id
  * Update a register (admin/manager only)
  */
-router.put('/:id', authenticate, requirePermission('pos.create'), async (req, res) => {
-    try {
-        const data = UpdateRegisterSchema.parse(req.body);
-        const user = req.user as { id: string };
+router.put('/:id', authenticate, requirePermission('pos.create'), asyncHandler(async (req, res) => {
+    const data = UpdateRegisterSchema.parse(req.body);
+    const user = req.user as { id: string };
 
-        const register = await cashRegisterService.updateRegister(req.params.id, data, user.id);
+    const register = await cashRegisterService.updateRegister(req.params.id, data, user.id);
 
-        if (!register) {
-            return res.status(404).json({
-                success: false,
-                error: 'Register not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: register,
-            message: 'Register updated successfully'
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
-        }
-        logger.error('Error updating register:', error);
-        res.status(500).json({
+    if (!register) {
+        return res.status(404).json({
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to update register'
+            error: 'Register not found'
         });
     }
-});
+
+    res.json({
+        success: true,
+        data: register,
+        message: 'Register updated successfully'
+    });
+}));
 
 // =============================================================================
 // SESSION ENDPOINTS
@@ -243,203 +198,114 @@ router.put('/:id', authenticate, requirePermission('pos.create'), async (req, re
  * GET /api/cash-registers/sessions/current
  * Get current user's open session
  */
-router.get('/sessions/current', authenticate, async (req, res) => {
-    try {
-        const user = req.user as { id: string };
-        const session = await cashRegisterService.getUserOpenSession(user.id);
+router.get('/sessions/current', authenticate, asyncHandler(async (req, res) => {
+    const user = req.user as { id: string };
+    const session = await cashRegisterService.getUserOpenSession(user.id);
 
-        res.json({
-            success: true,
-            data: session // null if no open session
-        });
-    } catch (error) {
-        logger.error('Error getting current session:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to get current session'
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: session // null if no open session
+    });
+}));
 
 /**
  * GET /api/cash-registers/sessions
  * Get sessions with filters
  */
-router.get('/sessions', authenticate, async (req, res) => {
-    try {
-        const filters = SessionQuerySchema.parse(req.query);
-        const result = await cashRegisterService.getSessions(filters);
+router.get('/sessions', authenticate, asyncHandler(async (req, res) => {
+    const filters = SessionQuerySchema.parse(req.query);
+    const result = await cashRegisterService.getSessions(filters);
 
-        res.json({
-            success: true,
-            data: result.sessions,
-            pagination: {
-                total: result.total,
-                limit: filters.limit || 50,
-                offset: filters.offset || 0
-            }
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
+    res.json({
+        success: true,
+        data: result.sessions,
+        pagination: {
+            total: result.total,
+            limit: filters.limit || 50,
+            offset: filters.offset || 0
         }
-        logger.error('Error getting sessions:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to get sessions'
-        });
-    }
-});
+    });
+}));
 
 /**
  * GET /api/cash-registers/sessions/:id
  * Get session by ID
  */
-router.get('/sessions/:id', authenticate, async (req, res) => {
-    try {
-        const session = await cashRegisterService.getSessionById(req.params.id);
+router.get('/sessions/:id', authenticate, asyncHandler(async (req, res) => {
+    const session = await cashRegisterService.getSessionById(req.params.id);
 
-        if (!session) {
-            return res.status(404).json({
-                success: false,
-                error: 'Session not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: session
-        });
-    } catch (error) {
-        logger.error('Error getting session:', error);
-        res.status(500).json({
+    if (!session) {
+        return res.status(404).json({
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to get session'
+            error: 'Session not found'
         });
     }
-});
+
+    res.json({
+        success: true,
+        data: session
+    });
+}));
 
 /**
  * GET /api/cash-registers/sessions/:id/summary
  * Get full session summary with movements
  */
-router.get('/sessions/:id/summary', authenticate, async (req, res) => {
-    try {
-        const summary = await cashRegisterService.getSessionSummary(req.params.id);
+router.get('/sessions/:id/summary', authenticate, asyncHandler(async (req, res) => {
+    const summary = await cashRegisterService.getSessionSummary(req.params.id);
 
-        if (!summary) {
-            return res.status(404).json({
-                success: false,
-                error: 'Session not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: summary
-        });
-    } catch (error) {
-        logger.error('Error getting session summary:', error);
-        res.status(500).json({
+    if (!summary) {
+        return res.status(404).json({
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to get session summary'
+            error: 'Session not found'
         });
     }
-});
+
+    res.json({
+        success: true,
+        data: summary
+    });
+}));
 
 /**
  * POST /api/cash-registers/sessions/open
  * Open a new register session
  */
-router.post('/sessions/open', authenticate, async (req, res) => {
-    try {
-        const data = OpenSessionSchema.parse(req.body);
-        const user = req.user as { id: string };
+router.post('/sessions/open', authenticate, asyncHandler(async (req, res) => {
+    const data = OpenSessionSchema.parse(req.body);
+    const user = req.user as { id: string };
 
-        const session = await cashRegisterService.openSession({
-            ...data,
-            userId: user.id
-        });
+    const session = await cashRegisterService.openSession({
+        ...data,
+        userId: user.id
+    });
 
-        res.status(201).json({
-            success: true,
-            data: session,
-            message: 'Session opened successfully'
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
-        }
-
-        // Handle known business errors
-        if (error instanceof Error &&
-            ['REGISTER_NOT_FOUND', 'REGISTER_INACTIVE', 'REGISTER_BUSY', 'USER_HAS_SESSION']
-                .some(code => error.message.includes(code))) {
-            return res.status(400).json({
-                success: false,
-                error: error.message
-            });
-        }
-
-        logger.error('Error opening session:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to open session'
-        });
-    }
-});
+    res.status(201).json({
+        success: true,
+        data: session,
+        message: 'Session opened successfully'
+    });
+}));
 
 /**
  * POST /api/cash-registers/sessions/:id/close
  * Close a register session
  */
-router.post('/sessions/:id/close', authenticate, async (req, res) => {
-    try {
-        const data = CloseSessionSchema.parse(req.body);
-        const user = req.user as { id: string };
+router.post('/sessions/:id/close', authenticate, asyncHandler(async (req, res) => {
+    const data = CloseSessionSchema.parse(req.body);
+    const user = req.user as { id: string };
 
-        const session = await cashRegisterService.closeSession({
-            sessionId: req.params.id,
-            ...data
-        }, user.id);
+    const session = await cashRegisterService.closeSession({
+        sessionId: req.params.id,
+        ...data
+    }, user.id);
 
-        res.json({
-            success: true,
-            data: session,
-            message: 'Session closed successfully'
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
-        }
-
-        if (error instanceof Error &&
-            ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => error.message.includes(code))) {
-            return res.status(400).json({
-                success: false,
-                error: error.message
-            });
-        }
-
-        logger.error('Error closing session:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to close session'
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: session,
+        message: 'Session closed successfully'
+    });
+}));
 
 /**
  * POST /api/cash-registers/sessions/:id/reconcile
@@ -461,10 +327,10 @@ router.post(
             });
         } catch (error) {
             if (error instanceof Error &&
-                ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some(code => error.message.includes(code))) {
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some(code => (error instanceof Error ? error.message : String(error)).includes(code))) {
                 return res.status(400).json({
                     success: false,
-                    error: error.message
+                    error: (error instanceof Error ? error.message : String(error))
                 });
             }
 
@@ -498,10 +364,10 @@ router.post(
             });
         } catch (error) {
             if (error instanceof Error &&
-                ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => error.message.includes(code))) {
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => (error instanceof Error ? error.message : String(error)).includes(code))) {
                 return res.status(400).json({
                     success: false,
-                    error: error.message
+                    error: (error instanceof Error ? error.message : String(error))
                 });
             }
 
@@ -522,79 +388,47 @@ router.post(
  * GET /api/cash-registers/sessions/:id/movements
  * Get movements for a session
  */
-router.get('/sessions/:id/movements', authenticate, async (req, res) => {
-    try {
-        const movements = await cashRegisterService.getSessionMovements(req.params.id);
+router.get('/sessions/:id/movements', authenticate, asyncHandler(async (req, res) => {
+    const movements = await cashRegisterService.getSessionMovements(req.params.id);
 
-        res.json({
-            success: true,
-            data: movements
-        });
-    } catch (error) {
-        logger.error('Error getting session movements:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to get movements'
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: movements
+    });
+}));
 
 /**
  * POST /api/cash-registers/movements
  * Record a cash movement (cash in/out)
  */
-router.post('/movements', authenticate, async (req, res) => {
-    try {
-        const data = RecordMovementSchema.parse(req.body);
-        const user = req.user as { id: string };
+router.post('/movements', authenticate, asyncHandler(async (req, res) => {
+    const data = RecordMovementSchema.parse(req.body);
+    const user = req.user as { id: string };
 
-        // For CASH_OUT types over a threshold, require approval
-        // (This is a simplified check - in production, use a configurable threshold)
-        const CASH_OUT_APPROVAL_THRESHOLD = 100000; // UGX
-        const isCashOutType = data.movementType.startsWith('CASH_OUT');
-        if (isCashOutType &&
-            data.amount > CASH_OUT_APPROVAL_THRESHOLD &&
-            !data.approvedBy) {
-            return res.status(400).json({
-                success: false,
-                error: `Cash out over ${CASH_OUT_APPROVAL_THRESHOLD.toLocaleString()} UGX requires manager approval`
-            });
-        }
-
-        const movement = await cashRegisterService.recordMovement({
-            ...data,
-            userId: user.id
-        });
-
-        res.status(201).json({
-            success: true,
-            data: movement,
-            message: 'Movement recorded successfully'
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
-        }
-
-        if (error instanceof Error &&
-            ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => error.message.includes(code))) {
-            return res.status(400).json({
-                success: false,
-                error: error.message
-            });
-        }
-
-        logger.error('Error recording movement:', error);
-        res.status(500).json({
+    // For CASH_OUT types over a threshold, require approval
+    // (This is a simplified check - in production, use a configurable threshold)
+    const CASH_OUT_APPROVAL_THRESHOLD = 100000; // UGX
+    const isCashOutType = data.movementType.startsWith('CASH_OUT');
+    if (isCashOutType &&
+        data.amount > CASH_OUT_APPROVAL_THRESHOLD &&
+        !data.approvedBy) {
+        return res.status(400).json({
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to record movement'
+            error: `Cash out over ${CASH_OUT_APPROVAL_THRESHOLD.toLocaleString()} UGX requires manager approval`
         });
     }
-});
+
+    const movement = await cashRegisterService.recordMovement({
+        ...data,
+        userId: user.id
+    });
+
+    res.status(201).json({
+        success: true,
+        data: movement,
+        message: 'Movement recorded successfully'
+    });
+}));
 
 // =============================================================================
 // REPORT ENDPOINTS (QuickBooks/Odoo Standard)
@@ -606,30 +440,14 @@ router.post('/movements', authenticate, async (req, res) => {
  * 
  * QuickBooks/Odoo equivalent: Interim cash register report
  */
-router.get('/sessions/:id/x-report', authenticate, async (req, res) => {
-    try {
-        const report = await cashRegisterService.generateXReport(req.params.id);
+router.get('/sessions/:id/x-report', authenticate, asyncHandler(async (req, res) => {
+    const report = await cashRegisterService.generateXReport(req.params.id);
 
-        res.json({
-            success: true,
-            data: report
-        });
-    } catch (error) {
-        if (error instanceof Error &&
-            ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => error.message.includes(code))) {
-            return res.status(400).json({
-                success: false,
-                error: error.message
-            });
-        }
-
-        logger.error('Error generating X-Report:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to generate X-Report'
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: report
+    });
+}));
 
 const ZReportSchema = z.object({
     actualClosing: z.number().nonnegative(),
@@ -643,48 +461,24 @@ const ZReportSchema = z.object({
  * 
  * QuickBooks/Odoo equivalent: End-of-day closing report
  */
-router.post('/sessions/:id/z-report', authenticate, async (req, res) => {
-    try {
-        const data = ZReportSchema.parse(req.body);
-        const user = req.user as { id: string };
+router.post('/sessions/:id/z-report', authenticate, asyncHandler(async (req, res) => {
+    const data = ZReportSchema.parse(req.body);
+    const user = req.user as { id: string };
 
-        const report = await cashRegisterService.generateZReport(
-            req.params.id,
-            data.actualClosing,
-            data.denominationBreakdown,
-            data.varianceReason,
-            user.id
-        );
+    const report = await cashRegisterService.generateZReport(
+        req.params.id,
+        data.actualClosing,
+        data.denominationBreakdown,
+        data.varianceReason,
+        user.id
+    );
 
-        res.json({
-            success: true,
-            data: report,
-            message: 'Z-Report generated and session closed'
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({
-                success: false,
-                error: 'Validation error',
-                details: error.errors
-            });
-        }
-
-        if (error instanceof Error &&
-            ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some(code => error.message.includes(code))) {
-            return res.status(400).json({
-                success: false,
-                error: error.message
-            });
-        }
-
-        logger.error('Error generating Z-Report:', error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to generate Z-Report'
-        });
-    }
-});
+    res.json({
+        success: true,
+        data: report,
+        message: 'Z-Report generated and session closed'
+    });
+}));
 
 /**
  * POST /api/cash-registers/sessions/:id/approve-variance
@@ -714,10 +508,10 @@ router.post(
             });
         } catch (error) {
             if (error instanceof Error &&
-                ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some(code => error.message.includes(code))) {
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some(code => (error instanceof Error ? error.message : String(error)).includes(code))) {
                 return res.status(400).json({
                     success: false,
-                    error: error.message
+                    error: (error instanceof Error ? error.message : String(error))
                 });
             }
 

@@ -87,7 +87,7 @@ export const quotationRepository = {
    * Generate next quote number (Q-YYYY-####)
    * Uses sequence for thread-safe incrementing
    */
-  async generateQuoteNumber(pool: Pool): Promise<string> {
+  async generateQuoteNumber(pool: Pool | PoolClient): Promise<string> {
     const year = new Date().getFullYear();
     const seq = await pool.query("SELECT nextval('quotations_seq')");
     const num = seq.rows[0].nextval;
@@ -122,7 +122,7 @@ export const quotationRepository = {
       requiresApproval?: boolean;
     }
   ): Promise<QuotationDbRow> {
-    const quoteNumber = await this.generateQuoteNumber(client as any);
+    const quoteNumber = await this.generateQuoteNumber(client);
 
     const result = await client.query<QuotationDbRow>(
       `INSERT INTO quotations (
@@ -191,7 +191,7 @@ export const quotationRepository = {
       productType?: string;
     }>
   ): Promise<QuotationItemDbRow[]> {
-    const values: any[] = [];
+    const values: unknown[] = [];
     const placeholders: string[] = [];
 
     items.forEach((item, idx) => {
@@ -353,7 +353,7 @@ export const quotationRepository = {
   ): Promise<{ quotations: QuotationDbRow[]; total: number }> {
     const offset = (filters.page - 1) * filters.limit;
     const where: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let idx = 1;
 
     if (filters.customerId) {
@@ -499,7 +499,7 @@ export const quotationRepository = {
     }>
   ): Promise<QuotationDbRow> {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let idx = 1;
 
     // Filter out non-database fields (items is handled separately in the service)
@@ -556,7 +556,7 @@ export const quotationRepository = {
    * BR-QUOTE-002: Expired quotes cannot be converted
    * SIMPLIFIED: Any OPEN (non-CONVERTED, non-CANCELLED) quote can convert
    */
-  async canConvertQuotation(pool: Pool, id: string): Promise<{ can: boolean; reason?: string }> {
+  async canConvertQuotation(pool: Pool | PoolClient, id: string): Promise<{ can: boolean; reason?: string }> {
     const result = await pool.query<QuotationDbRow>(
       'SELECT * FROM quotations WHERE id = $1',
       [id]

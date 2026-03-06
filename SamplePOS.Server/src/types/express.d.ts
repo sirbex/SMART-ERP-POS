@@ -18,6 +18,8 @@ declare global {
       tenantPool?: Pool;
       tenant?: Tenant;
       tenantId?: string;
+      // Resolved pool (tenantPool || globalPool, set by route middleware)
+      pool?: Pool;
       // Audit context
       auditContext?: import('../../../shared/types/audit.js').AuditContext;
       requestId?: string;

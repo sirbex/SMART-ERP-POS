@@ -2,7 +2,7 @@
 // Validates input, calls service layer, formats responses
 // SECURITY: Uses req.tenantPool for multi-tenant isolation
 
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { pool as globalPool } from '../../db/pool.js';
 import { connectionManager } from '../../db/connectionManager.js';
@@ -11,15 +11,15 @@ import { authenticateUser, registerUser, getUserProfile } from './authService.js
 import * as auditService from '../audit/auditService.js';
 import * as twoFactorService from './twoFactorService.js';
 import * as refreshTokenService from './refreshTokenService.js';
-import { createUserSessionMiddleware, endUserSessionMiddleware } from '../../middleware/auditContext.js';
 import { resetAuthRateLimit } from '../../middleware/security.js';
+import { asyncHandler, UnauthorizedError, NotFoundError, ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 
 /**
  * Login controller
  * POST /api/auth/login
  */
-export async function login(req: Request, res: Response, next: NextFunction) {
+export const login = asyncHandler(async (req: Request, res: Response) => {
   try {
     // SECURITY: Use tenant pool for multi-tenant isolation
     const pool = req.tenantPool || globalPool;
@@ -37,15 +37,15 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       // 2FA is enabled - return partial login, require 2FA verification
       logger.info('2FA verification required', { userId: result.user.id, email: result.user.email });
 
-      return res.json({
+      res.json({
         success: true,
         data: {
           requires2FA: true,
           userId: result.user.id,
-          // Don't send token until 2FA is verified
         },
         message: 'Please enter your 2FA code',
       });
+      return;
     }
 
     // Check if user's role requires 2FA but it's not set up
@@ -56,7 +56,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       const deviceInfo = req.headers['user-agent'] || undefined;
       const ipAddress = req.ip || req.socket.remoteAddress || undefined;
       const tokenPair = await refreshTokenService.generateTokenPair(
-        { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role as any, tenantId, tenantSlug },
+        { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role, tenantId, tenantSlug },
         deviceInfo,
         ipAddress,
         pool
@@ -71,11 +71,11 @@ export async function login(req: Request, res: Response, next: NextFunction) {
         path: '/api/auth/token',
       });
 
-      return res.json({
+      res.json({
         success: true,
         data: {
           user: result.user,
-          token: tokenPair.accessToken, // Keep 'token' for backward compatibility
+          token: tokenPair.accessToken,
           accessToken: tokenPair.accessToken,
           refreshToken: tokenPair.refreshToken,
           expiresIn: tokenPair.expiresIn,
@@ -84,13 +84,14 @@ export async function login(req: Request, res: Response, next: NextFunction) {
         },
         message: 'Login successful. 2FA setup is required for your role.',
       });
+      return;
     }
 
     // Generate token pair for successful login
     const deviceInfo = req.headers['user-agent'] || undefined;
     const ipAddress = req.ip || req.socket.remoteAddress || undefined;
     const tokenPair = await refreshTokenService.generateTokenPair(
-      { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role as any, tenantId, tenantSlug },
+      { id: result.user.id, email: result.user.email, fullName: result.user.fullName, role: result.user.role, tenantId, tenantSlug },
       deviceInfo,
       ipAddress,
       pool
@@ -115,7 +116,6 @@ export async function login(req: Request, res: Response, next: NextFunction) {
         userAgent: req.headers['user-agent'],
       };
 
-      // Log successful login and create session
       const session = await auditService.logUserLogin(
         pool,
         result.user.id,
@@ -124,7 +124,6 @@ export async function login(req: Request, res: Response, next: NextFunction) {
         auditContext
       );
 
-      // Store session ID in cookie
       res.cookie('sessionId', session.id, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -139,7 +138,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       success: true,
       data: {
         user: result.user,
-        token: tokenPair.accessToken, // Keep 'token' for backward compatibility
+        token: tokenPair.accessToken,
         accessToken: tokenPair.accessToken,
         refreshToken: tokenPair.refreshToken,
         expiresIn: tokenPair.expiresIn,
@@ -163,11 +162,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
           if (validPassword) {
             logger.info('Super admin detected via tenant login — redirecting to platform portal', { email: superAdmin.email });
 
-            // Do NOT issue a tenant-scoped token — the super admin UUID
-            // does not exist in the tenant's users table, so subsequent
-            // authenticate() calls would fail with 401.
-            // Instead, tell the frontend to redirect to the platform login.
-            return res.json({
+            res.json({
               success: true,
               data: {
                 isSuperAdmin: true,
@@ -175,10 +170,10 @@ export async function login(req: Request, res: Response, next: NextFunction) {
               },
               message: 'Please use the Platform Admin portal to log in.',
             });
+            return;
           }
         }
       } catch (superAdminError) {
-        // Super admin fallback failed — continue to normal error handling
         logger.debug('Super admin fallback check failed (non-fatal)', {
           error: superAdminError instanceof Error ? superAdminError.message : String(superAdminError),
         });
@@ -190,9 +185,9 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     // Log failed login attempt to audit trail
     try {
       const auditContext = {
-        userId: '00000000-0000-0000-0000-000000000000', // System/unknown user UUID
+        userId: '00000000-0000-0000-0000-000000000000',
         userName: 'Anonymous',
-        userRole: 'NONE' as any,
+        userRole: 'NONE' as string,
         ipAddress: req.ip || req.socket.remoteAddress,
         userAgent: req.headers['user-agent'],
       };
@@ -212,148 +207,104 @@ export async function login(req: Request, res: Response, next: NextFunction) {
 
     // Handle authentication errors with 401
     if (error instanceof Error) {
-      if (
-        error.message === 'Invalid email or password' ||
-        error.message === 'Account is disabled'
-      ) {
-        return res.status(401).json({
-          success: false,
-          error: error.message,
-        });
+      if (error.message === 'Invalid email or password' || error.message === 'Account is disabled') {
+        throw new UnauthorizedError(error.message);
       }
     }
 
-    // Pass other errors to error middleware
-    next(error);
+    // Re-throw for asyncHandler → global error handler
+    throw error;
   }
-}
+});
 
 /**
  * Register controller
  * POST /api/auth/register
  */
-export async function register(req: Request, res: Response, next: NextFunction) {
+export const register = asyncHandler(async (req: Request, res: Response) => {
+  const regPool = req.tenantPool || globalPool;
   try {
-    const regPool = req.tenantPool || globalPool;
     const result = await registerUser(regPool, req.body);
-
     res.status(201).json({
       success: true,
       data: result,
       message: 'User registered successfully',
     });
   } catch (error) {
-    logger.error('Registration failed', { error, body: req.body });
-
-    // Handle duplicate email error with 400
+    // Handle duplicate email error
     if (error instanceof Error && error.message === 'Email already registered') {
-      return res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      throw new ConflictError(error.message);
     }
-
-    // Pass other errors to error middleware
-    next(error);
+    throw error;
   }
-}
+});
 
 /**
  * Logout controller
  * POST /api/auth/logout
  */
-export async function logout(req: Request, res: Response, next: NextFunction) {
-  try {
-    const userId = req.user?.id;
-    const userName = req.user?.fullName;
-    const sessionId = req.cookies?.sessionId || (req.headers['x-session-id'] as string);
+export const logout = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  const userName = req.user?.fullName;
+  const sessionId = req.cookies?.sessionId || (req.headers['x-session-id'] as string);
 
-    if (userId && sessionId) {
-      // End user session and log logout
-      try {
-        const auditContext = {
-          userId,
-          userName: userName || 'Unknown',
-          userRole: req.user?.role || 'STAFF',
-          sessionId,
-          ipAddress: req.ip || req.socket.remoteAddress,
-          userAgent: req.headers['user-agent'],
-        };
+  if (userId && sessionId) {
+    try {
+      const auditContext = {
+        userId,
+        userName: userName || 'Unknown',
+        userRole: req.user?.role || 'STAFF',
+        sessionId,
+        ipAddress: req.ip || req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      };
 
-        const logoutPool = req.tenantPool || globalPool;
-        await auditService.logUserLogout(logoutPool, sessionId, 'MANUAL', auditContext);
-
-        // Clear session cookie
-        res.clearCookie('sessionId');
-      } catch (auditError) {
-        logger.error('Audit logging failed for logout (non-fatal)', {
-          error: auditError instanceof Error ? auditError.message : String(auditError),
-          stack: auditError instanceof Error ? auditError.stack : undefined,
-          sessionId,
-          userId
-        });
-      }
+      const logoutPool = req.tenantPool || globalPool;
+      await auditService.logUserLogout(logoutPool, sessionId, 'MANUAL', auditContext);
+      res.clearCookie('sessionId');
+    } catch (auditError) {
+      logger.error('Audit logging failed for logout (non-fatal)', {
+        error: auditError instanceof Error ? auditError.message : String(auditError),
+        stack: auditError instanceof Error ? auditError.stack : undefined,
+        sessionId,
+        userId
+      });
     }
-
-    // Revoke refresh token if present
-    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
-    if (refreshToken) {
-      try {
-        const logoutPool = req.tenantPool || globalPool;
-        await refreshTokenService.revokeRefreshToken(refreshToken, logoutPool);
-      } catch (revokeError) {
-        logger.error('Failed to revoke refresh token (non-fatal)', { error: revokeError });
-      }
-    }
-
-    // Clear refresh token cookie
-    res.clearCookie('refreshToken', { path: '/api/auth/token' });
-
-    res.json({
-      success: true,
-      message: 'Logout successful',
-    });
-  } catch (error) {
-    logger.error('Logout failed', { error, userId: req.user?.id });
-    next(error);
   }
-}
+
+  // Revoke refresh token if present
+  const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+  if (refreshToken) {
+    try {
+      const logoutPool = req.tenantPool || globalPool;
+      await refreshTokenService.revokeRefreshToken(refreshToken, logoutPool);
+    } catch (revokeError) {
+      logger.error('Failed to revoke refresh token (non-fatal)', { error: revokeError });
+    }
+  }
+
+  res.clearCookie('refreshToken', { path: '/api/auth/token' });
+  res.json({ success: true, message: 'Logout successful' });
+});
 
 /**
  * Get profile controller
  * GET /api/auth/profile
  */
-export async function getProfile(req: Request, res: Response, next: NextFunction) {
-  try {
-    // req.user is set by authenticate middleware
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error: 'Not authenticated',
-      });
-    }
-
-    const profilePool = req.tenantPool || globalPool;
-    const user = await getUserProfile(profilePool, userId);
-
-    res.json({
-      success: true,
-      data: user,
-    });
-  } catch (error) {
-    logger.error('Get profile failed', { error, userId: req.user?.id });
-
-    // Handle not found error with 404
-    if (error instanceof Error && error.message === 'User not found') {
-      return res.status(404).json({
-        success: false,
-        error: error.message,
-      });
-    }
-
-    // Pass other errors to error middleware
-    next(error);
+export const getProfile = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new UnauthorizedError('Not authenticated');
   }
-}
+
+  const profilePool = req.tenantPool || globalPool;
+  try {
+    const user = await getUserProfile(profilePool, userId);
+    res.json({ success: true, data: user });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'User not found') {
+      throw new NotFoundError('User');
+    }
+    throw error;
+  }
+});

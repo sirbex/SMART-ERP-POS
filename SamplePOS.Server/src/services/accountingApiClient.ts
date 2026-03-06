@@ -78,7 +78,7 @@ interface COGSItemPosting {
   salesAmount: number;
 }
 
-interface AccountingApiResponse<T = any> {
+interface AccountingApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   message?: string;
@@ -146,15 +146,15 @@ class AccountingApiClient {
         });
         return { success: false, error: response.data.error || response.data.message };
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Error posting invoice to accounting system', {
         invoiceId: invoiceData.invoiceId,
-        error: error.message,
-        stack: error.stack
+        error: (error instanceof Error ? error.message : String(error)),
+        stack: (error instanceof Error ? error.stack : undefined)
       });
 
       // Non-blocking - invoice creation continues even if accounting fails
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -189,15 +189,15 @@ class AccountingApiClient {
         });
         return { success: false, error: response.data.error || response.data.message };
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Error posting payment to accounting system', {
         paymentId: paymentData.paymentId,
-        error: error.message,
-        stack: error.stack
+        error: (error instanceof Error ? error.message : String(error)),
+        stack: (error instanceof Error ? error.stack : undefined)
       });
 
       // Non-blocking - payment processing continues even if accounting fails
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -231,15 +231,15 @@ class AccountingApiClient {
         });
         return { success: false, error: response.data.error || response.data.message };
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Error posting COGS to accounting system', {
         saleId: cogsData.saleId,
-        error: error.message,
-        stack: error.stack
+        error: (error instanceof Error ? error.message : String(error)),
+        stack: (error instanceof Error ? error.stack : undefined)
       });
 
       // Non-blocking - sale completion continues even if accounting fails
-      return { success: false, error: error.message };
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -254,16 +254,16 @@ class AccountingApiClient {
 
       logger.info('Accounting API health check passed');
       return { healthy: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.isHealthy = false;
       this.lastHealthCheck = new Date();
 
       logger.warn('Accounting API health check failed', {
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
         baseUrl: this.config.baseUrl
       });
 
-      return { healthy: false, error: error.message };
+      return { healthy: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -299,7 +299,7 @@ class AccountingApiClient {
     } else {
       // Error in request setup
       logger.error('Error setting up accounting API request', {
-        message: error.message,
+        message: (error instanceof Error ? error.message : String(error)),
         url: error.config?.url
       });
     }
