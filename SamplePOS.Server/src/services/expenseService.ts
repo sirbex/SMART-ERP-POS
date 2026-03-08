@@ -1,6 +1,7 @@
 import * as expenseRepository from '../repositories/expenseRepository';
 import { ExpenseFilters, CreateExpenseData, UpdateExpenseData } from '../types/expense';
 import logger from '../utils/logger.js';
+import { BusinessError, NotFoundError } from '../middleware/errorHandler.js';
 import * as glEntryService from './glEntryService.js';
 import { BankingService } from './bankingService.js';
 import { pool as globalPool } from '../db/pool.js';
@@ -21,8 +22,8 @@ export const getExpenses = async (filters: ExpenseFilters) => {
         page: filters.page,
         limit: filters.limit,
         total,
-        totalPages: Math.ceil(total / filters.limit)
-      }
+        totalPages: Math.ceil(total / filters.limit),
+      },
     };
   } catch (error) {
     logger.error('Error in expense service getExpenses', { error, filters });
@@ -53,7 +54,7 @@ export const createExpense = async (data: CreateExpenseData) => {
     const expenseData = {
       ...data,
       expense_number: expenseNumber,
-      status: 'DRAFT' as const
+      status: 'DRAFT' as const,
     };
 
     // Wrap create + approval in a single transaction
@@ -88,7 +89,10 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, userId:
 
     // Business rule: Only draft expenses can be modified by creator
     if (existingExpense.status !== 'DRAFT' && existingExpense.createdBy !== userId) {
-      throw new Error('Cannot modify expense in current status');
+      throw new BusinessError('Cannot modify expense in current status', 'ERR_EXPENSE_001', {
+        expenseId: id,
+        currentStatus: existingExpense.status,
+      });
     }
 
     return await expenseRepository.updateExpense(id, data);
@@ -110,7 +114,10 @@ export const deleteExpense = async (id: string, userId: string) => {
 
     // Business rule: Only draft expenses can be deleted by creator
     if (existingExpense.status !== 'DRAFT' && existingExpense.createdBy !== userId) {
-      throw new Error('Cannot delete expense in current status');
+      throw new BusinessError('Cannot delete expense in current status', 'ERR_EXPENSE_002', {
+        expenseId: id,
+        currentStatus: existingExpense.status,
+      });
     }
 
     return await expenseRepository.deleteExpense(id);
@@ -127,12 +134,16 @@ export const submitExpense = async (id: string, userId: string) => {
   try {
     const existingExpense = await expenseRepository.getExpenseById(id);
     if (!existingExpense) {
-      throw new Error('Expense not found');
+      throw new NotFoundError('Expense');
     }
 
     // Business rule: Only draft expenses can be submitted
     if (existingExpense.status !== 'DRAFT') {
-      throw new Error('Only draft expenses can be submitted for approval');
+      throw new BusinessError(
+        'Only draft expenses can be submitted for approval',
+        'ERR_EXPENSE_003',
+        { expenseId: id, currentStatus: existingExpense.status, requiredStatus: 'DRAFT' }
+      );
     }
 
     // Update status to pending approval
@@ -156,17 +167,25 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
 
     // Business rule: Only pending expenses can be approved
     if (existingExpense.status !== 'PENDING_APPROVAL') {
-      throw new Error('Cannot approve expense in current status');
+      throw new BusinessError('Cannot approve expense in current status', 'ERR_EXPENSE_004', {
+        expenseId: id,
+        currentStatus: existingExpense.status,
+        requiredStatus: 'PENDING_APPROVAL',
+      });
     }
 
     // Wrap status update + approval record in a single transaction
     const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
       // Update expense status
-      const updated = await expenseRepository.updateExpense(id, {
-        status: 'APPROVED',
-        approved_by: approverId,
-        approved_at: new Date().toISOString()
-      }, client);
+      const updated = await expenseRepository.updateExpense(
+        id,
+        {
+          status: 'APPROVED',
+          approved_by: approverId,
+          approved_at: new Date().toISOString(),
+        },
+        client
+      );
 
       // Update approval record
       await expenseRepository.updateApprovalRecord(id, approverId, 'APPROVED', comments, client);
@@ -193,18 +212,26 @@ export const rejectExpense = async (id: string, rejectorId: string, reason: stri
 
     // Business rule: Only pending expenses can be rejected
     if (existingExpense.status !== 'PENDING_APPROVAL') {
-      throw new Error('Cannot reject expense in current status');
+      throw new BusinessError('Cannot reject expense in current status', 'ERR_EXPENSE_005', {
+        expenseId: id,
+        currentStatus: existingExpense.status,
+        requiredStatus: 'PENDING_APPROVAL',
+      });
     }
 
     // Wrap status update + approval record in a single transaction
     const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
       // Update expense status
-      const updated = await expenseRepository.updateExpense(id, {
-        status: 'REJECTED',
-        rejected_by: rejectorId,
-        rejected_at: new Date().toISOString(),
-        rejection_reason: reason
-      }, client);
+      const updated = await expenseRepository.updateExpense(
+        id,
+        {
+          status: 'REJECTED',
+          rejected_by: rejectorId,
+          rejected_at: new Date().toISOString(),
+          rejection_reason: reason,
+        },
+        client
+      );
 
       // Update approval record
       await expenseRepository.updateApprovalRecord(id, rejectorId, 'REJECTED', reason, client);
@@ -225,7 +252,12 @@ export const rejectExpense = async (id: string, rejectorId: string, reason: stri
 export const markExpensePaid = async (
   id: string,
   paidById: string,
-  paymentData: { paymentDate?: string; paymentReference?: string; notes?: string; paymentAccountId?: string }
+  paymentData: {
+    paymentDate?: string;
+    paymentReference?: string;
+    notes?: string;
+    paymentAccountId?: string;
+  }
 ) => {
   try {
     const existingExpense = await expenseRepository.getExpenseById(id);
@@ -235,7 +267,11 @@ export const markExpensePaid = async (
 
     // Business rule: Only approved expenses can be marked as paid
     if (existingExpense.status !== 'APPROVED') {
-      throw new Error('Cannot mark expense as paid in current status');
+      throw new BusinessError('Cannot mark expense as paid in current status', 'ERR_EXPENSE_006', {
+        expenseId: id,
+        currentStatus: existingExpense.status,
+        requiredStatus: 'APPROVED',
+      });
     }
 
     // Get default cash account if no payment account specified
@@ -243,7 +279,7 @@ export const markExpensePaid = async (
     if (!paymentAccountId) {
       // Default to Cash account (1010)
       const cashAccounts = await expenseRepository.getPaymentAccounts();
-      const cashAccount = cashAccounts.find(a => a.code === '1010');
+      const cashAccount = cashAccounts.find((a) => a.code === '1010');
       if (cashAccount) {
         paymentAccountId = cashAccount.id;
       }
@@ -254,10 +290,12 @@ export const markExpensePaid = async (
       paid_by: paidById,
       paid_at: paymentData.paymentDate || new Date().toISOString(),
       reference_number: paymentData.paymentReference || existingExpense.referenceNumber,
-      notes: paymentData.notes ? `${existingExpense.notes || ''}\n\nPayment: ${paymentData.notes}`.trim() : existingExpense.notes,
+      notes: paymentData.notes
+        ? `${existingExpense.notes || ''}\n\nPayment: ${paymentData.notes}`.trim()
+        : existingExpense.notes,
       // Set payment status and account for GL trigger
       payment_status: 'PAID' as const,
-      payment_account_id: paymentAccountId || null
+      payment_account_id: paymentAccountId || null,
     };
 
     // ============================================================
@@ -336,12 +374,18 @@ export const getPaymentAccounts = async () => {
 /**
  * Create expense category
  */
-export const createExpenseCategory = async (data: { name: string; code: string; description?: string }) => {
+export const createExpenseCategory = async (data: {
+  name: string;
+  code: string;
+  description?: string;
+}) => {
   try {
     // Check if category with same name or code exists
     const existing = await expenseRepository.getExpenseCategoryByCode(data.code);
     if (existing) {
-      throw new Error('Category with this code already exists');
+      throw new BusinessError('Category with this code already exists', 'ERR_EXPENSE_007', {
+        code: data.code,
+      });
     }
 
     return await expenseRepository.createExpenseCategory(data);
@@ -376,8 +420,8 @@ export const deleteExpenseDocument = async (documentId: string, userId: string) 
 
     // Check if user can delete this document (owns the expense or is admin)
     const expense = await expenseRepository.getExpenseById(document.expense_id);
-    if (!expense || (expense.createdBy !== userId)) {
-      throw new Error('Permission denied');
+    if (!expense || expense.createdBy !== userId) {
+      throw new BusinessError('Permission denied', 'ERR_EXPENSE_008', { documentId, userId });
     }
 
     return await expenseRepository.deleteExpenseDocument(documentId);
@@ -417,15 +461,23 @@ export const submitForApproval = async (id: string, userId: string) => {
 
     // Business rule: Only draft expenses can be submitted for approval
     if (existingExpense.status !== 'DRAFT') {
-      throw new Error('Cannot submit expense in current status for approval');
+      throw new BusinessError(
+        'Cannot submit expense in current status for approval',
+        'ERR_EXPENSE_003',
+        { expenseId: id, currentStatus: existingExpense.status, requiredStatus: 'DRAFT' }
+      );
     }
 
     // Wrap status update + approval record creation in a single transaction
     const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
       // Update expense status
-      const updated = await expenseRepository.updateExpense(id, {
-        status: 'PENDING_APPROVAL'
-      }, client);
+      const updated = await expenseRepository.updateExpense(
+        id,
+        {
+          status: 'PENDING_APPROVAL',
+        },
+        client
+      );
 
       // Create approval record
       await expenseRepository.createApprovalRecord(id, userId, client);
@@ -479,7 +531,10 @@ export const getExpenseTrends = async (filters: { startDate?: string; endDate?: 
 /**
  * Get expenses by payment method
  */
-export const getExpensesByPaymentMethod = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpensesByPaymentMethod = async (filters: {
+  startDate?: string;
+  endDate?: string;
+}) => {
   try {
     return await expenseRepository.getExpensesByPaymentMethod(filters);
   } catch (error) {
@@ -491,7 +546,12 @@ export const getExpensesByPaymentMethod = async (filters: { startDate?: string; 
 /**
  * Get expenses for export
  */
-export const getExpensesForExport = async (filters: { startDate?: string; endDate?: string; categoryId?: string; status?: string }) => {
+export const getExpensesForExport = async (filters: {
+  startDate?: string;
+  endDate?: string;
+  categoryId?: string;
+  status?: string;
+}) => {
   try {
     return await expenseRepository.getExpensesForExport(filters);
   } catch (error) {
@@ -503,7 +563,11 @@ export const getExpensesForExport = async (filters: { startDate?: string; endDat
 /**
  * Get expense summary/statistics
  */
-export const getExpenseSummary = async (filters: { startDate?: string; endDate?: string; categoryId?: string }) => {
+export const getExpenseSummary = async (filters: {
+  startDate?: string;
+  endDate?: string;
+  categoryId?: string;
+}) => {
   try {
     return await expenseRepository.getExpenseSummary(filters);
   } catch (error) {
@@ -515,14 +579,18 @@ export const getExpenseSummary = async (filters: { startDate?: string; endDate?:
 /**
  * Update expense category
  */
-export const updateExpenseCategory = async (id: string, updateData: Record<string, unknown>, userId: string) => {
+export const updateExpenseCategory = async (
+  id: string,
+  updateData: Record<string, unknown>,
+  userId: string
+) => {
   try {
     const category = await expenseRepository.updateExpenseCategory(id, updateData);
 
     if (category) {
       logger.info('Expense category updated', {
         categoryId: id,
-        updatedBy: userId
+        updatedBy: userId,
       });
     }
 
@@ -541,7 +609,11 @@ export const deleteExpenseCategory = async (id: string, userId: string) => {
     // Check if category has associated expenses
     const expenseCount = await expenseRepository.getExpenseCountByCategory(id);
     if (expenseCount > 0) {
-      throw new Error(`Cannot delete category: ${expenseCount} expenses are associated with this category`);
+      throw new BusinessError(
+        `Cannot delete category: ${expenseCount} expenses are associated with this category`,
+        'ERR_EXPENSE_009',
+        { categoryId: id, expenseCount }
+      );
     }
 
     const deleted = await expenseRepository.deleteExpenseCategory(id);
@@ -549,7 +621,7 @@ export const deleteExpenseCategory = async (id: string, userId: string) => {
     if (deleted) {
       logger.info('Expense category deleted', {
         categoryId: id,
-        deletedBy: userId
+        deletedBy: userId,
       });
     }
 

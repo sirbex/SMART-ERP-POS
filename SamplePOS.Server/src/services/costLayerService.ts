@@ -5,6 +5,7 @@
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
+import { BusinessError, NotFoundError } from '../middleware/errorHandler.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import logger from '../utils/logger.js';
 import type { CostLayer, CreateCostLayer } from '../../../shared/zod/cost-layer.js';
@@ -58,33 +59,33 @@ interface CostLayerSummary {
  * @param data - Cost layer creation data (product, quantity, cost, batch, GR reference)
  * @returns void (inserts cost layer record)
  * @throws Error if quantity/cost invalid or product not found
- * 
+ *
  * Called During:
  * - Goods receipt finalization
  * - Purchase order receiving
  * - Stock adjustment with cost data
- * 
+ *
  * Inventory Valuation Methods:
  * - **FIFO** (First In First Out): Oldest cost layers consumed first
  * - **AVCO** (Average Cost): Weighted average across all layers
  * - **STANDARD** (Fixed Cost): Manual cost override (no layers)
- * 
+ *
  * Cost Layer Lifecycle:
  * 1. Created on goods receipt with full quantity
  * 2. remaining_quantity decremented on sales (FIFO consumption)
  * 3. Marked is_active=false when remaining_quantity reaches 0
  * 4. Archived after 2 years for historical valuation
- * 
+ *
  * Bank-Grade Precision:
  * - Uses Decimal.js for all cost calculations
  * - 20-digit precision, ROUND_HALF_UP
  * - Prevents floating-point rounding errors
- * 
+ *
  * Batch Tracking:
  * - Links to goods_receipt_id for traceability
  * - batch_number for physical inventory management
  * - received_date for aging analysis and FEFO
- * 
+ *
  * Business Rules:
  * - BR-INV-001: Quantity must be positive
  * - BR-PRC-001: Unit cost cannot be negative
@@ -94,7 +95,11 @@ interface CostLayerSummary {
  *   queries run on that client (no separate connection, no BEGIN/COMMIT).
  *   Use this when calling from inside an active transaction to prevent deadlocks.
  */
-export async function createCostLayer(data: CreateCostLayer, dbPool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
+export async function createCostLayer(
+  data: CreateCostLayer,
+  dbPool?: pg.Pool,
+  txClient?: pg.PoolClient
+): Promise<void> {
   // If transaction client provided, run directly on it (no separate connection)
   if (txClient) {
     await _createCostLayerOnClient(txClient, data);
@@ -113,7 +118,10 @@ export async function createCostLayer(data: CreateCostLayer, dbPool?: pg.Pool, t
  * Internal: create cost layer using the provided client.
  * Does NOT manage transaction boundaries (caller is responsible).
  */
-async function _createCostLayerOnClient(client: pg.PoolClient | pg.Pool, data: CreateCostLayer): Promise<void> {
+async function _createCostLayerOnClient(
+  client: pg.PoolClient | pg.Pool,
+  data: CreateCostLayer
+): Promise<void> {
   const quantity = new Decimal(data.quantity);
   const unitCost = new Decimal(data.unitCost);
   const receivedDate = data.receivedDate || new Date().toISOString();
@@ -121,10 +129,14 @@ async function _createCostLayerOnClient(client: pg.PoolClient | pg.Pool, data: C
 
   // Validate inputs
   if (quantity.lte(0)) {
-    throw new Error('Quantity must be positive');
+    throw new BusinessError('Quantity must be positive', 'ERR_COSTLAYER_001', {
+      quantity: data.quantity,
+    });
   }
   if (unitCost.lt(0)) {
-    throw new Error('Unit cost cannot be negative');
+    throw new BusinessError('Unit cost cannot be negative', 'ERR_COSTLAYER_002', {
+      unitCost: data.unitCost,
+    });
   }
 
   // Insert cost layer
@@ -146,10 +158,10 @@ async function _createCostLayerOnClient(client: pg.PoolClient | pg.Pool, data: C
   );
 
   // Update product_valuation's last_cost
-  await client.query(`UPDATE product_valuation SET last_cost = $1, updated_at = NOW() WHERE product_id = $2`, [
-    unitCost.toFixed(2),
-    data.productId,
-  ]);
+  await client.query(
+    `UPDATE product_valuation SET last_cost = $1, updated_at = NOW() WHERE product_id = $2`,
+    [unitCost.toFixed(2), data.productId]
+  );
 
   // Recalculate average cost
   await updateAverageCost(data.productId, client);
@@ -175,10 +187,10 @@ async function _createCostLayerOnClient(client: pg.PoolClient | pg.Pool, data: C
     );
 
     if (inventoryAcct.rows.length === 0) {
-      throw new Error(`Inventory account ${inventoryAccountCode} not found`);
+      throw new NotFoundError(`Inventory account ${inventoryAccountCode}`);
     }
     if (offsetAcct.rows.length === 0) {
-      throw new Error(`Offset account ${offsetAccountCode} not found`);
+      throw new NotFoundError(`Offset account ${offsetAccountCode}`);
     }
 
     const inventoryAccountId = inventoryAcct.rows[0].Id;
@@ -195,78 +207,92 @@ async function _createCostLayerOnClient(client: pg.PoolClient | pg.Pool, data: C
     const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
 
     // Get product name for description
-    const productResult = await client.query(
-      `SELECT name FROM products WHERE id = $1`,
-      [data.productId]
-    );
+    const productResult = await client.query(`SELECT name FROM products WHERE id = $1`, [
+      data.productId,
+    ]);
     const productName = productResult.rows[0]?.name || 'Unknown Product';
     const description = `Inventory addition: ${productName} (${quantity.toString()} @ ${unitCost.toString()})`;
 
     // Create ledger transaction header
-    await client.query(`
+    await client.query(
+      `
         INSERT INTO ledger_transactions (
           "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
           "ReferenceId", "ReferenceNumber", "Description",
           "TotalDebitAmount", "TotalCreditAmount", "Status",
           "CreatedBy", "CreatedAt", "UpdatedAt", "IsReversed"
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED', $10, NOW(), NOW(), FALSE)
-      `, [
-      transactionId,
-      transactionNumber,
-      receivedDate,
-      'COST_LAYER',
-      data.productId,
-      data.batchNumber || `CL-${transactionNumber}`,
-      description,
-      totalValue.toFixed(2),
-      totalValue.toFixed(2),
-      data.userId || null
-    ]);
+      `,
+      [
+        transactionId,
+        transactionNumber,
+        receivedDate,
+        'COST_LAYER',
+        data.productId,
+        data.batchNumber || `CL-${transactionNumber}`,
+        description,
+        totalValue.toFixed(2),
+        totalValue.toFixed(2),
+        data.userId || null,
+      ]
+    );
 
     // DR Inventory (increase asset)
-    await client.query(`
+    await client.query(
+      `
         INSERT INTO ledger_entries (
           "Id", "TransactionId", "AccountId", "EntryType",
           "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
           "EntityType", "EntityId", "CreatedAt"
         ) VALUES ($1, $2, $3, 'DEBIT', $4, $5, 0, $6, 1, 'PRODUCT', $7, NOW())
-      `, [
-      crypto.randomUUID(),
-      transactionId,
-      inventoryAccountId,
-      totalValue.toFixed(2),
-      totalValue.toFixed(2),
-      `Inventory received: ${productName}`,
-      data.productId
-    ]);
+      `,
+      [
+        crypto.randomUUID(),
+        transactionId,
+        inventoryAccountId,
+        totalValue.toFixed(2),
+        totalValue.toFixed(2),
+        `Inventory received: ${productName}`,
+        data.productId,
+      ]
+    );
 
     // CR Offset Account (Opening Balance Equity or specified account)
-    await client.query(`
+    await client.query(
+      `
         INSERT INTO ledger_entries (
           "Id", "TransactionId", "AccountId", "EntryType",
           "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
           "EntityType", "EntityId", "CreatedAt"
         ) VALUES ($1, $2, $3, 'CREDIT', $4, 0, $5, $6, 2, 'PRODUCT', $7, NOW())
-      `, [
-      crypto.randomUUID(),
-      transactionId,
-      offsetAccountId,
-      totalValue.toFixed(2),
-      totalValue.toFixed(2),
-      `Opening balance: ${productName}`,
-      data.productId
-    ]);
+      `,
+      [
+        crypto.randomUUID(),
+        transactionId,
+        offsetAccountId,
+        totalValue.toFixed(2),
+        totalValue.toFixed(2),
+        `Opening balance: ${productName}`,
+        data.productId,
+      ]
+    );
 
     // Update account balances
-    await client.query(`
+    await client.query(
+      `
         UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2, "UpdatedAt" = NOW()
         WHERE "Id" = $1
-      `, [inventoryAccountId, totalValue.toFixed(2)]);
+      `,
+      [inventoryAccountId, totalValue.toFixed(2)]
+    );
 
-    await client.query(`
+    await client.query(
+      `
         UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2, "UpdatedAt" = NOW()
         WHERE "Id" = $1
-      `, [offsetAccountId, totalValue.toFixed(2)]); // Credit to equity increases balance
+      `,
+      [offsetAccountId, totalValue.toFixed(2)]
+    ); // Credit to equity increases balance
 
     logger.info('GL entry posted for cost layer', {
       transactionId,
@@ -301,7 +327,7 @@ export async function calculateFIFOCost(
   const requestedQty = new Decimal(quantity);
 
   if (requestedQty.lte(0)) {
-    throw new Error('Quantity must be positive');
+    throw new BusinessError('Quantity must be positive', 'ERR_COSTLAYER_001', { quantity });
   }
 
   // Get active cost layers ordered by received_date (oldest first)
@@ -315,7 +341,9 @@ export async function calculateFIFOCost(
   const layers = result.rows;
 
   if (layers.length === 0) {
-    throw new Error(`No cost layers found for product ${productId}`);
+    throw new BusinessError(`No cost layers found for product ${productId}`, 'ERR_COSTLAYER_003', {
+      productId,
+    });
   }
 
   let remainingToAllocate = requestedQty;
@@ -350,8 +378,15 @@ export async function calculateFIFOCost(
       allocated: requestedQty.minus(remainingToAllocate).toNumber(),
       shortfall: remainingToAllocate.toNumber(),
     });
-    throw new Error(
-      `Insufficient inventory: requested ${quantity}, available ${requestedQty.minus(remainingToAllocate).toNumber()}`
+    throw new BusinessError(
+      `Insufficient inventory: requested ${quantity}, available ${requestedQty.minus(remainingToAllocate).toNumber()}`,
+      'ERR_COSTLAYER_004',
+      {
+        productId,
+        requested: quantity,
+        available: requestedQty.minus(remainingToAllocate).toNumber(),
+        shortfall: remainingToAllocate.toNumber(),
+      }
     );
   }
 
@@ -379,7 +414,7 @@ export async function calculateAVCOCost(
   const requestedQty = new Decimal(quantity);
 
   if (requestedQty.lte(0)) {
-    throw new Error('Quantity must be positive');
+    throw new BusinessError('Quantity must be positive', 'ERR_COSTLAYER_001', { quantity });
   }
 
   // Get sum of all active cost layers
@@ -397,12 +432,16 @@ export async function calculateAVCOCost(
   const totalValue = new Decimal(row.total_value || 0);
 
   if (totalQuantity.lte(0)) {
-    throw new Error(`No cost layers found for product ${productId}`);
+    throw new BusinessError(`No cost layers found for product ${productId}`, 'ERR_COSTLAYER_003', {
+      productId,
+    });
   }
 
   if (requestedQty.gt(totalQuantity)) {
-    throw new Error(
-      `Insufficient inventory: requested ${quantity}, available ${totalQuantity.toNumber()}`
+    throw new BusinessError(
+      `Insufficient inventory: requested ${quantity}, available ${totalQuantity.toNumber()}`,
+      'ERR_COSTLAYER_004',
+      { productId, requested: quantity, available: totalQuantity.toNumber() }
     );
   }
 
@@ -436,10 +475,13 @@ export async function calculateActualCost(
     return await calculateAVCOCost(productId, quantity, dbPool, txClient);
   } else if (costingMethod === 'STANDARD') {
     // Standard costing uses the product's average_cost field
-    const result = await queryable.query(`SELECT average_cost FROM product_valuation WHERE product_id = $1`, [productId]);
+    const result = await queryable.query(
+      `SELECT average_cost FROM product_valuation WHERE product_id = $1`,
+      [productId]
+    );
 
     if (result.rows.length === 0) {
-      throw new Error(`Product ${productId} not found`);
+      throw new NotFoundError(`Product ${productId}`);
     }
 
     const averageCost = new Decimal(result.rows[0].average_cost || 0);
@@ -452,7 +494,10 @@ export async function calculateActualCost(
       layers: [],
     };
   } else {
-    throw new Error(`Invalid costing method: ${costingMethod}`);
+    throw new BusinessError(`Invalid costing method: ${costingMethod}`, 'ERR_COSTLAYER_005', {
+      costingMethod,
+      validMethods: ['FIFO', 'AVCO', 'STANDARD'],
+    });
   }
 }
 
@@ -551,8 +596,10 @@ async function _deductFromCostLayersOnClient(
   }
 
   if (remainingToDeduct.gt(0)) {
-    throw new Error(
-      `Insufficient cost layers to deduct ${quantity} units (short by ${remainingToDeduct.toNumber()})`
+    throw new BusinessError(
+      `Insufficient cost layers to deduct ${quantity} units (short by ${remainingToDeduct.toNumber()})`,
+      'ERR_COSTLAYER_004',
+      { productId, requested: quantity, shortfall: remainingToDeduct.toNumber() }
     );
   }
 
@@ -568,7 +615,11 @@ async function _deductFromCostLayersOnClient(
 /**
  * Update product's average_cost based on active cost layers
  */
-export async function updateAverageCost(productId: string, client?: pg.PoolClient | pg.Pool, dbPool?: pg.Pool): Promise<void> {
+export async function updateAverageCost(
+  productId: string,
+  client?: pg.PoolClient | pg.Pool,
+  dbPool?: pg.Pool
+): Promise<void> {
   const pool = dbPool || globalPool;
   const queryClient = client || pool;
 
@@ -601,7 +652,10 @@ export async function updateAverageCost(productId: string, client?: pg.PoolClien
 /**
  * Get cost layer summary for a product
  */
-export async function getCostLayerSummary(productId: string, dbPool?: pg.Pool): Promise<CostLayerSummary> {
+export async function getCostLayerSummary(
+  productId: string,
+  dbPool?: pg.Pool
+): Promise<CostLayerSummary> {
   const pool = dbPool || globalPool;
   const result = await pool.query<CostLayerRow>(
     `SELECT * FROM cost_layers 

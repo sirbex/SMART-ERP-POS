@@ -1,10 +1,18 @@
 import { useState, useMemo } from 'react';
-import { usePurchaseOrders, useCreatePurchaseOrder, useSubmitPurchaseOrder, useCancelPurchaseOrder, useDeletePurchaseOrder, useSendPOToSupplier } from '../../hooks/usePurchaseOrders';
+import {
+  usePurchaseOrders,
+  useCreatePurchaseOrder,
+  useSubmitPurchaseOrder,
+  useCancelPurchaseOrder,
+  useDeletePurchaseOrder,
+  useSendPOToSupplier,
+} from '../../hooks/usePurchaseOrders';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useProducts } from '../../hooks/useProducts';
 import { formatCurrency } from '../../utils/currency';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../utils/api';
+import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
 import { UomSelector } from '../../components/inventory/UomSelector';
 import { convertQtyToBase, convertCostToBase } from '../../utils/uom';
@@ -152,7 +160,7 @@ function LineItemRow({
   let lineTotal = new Decimal(0);
   try {
     lineTotal = new Decimal(item.quantity || 0).times(new Decimal(item.unitCost || 0));
-  } catch { }
+  } catch {}
 
   const handleUomChange = (params: {
     uomId: string | null;
@@ -253,7 +261,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
     let subtotal = new Decimal(0);
     let itemCount = 0;
 
-    lineItems.forEach(item => {
+    lineItems.forEach((item) => {
       try {
         const qty = new Decimal(item.quantity || 0);
         const cost = new Decimal(item.unitCost || 0);
@@ -303,8 +311,8 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 
   // Update line item
   const updateLineItem = (id: string, field: keyof POLineItem, value: string) => {
-    setLineItems(prevItems => {
-      const updated = prevItems.map(item =>
+    setLineItems((prevItems) => {
+      const updated = prevItems.map((item) =>
         item.id === id ? { ...item, [field]: value } : item
       );
       return updated;
@@ -313,7 +321,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 
   // Remove line item
   const removeLineItem = (id: string) => {
-    setLineItems(lineItems.filter(item => item.id !== id));
+    setLineItems(lineItems.filter((item) => item.id !== id));
   };
 
   // Validate form
@@ -388,45 +396,53 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         expectedDate: expectedDelivery || undefined,
         notes: notes || undefined,
         createdBy: user.id,
-        items: await Promise.all(lineItems.map(async item => {
-          // Convert quantity to base units if UoM is selected
-          let baseQuantity = parseFloat(item.quantity);
-          let baseUnitCost = parseFloat(item.unitCost);
+        items: await Promise.all(
+          lineItems.map(async (item) => {
+            // Convert quantity to base units if UoM is selected
+            let baseQuantity = parseFloat(item.quantity);
+            let baseUnitCost = parseFloat(item.unitCost);
 
-          if (item.selectedUomId) {
-            // Fetch UoM data to get conversion factor
-            const product = allProducts.find((p: Product) => p.id === item.productId);
-            if (product) {
-              try {
-                const response = await fetch(`/api/products/${product.id}?includeUoms=true`, {
-                  headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-                  },
-                });
-                const json = await response.json();
-                if (json.success) {
-                  const uom = json.data.uoms?.find((u: ProductUom) => u.id === item.selectedUomId);
-                  if (uom) {
-                    // Convert: quantity × conversionFactor = base quantity
-                    baseQuantity = parseFloat(convertQtyToBase(item.quantity, uom.conversionFactor));
-                    // Convert: unit cost ÷ conversionFactor = base unit cost
-                    baseUnitCost = parseFloat(convertCostToBase(item.unitCost, uom.conversionFactor));
+            if (item.selectedUomId) {
+              // Fetch UoM data to get conversion factor
+              const product = allProducts.find((p: Product) => p.id === item.productId);
+              if (product) {
+                try {
+                  const response = await fetch(`/api/products/${product.id}?includeUoms=true`, {
+                    headers: {
+                      Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+                    },
+                  });
+                  const json = await response.json();
+                  if (json.success) {
+                    const uom = json.data.uoms?.find(
+                      (u: ProductUom) => u.id === item.selectedUomId
+                    );
+                    if (uom) {
+                      // Convert: quantity × conversionFactor = base quantity
+                      baseQuantity = parseFloat(
+                        convertQtyToBase(item.quantity, uom.conversionFactor)
+                      );
+                      // Convert: unit cost ÷ conversionFactor = base unit cost
+                      baseUnitCost = parseFloat(
+                        convertCostToBase(item.unitCost, uom.conversionFactor)
+                      );
+                    }
                   }
+                } catch (err) {
+                  console.error('Failed to fetch UoM for conversion:', err);
                 }
-              } catch (err) {
-                console.error('Failed to fetch UoM for conversion:', err);
               }
             }
-          }
 
-          return {
-            productId: item.productId,
-            productName: item.productName,
-            quantity: baseQuantity,
-            unitCost: baseUnitCost,
-            uomId: item.selectedUomId || null,
-          };
-        })),
+            return {
+              productId: item.productId,
+              productName: item.productName,
+              quantity: baseQuantity,
+              unitCost: baseUnitCost,
+              uomId: item.selectedUomId || null,
+            };
+          })
+        ),
       };
 
       await createPOMutation.mutateAsync(poData);
@@ -435,7 +451,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
       onClose();
     } catch (error: unknown) {
       console.error('PO creation error:', error);
-      alert(`Failed to create PO: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to create purchase order' });
     } finally {
       setIsSubmitting(false);
     }
@@ -453,15 +469,14 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         {/* Header Section */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* Supplier Selection */}
-          <SupplierSelector
-            value={supplierId}
-            onChange={setSupplierId}
-            disabled={isSubmitting}
-          />
+          <SupplierSelector value={supplierId} onChange={setSupplierId} disabled={isSubmitting} />
 
           {/* Expected Delivery Date */}
           <div>
-            <label htmlFor="expectedDelivery" className="block text-sm font-medium text-gray-700 mb-2">
+            <label
+              htmlFor="expectedDelivery"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
               Expected Delivery Date
             </label>
             <DatePicker
@@ -487,10 +502,10 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         {/* Line Items Section */}
         <div className="mb-6 border border-gray-300 rounded-lg p-4">
           <div className="flex justify-between items-center mb-4">
-            <h4 className="text-sm font-semibold text-gray-900">Line Items <span className="text-red-500">*</span></h4>
-            <div className="text-xs text-gray-600">
-              BR-PO-002: At least one item required
-            </div>
+            <h4 className="text-sm font-semibold text-gray-900">
+              Line Items <span className="text-red-500">*</span>
+            </h4>
+            <div className="text-xs text-gray-600">BR-PO-002: At least one item required</div>
           </div>
 
           {/* Product Search/Add */}
@@ -506,11 +521,21 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-32">Quantity</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-40">Unit Cost</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-40">Line Total</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-20">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Product
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-32">
+                      Quantity
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-40">
+                      Unit Cost
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-40">
+                      Line Total
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-20">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -553,7 +578,9 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         {/* Form Actions */}
         <ModalFooter
           onCancel={onClose}
-          onSubmit={() => handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)}
+          onSubmit={() =>
+            handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)
+          }
           submitLabel="Create Purchase Order"
           isSubmitting={isSubmitting}
           submitDisabled={lineItems.length === 0}
@@ -562,7 +589,6 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
     </ModalContainer>
   );
 }
-
 
 export default function PurchaseOrdersPage() {
   // State
@@ -575,7 +601,12 @@ export default function PurchaseOrdersPage() {
   const limit = 20;
 
   // API queries
-  const { data: posData, isLoading, error, refetch } = usePurchaseOrders({
+  const {
+    data: posData,
+    isLoading,
+    error,
+    refetch,
+  } = usePurchaseOrders({
     page,
     limit,
     status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
@@ -599,15 +630,18 @@ export default function PurchaseOrdersPage() {
     createdBy: po.created_by_id || po.createdBy,
     createdAt: po.created_at || po.createdAt,
     updatedAt: po.updated_at || po.updatedAt,
-    sentDate: po.sent_date || po.sentDate
+    sentDate: po.sent_date || po.sentDate,
   });
 
   // Extract data
   const purchaseOrders = useMemo(() => {
     if (!posData) return [];
-    const rawData = posData.data && Array.isArray(posData.data)
-      ? posData.data
-      : (Array.isArray(posData) ? posData : []);
+    const rawData =
+      posData.data && Array.isArray(posData.data)
+        ? posData.data
+        : Array.isArray(posData)
+          ? posData
+          : [];
 
     // Map and deduplicate by ID to prevent duplicate display
     const mapped = rawData.map(mapPOFromDB);
@@ -649,7 +683,12 @@ export default function PurchaseOrdersPage() {
 
   // Handle submit PO - automatically sends to supplier and creates goods receipt
   const handleSubmitPO = async (id: string) => {
-    if (!confirm('Submit this purchase order?\n\nThis will:\n• Submit PO for approval\n• Send to supplier\n• Create goods receipt draft for receiving department')) return;
+    if (
+      !confirm(
+        'Submit this purchase order?\n\nThis will:\n• Submit PO for approval\n• Send to supplier\n• Create goods receipt draft for receiving department'
+      )
+    )
+      return;
     try {
       // First submit the PO
       await submitPOMutation.mutateAsync(id);
@@ -659,10 +698,12 @@ export default function PurchaseOrdersPage() {
       const resultData = result?.data as SendToSupplierData | undefined;
       const grNumber = resultData?.goodsReceipt?.receiptNumber || 'GR-XXXX-XXXX';
 
-      alert(`✅ Purchase Order submitted and sent to supplier!\n\nGoods Receipt ${grNumber} created for receiving department.\n\nNext: Receiving department will confirm quantities when delivery arrives.`);
+      alert(
+        `✅ Purchase Order submitted and sent to supplier!\n\nGoods Receipt ${grNumber} created for receiving department.\n\nNext: Receiving department will confirm quantities when delivery arrives.`
+      );
       refetch();
     } catch (error: unknown) {
-      alert(`❌ Failed to submit PO: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to submit purchase order' });
     }
   };
 
@@ -673,7 +714,7 @@ export default function PurchaseOrdersPage() {
       await cancelPOMutation.mutateAsync(id);
       alert('Purchase order cancelled');
     } catch (error) {
-      alert('Failed to cancel purchase order');
+      handleApiError(error, { fallback: 'Failed to cancel purchase order' });
     }
   };
 
@@ -684,7 +725,7 @@ export default function PurchaseOrdersPage() {
       await deletePOMutation.mutateAsync(id);
       alert('Purchase order deleted');
     } catch (error: unknown) {
-      alert(`Failed to delete purchase order: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to delete purchase order' });
     }
   };
 
@@ -718,12 +759,12 @@ export default function PurchaseOrdersPage() {
         quantity: item.ordered_quantity || item.quantity,
         unitCost: item.unit_price || item.unitCost,
         receivedQuantity: item.received_quantity || item.receivedQuantity,
-        totalPrice: item.total_price || item.totalPrice
+        totalPrice: item.total_price || item.totalPrice,
       }));
 
       const finalPO = {
         ...mapPOFromDB(poData as PORow),
-        items: mappedItems
+        items: mappedItems,
       };
 
       console.log('Final PO:', finalPO);
@@ -732,9 +773,7 @@ export default function PurchaseOrdersPage() {
       setShowDetailsModal(true);
     } catch (error: unknown) {
       console.error('Error loading PO details:', error);
-
-      const errorMessage = getErrorMessage(error);
-      alert(`Failed to load purchase order details: ${errorMessage}`);
+      handleApiError(error, { fallback: 'Failed to load purchase order details' });
     }
   };
 
@@ -747,7 +786,7 @@ export default function PurchaseOrdersPage() {
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
-        day: 'numeric'
+        day: 'numeric',
       });
     } catch {
       return '-';
@@ -815,7 +854,7 @@ export default function PurchaseOrdersPage() {
       doc.setFont('helvetica', 'normal');
       const splitNotes = doc.splitTextToSize(po.notes, 180);
       doc.text(splitNotes, 15, yPos + 5);
-      yPos += 5 + (splitNotes.length * 5) + 10;
+      yPos += 5 + splitNotes.length * 5 + 10;
     }
 
     // Line Items Table
@@ -835,7 +874,7 @@ export default function PurchaseOrdersPage() {
           quantity.toString(),
           item.uomName || item.uom_name || 'Base UoM',
           formatCurrencyPDF(unitCost.toNumber()),
-          formatCurrencyPDF(total.toNumber())
+          formatCurrencyPDF(total.toNumber()),
         ];
       });
 
@@ -850,9 +889,9 @@ export default function PurchaseOrdersPage() {
           1: { cellWidth: 25, halign: 'right' },
           2: { cellWidth: 30 },
           3: { cellWidth: 35, halign: 'right' },
-          4: { cellWidth: 35, halign: 'right' }
+          4: { cellWidth: 35, halign: 'right' },
         },
-        margin: { left: 15, right: 15 }
+        margin: { left: 15, right: 15 },
       });
 
       yPos = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
@@ -870,7 +909,9 @@ export default function PurchaseOrdersPage() {
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text('TOTAL AMOUNT:', 120, yPos);
-    doc.text(formatCurrencyPDF(new Decimal(po.totalAmount || 0).toNumber()), 195, yPos, { align: 'right' });
+    doc.text(formatCurrencyPDF(new Decimal(po.totalAmount || 0).toNumber()), 195, yPos, {
+      align: 'right',
+    });
 
     // Footer
     yPos += 20;
@@ -878,7 +919,11 @@ export default function PurchaseOrdersPage() {
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(128, 128, 128);
     doc.text(`Generated on ${new Date().toLocaleString()}`, 15, yPos);
-    doc.text(`Created: ${formatDate(po.createdAt)} | Updated: ${formatDate(po.updatedAt)}`, 15, yPos + 5);
+    doc.text(
+      `Created: ${formatDate(po.createdAt)} | Updated: ${formatDate(po.updatedAt)}`,
+      15,
+      yPos + 5
+    );
 
     // Save PDF
     doc.save(`PurchaseOrder_${po.poNumber || 'Unknown'}.pdf`);
@@ -953,9 +998,7 @@ export default function PurchaseOrdersPage() {
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Total Value</div>
           <div className="text-xs text-gray-500 mb-1">(excl. cancelled)</div>
-          <div className="text-2xl font-bold text-blue-600">
-            {formatCurrency(stats.totalValue)}
-          </div>
+          <div className="text-2xl font-bold text-blue-600">{formatCurrency(stats.totalValue)}</div>
         </div>
       </div>
 
@@ -987,7 +1030,10 @@ export default function PurchaseOrdersPage() {
 
           {/* Supplier Filter */}
           <div>
-            <label htmlFor="supplier-filter" className="block text-sm font-medium text-gray-700 mb-2">
+            <label
+              htmlFor="supplier-filter"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
               Supplier
             </label>
             <select
@@ -1077,9 +1123,7 @@ export default function PurchaseOrdersPage() {
                     <tr key={po.id} className="hover:bg-gray-50">
                       {/* PO Number */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-blue-600">
-                          {po.poNumber}
-                        </div>
+                        <div className="text-sm font-medium text-blue-600">{po.poNumber}</div>
                       </td>
 
                       {/* Supplier */}
@@ -1092,9 +1136,7 @@ export default function PurchaseOrdersPage() {
 
                       {/* Order Date */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {formatDate(po.orderDate)}
-                        </div>
+                        <div className="text-sm text-gray-900">{formatDate(po.orderDate)}</div>
                       </td>
 
                       {/* Expected Delivery */}
@@ -1106,7 +1148,9 @@ export default function PurchaseOrdersPage() {
 
                       {/* Status */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}>
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}
+                        >
                           {statusConfig.icon} {statusConfig.label}
                         </span>
                       </td>
@@ -1195,31 +1239,54 @@ export default function PurchaseOrdersPage() {
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="text-sm font-medium text-blue-900 mb-2">📋 Purchase Order Workflow</h3>
         <ul className="text-xs text-blue-800 space-y-1">
-          <li>• <strong>PO Numbers:</strong> Auto-generated in format PO-YYYY-####</li>
-          <li>• <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED</li>
-          <li>• <strong>BR-PO-001:</strong> Supplier validation required for all purchase orders</li>
-          <li>• <strong>BR-PO-003:</strong> Expected delivery date must be in the future</li>
-          <li>• <strong>Line Items:</strong> Add products with quantities and unit costs</li>
-          <li>• <strong>Goods Receipts:</strong> Create GR when items are received to update inventory</li>
-          <li>• <strong>DRAFT:</strong> Can edit, submit, or delete</li>
-          <li>• <strong>PENDING/APPROVED:</strong> Can cancel only</li>
-          <li>• <strong>COMPLETED:</strong> Immutable, linked to goods receipts</li>
-          <li>• <strong>CANCELLED:</strong> Excluded from total value calculations</li>
+          <li>
+            • <strong>PO Numbers:</strong> Auto-generated in format PO-YYYY-####
+          </li>
+          <li>
+            • <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED
+          </li>
+          <li>
+            • <strong>BR-PO-001:</strong> Supplier validation required for all purchase orders
+          </li>
+          <li>
+            • <strong>BR-PO-003:</strong> Expected delivery date must be in the future
+          </li>
+          <li>
+            • <strong>Line Items:</strong> Add products with quantities and unit costs
+          </li>
+          <li>
+            • <strong>Goods Receipts:</strong> Create GR when items are received to update inventory
+          </li>
+          <li>
+            • <strong>DRAFT:</strong> Can edit, submit, or delete
+          </li>
+          <li>
+            • <strong>PENDING/APPROVED:</strong> Can cancel only
+          </li>
+          <li>
+            • <strong>COMPLETED:</strong> Immutable, linked to goods receipts
+          </li>
+          <li>
+            • <strong>CANCELLED:</strong> Excluded from total value calculations
+          </li>
         </ul>
       </div>
 
       {/* Create PO Modal */}
       {showCreateModal && (
-        <CreatePOModal
-          onClose={() => setShowCreateModal(false)}
-          onSuccess={() => refetch()}
-        />
+        <CreatePOModal onClose={() => setShowCreateModal(false)} onSuccess={() => refetch()} />
       )}
 
       {/* Details Modal */}
       {showDetailsModal && selectedPO && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowDetailsModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowDetailsModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
               <div>
@@ -1238,9 +1305,13 @@ export default function PurchaseOrdersPage() {
             <div className="p-6 space-y-6">
               {/* Status Badge */}
               <div>
-                <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${PO_STATUSES[selectedPO.status as POStatus]?.color || 'bg-gray-100 text-gray-800'
-                  }`}>
-                  {PO_STATUSES[selectedPO.status as POStatus]?.icon} {PO_STATUSES[selectedPO.status as POStatus]?.label}
+                <span
+                  className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${
+                    PO_STATUSES[selectedPO.status as POStatus]?.color || 'bg-gray-100 text-gray-800'
+                  }`}
+                >
+                  {PO_STATUSES[selectedPO.status as POStatus]?.icon}{' '}
+                  {PO_STATUSES[selectedPO.status as POStatus]?.label}
                 </span>
               </div>
 
@@ -1248,7 +1319,9 @@ export default function PurchaseOrdersPage() {
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <h3 className="text-sm font-medium text-gray-500">Supplier</h3>
-                  <p className="mt-1 text-base font-medium text-gray-900">{selectedPO.supplierName}</p>
+                  <p className="mt-1 text-base font-medium text-gray-900">
+                    {selectedPO.supplierName}
+                  </p>
                   {selectedPO.supplierContact && (
                     <p className="text-sm text-gray-600">{selectedPO.supplierContact}</p>
                   )}
@@ -1261,7 +1334,9 @@ export default function PurchaseOrdersPage() {
 
                 <div>
                   <h3 className="text-sm font-medium text-gray-500">Expected Delivery</h3>
-                  <p className="mt-1 text-base text-gray-900">{formatDate(selectedPO.expectedDelivery)}</p>
+                  <p className="mt-1 text-base text-gray-900">
+                    {formatDate(selectedPO.expectedDelivery)}
+                  </p>
                 </div>
 
                 <div>
@@ -1276,7 +1351,9 @@ export default function PurchaseOrdersPage() {
               {selectedPO.notes && (
                 <div>
                   <h3 className="text-sm font-medium text-gray-500">Notes</h3>
-                  <p className="mt-1 text-base text-gray-900 whitespace-pre-wrap">{selectedPO.notes}</p>
+                  <p className="mt-1 text-base text-gray-900 whitespace-pre-wrap">
+                    {selectedPO.notes}
+                  </p>
                 </div>
               )}
 
@@ -1287,11 +1364,21 @@ export default function PurchaseOrdersPage() {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">UOM</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Unit Cost</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          Product
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Quantity
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          UOM
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Unit Cost
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Total
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -1303,8 +1390,12 @@ export default function PurchaseOrdersPage() {
 
                           return (
                             <tr key={index}>
-                              <td className="px-4 py-3 text-sm text-gray-900">{item.productName}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900 text-right">{quantity.toString()}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">
+                                {item.productName}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-900 text-right">
+                                {quantity.toString()}
+                              </td>
                               <td className="px-4 py-3 text-sm text-gray-600">
                                 {item.uomName || item.uom_name || 'Base UoM'}
                               </td>
@@ -1348,8 +1439,19 @@ export default function PurchaseOrdersPage() {
                 onClick={() => handleExportPDF(selectedPO)}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  />
                 </svg>
                 Export PDF
               </button>

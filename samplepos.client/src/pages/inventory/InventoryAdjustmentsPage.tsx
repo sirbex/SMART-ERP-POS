@@ -4,16 +4,19 @@
  * @requires ADMIN or MANAGER role
  * @architecture Uses unified StockMovementHandler on backend
  * @note Audit trail view is in StockMovementsPage to avoid duplication
- * 
+ *
  * REFACTORED: Now uses productId instead of batchId
  * Backend automatically handles batch selection (MAIN batch)
  */
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useStockLevels, useAdjustInventory } from '../../hooks/useInventory';
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { InventoryAdjustmentSchema } from '@shared/zod/inventory';
+import apiClient from '../../utils/api';
+import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
 
@@ -48,6 +51,7 @@ interface Batch {
 
 export default function InventoryAdjustmentsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: stockLevelsData, isLoading, error } = useStockLevels();
   const adjustInventoryMutation = useAdjustInventory();
 
@@ -63,6 +67,9 @@ export default function InventoryAdjustmentsPage() {
 
   // Adjustment form state
   const [adjustmentType, setAdjustmentType] = useState<'increase' | 'decrease'>('increase');
+  const [movementCategory, setMovementCategory] = useState<'ADJUSTMENT' | 'DAMAGE' | 'EXPIRY'>(
+    'ADJUSTMENT'
+  );
   const [adjustmentQuantity, setAdjustmentQuantity] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
   // Validation errors removed - using Zod schema validation
@@ -123,20 +130,34 @@ export default function InventoryAdjustmentsPage() {
 
     // For now, create mock batches from stock levels
     // In production, this would come from a dedicated batches endpoint
-    return levels.flatMap((level: { product_id: string; product_name: string; sku?: string; total_stock?: string; total_quantity?: string; nearest_expiry?: string | null; average_cost?: string }) => {
-      // Mock: Assume single batch per product for simplicity
-      return [{
-        id: `batch-${level.product_id}`, // Mock batch ID
-        product_id: level.product_id,
-        product_name: level.product_name,
-        batch_number: level.sku || 'MAIN',
-        remaining_quantity: parseFloat(String(level.total_stock || level.total_quantity || '0')),
-        expiry_date: level.nearest_expiry || null,
-        cost_price: parseFloat(String(level.average_cost || '0')),
-        status: 'ACTIVE',
-        created_at: new Date().toISOString(),
-      }];
-    });
+    return levels.flatMap(
+      (level: {
+        product_id: string;
+        product_name: string;
+        sku?: string;
+        total_stock?: string;
+        total_quantity?: string;
+        nearest_expiry?: string | null;
+        average_cost?: string;
+      }) => {
+        // Mock: Assume single batch per product for simplicity
+        return [
+          {
+            id: `batch-${level.product_id}`, // Mock batch ID
+            product_id: level.product_id,
+            product_name: level.product_name,
+            batch_number: level.sku || 'MAIN',
+            remaining_quantity: parseFloat(
+              String(level.total_stock || level.total_quantity || '0')
+            ),
+            expiry_date: level.nearest_expiry || null,
+            cost_price: parseFloat(String(level.average_cost || '0')),
+            status: 'ACTIVE',
+            created_at: new Date().toISOString(),
+          },
+        ];
+      }
+    );
   }, [stockLevelsData]);
 
   // Filter batches based on search
@@ -144,9 +165,10 @@ export default function InventoryAdjustmentsPage() {
     if (!searchTerm) return batches;
 
     const term = searchTerm.toLowerCase();
-    return batches.filter((batch: Batch) =>
-      batch.product_name.toLowerCase().includes(term) ||
-      batch.batch_number.toLowerCase().includes(term)
+    return batches.filter(
+      (batch: Batch) =>
+        batch.product_name.toLowerCase().includes(term) ||
+        batch.batch_number.toLowerCase().includes(term)
     );
   }, [batches, searchTerm]);
 
@@ -164,6 +186,7 @@ export default function InventoryAdjustmentsPage() {
     }
 
     setSelectedBatch(batch);
+    setMovementCategory('ADJUSTMENT');
     setAdjustmentType('increase');
     setAdjustmentQuantity('');
     setAdjustmentReason('');
@@ -189,39 +212,54 @@ export default function InventoryAdjustmentsPage() {
       adjustmentType,
       adjustmentQuantity,
       adjustmentReason,
-      userId: currentUser.id
+      userId: currentUser.id,
     });
 
     try {
-      // Calculate actual adjustment value
-      const qtyDecimal = new Decimal(adjustmentQuantity || 0);
-      const adjustment = adjustmentType === 'increase'
-        ? qtyDecimal.toNumber()
-        : qtyDecimal.times(-1).toNumber();
+      if (movementCategory === 'DAMAGE' || movementCategory === 'EXPIRY') {
+        // Use stock-movements API for DAMAGE/EXPIRY
+        const qty = new Decimal(adjustmentQuantity || 0).toNumber();
+        // Send with movementType as backend RecordMovementSchema expects
+        await apiClient.post('stock-movements', {
+          productId: selectedBatch.product_id,
+          movementType: movementCategory,
+          quantity: qty,
+          notes: adjustmentReason,
+          createdBy: currentUser.id,
+        });
+        // Invalidate queries for fresh data
+        queryClient.invalidateQueries({ queryKey: ['stockLevels'] });
+        queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
+      } else {
+        // ADJUSTMENT_IN / ADJUSTMENT_OUT via existing adjust endpoint
+        const qtyDecimal = new Decimal(adjustmentQuantity || 0);
+        const adjustment =
+          adjustmentType === 'increase' ? qtyDecimal.toNumber() : qtyDecimal.times(-1).toNumber();
 
-      console.log('🔢 Calculated adjustment:', adjustment);
+        const validatedData = InventoryAdjustmentSchema.parse({
+          productId: selectedBatch.product_id,
+          adjustment,
+          reason: adjustmentReason,
+          userId: currentUser.id,
+        });
 
-      // Validate with Zod schema
-      const validatedData = InventoryAdjustmentSchema.parse({
-        productId: selectedBatch.product_id,
-        adjustment,
-        reason: adjustmentReason,
-        userId: currentUser.id,
-      });
-
-      console.log('✅ Validated data:', validatedData);
-
-      // Call API
-      console.log('📡 Calling API...');
-      const result = await adjustInventoryMutation.mutateAsync(validatedData);
-      console.log('✅ API result:', result);
+        await adjustInventoryMutation.mutateAsync(validatedData);
+      }
 
       // Success
-      alert('Inventory adjusted successfully!');
+      const typeLabel =
+        movementCategory === 'DAMAGE'
+          ? 'Damage recorded'
+          : movementCategory === 'EXPIRY'
+            ? 'Expiry write-off recorded'
+            : 'Inventory adjusted';
+      alert(`${typeLabel} successfully!`);
       setShowAdjustModal(false);
       setSelectedBatch(null);
       setAdjustmentQuantity('');
       setAdjustmentReason('');
+      setMovementCategory('ADJUSTMENT');
     } catch (error) {
       console.error('❌ Adjustment failed:', error);
       if (error instanceof z.ZodError) {
@@ -235,14 +273,23 @@ export default function InventoryAdjustmentsPage() {
         console.error('❌ Validation errors:', errors);
       } else {
         console.error('❌ Error details:', error);
-        alert(`Failed to adjust inventory: ${(error as Error).message}`);
+        handleApiError(error, { fallback: 'Failed to adjust inventory' });
       }
     }
-  }, [selectedBatch, currentUser, adjustmentQuantity, adjustmentType, adjustmentReason, adjustInventoryMutation]);
+  }, [
+    selectedBatch,
+    currentUser,
+    adjustmentQuantity,
+    adjustmentType,
+    adjustmentReason,
+    movementCategory,
+    adjustInventoryMutation,
+    queryClient,
+  ]);
 
   // View full audit trail in Stock Movements page
   const handleViewAllMovements = () => {
-    navigate('/inventory/stock-movements?type=ADJUSTMENT_IN,ADJUSTMENT_OUT');
+    navigate('/inventory/stock-movements?type=ADJUSTMENT_IN,ADJUSTMENT_OUT,DAMAGE,EXPIRY');
   };
 
   // Calculate new quantity for preview with real-time validation
@@ -251,12 +298,17 @@ export default function InventoryAdjustmentsPage() {
 
     const current = new Decimal(selectedBatch.remaining_quantity);
     const adjustment = new Decimal(adjustmentQuantity || 0);
-    const newQty = adjustmentType === 'increase'
-      ? current.plus(adjustment)
-      : current.minus(adjustment);
+
+    // DAMAGE and EXPIRY always decrease stock
+    if (movementCategory === 'DAMAGE' || movementCategory === 'EXPIRY') {
+      return current.minus(adjustment).toNumber();
+    }
+
+    const newQty =
+      adjustmentType === 'increase' ? current.plus(adjustment) : current.minus(adjustment);
 
     return newQty.toNumber();
-  }, [selectedBatch, adjustmentQuantity, adjustmentType]);
+  }, [selectedBatch, adjustmentQuantity, adjustmentType, movementCategory]);
 
   // Real-time form validation
   const formValidation = useMemo(() => {
@@ -320,8 +372,10 @@ export default function InventoryAdjustmentsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Inventory Adjustments</h2>
-          <p className="text-gray-600 mt-1">Manual stock corrections with full audit trail</p>
+          <h2 className="text-2xl font-bold text-gray-900">Adjustments & Damage Tracking</h2>
+          <p className="text-gray-600 mt-1">
+            Record stock adjustments, damages, and expiry write-offs
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -340,7 +394,9 @@ export default function InventoryAdjustmentsPage() {
       {recentAdjustments.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-semibold text-blue-900">📝 Recent Adjustments ({recentAdjustments.length})</h3>
+            <h3 className="text-sm font-semibold text-blue-900">
+              📝 Recent Adjustments ({recentAdjustments.length})
+            </h3>
             <button
               onClick={handleViewAllMovements}
               className="text-sm text-blue-700 hover:text-blue-900 font-medium"
@@ -349,22 +405,46 @@ export default function InventoryAdjustmentsPage() {
             </button>
           </div>
           <div className="space-y-2">
-            {recentAdjustments.slice(0, 5).map((adj: { id: string; movement_type: string; product_name?: string; quantity?: number; created_at?: string }) => (
-              <div key={adj.id} className="flex items-center justify-between text-sm bg-white rounded px-3 py-2">
-                <div className="flex items-center gap-3">
-                  <span className={adj.movement_type === 'ADJUSTMENT_IN' ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
-                    {adj.movement_type === 'ADJUSTMENT_IN' ? '➕' : '➖'}
-                  </span>
-                  <span className="font-medium text-gray-900">{adj.product_name || 'Unknown'}</span>
-                  <span className="text-gray-600">
-                    {adj.movement_type === 'ADJUSTMENT_IN' ? '+' : '-'}{Math.abs(adj.quantity || 0).toFixed(2)}
-                  </span>
-                </div>
-                <div className="text-xs text-gray-500">
-                  {adj.created_at?.includes('T') ? `${formatDisplayDate(adj.created_at)} ${adj.created_at.split('T')[1].substring(0, 8)}` : formatDisplayDate(adj.created_at)}
-                </div>
-              </div>
-            ))}
+            {recentAdjustments
+              .slice(0, 5)
+              .map(
+                (adj: {
+                  id: string;
+                  movement_type: string;
+                  product_name?: string;
+                  quantity?: number;
+                  created_at?: string;
+                }) => (
+                  <div
+                    key={adj.id}
+                    className="flex items-center justify-between text-sm bg-white rounded px-3 py-2"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={
+                          adj.movement_type === 'ADJUSTMENT_IN'
+                            ? 'text-green-600 font-bold'
+                            : 'text-red-600 font-bold'
+                        }
+                      >
+                        {adj.movement_type === 'ADJUSTMENT_IN' ? '➕' : '➖'}
+                      </span>
+                      <span className="font-medium text-gray-900">
+                        {adj.product_name || 'Unknown'}
+                      </span>
+                      <span className="text-gray-600">
+                        {adj.movement_type === 'ADJUSTMENT_IN' ? '+' : '-'}
+                        {Math.abs(adj.quantity || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {adj.created_at?.includes('T')
+                        ? `${formatDisplayDate(adj.created_at)} ${adj.created_at.split('T')[1].substring(0, 8)}`
+                        : formatDisplayDate(adj.created_at)}
+                    </div>
+                  </div>
+                )
+              )}
           </div>
         </div>
       )}
@@ -422,9 +502,7 @@ export default function InventoryAdjustmentsPage() {
                   <td className="px-6 py-4">
                     <div className="text-sm font-medium text-gray-900">{batch.product_name}</div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    {batch.batch_number}
-                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{batch.batch_number}</td>
                   <td className="px-6 py-4 text-sm text-gray-900">
                     <span className="font-semibold">{batch.remaining_quantity.toFixed(2)}</span>
                   </td>
@@ -432,10 +510,13 @@ export default function InventoryAdjustmentsPage() {
                     {batch.expiry_date ? formatDisplayDate(batch.expiry_date) : 'N/A'}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-gray-100 text-gray-800'
-                      }`}>
+                    <span
+                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        batch.status === 'ACTIVE'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
                       {batch.status}
                     </span>
                   </td>
@@ -447,7 +528,22 @@ export default function InventoryAdjustmentsPage() {
                       Adjust
                     </button>
                     <button
-                      onClick={() => navigate(`/inventory/stock-movements?product=${batch.product_id}`)}
+                      onClick={() => {
+                        handleOpenAdjustModal(batch);
+                        // Set category after modal opens
+                        setTimeout(() => {
+                          setMovementCategory('DAMAGE');
+                          setAdjustmentType('decrease');
+                        }, 0);
+                      }}
+                      className="text-orange-600 hover:text-orange-900 font-medium"
+                    >
+                      Damage
+                    </button>
+                    <button
+                      onClick={() =>
+                        navigate(`/inventory/stock-movements?product=${batch.product_id}`)
+                      }
                       className="text-gray-600 hover:text-gray-900 font-medium"
                     >
                       History
@@ -482,7 +578,11 @@ export default function InventoryAdjustmentsPage() {
           >
             <div className="px-6 py-4 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-900">
-                Adjust Inventory
+                {movementCategory === 'DAMAGE'
+                  ? '⚠️ Record Damage'
+                  : movementCategory === 'EXPIRY'
+                    ? '⏰ Record Expiry Write-Off'
+                    : '⚖️ Adjust Inventory'}
               </h3>
               <p className="text-sm text-gray-600 mt-1">
                 {selectedBatch.product_name} - {selectedBatch.batch_number}
@@ -500,38 +600,96 @@ export default function InventoryAdjustmentsPage() {
                 </div>
               </div>
 
-              {/* Adjustment Type */}
+              {/* Movement Category */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Adjustment Type
+                  Movement Category
                 </label>
-                <div className="flex gap-4">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => setAdjustmentType('increase')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${adjustmentType === 'increase'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
+                    onClick={() => {
+                      setMovementCategory('ADJUSTMENT');
+                      setAdjustmentType('increase');
+                    }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      movementCategory === 'ADJUSTMENT'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                   >
-                    ➕ Increase
+                    ⚖️ Adjustment
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAdjustmentType('decrease')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${adjustmentType === 'decrease'
-                      ? 'bg-red-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
+                    onClick={() => {
+                      setMovementCategory('DAMAGE');
+                      setAdjustmentType('decrease');
+                    }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      movementCategory === 'DAMAGE'
+                        ? 'bg-orange-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                   >
-                    ➖ Decrease
+                    ⚠️ Damage
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMovementCategory('EXPIRY');
+                      setAdjustmentType('decrease');
+                    }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      movementCategory === 'EXPIRY'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    ⏰ Expiry
                   </button>
                 </div>
               </div>
 
+              {/* Adjustment Type - only for ADJUSTMENT category */}
+              {movementCategory === 'ADJUSTMENT' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Adjustment Type
+                  </label>
+                  <div className="flex gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustmentType('increase')}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        adjustmentType === 'increase'
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      ➕ Increase
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustmentType('decrease')}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        adjustmentType === 'decrease'
+                          ? 'bg-red-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      ➖ Decrease
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Quantity */}
               <div>
-                <label htmlFor="adj-quantity" className="block text-sm font-medium text-gray-700 mb-1">
+                <label
+                  htmlFor="adj-quantity"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
                   Adjustment Quantity *
                 </label>
                 <input
@@ -548,8 +706,9 @@ export default function InventoryAdjustmentsPage() {
                       reasonInputRef.current?.focus();
                     }
                   }}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${formValidation.errors.quantity ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
+                    formValidation.errors.quantity ? 'border-red-500' : 'border-gray-300'
+                  }`}
                   placeholder="0.00"
                 />
                 {formValidation.errors.quantity && (
@@ -559,12 +718,18 @@ export default function InventoryAdjustmentsPage() {
 
               {/* Preview New Quantity */}
               {previewNewQuantity !== null && (
-                <div className={`border rounded-lg p-3 ${previewNewQuantity < 0
-                  ? 'bg-red-50 border-red-300'
-                  : 'bg-blue-50 border-blue-200'
-                  }`}>
-                  <div className={`text-sm ${previewNewQuantity < 0 ? 'text-red-800' : 'text-blue-800'
-                    }`}>
+                <div
+                  className={`border rounded-lg p-3 ${
+                    previewNewQuantity < 0
+                      ? 'bg-red-50 border-red-300'
+                      : 'bg-blue-50 border-blue-200'
+                  }`}
+                >
+                  <div
+                    className={`text-sm ${
+                      previewNewQuantity < 0 ? 'text-red-800' : 'text-blue-800'
+                    }`}
+                  >
                     <strong>New Quantity:</strong> {previewNewQuantity.toFixed(2)}
                     {previewNewQuantity < 0 && (
                       <span className="ml-2">⚠️ Negative quantity not allowed</span>
@@ -575,7 +740,10 @@ export default function InventoryAdjustmentsPage() {
 
               {/* Reason */}
               <div>
-                <label htmlFor="adj-reason" className="block text-sm font-medium text-gray-700 mb-1">
+                <label
+                  htmlFor="adj-reason"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
                   Reason * (min 5 characters)
                 </label>
                 <textarea
@@ -583,16 +751,26 @@ export default function InventoryAdjustmentsPage() {
                   id="adj-reason"
                   value={adjustmentReason}
                   onChange={(e) => setAdjustmentReason(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${formValidation.errors.reason ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
+                    formValidation.errors.reason ? 'border-red-500' : 'border-gray-300'
+                  }`}
                   rows={3}
-                  placeholder="Physical count correction, damaged goods, etc."
+                  placeholder={
+                    movementCategory === 'DAMAGE'
+                      ? 'Describe the damage: broken packaging, water damage, etc.'
+                      : movementCategory === 'EXPIRY'
+                        ? 'Expired batch disposal, date: ...'
+                        : 'Physical count correction, damaged goods, etc.'
+                  }
                 />
                 {formValidation.errors.reason && (
                   <p className="text-red-600 text-sm mt-1">{formValidation.errors.reason}</p>
                 )}
-                <p className={`text-xs mt-1 ${adjustmentReason.length >= 5 ? 'text-green-600' : 'text-gray-500'
-                  }`}>
+                <p
+                  className={`text-xs mt-1 ${
+                    adjustmentReason.length >= 5 ? 'text-green-600' : 'text-gray-500'
+                  }`}
+                >
                   {adjustmentReason.length}/5 characters minimum
                 </p>
               </div>
@@ -627,7 +805,13 @@ export default function InventoryAdjustmentsPage() {
                 disabled={adjustInventoryMutation.isPending || !formValidation.isValid}
                 className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
-                {adjustInventoryMutation.isPending ? 'Saving...' : 'Save Adjustment (Enter)'}
+                {adjustInventoryMutation.isPending
+                  ? 'Saving...'
+                  : movementCategory === 'DAMAGE'
+                    ? 'Record Damage'
+                    : movementCategory === 'EXPIRY'
+                      ? 'Record Expiry'
+                      : 'Save Adjustment (Enter)'}
               </button>
             </div>
           </div>
@@ -636,14 +820,29 @@ export default function InventoryAdjustmentsPage() {
 
       {/* Info Box - Relationship with Stock Movements */}
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-900 mb-2">ℹ️ About Adjustments</h3>
+        <h3 className="text-sm font-medium text-blue-900 mb-2">
+          ℹ️ About Adjustments & Damage Tracking
+        </h3>
         <ul className="text-xs text-blue-800 space-y-1">
-          <li>• <strong>This page:</strong> Create manual inventory adjustments (ADJUSTMENT_IN / ADJUSTMENT_OUT)</li>
-          <li>• <strong>Stock Movements page:</strong> View complete audit trail of ALL inventory changes (including adjustments, sales, receipts, etc.)</li>
-          <li>• Each adjustment creates an immutable stock movement record for full traceability</li>
-          <li>• Use "History" button next to each batch to view all movements for that product</li>
-          <li>• All adjustments require a reason (minimum 5 characters) and are logged with user ID and timestamp</li>
-          <li>• <strong>Role Required:</strong> ADMIN or MANAGER</li>
+          <li>
+            • <strong>Adjustment:</strong> Increase or decrease stock for physical count corrections
+          </li>
+          <li>
+            • <strong>Damage:</strong> Record stock lost due to physical damage (broken, water
+            damage, etc.)
+          </li>
+          <li>
+            • <strong>Expiry:</strong> Write off stock that has expired and must be disposed of
+          </li>
+          <li>• All records create immutable stock movement entries for full audit trail</li>
+          <li>
+            • View the <strong>Waste & Damage Report</strong> in Reports for aggregated loss
+            analysis
+          </li>
+          <li>• Click "History" next to each product to see all movements for that item</li>
+          <li>
+            • <strong>Role Required:</strong> ADMIN or MANAGER
+          </li>
         </ul>
       </div>
     </div>

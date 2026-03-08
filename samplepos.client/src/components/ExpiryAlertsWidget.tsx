@@ -35,7 +35,7 @@ interface ExpiryAlertsWidgetProps {
 export default function ExpiryAlertsWidget({
   maxAlerts = 5,
   criticalOnly = false,
-  className = ''
+  className = '',
 }: ExpiryAlertsWidgetProps) {
   const { data: stockLevelsData, isLoading, error, refetch } = useStockLevels();
 
@@ -93,46 +93,50 @@ export default function ExpiryAlertsWidget({
 
     const batches: ExpiringBatch[] = [];
 
-    levels.forEach((level: {
-      product_id: string;
-      product_name: string;
-      sku?: string;
-      total_stock?: number;
-      total_quantity?: number;
-      nearest_expiry?: string | null;
-      uoms?: Array<{ symbol?: string; name?: string; isDefault?: boolean }>;
-    }) => {
-      // Only include items with expiry dates
-      if (!level.nearest_expiry) return;
+    levels.forEach(
+      (level: {
+        product_id: string;
+        product_name: string;
+        sku?: string;
+        total_stock?: number;
+        total_quantity?: number;
+        nearest_expiry?: string | null;
+        uoms?: Array<{ symbol?: string; name?: string; isDefault?: boolean }>;
+      }) => {
+        // Only include items with expiry dates
+        if (!level.nearest_expiry) return;
 
-      const expiryDate = new Date(level.nearest_expiry);
-      const daysUntilExpiry = Math.ceil(
-        (expiryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-      );
+        const expiryDate = new Date(level.nearest_expiry + 'T00:00:00');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const daysUntilExpiry = Math.ceil(
+          (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+        );
 
-      const urgency = calculateExpiryUrgency(daysUntilExpiry);
+        const urgency = calculateExpiryUrgency(daysUntilExpiry);
 
-      // Filter by criticalOnly setting
-      if (criticalOnly && urgency !== 'CRITICAL') return;
+        // Filter by criticalOnly setting
+        if (criticalOnly && urgency !== 'CRITICAL') return;
 
-      // Only show items that are WARNING or CRITICAL
-      if (urgency === 'NORMAL') return;
+        // Only show items that are WARNING or CRITICAL
+        if (urgency === 'NORMAL') return;
 
-      // Get default UOM symbol from uoms array
-      const defaultUom = level.uoms?.find((u) => u.isDefault) || level.uoms?.[0];
-      const uomDisplay = defaultUom?.symbol || defaultUom?.name || 'PCS';
+        // Get default UOM symbol from uoms array
+        const defaultUom = level.uoms?.find((u) => u.isDefault) || level.uoms?.[0];
+        const uomDisplay = defaultUom?.symbol || defaultUom?.name || 'PCS';
 
-      batches.push({
-        productId: level.product_id,
-        productName: level.product_name,
-        batchNumber: level.sku || 'MAIN',
-        remainingQuantity: Number(level.total_stock || level.total_quantity || 0),
-        expiryDate: level.nearest_expiry,
-        daysUntilExpiry,
-        urgency,
-        unitOfMeasure: uomDisplay,
-      });
-    });
+        batches.push({
+          productId: level.product_id,
+          productName: level.product_name,
+          batchNumber: level.sku || 'MAIN',
+          remainingQuantity: Number(level.total_stock || level.total_quantity || 0),
+          expiryDate: level.nearest_expiry,
+          daysUntilExpiry,
+          urgency,
+          unitOfMeasure: uomDisplay,
+        });
+      }
+    );
 
     // Sort by days until expiry (most urgent first)
     return batches.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
@@ -186,9 +190,7 @@ export default function ExpiryAlertsWidget({
         <div className="flex items-center justify-between">
           <div className="flex items-center">
             <span className="text-lg">⚠️</span>
-            <h3 className="ml-2 text-base font-semibold text-gray-900">
-              Expiry Alerts
-            </h3>
+            <h3 className="ml-2 text-base font-semibold text-gray-900">Expiry Alerts</h3>
           </div>
           <div className="flex items-center gap-2">
             {stats.critical > 0 && (
@@ -211,9 +213,7 @@ export default function ExpiryAlertsWidget({
           <div className="px-4 py-6 text-center">
             <div className="text-green-600 text-3xl mb-2">✓</div>
             <p className="text-sm text-gray-600">
-              {criticalOnly
-                ? 'No critical expiry alerts'
-                : 'No items expiring soon'}
+              {criticalOnly ? 'No critical expiry alerts' : 'No items expiring soon'}
             </p>
             <p className="text-xs text-gray-500 mt-1">
               All inventory batches are within safe expiry ranges
@@ -249,7 +249,9 @@ export default function ExpiryAlertsWidget({
 
                     {/* Expiry Info */}
                     <div className="mt-2 flex items-center gap-2">
-                      <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${style.badge}`}>
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${style.badge}`}
+                      >
                         {formatDaysUntilExpiry(batch.daysUntilExpiry)}
                       </span>
                       <span className="text-xs text-gray-500">
@@ -295,10 +297,7 @@ export default function ExpiryAlertsWidget({
               </span>
             )}
           </div>
-          <Link
-            to="/inventory/batches"
-            className="text-blue-600 hover:text-blue-800 font-medium"
-          >
+          <Link to="/inventory/batches" className="text-blue-600 hover:text-blue-800 font-medium">
             View All Batches →
           </Link>
         </div>

@@ -3,10 +3,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { useGoodsReceipts, useFinalizeGoodsReceipt, useGoodsReceipt, useUpdateGRItem, useCreateGoodsReceipt } from '../../hooks/useGoodsReceipts';
+import {
+  useGoodsReceipts,
+  useFinalizeGoodsReceipt,
+  useGoodsReceipt,
+  useUpdateGRItem,
+  useCreateGoodsReceipt,
+} from '../../hooks/useGoodsReceipts';
 import { useAuth } from '../../hooks/useAuth';
 import { formatCurrency } from '../../utils/currency';
 import { api } from '../../utils/api';
+import { handleApiError } from '../../utils/errorHandler';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { useProductWithUoms, findUom, getDefaultUom } from '../../hooks/useProductWithUoms';
 import { useStockLevelByProduct, inventoryKeys } from '../../hooks/useInventory';
@@ -196,7 +203,7 @@ export default function GoodsReceiptsPage() {
   // Check for duplicate batch numbers
   const checkBatchDuplicate = async (itemId: string, batchNumber: string) => {
     if (!batchNumber || batchNumber.trim() === '') {
-      setBatchWarnings(prev => {
+      setBatchWarnings((prev) => {
         const next = { ...prev };
         delete next[itemId];
         return next;
@@ -205,28 +212,30 @@ export default function GoodsReceiptsPage() {
     }
 
     try {
-      const response = await fetch(`/api/inventory/batches/exists?batchNumber=${encodeURIComponent(batchNumber)}`);
+      const response = await fetch(
+        `/api/inventory/batches/exists?batchNumber=${encodeURIComponent(batchNumber)}`
+      );
       const data = await response.json();
 
       if (data.exists) {
-        setBatchWarnings(prev => ({
+        setBatchWarnings((prev) => ({
           ...prev,
-          [itemId]: '⚠️ This batch number already exists in the system'
+          [itemId]: '⚠️ This batch number already exists in the system',
         }));
       } else {
         // Also check within current GR items
         const currentItems = Object.entries(editItems);
-        const duplicateInCurrent = currentItems.filter(
-          ([id, item]) => id !== itemId && item.batchNumber === batchNumber
-        ).length > 0;
+        const duplicateInCurrent =
+          currentItems.filter(([id, item]) => id !== itemId && item.batchNumber === batchNumber)
+            .length > 0;
 
         if (duplicateInCurrent) {
-          setBatchWarnings(prev => ({
+          setBatchWarnings((prev) => ({
             ...prev,
-            [itemId]: '⚠️ Duplicate batch number in this goods receipt'
+            [itemId]: '⚠️ Duplicate batch number in this goods receipt',
           }));
         } else {
-          setBatchWarnings(prev => {
+          setBatchWarnings((prev) => {
             const next = { ...prev };
             delete next[itemId];
             return next;
@@ -273,10 +282,10 @@ export default function GoodsReceiptsPage() {
 
     // Status badge simulation
     const statusColors: Record<string, { r: number; g: number; b: number }> = {
-      'DRAFT': { r: 245, g: 158, b: 11 },
-      'PENDING': { r: 59, g: 130, b: 246 },
-      'COMPLETED': { r: 16, g: 185, b: 129 },
-      'FINALIZED': { r: 16, g: 185, b: 129 },
+      DRAFT: { r: 245, g: 158, b: 11 },
+      PENDING: { r: 59, g: 130, b: 246 },
+      COMPLETED: { r: 16, g: 185, b: 129 },
+      FINALIZED: { r: 16, g: 185, b: 129 },
     };
     const statusColor = statusColors[status] || { r: 107, g: 114, b: 128 };
     doc.setFillColor(statusColor.r, statusColor.g, statusColor.b);
@@ -300,24 +309,38 @@ export default function GoodsReceiptsPage() {
     const tableData = grItems.map((item: GRItemRow) => {
       const productName = item.productName || item.product_name || 'Unknown';
       // Get UoM and conversion factor from item data
-      const uomSymbol = item.uomSymbol || item.uom_symbol || item.uomName || item.uom_name || 'base';
-      const conversionFactor = parseFloat(String(item.conversionFactor || item.conversion_factor || 1));
+      const uomSymbol =
+        item.uomSymbol || item.uom_symbol || item.uomName || item.uom_name || 'base';
+      const conversionFactor = parseFloat(
+        String(item.conversionFactor || item.conversion_factor || 1)
+      );
 
       // Base quantities from database
       const baseOrderedQty = parseFloat(String(item.orderedQuantity || item.ordered_quantity || 0));
-      const baseReceivedQty = parseFloat(String(item.receivedQuantity || item.received_quantity || 0));
+      const baseReceivedQty = parseFloat(
+        String(item.receivedQuantity || item.received_quantity || 0)
+      );
       const baseUnitCost = parseFloat(String(item.unitCost || item.unit_cost || 0));
 
       // Convert to ordering UoM quantities
-      const orderedQty = conversionFactor > 0 ? new Decimal(baseOrderedQty).div(conversionFactor).toNumber() : baseOrderedQty;
-      const receivedQty = conversionFactor > 0 ? new Decimal(baseReceivedQty).div(conversionFactor).toNumber() : baseReceivedQty;
+      const orderedQty =
+        conversionFactor > 0
+          ? new Decimal(baseOrderedQty).div(conversionFactor).toNumber()
+          : baseOrderedQty;
+      const receivedQty =
+        conversionFactor > 0
+          ? new Decimal(baseReceivedQty).div(conversionFactor).toNumber()
+          : baseReceivedQty;
       // Unit cost in ordering UoM = base cost * conversion factor
       const unitCost = new Decimal(baseUnitCost).times(conversionFactor).toNumber();
 
       const batchNumber = item.batchNumber || item.batch_number || '-';
       const expiryDate = item.expiryDate || item.expiry_date || '-';
       const totalCost = new Decimal(baseReceivedQty).times(baseUnitCost).toNumber();
-      const qtyVariance = baseOrderedQty > 0 ? ((baseReceivedQty - baseOrderedQty) / baseOrderedQty * 100).toFixed(2) : '0.00';
+      const qtyVariance =
+        baseOrderedQty > 0
+          ? (((baseReceivedQty - baseOrderedQty) / baseOrderedQty) * 100).toFixed(2)
+          : '0.00';
 
       return [
         productName,
@@ -328,32 +351,44 @@ export default function GoodsReceiptsPage() {
         formatCurrency(totalCost),
         batchNumber,
         formatDisplayDate(expiryDate),
-        `${parseFloat(qtyVariance) >= 0 ? '+' : ''}${qtyVariance}%`
+        `${parseFloat(qtyVariance) >= 0 ? '+' : ''}${qtyVariance}%`,
       ];
     });
 
     autoTable(doc, {
       startY: 95,
-      head: [['Product', 'UoM', 'Ordered', 'Received', 'Unit Cost', 'Total Cost', 'Batch #', 'Expiry', 'Qty Var']],
+      head: [
+        [
+          'Product',
+          'UoM',
+          'Ordered',
+          'Received',
+          'Unit Cost',
+          'Total Cost',
+          'Batch #',
+          'Expiry',
+          'Qty Var',
+        ],
+      ],
       body: tableData,
       theme: 'striped',
       headStyles: {
         fillColor: [59, 130, 246],
         textColor: [255, 255, 255],
         fontStyle: 'bold',
-        fontSize: 9
+        fontSize: 9,
       },
       styles: {
         fontSize: 8,
-        cellPadding: 3
+        cellPadding: 3,
       },
       columnStyles: {
         0: { cellWidth: 35 },
         1: { cellWidth: 18 },
         4: { halign: 'right' },
         5: { halign: 'right' },
-        8: { halign: 'center' }
-      }
+        8: { halign: 'center' },
+      },
     });
 
     // Calculate total
@@ -364,7 +399,8 @@ export default function GoodsReceiptsPage() {
     }, 0);
 
     // Get final Y position after table
-    const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 150;
+    const finalY =
+      (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 150;
 
     // Total box
     doc.setFillColor(240, 240, 240);
@@ -410,9 +446,10 @@ export default function GoodsReceiptsPage() {
       items.forEach((it: GRItemRow) => {
         init[it.id] = {
           batchNumber: it.batchNumber ?? it.batch_number ?? '',
-          expiryDate: (it.expiryDate || it.expiry_date)
-            ? new Date(String(it.expiryDate || it.expiry_date)).toISOString().slice(0, 10)
-            : '',
+          expiryDate:
+            it.expiryDate || it.expiry_date
+              ? new Date(String(it.expiryDate || it.expiry_date)).toISOString().slice(0, 10)
+              : '',
           receivedQuantity: Number(it.receivedQuantity ?? it.received_quantity ?? 0),
           unitCost: Number(it.unitCost ?? it.unit_cost ?? 0),
           isBonus: !!(it.isBonus ?? it.is_bonus ?? false),
@@ -423,7 +460,11 @@ export default function GoodsReceiptsPage() {
   }, [showDetailsModal, items]);
 
   const handleFinalize = async (id: string) => {
-    if (!confirm('Finalize this goods receipt? This will create inventory batches and update stock levels.')) {
+    if (
+      !confirm(
+        'Finalize this goods receipt? This will create inventory batches and update stock levels.'
+      )
+    ) {
       return;
     }
 
@@ -436,18 +477,27 @@ export default function GoodsReceiptsPage() {
         if (edits) {
           // Check if there are any changes
           const hasChanges =
-            (edits.batchNumber !== undefined && edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
-            (edits.expiryDate !== undefined && edits.expiryDate !== (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
-            (edits.receivedQuantity !== undefined && edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
-            (edits.unitCost !== undefined && edits.unitCost !== (item.unitCost || item.unit_cost)) ||
+            (edits.batchNumber !== undefined &&
+              edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
+            (edits.expiryDate !== undefined &&
+              edits.expiryDate !==
+                (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
+            (edits.receivedQuantity !== undefined &&
+              edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
+            (edits.unitCost !== undefined &&
+              edits.unitCost !== (item.unitCost || item.unit_cost)) ||
             (edits.isBonus !== undefined && edits.isBonus !== !!(item.isBonus ?? item.is_bonus));
 
           if (hasChanges) {
             const payload: GRItemUpdatePayload = {};
-            if (edits.receivedQuantity !== undefined) payload.receivedQuantity = Number(edits.receivedQuantity);
+            if (edits.receivedQuantity !== undefined)
+              payload.receivedQuantity = Number(edits.receivedQuantity);
             if (edits.unitCost !== undefined) payload.unitCost = Number(edits.unitCost);
             if (edits.batchNumber !== undefined) payload.batchNumber = edits.batchNumber || null;
-            if (edits.expiryDate !== undefined) payload.expiryDate = edits.expiryDate ? new Date(edits.expiryDate).toISOString() : null;
+            if (edits.expiryDate !== undefined)
+              payload.expiryDate = edits.expiryDate
+                ? new Date(edits.expiryDate).toISOString()
+                : null;
             if (edits.isBonus !== undefined) payload.isBonus = !!edits.isBonus;
 
             await updateItemMutation.mutateAsync({ grId: id, itemId, data: payload });
@@ -473,7 +523,7 @@ export default function GoodsReceiptsPage() {
 
       // Check for cost alerts (suppress alerts that are likely pure UoM conversions)
       const alerts = (response.data.alerts as CostAlert[]) || [];
-      const filtered = alerts.filter(a => {
+      const filtered = alerts.filter((a) => {
         const prev = parseFloat(a.details.previousCost);
         const next = parseFloat(a.details.newCost);
         if (!isFinite(prev) || prev <= 0 || !isFinite(next) || next <= 0) return true;
@@ -495,8 +545,7 @@ export default function GoodsReceiptsPage() {
 
       setShowDetailsModal(false);
     } catch (err: unknown) {
-      const errObj = err as { response?: { data?: { error?: string } }; message?: string };
-      alert(`Failed to finalize: ${errObj.response?.data?.error || errObj.message || 'Unknown error'}`);
+      handleApiError(err, { fallback: 'Failed to finalize goods receipt' });
     }
   };
 
@@ -505,8 +554,12 @@ export default function GoodsReceiptsPage() {
     setShowDetailsModal(true);
   };
 
-  const handleItemFieldChange = (itemId: string, field: string, value: string | number | boolean | undefined) => {
-    setEditItems(prev => ({
+  const handleItemFieldChange = (
+    itemId: string,
+    field: string,
+    value: string | number | boolean | undefined
+  ) => {
+    setEditItems((prev) => ({
       ...prev,
       [itemId]: {
         ...(prev[itemId] || {}),
@@ -520,18 +573,26 @@ export default function GoodsReceiptsPage() {
     const current = editItems[id] || {};
     const original = {
       batchNumber: item.batchNumber ?? item.batch_number ?? '',
-      expiryDate: (item.expiryDate || item.expiry_date)
-        ? new Date(String(item.expiryDate || item.expiry_date)).toISOString().slice(0, 10)
-        : '',
+      expiryDate:
+        item.expiryDate || item.expiry_date
+          ? new Date(String(item.expiryDate || item.expiry_date)).toISOString().slice(0, 10)
+          : '',
       receivedQuantity: Number(item.receivedQuantity ?? item.received_quantity ?? 0),
       unitCost: Number(item.unitCost ?? item.unit_cost ?? 0),
     };
 
     const payload: GRItemUpdatePayload = {};
-    if (current.batchNumber !== undefined && current.batchNumber !== original.batchNumber) payload.batchNumber = current.batchNumber || null;
-    if (current.expiryDate !== undefined && current.expiryDate !== original.expiryDate) payload.expiryDate = current.expiryDate || null;
-    if (current.receivedQuantity !== undefined && current.receivedQuantity !== original.receivedQuantity) payload.receivedQuantity = Number(current.receivedQuantity);
-    if (current.unitCost !== undefined && current.unitCost !== original.unitCost) payload.unitCost = Number(current.unitCost);
+    if (current.batchNumber !== undefined && current.batchNumber !== original.batchNumber)
+      payload.batchNumber = current.batchNumber || null;
+    if (current.expiryDate !== undefined && current.expiryDate !== original.expiryDate)
+      payload.expiryDate = current.expiryDate || null;
+    if (
+      current.receivedQuantity !== undefined &&
+      current.receivedQuantity !== original.receivedQuantity
+    )
+      payload.receivedQuantity = Number(current.receivedQuantity);
+    if (current.unitCost !== undefined && current.unitCost !== original.unitCost)
+      payload.unitCost = Number(current.unitCost);
     if (current.isBonus !== undefined) payload.isBonus = !!current.isBonus;
 
     if (Object.keys(payload).length === 0) return; // nothing to save
@@ -539,8 +600,7 @@ export default function GoodsReceiptsPage() {
     try {
       await updateItemMutation.mutateAsync({ grId: selectedGR!.id, itemId: id, data: payload });
     } catch (e: unknown) {
-      const errObj = e as { response?: { data?: { error?: string } }; message?: string };
-      alert(errObj?.response?.data?.error || errObj.message || 'Unknown error');
+      handleApiError(e, { fallback: 'Failed to update item' });
     }
   };
 
@@ -588,7 +648,7 @@ export default function GoodsReceiptsPage() {
               normalizedUnit = rawUnit / rounded;
             }
           }
-          return ({
+          return {
             poItemId: it.id,
             productId: it.product_id || it.productId || '',
             productName: it.product_name || it.productName,
@@ -597,10 +657,13 @@ export default function GoodsReceiptsPage() {
             unitCost: normalizedUnit,
             batchNumber: null,
             expiryDate: null,
-          });
-        })
+          };
+        }),
       };
-      console.log('🚀 [Frontend] Creating GR from PO with payload:', JSON.stringify(payload, null, 2));
+      console.log(
+        '🚀 [Frontend] Creating GR from PO with payload:',
+        JSON.stringify(payload, null, 2)
+      );
       console.log('🔍 [Frontend] User object:', user);
       console.log('🔍 [Frontend] PO Data:', poData);
       await createGRMutation.mutateAsync(payload);
@@ -612,8 +675,7 @@ export default function GoodsReceiptsPage() {
       setPoPage(1);
       setFocusedPoIndex(0);
     } catch (e: unknown) {
-      const errObj = e as { response?: { data?: { error?: string } }; message?: string };
-      alert(errObj?.response?.data?.error || errObj.message || 'Failed to create goods receipt');
+      handleApiError(e, { fallback: 'Failed to create goods receipt' });
     }
   };
 
@@ -646,7 +708,7 @@ export default function GoodsReceiptsPage() {
       const res = await api.purchaseOrders.getById(poId);
       const poDetail = res.data?.data as { items?: unknown[] } | undefined;
       const items = poDetail?.items || [];
-      setPoQuickView(prev => ({ ...prev, [poId]: { itemsCount: items.length } }));
+      setPoQuickView((prev) => ({ ...prev, [poId]: { itemsCount: items.length } }));
     } catch {
       // ignore failures for quick-view
     }
@@ -677,7 +739,9 @@ export default function GoodsReceiptsPage() {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Goods Receipts</h2>
-          <p className="text-gray-600 mt-1">Receiving workflow with batch creation and cost change alerts</p>
+          <p className="text-gray-600 mt-1">
+            Receiving workflow with batch creation and cost change alerts
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -707,7 +771,9 @@ export default function GoodsReceiptsPage() {
       <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
         <div className="flex gap-4">
           <div>
-            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
+              Status
+            </label>
             <select
               id="status-filter"
               value={statusFilter}
@@ -788,9 +854,7 @@ export default function GoodsReceiptsPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatDisplayDate(gr.receivedDate || gr.received_date)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(gr.status)}
-                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(gr.status)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <div className="flex gap-2">
                         <button
@@ -844,8 +908,14 @@ export default function GoodsReceiptsPage() {
 
       {/* Details Modal */}
       {showDetailsModal && selectedGR && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowDetailsModal(false)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowDetailsModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6 border-b border-gray-200">
               <div className="flex justify-between items-start">
                 <div>
@@ -853,7 +923,8 @@ export default function GoodsReceiptsPage() {
                     {selectedGR.receiptNumber || selectedGR.receipt_number}
                   </h3>
                   <p className="text-gray-600 mt-1">
-                    PO: {selectedGR.poNumber || selectedGR.po_number} | Supplier: {selectedGR.supplierName || selectedGR.supplier_name}
+                    PO: {selectedGR.poNumber || selectedGR.po_number} | Supplier:{' '}
+                    {selectedGR.supplierName || selectedGR.supplier_name}
                   </p>
                 </div>
                 <button
@@ -879,11 +950,15 @@ export default function GoodsReceiptsPage() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Received By</label>
-                  <p className="text-gray-900">{selectedGR.receivedByName || selectedGR.received_by_name || '-'}</p>
+                  <p className="text-gray-900">
+                    {selectedGR.receivedByName || selectedGR.received_by_name || '-'}
+                  </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Delivery Note</label>
-                  <p className="text-gray-900">{selectedGR.supplierDeliveryNote || selectedGR.supplier_delivery_note || '-'}</p>
+                  <p className="text-gray-900">
+                    {selectedGR.supplierDeliveryNote || selectedGR.supplier_delivery_note || '-'}
+                  </p>
                 </div>
               </div>
 
@@ -898,30 +973,61 @@ export default function GoodsReceiptsPage() {
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-lg font-semibold text-gray-900">Items</h4>
-                  {detailsQuery.isLoading && <span className="text-sm text-gray-500">Loading items…</span>}
+                  {detailsQuery.isLoading && (
+                    <span className="text-sm text-gray-500">Loading items…</span>
+                  )}
                 </div>
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">On Hand</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UoM</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ordered</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Received</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch #</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                        <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" title="Bonus stock from supplier (zero cost)">Bonus</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty Var</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost Var</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Product
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          On Hand
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          UoM
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Ordered
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Received
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Unit Cost
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Batch #
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Expiry
+                        </th>
+                        <th
+                          className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider"
+                          title="Bonus stock from supplier (zero cost)"
+                        >
+                          Bonus
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Qty Var
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Cost Var
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {items.length === 0 ? (
                         <tr>
-                          <td className="px-4 py-6 text-center text-gray-500" colSpan={12}>No items</td>
+                          <td className="px-4 py-6 text-center text-gray-500" colSpan={12}>
+                            No items
+                          </td>
                         </tr>
                       ) : (
                         items.map((it: GRItemRow) => (
@@ -950,8 +1056,19 @@ export default function GoodsReceiptsPage() {
                   onClick={() => handleExportGRPDF(selectedGR, items)}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
                   </svg>
                   Export PDF
                 </button>
@@ -979,13 +1096,21 @@ export default function GoodsReceiptsPage() {
 
       {/* Cost Alerts Modal */}
       {showAlertsModal && costAlerts.length > 0 && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowAlertsModal(false)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowAlertsModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6 border-b border-gray-200">
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="text-2xl font-bold text-gray-900">⚠️ Cost Price Change Alerts</h3>
-                  <p className="text-gray-600 mt-1">{costAlerts.length} product(s) with cost changes</p>
+                  <p className="text-gray-600 mt-1">
+                    {costAlerts.length} product(s) with cost changes
+                  </p>
                 </div>
                 <button
                   onClick={() => setShowAlertsModal(false)}
@@ -1000,10 +1125,11 @@ export default function GoodsReceiptsPage() {
               {costAlerts.map((alert, index) => (
                 <div
                   key={index}
-                  className={`rounded-lg p-4 border-2 ${alert.severity === 'HIGH'
-                    ? 'bg-red-50 border-red-200'
-                    : 'bg-yellow-50 border-yellow-200'
-                    }`}
+                  className={`rounded-lg p-4 border-2 ${
+                    alert.severity === 'HIGH'
+                      ? 'bg-red-50 border-red-200'
+                      : 'bg-yellow-50 border-yellow-200'
+                  }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-shrink-0 text-2xl">
@@ -1012,10 +1138,11 @@ export default function GoodsReceiptsPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span
-                          className={`px-2 py-1 text-xs font-bold rounded ${alert.severity === 'HIGH'
-                            ? 'bg-red-600 text-white'
-                            : 'bg-yellow-600 text-white'
-                            }`}
+                          className={`px-2 py-1 text-xs font-bold rounded ${
+                            alert.severity === 'HIGH'
+                              ? 'bg-red-600 text-white'
+                              : 'bg-yellow-600 text-white'
+                          }`}
                         >
                           {alert.severity} SEVERITY
                         </span>
@@ -1065,7 +1192,8 @@ export default function GoodsReceiptsPage() {
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
                 <p className="text-sm text-blue-800">
-                  ℹ️ Cost changes have been applied. Pricing formulas will be recalculated automatically.
+                  ℹ️ Cost changes have been applied. Pricing formulas will be recalculated
+                  automatically.
                 </p>
               </div>
 
@@ -1084,8 +1212,20 @@ export default function GoodsReceiptsPage() {
 
       {/* Create GR Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => { setShowCreateModal(false); setSelectedPoId(''); setPoSearch(''); setPoPage(1); setFocusedPoIndex(0); }}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => {
+            setShowCreateModal(false);
+            setSelectedPoId('');
+            setPoSearch('');
+            setPoPage(1);
+            setFocusedPoIndex(0);
+          }}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">Create Goods Receipt from PO</h3>
               <button
@@ -1103,7 +1243,9 @@ export default function GoodsReceiptsPage() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label htmlFor="po-search" className="block text-sm font-medium text-gray-700 mb-1">Search POs (status: PENDING)</label>
+                <label htmlFor="po-search" className="block text-sm font-medium text-gray-700 mb-1">
+                  Search POs (status: PENDING)
+                </label>
                 <input
                   id="po-search"
                   className="w-full border rounded-lg px-3 py-2"
@@ -1162,19 +1304,27 @@ export default function GoodsReceiptsPage() {
                             onFocus={() => ensurePoQuickView(po.id)}
                           >
                             <input
-                              ref={(el) => { if (el) poRadioRefs.current[idx] = el; }}
+                              ref={(el) => {
+                                if (el) poRadioRefs.current[idx] = el;
+                              }}
                               type="radio"
                               name="selected-po"
                               value={po.id}
                               checked={selectedPoId === po.id}
-                              onChange={() => { setSelectedPoId(po.id); ensurePoQuickView(po.id); }}
+                              onChange={() => {
+                                setSelectedPoId(po.id);
+                                ensurePoQuickView(po.id);
+                              }}
                               aria-label={`Select ${orderNumber} from ${supplierName}`}
                             />
                             <div className="flex-1">
                               <div className="text-sm font-medium text-gray-900">{orderNumber}</div>
                               <div className="text-xs text-gray-600">{supplierName}</div>
                               <div className="text-xs text-gray-500 mt-1">
-                                {qv ? `${qv.itemsCount} item${qv.itemsCount === 1 ? '' : 's'}` : 'items: —'} • Total {formatCurrency(totalAmount)}
+                                {qv
+                                  ? `${qv.itemsCount} item${qv.itemsCount === 1 ? '' : 's'}`
+                                  : 'items: —'}{' '}
+                                • Total {formatCurrency(totalAmount)}
                               </div>
                             </div>
                             <div className="text-xs text-gray-500">{orderDate}</div>
@@ -1187,10 +1337,24 @@ export default function GoodsReceiptsPage() {
               </div>
               {poPagination && (
                 <div className="flex items-center justify-between text-xs text-gray-600">
-                  <div>Page {poPagination.page} of {poPagination.totalPages}</div>
+                  <div>
+                    Page {poPagination.page} of {poPagination.totalPages}
+                  </div>
                   <div className="flex gap-2">
-                    <button className="px-2 py-1 border rounded" disabled={poPage === 1} onClick={() => setPoPage(Math.max(1, poPage - 1))}>Prev</button>
-                    <button className="px-2 py-1 border rounded" disabled={poPage === poPagination.totalPages} onClick={() => setPoPage(Math.min(poPagination.totalPages, poPage + 1))}>Next</button>
+                    <button
+                      className="px-2 py-1 border rounded"
+                      disabled={poPage === 1}
+                      onClick={() => setPoPage(Math.max(1, poPage - 1))}
+                    >
+                      Prev
+                    </button>
+                    <button
+                      className="px-2 py-1 border rounded"
+                      disabled={poPage === poPagination.totalPages}
+                      onClick={() => setPoPage(Math.min(poPagination.totalPages, poPage + 1))}
+                    >
+                      Next
+                    </button>
                   </div>
                 </div>
               )}
@@ -1207,7 +1371,11 @@ export default function GoodsReceiptsPage() {
                 >
                   Cancel
                 </button>
-                <button onClick={handleCreateGR} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" disabled={createGRMutation.isPending || !selectedPoId}>
+                <button
+                  onClick={handleCreateGR}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  disabled={createGRMutation.isPending || !selectedPoId}
+                >
                   {createGRMutation.isPending ? 'Creating…' : 'Create GR'}
                 </button>
               </div>
@@ -1236,7 +1404,11 @@ function GRItemRow({
   baseline: 'PO' | 'PRODUCT';
   selectedGR: GRRow;
   editState: EditItemState;
-  onFieldChange: (itemId: string, field: string, value: string | number | boolean | undefined) => void;
+  onFieldChange: (
+    itemId: string,
+    field: string,
+    value: string | number | boolean | undefined
+  ) => void;
   onSave: (item: GRItemRow) => void;
   updatePending: boolean;
   batchWarnings: Record<string, string>;
@@ -1246,7 +1418,12 @@ function GRItemRow({
   const es = editState || {};
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
   // For DRAFT GRs, default received to ordered quantity if not set
-  const baseReceived = Number(es.receivedQuantity ?? item.receivedQuantity ?? item.received_quantity ?? (selectedGR.status === 'DRAFT' ? ordered : 0));
+  const baseReceived = Number(
+    es.receivedQuantity ??
+      item.receivedQuantity ??
+      item.received_quantity ??
+      (selectedGR.status === 'DRAFT' ? ordered : 0)
+  );
   const disabled = selectedGR.status !== 'DRAFT';
   const baseUnitCost = Number(es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0);
   const poBase = Number(item.po_unit_price ?? item.poUnitPrice ?? 0);
@@ -1286,7 +1463,7 @@ function GRItemRow({
     displayedReceived,
     'es.receivedUomQty': es.receivedUomQty,
     'es.receivedLooseQty': es.receivedLooseQty,
-    'es.receivedQuantity': es.receivedQuantity
+    'es.receivedQuantity': es.receivedQuantity,
   });
 
   // DEBUG: Log variance calculation values
@@ -1298,14 +1475,15 @@ function GRItemRow({
       factor,
       displayedOrdered,
       displayedReceived,
-      calculation: `(${baseReceived} - ${ordered}) / ${ordered} * 100`
+      calculation: `(${baseReceived} - ${ordered}) / ${ordered} * 100`,
     });
   }
 
   // Calculate variance using BASE UNITS (not displayed UoM values)
-  const qtyVariancePct = ordered > 0
-    ? new Decimal(baseReceived || 0).minus(ordered).div(ordered).mul(100).toNumber()
-    : 0;
+  const qtyVariancePct =
+    ordered > 0
+      ? new Decimal(baseReceived || 0).minus(ordered).div(ordered).mul(100).toNumber()
+      : 0;
   let costVarPct: number | null = null;
   let costVarAbs: number | null = null;
   if (base && base > 0) {
@@ -1319,7 +1497,8 @@ function GRItemRow({
   const receivedError = ((): string | null => {
     if (es.receivedQuantity == null) return null;
     if (Number(es.receivedQuantity) < 0) return 'Must be ≥ 0';
-    if (ordered !== undefined && Number(es.receivedQuantity) > Number(ordered)) return 'Cannot exceed ordered';
+    if (ordered !== undefined && Number(es.receivedQuantity) > Number(ordered))
+      return 'Cannot exceed ordered';
     return null;
   })();
   const unitCostError = ((): string | null => {
@@ -1346,12 +1525,13 @@ function GRItemRow({
         ) : (
           <div className="flex items-center gap-2">
             <span
-              className={`px-2 py-1 rounded text-xs font-semibold ${needsReorder
-                ? 'bg-red-100 text-red-800'
-                : onHandQty > reorderLevel * 1.5
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-yellow-100 text-yellow-800'
-                }`}
+              className={`px-2 py-1 rounded text-xs font-semibold ${
+                needsReorder
+                  ? 'bg-red-100 text-red-800'
+                  : onHandQty > reorderLevel * 1.5
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+              }`}
               title={`Reorder Level: ${reorderLevel}`}
             >
               {onHandQty.toFixed(4)}
@@ -1378,7 +1558,7 @@ function GRItemRow({
             aria-label={`Unit of Measure for ${item.productName || item.product_name}`}
             title="Unit of Measure"
           >
-            {uomList.map(u => (
+            {uomList.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.uomSymbol || u.uomName} × {u.factor.toString()}
                 {u.isDefault ? ' • default' : ''}
@@ -1396,7 +1576,13 @@ function GRItemRow({
               type="number"
               min={0}
               className={`w-20 border rounded px-2 py-1 ${receivedError ? 'border-red-500' : ''}`}
-              value={es.receivedUomQty !== undefined ? es.receivedUomQty : (factor > 1 ? Math.floor(baseReceived / factor) : baseReceived)}
+              value={
+                es.receivedUomQty !== undefined
+                  ? es.receivedUomQty
+                  : factor > 1
+                    ? Math.floor(baseReceived / factor)
+                    : baseReceived
+              }
               disabled={disabled}
               placeholder="0"
               aria-label={`Received ${selectedUom?.uomSymbol || 'units'} for ${item.productName || item.product_name}`}
@@ -1420,14 +1606,21 @@ function GRItemRow({
               min={0}
               max={factor > 1 ? factor - 1 : undefined}
               className={`w-20 border rounded px-2 py-1 ${receivedError ? 'border-red-500' : ''}`}
-              value={es.receivedLooseQty !== undefined ? es.receivedLooseQty : (factor > 1 ? baseReceived % factor : 0)}
+              value={
+                es.receivedLooseQty !== undefined
+                  ? es.receivedLooseQty
+                  : factor > 1
+                    ? baseReceived % factor
+                    : 0
+              }
               disabled={disabled}
               placeholder="0"
               aria-label={`Loose base units for ${item.productName || item.product_name}`}
               title="Loose base units"
               onChange={(e) => {
                 const looseQty = e.target.value === '' ? 0 : Number(e.target.value);
-                const uomQty = es.receivedUomQty ?? (factor > 1 ? Math.floor(baseReceived / factor) : 0);
+                const uomQty =
+                  es.receivedUomQty ?? (factor > 1 ? Math.floor(baseReceived / factor) : 0);
                 const totalBase = new Decimal(uomQty).mul(factor).plus(looseQty).toNumber();
                 onFieldChange(item.id, 'receivedLooseQty', looseQty);
                 onFieldChange(item.id, 'receivedQuantity', totalBase);
@@ -1436,9 +1629,7 @@ function GRItemRow({
             <span className="text-xs text-gray-500 mt-0.5">base</span>
           </div>
 
-          <div className="text-xs text-gray-600 ml-1">
-            = {Number(baseReceived || 0).toFixed(4)}
-          </div>
+          <div className="text-xs text-gray-600 ml-1">= {Number(baseReceived || 0).toFixed(4)}</div>
         </div>
         {receivedError && <div className="text-xs text-red-600 mt-1">{receivedError}</div>}
       </td>
@@ -1484,9 +1675,7 @@ function GRItemRow({
           placeholder="Auto on finalize if empty"
         />
         {batchWarnings[item.id] && (
-          <div className="text-xs text-red-600 mt-1">
-            {batchWarnings[item.id]}
-          </div>
+          <div className="text-xs text-red-600 mt-1">{batchWarnings[item.id]}</div>
         )}
       </td>
       <td className="px-4 py-2 text-sm">
@@ -1501,7 +1690,10 @@ function GRItemRow({
         {expiryError && <div className="text-xs text-red-600 mt-1">{expiryError}</div>}
       </td>
       <td className="px-4 py-2 text-sm text-center">
-        <label className="inline-flex items-center gap-1 cursor-pointer" title="Mark as bonus stock (zero cost)">
+        <label
+          className="inline-flex items-center gap-1 cursor-pointer"
+          title="Mark as bonus stock (zero cost)"
+        >
           <input
             type="checkbox"
             checked={!!(es.isBonus ?? item.isBonus ?? item.is_bonus ?? false)}
@@ -1517,8 +1709,11 @@ function GRItemRow({
       </td>
       <td className="px-4 py-2 text-sm">
         {displayedOrdered > 0 ? (
-          <span className={`px-2 py-1 rounded text-xs font-semibold ${qtyVariancePct > 0 ? 'bg-yellow-100 text-yellow-800' : qtyVariancePct < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
-            {qtyVariancePct > 0 ? '+' : ''}{qtyVariancePct.toFixed(2)}%
+          <span
+            className={`px-2 py-1 rounded text-xs font-semibold ${qtyVariancePct > 0 ? 'bg-yellow-100 text-yellow-800' : qtyVariancePct < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}
+          >
+            {qtyVariancePct > 0 ? '+' : ''}
+            {qtyVariancePct.toFixed(2)}%
           </span>
         ) : (
           <span className="text-gray-400">-</span>
@@ -1529,11 +1724,17 @@ function GRItemRow({
           <span className="text-gray-400">-</span>
         ) : (
           <div className="flex items-center gap-2">
-            <span className={`px-2 py-1 rounded text-xs font-semibold ${costVarPct > 0 ? 'bg-red-100 text-red-800' : costVarPct < 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-              {costVarAbs !== null ? `${costVarAbs > 0 ? '+' : '-'}` : ''}{costVarAbs !== null ? formatCurrency(Math.abs(costVarAbs)) : ''}
+            <span
+              className={`px-2 py-1 rounded text-xs font-semibold ${costVarPct > 0 ? 'bg-red-100 text-red-800' : costVarPct < 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}
+            >
+              {costVarAbs !== null ? `${costVarAbs > 0 ? '+' : '-'}` : ''}
+              {costVarAbs !== null ? formatCurrency(Math.abs(costVarAbs)) : ''}
               {` (${costVarPct > 0 ? '+' : ''}${costVarPct.toFixed(2)}%)`}
             </span>
-            <span className="text-xs text-gray-500">vs {baseline === 'PO' ? 'PO agreed price' : 'Product current cost'} {base ? `(${formatCurrency(new Decimal(base).mul(factor).toNumber())})` : ''}</span>
+            <span className="text-xs text-gray-500">
+              vs {baseline === 'PO' ? 'PO agreed price' : 'Product current cost'}{' '}
+              {base ? `(${formatCurrency(new Decimal(base).mul(factor).toNumber())})` : ''}
+            </span>
           </div>
         )}
       </td>

@@ -22,11 +22,12 @@ import {
   CardHeader,
   CardTitle,
   Badge,
-  Textarea
+  Textarea,
 } from '../../components/ui/temp-ui-components';
 import { formatCurrency } from '../../utils/currency';
 import toast from 'react-hot-toast';
 import { accountingApi } from '../../services/api';
+import { handleApiError } from '../../utils/errorHandler';
 
 interface Account {
   id: string;
@@ -63,7 +64,7 @@ const ACCOUNT_TYPES = [
   { value: 'LIABILITY', label: 'Liabilities', color: 'bg-red-100 text-red-800' },
   { value: 'EQUITY', label: 'Equity', color: 'bg-purple-100 text-purple-800' },
   { value: 'REVENUE', label: 'Revenue', color: 'bg-green-100 text-green-800' },
-  { value: 'EXPENSE', label: 'Expenses', color: 'bg-orange-100 text-orange-800' }
+  { value: 'EXPENSE', label: 'Expenses', color: 'bg-orange-100 text-orange-800' },
 ];
 
 const ChartOfAccountsPage = () => {
@@ -82,7 +83,7 @@ const ChartOfAccountsPage = () => {
     accountType: 'ASSET',
     parentAccountId: undefined,
     description: '',
-    isActive: true
+    isActive: true,
   });
 
   useEffect(() => {
@@ -99,7 +100,7 @@ const ChartOfAccountsPage = () => {
         // Map API response to frontend interface (currentBalance -> balance)
         const mappedAccounts = (result.data || []).map((acc: RawApiAccount) => ({
           ...acc,
-          balance: acc.currentBalance ?? acc.balance ?? 0
+          balance: acc.currentBalance ?? acc.balance ?? 0,
         }));
         setAccounts(mappedAccounts);
       } else {
@@ -107,7 +108,7 @@ const ChartOfAccountsPage = () => {
       }
     } catch (error: unknown) {
       console.error('Error loading accounts:', error);
-      toast.error(`Failed to load accounts: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to load accounts' });
       setAccounts([]);
     } finally {
       setLoading(false);
@@ -127,7 +128,7 @@ const ChartOfAccountsPage = () => {
       }
     } catch (error: unknown) {
       console.error('Error creating account:', error);
-      toast.error(`Failed to create account: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to create account' });
     }
   };
 
@@ -146,12 +147,16 @@ const ChartOfAccountsPage = () => {
       }
     } catch (error: unknown) {
       console.error('Error updating account:', error);
-      toast.error(`Failed to update account: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to update account' });
     }
   };
 
   const handleDeleteAccount = async (accountId: string, accountName: string) => {
-    if (!confirm(`Are you sure you want to delete account "${accountName}"? This action cannot be undone.`)) {
+    if (
+      !confirm(
+        `Are you sure you want to delete account "${accountName}"? This action cannot be undone.`
+      )
+    ) {
       return;
     }
 
@@ -165,7 +170,7 @@ const ChartOfAccountsPage = () => {
       }
     } catch (error: unknown) {
       console.error('Error deleting account:', error);
-      toast.error(`Failed to delete account: ${getErrorMessage(error)}`);
+      handleApiError(error, { fallback: 'Failed to delete account' });
     }
   };
 
@@ -176,7 +181,7 @@ const ChartOfAccountsPage = () => {
       accountType: 'ASSET',
       parentAccountId: undefined,
       description: '',
-      isActive: true
+      isActive: true,
     });
   };
 
@@ -188,18 +193,19 @@ const ChartOfAccountsPage = () => {
       accountType: account.accountType,
       parentAccountId: account.parentAccountId,
       description: account.description || '',
-      isActive: account.isActive
+      isActive: account.isActive,
     });
   };
 
-  const filteredAccounts = accounts.filter(account => {
+  const filteredAccounts = accounts.filter((account) => {
     const matchesSearch =
       account.accountNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       account.accountName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (account.description || '').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesType = filterType === 'ALL' || account.accountType === filterType;
-    const matchesActive = filterActive === 'ALL' ||
+    const matchesActive =
+      filterActive === 'ALL' ||
       (filterActive === 'ACTIVE' && account.isActive) ||
       (filterActive === 'INACTIVE' && !account.isActive);
 
@@ -207,23 +213,23 @@ const ChartOfAccountsPage = () => {
   });
 
   const getAccountTypeColor = (type: string) => {
-    const typeConfig = ACCOUNT_TYPES.find(t => t.value === type);
+    const typeConfig = ACCOUNT_TYPES.find((t) => t.value === type);
     return typeConfig?.color || 'bg-gray-100 text-gray-800';
   };
 
   const exportToCSV = () => {
     const headers = ['Account Number', 'Account Name', 'Type', 'Balance', 'Status', 'Description'];
-    const rows = filteredAccounts.map(account => [
+    const rows = filteredAccounts.map((account) => [
       account.accountNumber,
       account.accountName,
       account.accountType,
       account.balance.toString(),
       account.isActive ? 'Active' : 'Inactive',
-      account.description || ''
+      account.description || '',
     ]);
 
     const csvContent = [headers, ...rows]
-      .map(row => row.map(field => `"${field.replace(/"/g, '""')}"`).join(','))
+      .map((row) => row.map((field) => `"${field.replace(/"/g, '""')}"`).join(','))
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -277,8 +283,10 @@ const ChartOfAccountsPage = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All Types</SelectItem>
-                  {ACCOUNT_TYPES.map(type => (
-                    <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                  {ACCOUNT_TYPES.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -299,7 +307,12 @@ const ChartOfAccountsPage = () => {
             <div className="flex flex-wrap gap-2">
               <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
-                  <Button onClick={() => { resetForm(); setShowCreateDialog(true); }}>
+                  <Button
+                    onClick={() => {
+                      resetForm();
+                      setShowCreateDialog(true);
+                    }}
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     New Account
                   </Button>
@@ -319,19 +332,31 @@ const ChartOfAccountsPage = () => {
                         <Input
                           id="accountNumber"
                           value={formData.accountNumber}
-                          onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, accountNumber: e.target.value })
+                          }
                           placeholder="1000"
                         />
                       </div>
                       <div>
                         <Label htmlFor="accountType">Account Type *</Label>
-                        <Select value={formData.accountType} onValueChange={(value: string) => setFormData({ ...formData, accountType: value as Account['accountType'] })}>
+                        <Select
+                          value={formData.accountType}
+                          onValueChange={(value: string) =>
+                            setFormData({
+                              ...formData,
+                              accountType: value as Account['accountType'],
+                            })
+                          }
+                        >
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {ACCOUNT_TYPES.map(type => (
-                              <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                            {ACCOUNT_TYPES.map((type) => (
+                              <SelectItem key={type.value} value={type.value}>
+                                {type.label}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -353,7 +378,9 @@ const ChartOfAccountsPage = () => {
                       <Textarea
                         id="description"
                         value={formData.description}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData({ ...formData, description: e.target.value })}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          setFormData({ ...formData, description: e.target.value })
+                        }
                         placeholder="Optional description of the account"
                         rows={3}
                       />
@@ -376,14 +403,21 @@ const ChartOfAccountsPage = () => {
                     <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
                       Cancel
                     </Button>
-                    <Button onClick={handleCreateAccount} disabled={!formData.accountNumber || !formData.accountName}>
+                    <Button
+                      onClick={handleCreateAccount}
+                      disabled={!formData.accountNumber || !formData.accountName}
+                    >
                       Create Account
                     </Button>
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
 
-              <Button variant="outline" onClick={exportToCSV} disabled={filteredAccounts.length === 0}>
+              <Button
+                variant="outline"
+                onClick={exportToCSV}
+                disabled={filteredAccounts.length === 0}
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Export CSV
               </Button>
@@ -483,9 +517,7 @@ const ChartOfAccountsPage = () => {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Edit Account</DialogTitle>
-              <DialogDescription>
-                Update account information
-              </DialogDescription>
+              <DialogDescription>Update account information</DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
@@ -500,13 +532,20 @@ const ChartOfAccountsPage = () => {
                 </div>
                 <div>
                   <Label htmlFor="edit-accountType">Account Type *</Label>
-                  <Select value={formData.accountType} onValueChange={(value: string) => setFormData({ ...formData, accountType: value as Account['accountType'] })}>
+                  <Select
+                    value={formData.accountType}
+                    onValueChange={(value: string) =>
+                      setFormData({ ...formData, accountType: value as Account['accountType'] })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {ACCOUNT_TYPES.map(type => (
-                        <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                      {ACCOUNT_TYPES.map((type) => (
+                        <SelectItem key={type.value} value={type.value}>
+                          {type.label}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -527,7 +566,9 @@ const ChartOfAccountsPage = () => {
                 <Textarea
                   id="edit-description"
                   value={formData.description}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
                   rows={3}
                 />
               </div>
@@ -548,7 +589,10 @@ const ChartOfAccountsPage = () => {
               <Button variant="outline" onClick={() => setEditingAccount(null)}>
                 Cancel
               </Button>
-              <Button onClick={handleUpdateAccount} disabled={!formData.accountNumber || !formData.accountName}>
+              <Button
+                onClick={handleUpdateAccount}
+                disabled={!formData.accountNumber || !formData.accountName}
+              >
                 Update Account
               </Button>
             </DialogFooter>

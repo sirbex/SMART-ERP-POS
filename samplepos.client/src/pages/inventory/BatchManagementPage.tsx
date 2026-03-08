@@ -47,7 +47,9 @@ export default function BatchManagementPage() {
   const { data: productsData } = useProducts();
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'DEPLETED' | 'EXPIRED'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'DEPLETED' | 'EXPIRED'>(
+    'ALL'
+  );
   const [filterUrgency, setFilterUrgency] = useState<'ALL' | ExpiryUrgency>('ALL');
   const [selectedBatch, setSelectedBatch] = useState<InventoryBatch | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -79,29 +81,32 @@ export default function BatchManagementPage() {
         const stock = Number(level.total_stock || level.total_quantity || 0);
         return stock > 0; // Only show products that have actual stock/batches
       })
-      .map((level: {
-        product_id: string;
-        product_name: string;
-        sku?: string;
-        total_stock?: number;
-        total_quantity?: number;
-        nearest_expiry?: string | null;
-        average_cost?: number;
-      }) => ({
-        id: `batch-${level.product_id}`,
-        product_id: level.product_id,
-        product_name: level.product_name,
-        batch_number: level.sku || 'MAIN',
-        quantity: Number(level.total_stock || level.total_quantity || 0),
-        remaining_quantity: Number(level.total_stock || level.total_quantity || 0),
-        expiry_date: level.nearest_expiry || null,
-        cost_price: Number(level.average_cost || 0),
-        status: Number(level.total_stock || level.total_quantity || 0) === 0
-          ? 'DEPLETED' as const
-          : 'ACTIVE' as const,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }));
+      .map(
+        (level: {
+          product_id: string;
+          product_name: string;
+          sku?: string;
+          total_stock?: number;
+          total_quantity?: number;
+          nearest_expiry?: string | null;
+          average_cost?: number;
+        }) => ({
+          id: `batch-${level.product_id}`,
+          product_id: level.product_id,
+          product_name: level.product_name,
+          batch_number: level.sku || 'MAIN',
+          quantity: Number(level.total_stock || level.total_quantity || 0),
+          remaining_quantity: Number(level.total_stock || level.total_quantity || 0),
+          expiry_date: level.nearest_expiry || null,
+          cost_price: Number(level.average_cost || 0),
+          status:
+            Number(level.total_stock || level.total_quantity || 0) === 0
+              ? ('DEPLETED' as const)
+              : ('ACTIVE' as const),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+      );
   }, [stockLevelsData]);
 
   // Calculate expiry urgency for a batch
@@ -133,9 +138,10 @@ export default function BatchManagementPage() {
     // Search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter((batch) =>
-        batch.product_name.toLowerCase().includes(term) ||
-        batch.batch_number.toLowerCase().includes(term)
+      filtered = filtered.filter(
+        (batch) =>
+          batch.product_name.toLowerCase().includes(term) ||
+          batch.batch_number.toLowerCase().includes(term)
       );
     }
 
@@ -146,8 +152,8 @@ export default function BatchManagementPage() {
 
     // Urgency filter
     if (filterUrgency !== 'ALL') {
-      filtered = filtered.filter((batch) =>
-        calculateExpiryUrgency(batch.expiry_date) === filterUrgency
+      filtered = filtered.filter(
+        (batch) => calculateExpiryUrgency(batch.expiry_date) === filterUrgency
       );
     }
 
@@ -163,7 +169,10 @@ export default function BatchManagementPage() {
       if (!b.expiry_date) return -1;
 
       // Sort by expiry date ascending (earliest first)
-      return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+      return (
+        new Date(a.expiry_date + 'T00:00:00').getTime() -
+        new Date(b.expiry_date + 'T00:00:00').getTime()
+      );
     });
   }, [filteredBatches]);
 
@@ -171,11 +180,11 @@ export default function BatchManagementPage() {
   const stats = useMemo(() => {
     const totalBatches = sortedBatches.length;
     const activeBatches = sortedBatches.filter((b) => b.status === 'ACTIVE').length;
-    const criticalBatches = sortedBatches.filter((b) =>
-      calculateExpiryUrgency(b.expiry_date) === 'CRITICAL'
+    const criticalBatches = sortedBatches.filter(
+      (b) => calculateExpiryUrgency(b.expiry_date) === 'CRITICAL'
     ).length;
-    const warningBatches = sortedBatches.filter((b) =>
-      calculateExpiryUrgency(b.expiry_date) === 'WARNING'
+    const warningBatches = sortedBatches.filter(
+      (b) => calculateExpiryUrgency(b.expiry_date) === 'WARNING'
     ).length;
 
     const totalValue = sortedBatches.reduce((sum, batch) => {
@@ -319,7 +328,10 @@ export default function BatchManagementPage() {
 
           {/* Urgency Filter */}
           <div>
-            <label htmlFor="urgency-filter" className="block text-sm font-medium text-gray-700 mb-2">
+            <label
+              htmlFor="urgency-filter"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
               Expiry Urgency
             </label>
             <select
@@ -401,7 +413,9 @@ export default function BatchManagementPage() {
                 </tr>
               ) : (
                 sortedBatches.map((batch, index) => {
-                  const product = productMap.get(batch.product_id) as { unitOfMeasure?: string } | undefined;
+                  const product = productMap.get(batch.product_id) as
+                    | { unitOfMeasure?: string }
+                    | undefined;
                   const urgency = calculateExpiryUrgency(batch.expiry_date);
                   const urgencyBadge = getUrgencyBadge(urgency);
                   const daysUntilExpiry = getDaysUntilExpiry(batch.expiry_date);
@@ -427,9 +441,7 @@ export default function BatchManagementPage() {
 
                       {/* Batch Number */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900 font-mono">
-                          {batch.batch_number}
-                        </div>
+                        <div className="text-sm text-gray-900 font-mono">{batch.batch_number}</div>
                       </td>
 
                       {/* Quantity */}
@@ -450,14 +462,17 @@ export default function BatchManagementPage() {
                               {formatDisplayDate(batch.expiry_date)}
                             </div>
                             {daysUntilExpiry !== null && (
-                              <div className={`text-xs ${daysUntilExpiry < 0
-                                ? 'text-red-600 font-bold'
-                                : daysUntilExpiry <= 7
-                                  ? 'text-red-600'
-                                  : daysUntilExpiry <= 30
-                                    ? 'text-yellow-600'
-                                    : 'text-green-600'
-                                }`}>
+                              <div
+                                className={`text-xs ${
+                                  daysUntilExpiry < 0
+                                    ? 'text-red-600 font-bold'
+                                    : daysUntilExpiry <= 7
+                                      ? 'text-red-600'
+                                      : daysUntilExpiry <= 30
+                                        ? 'text-yellow-600'
+                                        : 'text-green-600'
+                                }`}
+                              >
                                 {daysUntilExpiry < 0
                                   ? `Expired ${Math.abs(daysUntilExpiry)} days ago`
                                   : `${daysUntilExpiry} days left`}
@@ -471,7 +486,9 @@ export default function BatchManagementPage() {
 
                       {/* Urgency */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${urgencyBadge.color}`}>
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${urgencyBadge.color}`}
+                        >
                           {urgencyBadge.icon} {urgencyBadge.label.replace(/🔴|🟡|🟢/, '').trim()}
                         </span>
                       </td>
@@ -481,19 +498,20 @@ export default function BatchManagementPage() {
                         <div className="text-sm font-medium text-gray-900">
                           UGX {batchValue.toFixed(0).toLocaleString()}
                         </div>
-                        <div className="text-xs text-gray-500">
-                          @{batch.cost_price.toFixed(2)}
-                        </div>
+                        <div className="text-xs text-gray-500">@{batch.cost_price.toFixed(2)}</div>
                       </td>
 
                       {/* Status */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
-                          ? 'bg-green-100 text-green-800'
-                          : batch.status === 'DEPLETED'
-                            ? 'bg-gray-100 text-gray-800'
-                            : 'bg-red-100 text-red-800'
-                          }`}>
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            batch.status === 'ACTIVE'
+                              ? 'bg-green-100 text-green-800'
+                              : batch.status === 'DEPLETED'
+                                ? 'bg-gray-100 text-gray-800'
+                                : 'bg-red-100 text-red-800'
+                          }`}
+                        >
                           {batch.status}
                         </span>
                       </td>
@@ -520,11 +538,19 @@ export default function BatchManagementPage() {
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="text-sm font-medium text-blue-900 mb-2">📦 FEFO (First Expiry First Out)</h3>
         <ul className="text-xs text-blue-800 space-y-1">
-          <li>• Batches are sorted by expiry date (earliest first) to ensure proper stock rotation</li>
+          <li>
+            • Batches are sorted by expiry date (earliest first) to ensure proper stock rotation
+          </li>
           <li>• POS system automatically selects batches in FEFO order during sales</li>
-          <li>• <strong>CRITICAL:</strong> Batches expiring in ≤7 days (red alert)</li>
-          <li>• <strong>WARNING:</strong> Batches expiring in ≤30 days (yellow alert)</li>
-          <li>• <strong>NORMAL:</strong> Batches expiring in &gt;30 days (green status)</li>
+          <li>
+            • <strong>CRITICAL:</strong> Batches expiring in ≤7 days (red alert)
+          </li>
+          <li>
+            • <strong>WARNING:</strong> Batches expiring in ≤30 days (yellow alert)
+          </li>
+          <li>
+            • <strong>NORMAL:</strong> Batches expiring in &gt;30 days (green status)
+          </li>
           <li>• Batches without expiry dates appear last in the queue</li>
         </ul>
       </div>
@@ -533,7 +559,11 @@ export default function BatchManagementPage() {
       {showDetailsModal && selectedBatch && (
         <BatchDetailsModal
           batch={selectedBatch}
-          product={productMap.get(selectedBatch.product_id) as { name?: string; sku?: string; unitOfMeasure?: string } | undefined}
+          product={
+            productMap.get(selectedBatch.product_id) as
+              | { name?: string; sku?: string; unitOfMeasure?: string }
+              | undefined
+          }
           onClose={() => setShowDetailsModal(false)}
         />
       )}
@@ -547,24 +577,33 @@ export default function BatchManagementPage() {
 function BatchDetailsModal({
   batch,
   product,
-  onClose
+  onClose,
 }: {
   batch: InventoryBatch;
   product?: { name?: string; sku?: string; unitOfMeasure?: string };
   onClose: () => void;
 }) {
   const daysUntilExpiry = batch.expiry_date
-    ? Math.ceil((new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.ceil(
+        (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+      )
     : null;
 
   const batchValue = new Decimal(batch.remaining_quantity).times(batch.cost_price);
-  const utilizationPercent = batch.quantity > 0
-    ? new Decimal(batch.remaining_quantity).dividedBy(batch.quantity).times(100).toNumber()
-    : 0;
+  const utilizationPercent =
+    batch.quantity > 0
+      ? new Decimal(batch.remaining_quantity).dividedBy(batch.quantity).times(100).toNumber()
+      : 0;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">Batch Details</h3>
           <p className="text-sm text-gray-600 mt-1">
@@ -588,11 +627,15 @@ function BatchDetailsModal({
                 </div>
                 <div>
                   <span className="text-gray-600">Batch Number:</span>
-                  <span className="ml-2 font-mono font-medium text-gray-900">{batch.batch_number}</span>
+                  <span className="ml-2 font-mono font-medium text-gray-900">
+                    {batch.batch_number}
+                  </span>
                 </div>
                 <div>
                   <span className="text-gray-600">Unit:</span>
-                  <span className="ml-2 font-medium text-gray-900">{product?.unitOfMeasure || 'PCS'}</span>
+                  <span className="ml-2 font-medium text-gray-900">
+                    {product?.unitOfMeasure || 'PCS'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -603,20 +646,29 @@ function BatchDetailsModal({
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <span className="text-gray-600">Original Quantity:</span>
-                  <span className="ml-2 font-medium text-gray-900">{batch.quantity.toFixed(2)}</span>
+                  <span className="ml-2 font-medium text-gray-900">
+                    {batch.quantity.toFixed(2)}
+                  </span>
                 </div>
                 <div>
                   <span className="text-gray-600">Remaining:</span>
-                  <span className="ml-2 font-semibold text-green-600">{batch.remaining_quantity.toFixed(2)}</span>
+                  <span className="ml-2 font-semibold text-green-600">
+                    {batch.remaining_quantity.toFixed(2)}
+                  </span>
                 </div>
                 <div>
                   <span className="text-gray-600">Utilization:</span>
-                  <span className="ml-2 font-medium text-gray-900">{utilizationPercent.toFixed(1)}%</span>
+                  <span className="ml-2 font-medium text-gray-900">
+                    {utilizationPercent.toFixed(1)}%
+                  </span>
                 </div>
                 <div>
                   <span className="text-gray-600">Status:</span>
-                  <span className={`ml-2 font-semibold ${batch.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-600'
-                    }`}>
+                  <span
+                    className={`ml-2 font-semibold ${
+                      batch.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-600'
+                    }`}
+                  >
                     {batch.status}
                   </span>
                 </div>
@@ -635,14 +687,17 @@ function BatchDetailsModal({
                     </span>
                   </div>
                   {daysUntilExpiry !== null && (
-                    <div className={`text-sm font-semibold ${daysUntilExpiry < 0
-                      ? 'text-red-600'
-                      : daysUntilExpiry <= 7
-                        ? 'text-red-600'
-                        : daysUntilExpiry <= 30
-                          ? 'text-yellow-600'
-                          : 'text-green-600'
-                      }`}>
+                    <div
+                      className={`text-sm font-semibold ${
+                        daysUntilExpiry < 0
+                          ? 'text-red-600'
+                          : daysUntilExpiry <= 7
+                            ? 'text-red-600'
+                            : daysUntilExpiry <= 30
+                              ? 'text-yellow-600'
+                              : 'text-green-600'
+                      }`}
+                    >
                       {daysUntilExpiry < 0
                         ? `⚠️ EXPIRED ${Math.abs(daysUntilExpiry)} days ago`
                         : daysUntilExpiry === 0
@@ -662,7 +717,9 @@ function BatchDetailsModal({
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <span className="text-gray-600">Unit Cost:</span>
-                  <span className="ml-2 font-medium text-gray-900">UGX {batch.cost_price.toFixed(2)}</span>
+                  <span className="ml-2 font-medium text-gray-900">
+                    UGX {batch.cost_price.toFixed(2)}
+                  </span>
                 </div>
                 <div>
                   <span className="text-gray-600">Total Value:</span>
@@ -680,13 +737,17 @@ function BatchDetailsModal({
                 <div>
                   <span className="text-gray-600">Created:</span>
                   <span className="ml-2 text-gray-900">
-                    {batch.created_at?.includes('T') ? `${formatDisplayDate(batch.created_at)} ${batch.created_at.split('T')[1].substring(0, 8)}` : formatDisplayDate(batch.created_at)}
+                    {batch.created_at?.includes('T')
+                      ? `${formatDisplayDate(batch.created_at)} ${batch.created_at.split('T')[1].substring(0, 8)}`
+                      : formatDisplayDate(batch.created_at)}
                   </span>
                 </div>
                 <div>
                   <span className="text-gray-600">Last Updated:</span>
                   <span className="ml-2 text-gray-900">
-                    {batch.updated_at?.includes('T') ? `${formatDisplayDate(batch.updated_at)} ${batch.updated_at.split('T')[1].substring(0, 8)}` : formatDisplayDate(batch.updated_at)}
+                    {batch.updated_at?.includes('T')
+                      ? `${formatDisplayDate(batch.updated_at)} ${batch.updated_at.split('T')[1].substring(0, 8)}`
+                      : formatDisplayDate(batch.updated_at)}
                   </span>
                 </div>
               </div>

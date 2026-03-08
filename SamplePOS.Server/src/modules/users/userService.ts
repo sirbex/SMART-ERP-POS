@@ -4,18 +4,19 @@ import type { Pool } from 'pg';
 import * as userRepository from './userRepository.js';
 import type { User, CreateUser, UpdateUser, ChangePassword } from '../../../../shared/zod/user.js';
 import logger from '../../utils/logger.js';
+import { BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 
 /**
  * Get all users (admin/manager only)
  * @param pool - Database connection pool
  * @returns List of all users (passwords excluded)
- * 
+ *
  * Features:
  * - Excludes password_hash for security
  * - Includes active and inactive users
  * - Role information included
- * 
+ *
  * Use Cases:
  * - Admin user management dashboard
  * - User selection dropdowns
@@ -32,7 +33,7 @@ export async function getUserById(pool: Pool, id: string): Promise<User> {
   const user = await userRepository.findUserById(id, pool);
 
   if (!user) {
-    throw new Error('User not found');
+    throw new NotFoundError('User');
   }
 
   return user;
@@ -44,24 +45,24 @@ export async function getUserById(pool: Pool, id: string): Promise<User> {
  * @param data - User creation data (email, password, name, role)
  * @returns Created user with auto-generated user_number
  * @throws Error if email already exists
- * 
+ *
  * Business Rules:
  * - Email must be unique across all users
  * - Password hashed using bcrypt (salt rounds: 12)
  * - user_number auto-generated: USER-YYYY-####
- * 
+ *
  * Roles:
  * - ADMIN: Full system access
  * - MANAGER: Sales, inventory, reports (no system settings)
  * - CASHIER: POS operations only
  * - STAFF: Limited read access
- * 
+ *
  * Transaction Flow:
  * 1. Validate email uniqueness
  * 2. Hash password with bcrypt
  * 3. Create user record
  * 4. Commit transaction atomically
- * 
+ *
  * Security:
  * - Password never stored in plain text
  * - Bcrypt with salt for one-way hashing
@@ -72,7 +73,7 @@ export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
   const existingUser = await userRepository.findUserByEmail(data.email, pool);
 
   if (existingUser) {
-    throw new Error('Email already in use');
+    throw new BusinessError('Email already in use', 'ERR_USER_001', { email: data.email });
   }
 
   // Transaction: Create user atomically with role assignment
@@ -81,7 +82,7 @@ export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
     logger.info('User created (transaction committed)', {
       userId: user.id,
       email: user.email,
-      role: user.role
+      role: user.role,
     });
     return user;
   });
@@ -94,18 +95,18 @@ export async function createUser(pool: Pool, data: CreateUser): Promise<User> {
  * @param data - Fields to update (all optional)
  * @returns Updated user record
  * @throws Error if email conflict or user not found
- * 
+ *
  * Updatable Fields:
  * - email (with uniqueness validation)
  * - name, phone
  * - role (ADMIN, MANAGER, CASHIER, STAFF)
  * - is_active (soft delete)
- * 
+ *
  * Business Rules:
  * - Cannot change email to one already in use
  * - Cannot update password via this endpoint (use changePassword)
  * - Audit trail: updated_at timestamp auto-updated
- * 
+ *
  * Security:
  * - Only ADMIN can change user roles
  * - Users can update own profile (limited fields)
@@ -116,7 +117,10 @@ export async function updateUser(pool: Pool, id: string, data: UpdateUser): Prom
   if (data.email) {
     const existingUser = await userRepository.findUserByEmail(data.email, pool);
     if (existingUser && existingUser.id !== id) {
-      throw new Error('Email already in use');
+      throw new BusinessError('Email already in use', 'ERR_USER_001', {
+        email: data.email,
+        conflictUserId: existingUser.id,
+      });
     }
   }
 
@@ -125,12 +129,12 @@ export async function updateUser(pool: Pool, id: string, data: UpdateUser): Prom
     const user = await userRepository.updateUser(id, data, client);
 
     if (!user) {
-      throw new Error('User not found');
+      throw new NotFoundError('User');
     }
 
     logger.info('User updated (transaction committed)', {
       userId: user.id,
-      updates: Object.keys(data)
+      updates: Object.keys(data),
     });
 
     return user;
@@ -148,20 +152,20 @@ export async function changePassword(
   const user = await userRepository.findUserById(userId, pool);
 
   if (!user) {
-    throw new Error('User not found');
+    throw new NotFoundError('User');
   }
 
   // Verify current password
   const isValid = await userRepository.verifyUserPassword(user.email, data.currentPassword, pool);
 
   if (!isValid) {
-    throw new Error('Current password is incorrect');
+    throw new BusinessError('Current password is incorrect', 'ERR_USER_002', { userId });
   }
 
   const success = await userRepository.changeUserPassword(userId, data.newPassword, pool);
 
   if (!success) {
-    throw new Error('Failed to change password');
+    throw new BusinessError('Failed to change password', 'ERR_USER_003', { userId });
   }
 
   logger.info('Password changed', { userId });
@@ -170,11 +174,15 @@ export async function changePassword(
 /**
  * Delete user (soft delete by default, hard delete if specified)
  */
-export async function deleteUser(pool: Pool, id: string, hardDelete: boolean = false): Promise<{ deleted: boolean; message: string }> {
+export async function deleteUser(
+  pool: Pool,
+  id: string,
+  hardDelete: boolean = false
+): Promise<{ deleted: boolean; message: string }> {
   const user = await userRepository.findUserById(id, pool);
 
   if (!user) {
-    throw new Error('User not found');
+    throw new NotFoundError('User');
   }
 
   // Check if user has associated data
@@ -182,18 +190,22 @@ export async function deleteUser(pool: Pool, id: string, hardDelete: boolean = f
 
   if (hardDelete) {
     if (hasData) {
-      throw new Error('Cannot permanently delete user with associated transactions. Please deactivate instead.');
+      throw new BusinessError(
+        'Cannot permanently delete user with associated transactions. Please deactivate instead.',
+        'ERR_USER_004',
+        { userId: id, hasTransactions: true }
+      );
     }
     const success = await userRepository.hardDeleteUser(id, pool);
     if (!success) {
-      throw new Error('Failed to delete user');
+      throw new BusinessError('Failed to delete user', 'ERR_USER_005', { userId: id });
     }
     logger.info('User permanently deleted', { userId: id, email: user.email });
     return { deleted: true, message: 'User permanently deleted' };
   } else {
     const success = await userRepository.deleteUser(id, pool);
     if (!success) {
-      throw new Error('Failed to deactivate user');
+      throw new BusinessError('Failed to deactivate user', 'ERR_USER_006', { userId: id });
     }
     logger.info('User deactivated', { userId: id, email: user.email });
     return { deleted: false, message: 'User deactivated successfully' };
@@ -207,15 +219,18 @@ export async function getUserStats(pool: Pool) {
   const total = await userRepository.countUsers(pool);
   const users = await userRepository.findAllUsers(pool);
 
-  const roleCount = users.reduce((acc, user) => {
-    acc[user.role] = (acc[user.role] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const roleCount = users.reduce(
+    (acc, user) => {
+      acc[user.role] = (acc[user.role] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 
   return {
     total,
-    active: users.filter(u => u.isActive).length,
-    inactive: users.filter(u => !u.isActive).length,
+    active: users.filter((u) => u.isActive).length,
+    inactive: users.filter((u) => !u.isActive).length,
     byRole: roleCount,
   };
 }

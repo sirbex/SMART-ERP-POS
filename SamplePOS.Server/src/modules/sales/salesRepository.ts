@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { BusinessError } from '../../middleware/errorHandler.js';
 
 export interface SaleRecord {
   id: string;
@@ -129,9 +130,10 @@ export const salesRepository = {
     const discountAmount = new Decimal(data.discountAmount || 0);
 
     // Use subtotal from input if provided, otherwise calculate as total + discount - tax
-    const subtotal = data.subtotal !== undefined
-      ? new Decimal(data.subtotal)
-      : totalAmount.plus(discountAmount).minus(taxAmount);
+    const subtotal =
+      data.subtotal !== undefined
+        ? new Decimal(data.subtotal)
+        : totalAmount.plus(discountAmount).minus(taxAmount);
 
     // CRITICAL: Profit should EXCLUDE tax (tax is pass-through to government)
     // Profit = Revenue - Cost, where Revenue = Subtotal (before tax)
@@ -142,8 +144,10 @@ export const salesRepository = {
       ? profit.dividedBy(revenueBeforeTax)
       : new Decimal(0);
 
-    const result = await pool.query(
-      `INSERT INTO sales (
+    let result;
+    try {
+      result = await pool.query(
+        `INSERT INTO sales (
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
         payment_method, amount_paid, change_amount, cashier_id, quote_id
@@ -166,24 +170,40 @@ export const salesRepository = {
         cashier_id as "cashierId",
         quote_id as "quoteId",
         created_at as "createdAt"`,
-      [
-        saleNumber,
-        data.customerId,
-        data.saleDate || new Date().toLocaleDateString('en-CA'), // Use YYYY-MM-DD string format, no Date object conversion
-        parseFloat(subtotal.toFixed(2)),           // $4
-        parseFloat(taxAmount.toFixed(2)),          // $5
-        parseFloat(discountAmount.toFixed(2)),     // $6
-        parseFloat(totalAmount.toFixed(2)),        // $7
-        parseFloat(totalCost.toFixed(2)),          // $8
-        parseFloat(profit.toFixed(2)),             // $9
-        parseFloat(profitMargin.toFixed(4)), // 4 decimal places for margin (0.2500 = 25%)
-        data.paymentMethod,
-        data.paymentReceived,
-        data.changeAmount,
-        data.soldBy, // Maps to cashier_id
-        data.quoteId || null, // Link to quotation
-      ]
-    );
+        [
+          saleNumber,
+          data.customerId,
+          data.saleDate || new Date().toLocaleDateString('en-CA'), // Use YYYY-MM-DD string format, no Date object conversion
+          parseFloat(subtotal.toFixed(2)), // $4
+          parseFloat(taxAmount.toFixed(2)), // $5
+          parseFloat(discountAmount.toFixed(2)), // $6
+          parseFloat(totalAmount.toFixed(2)), // $7
+          parseFloat(totalCost.toFixed(2)), // $8
+          parseFloat(profit.toFixed(2)), // $9
+          parseFloat(profitMargin.toFixed(4)), // 4 decimal places for margin (0.2500 = 25%)
+          data.paymentMethod,
+          data.paymentReceived,
+          data.changeAmount,
+          data.soldBy, // Maps to cashier_id
+          data.quoteId || null, // Link to quotation
+        ]
+      );
+    } catch (dbError: unknown) {
+      // Convert PostgreSQL constraint violations to structured BusinessErrors
+      const pgError = dbError as { constraint?: string; message?: string };
+      if (pgError.constraint === 'chk_sales_payment_valid') {
+        throw new BusinessError(
+          `Payment amount is invalid for this sale. Amount paid: ${data.paymentReceived}, Total: ${parseFloat(totalAmount.toFixed(2))}`,
+          'ERR_PAYMENT_005',
+          {
+            amountPaid: data.paymentReceived,
+            totalAmount: parseFloat(totalAmount.toFixed(2)),
+            constraint: 'chk_sales_payment_valid',
+          }
+        );
+      }
+      throw dbError; // Re-throw non-constraint DB errors
+    }
 
     return result.rows[0];
   },
@@ -194,7 +214,10 @@ export const salesRepository = {
    * Schema fields: sale_id, product_id, product_name, item_type, batch_id, quantity, unit_price,
    * unit_cost, discount_amount, total_price, profit
    */
-  async addSaleItems(pool: Pool | PoolClient, items: CreateSaleItemData[]): Promise<SaleItemRecord[]> {
+  async addSaleItems(
+    pool: Pool | PoolClient,
+    items: CreateSaleItemData[]
+  ): Promise<SaleItemRecord[]> {
     const values: unknown[] = [];
     const placeholders: string[] = [];
 
@@ -209,9 +232,10 @@ export const salesRepository = {
       const lineTotal = new Decimal(item.lineTotal || 0);
       const costPrice = new Decimal(item.costPrice || 0);
       const quantity = new Decimal(item.quantity || 0);
-      const itemProfit = item.profit !== undefined
-        ? new Decimal(item.profit)  // Use pre-calculated profit (with discount allocation)
-        : lineTotal.minus(costPrice.times(quantity));  // Fallback calculation
+      const itemProfit =
+        item.profit !== undefined
+          ? new Decimal(item.profit) // Use pre-calculated profit (with discount allocation)
+          : lineTotal.minus(costPrice.times(quantity)); // Fallback calculation
 
       // Handle custom/service items (productId starts with 'custom_')
       const isCustomItem = item.productId?.startsWith('custom_');
@@ -250,7 +274,11 @@ export const salesRepository = {
   async getSaleById(
     pool: Pool | PoolClient,
     id: string
-  ): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines?: Record<string, unknown>[] } | null> {
+  ): Promise<{
+    sale: SaleRecord;
+    items: SaleItemRecord[];
+    paymentLines?: Record<string, unknown>[];
+  } | null> {
     const saleResult = await pool.query('SELECT * FROM sales WHERE id = $1', [id]);
 
     if (saleResult.rows.length === 0) {
@@ -300,7 +328,13 @@ export const salesRepository = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; customerId?: string; cashierId?: string; startDate?: string; endDate?: string }
+    filters?: {
+      status?: string;
+      customerId?: string;
+      cashierId?: string;
+      startDate?: string;
+      endDate?: string;
+    }
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
@@ -377,7 +411,10 @@ export const salesRepository = {
    * Get FIFO cost layers for a product (oldest first)
    * Uses FOR UPDATE to prevent concurrent depletion by parallel sales.
    */
-  async getFIFOCostLayers(pool: Pool | PoolClient, productId: string): Promise<Record<string, unknown>[]> {
+  async getFIFOCostLayers(
+    pool: Pool | PoolClient,
+    productId: string
+  ): Promise<Record<string, unknown>[]> {
     const result = await pool.query(
       `SELECT * FROM cost_layers 
        WHERE product_id = $1 AND remaining_quantity > 0 
@@ -392,7 +429,11 @@ export const salesRepository = {
    * Update cost layer remaining quantity
    * @param poolOrClient - Pool for standalone operations, PoolClient for transactional operations
    */
-  async updateCostLayerQuantity(poolOrClient: Pool | PoolClient, layerId: string, newQuantity: number): Promise<void> {
+  async updateCostLayerQuantity(
+    poolOrClient: Pool | PoolClient,
+    layerId: string,
+    newQuantity: number
+  ): Promise<void> {
     await poolOrClient.query('UPDATE cost_layers SET remaining_quantity = $1 WHERE id = $2', [
       newQuantity,
       layerId,
@@ -484,7 +525,7 @@ export const salesRepository = {
       totalAmount: parseFloat(summaryResult.rows[0].total_amount),
       totalCost: parseFloat(summaryResult.rows[0].total_cost),
       totalProfit: parseFloat(summaryResult.rows[0].total_profit),
-      byPaymentMethod: paymentMethodResult.rows.map(row => ({
+      byPaymentMethod: paymentMethodResult.rows.map((row) => ({
         paymentMethod: row.payment_method,
         count: parseInt(row.count),
         totalAmount: parseFloat(row.total_amount),
@@ -573,9 +614,14 @@ export const salesRepository = {
       const totalProfit = Number(row.total_profit) || 0;
       return {
         ...row,
-        profit_margin_pct: totalRevenue > 0
-          ? new Decimal(totalProfit).dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toString()
-          : '0.00',
+        profit_margin_pct:
+          totalRevenue > 0
+            ? new Decimal(totalProfit)
+                .dividedBy(totalRevenue)
+                .times(100)
+                .toDecimalPlaces(2)
+                .toString()
+            : '0.00',
       };
     });
   },
@@ -592,7 +638,7 @@ export const salesRepository = {
       cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
-    const whereClauses: string[] = ['s.status = \'COMPLETED\''];
+    const whereClauses: string[] = ["s.status = 'COMPLETED'"];
     const values: unknown[] = [];
     let paramIndex = 1;
 
@@ -642,7 +688,7 @@ export const salesRepository = {
       cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
-    const whereClauses: string[] = ['status = \'COMPLETED\''];
+    const whereClauses: string[] = ["status = 'COMPLETED'"];
     const values: unknown[] = [];
     let paramIndex = 1;
 
@@ -666,15 +712,15 @@ export const salesRepository = {
     switch (groupBy) {
       case 'day':
         dateGrouping = 'DATE(sale_date)';
-        dateFormat = 'TO_CHAR(DATE(sale_date), \'Mon DD, YYYY\')';
+        dateFormat = "TO_CHAR(DATE(sale_date), 'Mon DD, YYYY')";
         break;
       case 'week':
-        dateGrouping = 'DATE_TRUNC(\'week\', sale_date)';
-        dateFormat = 'TO_CHAR(DATE_TRUNC(\'week\', sale_date), \'Mon DD, YYYY\')';
+        dateGrouping = "DATE_TRUNC('week', sale_date)";
+        dateFormat = "TO_CHAR(DATE_TRUNC('week', sale_date), 'Mon DD, YYYY')";
         break;
       case 'month':
-        dateGrouping = 'DATE_TRUNC(\'month\', sale_date)';
-        dateFormat = 'TO_CHAR(DATE_TRUNC(\'month\', sale_date), \'Mon YYYY\')';
+        dateGrouping = "DATE_TRUNC('month', sale_date)";
+        dateFormat = "TO_CHAR(DATE_TRUNC('month', sale_date), 'Mon YYYY')";
         break;
     }
 
@@ -699,7 +745,10 @@ export const salesRepository = {
   /**
    * Get sales details report - aggregated by date and product with revenue/cost metrics
    */
-  async getSalesDetailsReport(pool: Pool, filters: Record<string, unknown> = {}): Promise<Record<string, unknown>[]> {
+  async getSalesDetailsReport(
+    pool: Pool,
+    filters: Record<string, unknown> = {}
+  ): Promise<Record<string, unknown>[]> {
     const whereClauses = ['s.status = $1'];
     const values: unknown[] = ['COMPLETED'];
     let paramIndex = 2;
@@ -749,7 +798,10 @@ export const salesRepository = {
   /**
    * Get sales by cashier report - shows sales performance by user/cashier
    */
-  async getSalesByCashier(pool: Pool, filters: Record<string, unknown> = {}): Promise<Record<string, unknown>[]> {
+  async getSalesByCashier(
+    pool: Pool,
+    filters: Record<string, unknown> = {}
+  ): Promise<Record<string, unknown>[]> {
     const whereClauses = ['s.status = $1'];
     const values: unknown[] = ['COMPLETED'];
     let paramIndex = 2;
@@ -833,7 +885,7 @@ export const salesRepository = {
     );
 
     if (result.rows.length === 0) {
-      throw new Error('Sale not found or already voided');
+      throw new BusinessError('Sale not found or already voided', 'ERR_SALE_013', { saleId });
     }
 
     return result.rows[0];
@@ -843,7 +895,10 @@ export const salesRepository = {
    * Get sale items for a sale (needed for inventory restoration)
    * Accepts Pool or PoolClient to participate in caller's transaction.
    */
-  async getSaleItemsForVoid(pool: Pool | PoolClient, saleId: string): Promise<VoidSaleItemRecord[]> {
+  async getSaleItemsForVoid(
+    pool: Pool | PoolClient,
+    saleId: string
+  ): Promise<VoidSaleItemRecord[]> {
     const result = await pool.query(
       `SELECT 
         si.id,
@@ -871,10 +926,7 @@ export const salesRepository = {
    * Check if user has manager role (required for void approval)
    */
   async isManager(pool: Pool | PoolClient, userId: string): Promise<boolean> {
-    const result = await pool.query(
-      `SELECT role FROM users WHERE id = $1`,
-      [userId]
-    );
+    const result = await pool.query(`SELECT role FROM users WHERE id = $1`, [userId]);
 
     if (result.rows.length === 0) {
       return false;
@@ -884,4 +936,3 @@ export const salesRepository = {
     return role === 'ADMIN' || role === 'MANAGER';
   },
 };
-

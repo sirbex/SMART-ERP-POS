@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, Key, RefreshCw, Shield } from 'lucide-react';
 import { api } from '../../../services/api';
+import { handleApiError } from '../../../utils/errorHandler';
 
 // Utility function to format dates without timezone conversion
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -129,11 +130,10 @@ export default function UserManagementTab() {
         fetchUsers();
         fetchStats();
       } else {
-        alert(result.error || 'Failed to create user');
+        handleApiError(new Error(result.error || 'Failed to create user'));
       }
     } catch (err) {
-      alert('Network error. Please try again.');
-      console.error('Failed to create user:', err);
+      handleApiError(err, { fallback: 'Failed to create user' });
     }
   };
 
@@ -146,11 +146,10 @@ export default function UserManagementTab() {
         fetchUsers();
         fetchStats();
       } else {
-        alert(result.error || 'Failed to update user');
+        handleApiError(new Error(result.error || 'Failed to update user'));
       }
     } catch (err) {
-      alert('Network error. Please try again.');
-      console.error('Failed to update user:', err);
+      handleApiError(err, { fallback: 'Failed to update user' });
     }
   };
 
@@ -162,19 +161,16 @@ export default function UserManagementTab() {
         setSelectedUser(null);
         alert('Password changed successfully');
       } else {
-        alert(result.error || 'Failed to change password');
+        handleApiError(new Error(result.error || 'Failed to change password'));
       }
     } catch (err) {
-      alert('Network error. Please try again.');
-      console.error('Failed to change password:', err);
+      handleApiError(err, { fallback: 'Failed to change password' });
     }
   };
 
   const handleDeleteUser = async (userId: string, permanent: boolean = false) => {
     try {
-      const url = permanent
-        ? `/users/${userId}?permanent=true`
-        : `/users/${userId}`;
+      const url = permanent ? `/users/${userId}?permanent=true` : `/users/${userId}`;
 
       const { data: result } = await api.delete(url);
       if (result.success) {
@@ -187,11 +183,10 @@ export default function UserManagementTab() {
           alert('User permanently deleted');
         }
       } else {
-        alert(result.error || 'Failed to delete user');
+        handleApiError(new Error(result.error || 'Failed to delete user'));
       }
     } catch (err) {
-      alert('Network error. Please try again.');
-      console.error('Failed to delete user:', err);
+      handleApiError(err, { fallback: 'Failed to delete user' });
     }
   };
 
@@ -296,7 +291,10 @@ export default function UserManagementTab() {
             <div className="flex flex-col sm:flex-row gap-3">
               {/* Search */}
               <div className="relative flex-1 sm:w-64">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <Search
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                  size={18}
+                />
                 <input
                   type="text"
                   placeholder="Search users..."
@@ -405,7 +403,9 @@ export default function UserManagementTab() {
                           <div className="text-sm font-medium text-gray-900">
                             {user.fullName || 'Unnamed'}
                           </div>
-                          <div className="text-sm text-gray-500">{user.userNumber || user.id.slice(0, 8)}</div>
+                          <div className="text-sm text-gray-500">
+                            {user.userNumber || user.id.slice(0, 8)}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -423,8 +423,9 @@ export default function UserManagementTab() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          user.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}
                       >
                         {user.isActive ? 'Active' : 'Inactive'}
                       </span>
@@ -486,10 +487,7 @@ export default function UserManagementTab() {
 
       {/* Modals */}
       {isCreateModalOpen && (
-        <CreateUserModal
-          onClose={() => setIsCreateModalOpen(false)}
-          onCreate={handleCreateUser}
-        />
+        <CreateUserModal onClose={() => setIsCreateModalOpen(false)} onCreate={handleCreateUser} />
       )}
 
       {isEditModalOpen && selectedUser && (
@@ -572,8 +570,14 @@ function CreateUserModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">Create New User</h3>
         </div>
@@ -693,17 +697,23 @@ function EditUserModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">
-            Edit User: {user.fullName}
-          </h3>
+          <h3 className="text-lg font-semibold text-gray-900">Edit User: {user.fullName}</h3>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label htmlFor="editEmail" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label htmlFor="editEmail" className="block text-sm font-medium text-gray-700 mb-1">
+              Email
+            </label>
             <input
               id="editEmail"
               type="email"
@@ -715,7 +725,9 @@ function EditUserModal({
           </div>
 
           <div>
-            <label htmlFor="editFullName" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+            <label htmlFor="editFullName" className="block text-sm font-medium text-gray-700 mb-1">
+              Full Name
+            </label>
             <input
               id="editFullName"
               type="text"
@@ -811,17 +823,24 @@ function ChangePasswordModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">
-            Change Password: {user.fullName}
-          </h3>
+          <h3 className="text-lg font-semibold text-gray-900">Change Password: {user.fullName}</h3>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label htmlFor="currentPassword" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="currentPassword"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Current Password *
             </label>
             <input
@@ -836,7 +855,9 @@ function ChangePasswordModal({
           </div>
 
           <div>
-            <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">New Password *</label>
+            <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">
+              New Password *
+            </label>
             <input
               id="newPassword"
               type="password"
@@ -851,7 +872,10 @@ function ChangePasswordModal({
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="confirmPassword"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Confirm New Password *
             </label>
             <input
@@ -903,8 +927,14 @@ function DeleteUserDialog({
   const [showPermanentDelete, setShowPermanentDelete] = useState(false);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-orange-600">Delete User</h3>
         </div>
@@ -921,7 +951,10 @@ function DeleteUserDialog({
               <strong>Role:</strong> {user.role}
             </p>
             <p className="text-sm text-gray-600 mt-1">
-              <strong>Current Status:</strong> <span className={user.isActive ? 'text-green-600' : 'text-gray-500'}>{user.isActive ? 'Active' : 'Inactive'}</span>
+              <strong>Current Status:</strong>{' '}
+              <span className={user.isActive ? 'text-green-600' : 'text-gray-500'}>
+                {user.isActive ? 'Active' : 'Inactive'}
+              </span>
             </p>
           </div>
 
@@ -933,14 +966,18 @@ function DeleteUserDialog({
                 <div className="border border-orange-200 rounded-lg p-3 bg-orange-50">
                   <p className="font-semibold text-orange-800 mb-1">Deactivate (Recommended)</p>
                   <p className="text-sm text-gray-700">
-                    User will be marked as <span className="font-semibold">Inactive</span> and preserved in the database. Can be reactivated later. Maintains audit trails and data integrity.
+                    User will be marked as <span className="font-semibold">Inactive</span> and
+                    preserved in the database. Can be reactivated later. Maintains audit trails and
+                    data integrity.
                   </p>
                 </div>
 
                 <div className="border border-red-200 rounded-lg p-3 bg-red-50">
                   <p className="font-semibold text-red-800 mb-1">Permanent Delete</p>
                   <p className="text-sm text-gray-700">
-                    <span className="font-semibold">Permanently</span> removes user from database. <span className="font-semibold text-red-600">Cannot be undone!</span> Only available for users without transactions.
+                    <span className="font-semibold">Permanently</span> removes user from database.{' '}
+                    <span className="font-semibold text-red-600">Cannot be undone!</span> Only
+                    available for users without transactions.
                   </p>
                 </div>
               </div>
@@ -971,10 +1008,12 @@ function DeleteUserDialog({
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
                 <p className="text-red-800 font-semibold mb-2">⚠️ Warning: Permanent Deletion</p>
                 <p className="text-sm text-red-700">
-                  This will <span className="font-bold">permanently delete</span> the user from the database. This action <span className="font-bold">CANNOT be undone</span>.
+                  This will <span className="font-bold">permanently delete</span> the user from the
+                  database. This action <span className="font-bold">CANNOT be undone</span>.
                 </p>
                 <p className="text-sm text-red-700 mt-2">
-                  If the user has any associated transactions (sales, stock movements, purchase orders), the deletion will fail.
+                  If the user has any associated transactions (sales, stock movements, purchase
+                  orders), the deletion will fail.
                 </p>
               </div>
 
@@ -1005,13 +1044,7 @@ function DeleteUserDialog({
 }
 
 // Manage RBAC Roles Modal Component
-function ManageRolesModal({
-  user,
-  onClose,
-}: {
-  user: User;
-  onClose: () => void;
-}) {
+function ManageRolesModal({ user, onClose }: { user: User; onClose: () => void }) {
   const [allRoles, setAllRoles] = useState<RbacRole[]>([]);
   const [userRoles, setUserRoles] = useState<UserRoleAssignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1050,15 +1083,17 @@ function ManageRolesModal({
   const handleAssignRole = async (roleId: string) => {
     try {
       setAssigning(true);
-      const { data: result } = await api.post('/rbac/users/roles', { userId: String(user.id), roleId });
+      const { data: result } = await api.post('/rbac/users/roles', {
+        userId: String(user.id),
+        roleId,
+      });
       if (result.success) {
         await fetchData();
       } else {
-        alert(result.error || 'Failed to assign role');
+        handleApiError(new Error(result.error || 'Failed to assign role'));
       }
     } catch (err) {
-      alert('Network error. Please try again.');
-      console.error('Failed to assign role:', err);
+      handleApiError(err, { fallback: 'Failed to assign role' });
     } finally {
       setAssigning(false);
     }
@@ -1073,11 +1108,10 @@ function ManageRolesModal({
       if (result.success) {
         await fetchData();
       } else {
-        alert(result.error || 'Failed to remove role');
+        handleApiError(new Error(result.error || 'Failed to remove role'));
       }
     } catch (err) {
-      alert('Network error. Please try again.');
-      console.error('Failed to remove role:', err);
+      handleApiError(err, { fallback: 'Failed to remove role' });
     } finally {
       setAssigning(false);
     }
@@ -1087,8 +1121,14 @@ function ManageRolesModal({
   const availableRoles = allRoles.filter((role) => !assignedRoleIds.has(role.id));
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-gray-200 bg-purple-50">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-purple-100 rounded-lg">
@@ -1096,7 +1136,9 @@ function ManageRolesModal({
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900">Manage RBAC Roles</h3>
-              <p className="text-sm text-gray-600">{user.fullName} ({user.email})</p>
+              <p className="text-sm text-gray-600">
+                {user.fullName} ({user.email})
+              </p>
             </div>
           </div>
         </div>

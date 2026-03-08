@@ -2,18 +2,31 @@
 // Centralized API communication with error handling and interceptors
 
 import axios, { AxiosError } from 'axios';
-import type { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import type {
-  CreateProductInput, UpdateProductInput,
-  CreateCustomerInput, UpdateCustomerInput,
-  CreateSupplierInput, UpdateSupplierInput,
+  AxiosInstance,
+  AxiosRequestConfig,
+  InternalAxiosRequestConfig,
+  AxiosResponse,
+} from 'axios';
+import type {
+  CreateProductInput,
+  UpdateProductInput,
+  CreateCustomerInput,
+  UpdateCustomerInput,
+  CreateSupplierInput,
+  UpdateSupplierInput,
   CreateSaleInput,
-  CreatePurchaseOrderInput, CreatePOInvoiceInput, RecordPOPaymentInput,
-  CreateGoodsReceiptInput, UpdateGoodsReceiptItemInput,
+  CreatePurchaseOrderInput,
+  CreatePOInvoiceInput,
+  RecordPOPaymentInput,
+  CreateGoodsReceiptInput,
+  UpdateGoodsReceiptItemInput,
   RecordStockMovementInput,
   CreateInvoiceInput,
-  SplitPaymentInput, RecordCustomerPaymentInput,
-  CreateHoldOrderInput, InvoiceSettingsInput,
+  SplitPaymentInput,
+  RecordCustomerPaymentInput,
+  CreateHoldOrderInput,
+  InvoiceSettingsInput,
 } from '../types/inputs';
 
 // API Configuration
@@ -26,6 +39,8 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   message?: string;
   error?: string;
+  error_code?: string;
+  details?: Record<string, unknown>;
   summary?: Record<string, unknown>;
   pagination?: {
     page: number;
@@ -81,10 +96,13 @@ apiClient.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
     // Log response in development
     if (import.meta.env.DEV) {
-      console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
-        status: response.status,
-        data: response.data,
-      });
+      console.log(
+        `[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`,
+        {
+          status: response.status,
+          data: response.data,
+        }
+      );
     }
 
     return response;
@@ -143,34 +161,48 @@ export const api = {
       apiClient.get<ApiResponse>('products', { params }),
     getById: (id: string, includeUoms: boolean = false) =>
       apiClient.get<ApiResponse>(`products/${id}`, { params: { includeUoms } }),
-    create: (data: CreateProductInput) =>
-      apiClient.post<ApiResponse>('products', data),
+    create: (data: CreateProductInput) => apiClient.post<ApiResponse>('products', data),
     update: (id: string, data: UpdateProductInput) =>
       apiClient.put<ApiResponse>(`products/${id}`, data),
-    delete: (id: string) =>
-      apiClient.delete<ApiResponse>(`products/${id}`),
+    delete: (id: string) => apiClient.delete<ApiResponse>(`products/${id}`),
     convertQuantity: (id: string, data: { quantity: number; fromUomId: string; toUomId: string }) =>
       apiClient.post<ApiResponse>(`products/${id}/convert-quantity`, data),
-    history: (id: string, params?: {
-      page?: number;
-      limit?: number;
-      startDate?: string;
-      endDate?: string;
-      type?: string
-    }) =>
-      apiClient.get<ApiResponse>(`products/${id}/history`, { params }),
+    history: (
+      id: string,
+      params?: {
+        page?: number;
+        limit?: number;
+        startDate?: string;
+        endDate?: string;
+        type?: string;
+      }
+    ) => apiClient.get<ApiResponse>(`products/${id}/history`, { params }),
 
     // Master UoM management
-    getMasterUoms: () =>
-      apiClient.get<ApiResponse>('products/uoms/master'),
+    getMasterUoms: () => apiClient.get<ApiResponse>('products/uoms/master'),
 
     // Product-specific UoM management
-    getProductUoms: (id: string) =>
-      apiClient.get<ApiResponse>(`products/${id}/uoms`),
-    addProductUom: (id: string, data: { uomId: string; conversionFactor: number; isDefault?: boolean; overrideCost?: number; overridePrice?: number }) =>
-      apiClient.post<ApiResponse>(`products/${id}/uoms`, data),
-    updateProductUom: (productId: string, productUomId: string, data: { conversionFactor?: number; isDefault?: boolean; overrideCost?: number; overridePrice?: number }) =>
-      apiClient.patch<ApiResponse>(`products/${productId}/uoms/${productUomId}`, data),
+    getProductUoms: (id: string) => apiClient.get<ApiResponse>(`products/${id}/uoms`),
+    addProductUom: (
+      id: string,
+      data: {
+        uomId: string;
+        conversionFactor: number;
+        isDefault?: boolean;
+        overrideCost?: number;
+        overridePrice?: number;
+      }
+    ) => apiClient.post<ApiResponse>(`products/${id}/uoms`, data),
+    updateProductUom: (
+      productId: string,
+      productUomId: string,
+      data: {
+        conversionFactor?: number;
+        isDefault?: boolean;
+        overrideCost?: number;
+        overridePrice?: number;
+      }
+    ) => apiClient.patch<ApiResponse>(`products/${productId}/uoms/${productUomId}`, data),
     deleteProductUom: (productId: string, productUomId: string) =>
       apiClient.delete<ApiResponse>(`products/${productId}/uoms/${productUomId}`),
   },
@@ -179,117 +211,124 @@ export const api = {
   customers: {
     list: (params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>('customers', { params }),
-    getById: (id: string) =>
-      apiClient.get<ApiResponse>(`customers/${id}`),
-    create: (data: CreateCustomerInput) =>
-      apiClient.post<ApiResponse>('customers', data),
+    getById: (id: string) => apiClient.get<ApiResponse>(`customers/${id}`),
+    create: (data: CreateCustomerInput) => apiClient.post<ApiResponse>('customers', data),
     update: (id: string, data: UpdateCustomerInput) =>
       apiClient.put<ApiResponse>(`customers/${id}`, data),
     toggleActive: (id: string, isActive: boolean) =>
       apiClient.patch<ApiResponse>(`customers/${id}/active`, { isActive }),
-    delete: (id: string) =>
-      apiClient.delete<ApiResponse>(`customers/${id}`),
+    delete: (id: string) => apiClient.delete<ApiResponse>(`customers/${id}`),
     adjustBalance: (id: string, amount: number, reason: string) =>
       apiClient.post<ApiResponse>(`customers/${id}/balance`, { amount, reason }),
     getSales: (id: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`customers/${id}/sales`, { params }),
     getTransactions: (id: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`customers/${id}/transactions`, { params }),
-    getSummary: (id: string) =>
-      apiClient.get<ApiResponse>(`customers/${id}/summary`),
-    getStatement: (id: string, params?: { start?: string; end?: string; page?: number; limit?: number }) =>
-      apiClient.get<ApiResponse>(`customers/${id}/statement`, { params }),
+    getSummary: (id: string) => apiClient.get<ApiResponse>(`customers/${id}/summary`),
+    getStatement: (
+      id: string,
+      params?: { start?: string; end?: string; page?: number; limit?: number }
+    ) => apiClient.get<ApiResponse>(`customers/${id}/statement`, { params }),
   },
 
   // Suppliers
   suppliers: {
     list: (params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>('suppliers', { params }),
-    getById: (id: string) =>
-      apiClient.get<ApiResponse>(`suppliers/${id}`),
-    create: (data: CreateSupplierInput) =>
-      apiClient.post<ApiResponse>('suppliers', data),
+    getById: (id: string) => apiClient.get<ApiResponse>(`suppliers/${id}`),
+    create: (data: CreateSupplierInput) => apiClient.post<ApiResponse>('suppliers', data),
     update: (id: string, data: UpdateSupplierInput) =>
       apiClient.put<ApiResponse>(`suppliers/${id}`, data),
-    delete: (id: string) =>
-      apiClient.delete<ApiResponse>(`suppliers/${id}`),
-    getPerformance: (id: string) =>
-      apiClient.get<ApiResponse>(`suppliers/${id}/performance`),
+    delete: (id: string) => apiClient.delete<ApiResponse>(`suppliers/${id}`),
+    getPerformance: (id: string) => apiClient.get<ApiResponse>(`suppliers/${id}/performance`),
     getOrders: (id: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`suppliers/${id}/orders`, { params }),
-    getProducts: (id: string) =>
-      apiClient.get<ApiResponse>(`suppliers/${id}/products`),
+    getProducts: (id: string) => apiClient.get<ApiResponse>(`suppliers/${id}/products`),
   },
 
   // Sales
   sales: {
-    list: (params?: { page?: number; limit?: number; startDate?: string; endDate?: string; cashierId?: string }) =>
-      apiClient.get<ApiResponse>('sales', { params }),
-    getById: (id: string) =>
-      apiClient.get<ApiResponse>(`sales/${id}`),
-    create: (data: CreateSaleInput) =>
-      apiClient.post<ApiResponse>('sales', data),
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      startDate?: string;
+      endDate?: string;
+      cashierId?: string;
+    }) => apiClient.get<ApiResponse>('sales', { params }),
+    getById: (id: string) => apiClient.get<ApiResponse>(`sales/${id}`),
+    create: (data: CreateSaleInput) => apiClient.post<ApiResponse>('sales', data),
     summary: (params?: { startDate?: string; endDate?: string; groupBy?: string }) =>
       apiClient.get<ApiResponse>('sales/summary', { params }),
     // Sales Reports
-    productSummary: (params?: { startDate?: string; endDate?: string; productId?: string; customerId?: string }) =>
-      apiClient.get<ApiResponse>('sales/reports/product-summary', { params }),
+    productSummary: (params?: {
+      startDate?: string;
+      endDate?: string;
+      productId?: string;
+      customerId?: string;
+    }) => apiClient.get<ApiResponse>('sales/reports/product-summary', { params }),
     topSelling: (params?: { limit?: number; startDate?: string; endDate?: string }) =>
       apiClient.get<ApiResponse>('sales/reports/top-selling', { params }),
-    summaryByDate: (params?: { groupBy?: 'day' | 'week' | 'month'; startDate?: string; endDate?: string }) =>
-      apiClient.get<ApiResponse>('sales/reports/summary-by-date', { params }),
+    summaryByDate: (params?: {
+      groupBy?: 'day' | 'week' | 'month';
+      startDate?: string;
+      endDate?: string;
+    }) => apiClient.get<ApiResponse>('sales/reports/summary-by-date', { params }),
   },
 
   // Invoices
   invoices: {
     list: (params?: { page?: number; limit?: number; customerId?: string }) =>
       apiClient.get<ApiResponse>('invoices', { params }),
-    getById: (id: string) =>
-      apiClient.get<ApiResponse>(`invoices/${id}`),
-    create: (data: CreateInvoiceInput) =>
-      apiClient.post<ApiResponse>('invoices', data),
-    addPayment: (invoiceId: string, data: { amount: number; paymentMethod: string; paymentDate?: string; referenceNumber?: string; notes?: string }) =>
-      apiClient.post<ApiResponse>(`invoices/${invoiceId}/payments`, data),
+    getById: (id: string) => apiClient.get<ApiResponse>(`invoices/${id}`),
+    create: (data: CreateInvoiceInput) => apiClient.post<ApiResponse>('invoices', data),
+    addPayment: (
+      invoiceId: string,
+      data: {
+        amount: number;
+        paymentMethod: string;
+        paymentDate?: string;
+        referenceNumber?: string;
+        notes?: string;
+      }
+    ) => apiClient.post<ApiResponse>(`invoices/${invoiceId}/payments`, data),
     getPayments: (invoiceId: string) =>
       apiClient.get<ApiResponse>(`invoices/${invoiceId}/payments`),
   },
 
   // Inventory
   inventory: {
-    stockLevels: () =>
-      apiClient.get<ApiResponse>('inventory/stock-levels'),
+    stockLevels: () => apiClient.get<ApiResponse>('inventory/stock-levels'),
     stockLevelByProduct: (productId: string) =>
       apiClient.get<ApiResponse>(`inventory/stock-levels/${productId}`),
     batchesByProduct: (productId: string) =>
       apiClient.get<ApiResponse>('inventory/batches', { params: { productId } }),
     expiringSoon: (days?: number) =>
       apiClient.get<ApiResponse>('inventory/batches/expiring', { params: { daysThreshold: days } }),
-    needingReorder: () =>
-      apiClient.get<ApiResponse>('inventory/reorder'),
+    needingReorder: () => apiClient.get<ApiResponse>('inventory/reorder'),
     inventoryValue: (productId?: string) =>
       apiClient.get<ApiResponse>('inventory/value', { params: productId ? { productId } : {} }),
-    adjustInventory: (data: { productId: string; adjustment: number; reason: string; userId: string }) =>
-      apiClient.post<ApiResponse>('inventory/adjust', data),
+    adjustInventory: (data: {
+      productId: string;
+      adjustment: number;
+      reason: string;
+      userId: string;
+    }) => apiClient.post<ApiResponse>('inventory/adjust', data),
   },
 
   // Purchase Orders
   purchaseOrders: {
     list: (params?: { page?: number; limit?: number; status?: string; supplierId?: string }) =>
       apiClient.get<ApiResponse>('purchase-orders', { params }),
-    getById: (id: string) =>
-      apiClient.get<ApiResponse>(`purchase-orders/${id}`),
+    getById: (id: string) => apiClient.get<ApiResponse>(`purchase-orders/${id}`),
     create: (data: CreatePurchaseOrderInput) =>
       apiClient.post<ApiResponse>('purchase-orders', data),
     updateStatus: (id: string, status: string) =>
       apiClient.put<ApiResponse>(`purchase-orders/${id}/status`, { status }),
-    submit: (id: string) =>
-      apiClient.post<ApiResponse>(`purchase-orders/${id}/submit`),
+    submit: (id: string) => apiClient.post<ApiResponse>(`purchase-orders/${id}/submit`),
     sendToSupplier: (id: string) =>
       apiClient.post<ApiResponse>(`purchase-orders/${id}/send-to-supplier`),
-    cancel: (id: string) =>
-      apiClient.post<ApiResponse>(`purchase-orders/${id}/cancel`),
-    delete: (id: string) =>
-      apiClient.delete<ApiResponse>(`purchase-orders/${id}`),
+    cancel: (id: string) => apiClient.post<ApiResponse>(`purchase-orders/${id}/cancel`),
+    delete: (id: string) => apiClient.delete<ApiResponse>(`purchase-orders/${id}`),
     createInvoice: (data: CreatePOInvoiceInput) =>
       apiClient.post<ApiResponse>('purchase-orders/invoices', data),
     recordPayment: (data: RecordPOPaymentInput) =>
@@ -300,12 +339,9 @@ export const api = {
   goodsReceipts: {
     list: (params?: { page?: number; limit?: number; status?: string; purchaseOrderId?: string }) =>
       apiClient.get<ApiResponse>('goods-receipts', { params }),
-    getById: (id: string) =>
-      apiClient.get<ApiResponse>(`goods-receipts/${id}`),
-    create: (data: CreateGoodsReceiptInput) =>
-      apiClient.post<ApiResponse>('goods-receipts', data),
-    finalize: (id: string) =>
-      apiClient.post<ApiResponse>(`goods-receipts/${id}/finalize`),
+    getById: (id: string) => apiClient.get<ApiResponse>(`goods-receipts/${id}`),
+    create: (data: CreateGoodsReceiptInput) => apiClient.post<ApiResponse>('goods-receipts', data),
+    finalize: (id: string) => apiClient.post<ApiResponse>(`goods-receipts/${id}/finalize`),
     updateItem: (grId: string, itemId: string, data: UpdateGoodsReceiptItemInput) =>
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`, data),
     hydrateFromPO: (id: string) =>
@@ -314,8 +350,13 @@ export const api = {
 
   // Stock Movements
   stockMovements: {
-    list: (params?: { page?: number; limit?: number; movementType?: string; startDate?: string; endDate?: string }) =>
-      apiClient.get<ApiResponse>('stock-movements', { params }),
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      movementType?: string;
+      startDate?: string;
+      endDate?: string;
+    }) => apiClient.get<ApiResponse>('stock-movements', { params }),
     byProduct: (productId: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`stock-movements/product/${productId}`, { params }),
     byBatch: (batchId: string, params?: { page?: number; limit?: number }) =>
@@ -328,10 +369,8 @@ export const api = {
   payments: {
     processSplit: (data: SplitPaymentInput) =>
       apiClient.post<ApiResponse>('payments/process-split', data),
-    getMethods: () =>
-      apiClient.get<ApiResponse>('payments/methods'),
-    getSalePayments: (saleId: string) =>
-      apiClient.get<ApiResponse>(`payments/sale/${saleId}`),
+    getMethods: () => apiClient.get<ApiResponse>('payments/methods'),
+    getSalePayments: (saleId: string) => apiClient.get<ApiResponse>(`payments/sale/${saleId}`),
     getCustomerBalance: (customerId: string) =>
       apiClient.get<ApiResponse>(`payments/customer/${customerId}/balance`),
     getCustomerHistory: (customerId: string, params?: { limit?: number }) =>
@@ -342,14 +381,10 @@ export const api = {
 
   // POS Hold Orders
   hold: {
-    create: (data: CreateHoldOrderInput) =>
-      apiClient.post<ApiResponse>('pos/hold', data),
-    list: (params?: { terminalId?: string }) =>
-      apiClient.get<ApiResponse>('pos/hold', { params }),
-    getById: (holdId: string) =>
-      apiClient.get<ApiResponse>(`pos/hold/${holdId}`),
-    delete: (holdId: string) =>
-      apiClient.delete<ApiResponse>(`pos/hold/${holdId}`),
+    create: (data: CreateHoldOrderInput) => apiClient.post<ApiResponse>('pos/hold', data),
+    list: (params?: { terminalId?: string }) => apiClient.get<ApiResponse>('pos/hold', { params }),
+    getById: (holdId: string) => apiClient.get<ApiResponse>(`pos/hold/${holdId}`),
+    delete: (holdId: string) => apiClient.delete<ApiResponse>(`pos/hold/${holdId}`),
   },
 
   // Customer Deposits
@@ -357,9 +392,16 @@ export const api = {
     getCustomerBalance: (customerId: string) =>
       apiClient.get<ApiResponse>(`deposits/customer/${customerId}/balance`),
     list: (customerId?: string, params?: { page?: number; limit?: number; status?: string }) =>
-      apiClient.get<ApiResponse>(customerId ? `deposits/customer/${customerId}` : 'deposits', { params }),
-    create: (data: { customerId: string; amount: number; paymentMethod: string; reference?: string; notes?: string }) =>
-      apiClient.post<ApiResponse>('deposits', data),
+      apiClient.get<ApiResponse>(customerId ? `deposits/customer/${customerId}` : 'deposits', {
+        params,
+      }),
+    create: (data: {
+      customerId: string;
+      amount: number;
+      paymentMethod: string;
+      reference?: string;
+      notes?: string;
+    }) => apiClient.post<ApiResponse>('deposits', data),
     apply: (data: { customerId: string; saleId: string; amount: number }) =>
       apiClient.post<ApiResponse>('deposits/apply', data),
     getHistory: (customerId: string, params?: { page?: number; limit?: number }) =>
@@ -368,15 +410,13 @@ export const api = {
 
   // Invoice Settings
   settings: {
-    getInvoiceSettings: () =>
-      apiClient.get<ApiResponse>('settings/invoice'),
+    getInvoiceSettings: () => apiClient.get<ApiResponse>('settings/invoice'),
     updateInvoiceSettings: (data: InvoiceSettingsInput) =>
       apiClient.put<ApiResponse>('settings/invoice', data),
   },
 
   // Generic HTTP methods for backward compatibility
-  get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) =>
-    apiClient.get<T>(url, config),
+  get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) => apiClient.get<T>(url, config),
   post: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     apiClient.post<T>(url, data, config),
   put: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
@@ -400,6 +440,29 @@ export const getErrorMessage = (error: unknown): string => {
 
   return 'An unknown error occurred';
 };
+
+/**
+ * Extract structured error info from an Axios error.
+ * Returns error_code and details if the backend sent a BusinessError.
+ */
+export function getStructuredError(error: unknown): {
+  message: string;
+  errorCode?: string;
+  details?: Record<string, unknown>;
+  status?: number;
+} {
+  if (axios.isAxiosError(error)) {
+    const axErr = error as AxiosError<ApiResponse>;
+    const data = axErr.response?.data;
+    return {
+      message: data?.error || axErr.message || 'An unknown error occurred',
+      errorCode: data?.error_code,
+      details: data?.details,
+      status: axErr.response?.status,
+    };
+  }
+  return { message: error instanceof Error ? error.message : 'An unknown error occurred' };
+}
 
 // Success Helper
 export const getSuccessMessage = (response: AxiosResponse<ApiResponse>): string => {

@@ -25,6 +25,7 @@ import PurchaseOrdersPage from './pages/inventory/PurchaseOrdersPage';
 import GoodsReceiptsPage from './pages/inventory/GoodsReceiptsPage';
 import UomManagementPage from './pages/inventory/UomManagementPage';
 import BatchManagementPage from './pages/inventory/BatchManagementPage';
+import InventoryAdjustmentsPage from './pages/inventory/InventoryAdjustmentsPage';
 import AuditLogPage from './pages/AuditLogPage';
 import RoleManagementPage from './pages/admin/RoleManagementPage';
 import QuotationsPage from './pages/quotations/QuotationsPage';
@@ -131,11 +132,14 @@ function App() {
 
             {/* Platform (Super Admin) Routes — own auth context */}
             <Route path="/platform/login" element={<PlatformLoginPage />} />
-            <Route path="/platform" element={
-              <PlatformProtectedRoute>
-                <PlatformLayout />
-              </PlatformProtectedRoute>
-            }>
+            <Route
+              path="/platform"
+              element={
+                <PlatformProtectedRoute>
+                  <PlatformLayout />
+                </PlatformProtectedRoute>
+              }
+            >
               <Route index element={<PlatformDashboardPage />} />
               <Route path="tenants" element={<TenantsPage />} />
               <Route path="admins" element={<AdminsPage />} />
@@ -249,7 +253,9 @@ function App() {
                   path="/accounting"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><AccountingIntegrationDashboard /></AccountingLayout>
+                      <AccountingLayout>
+                        <AccountingIntegrationDashboard />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -257,7 +263,9 @@ function App() {
                   path="/accounting/dashboard"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><AccountingIntegrationDashboard /></AccountingLayout>
+                      <AccountingLayout>
+                        <AccountingIntegrationDashboard />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -265,7 +273,9 @@ function App() {
                   path="/accounting/chart-of-accounts"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><ChartOfAccountsPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <ChartOfAccountsPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -273,7 +283,9 @@ function App() {
                   path="/accounting/general-ledger"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><GeneralLedgerPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <GeneralLedgerPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -281,7 +293,9 @@ function App() {
                   path="/accounting/trial-balance"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><TrialBalancePage /></AccountingLayout>
+                      <AccountingLayout>
+                        <TrialBalancePage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -289,7 +303,9 @@ function App() {
                   path="/accounting/financial-statements"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><FinancialStatementsPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <FinancialStatementsPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -297,7 +313,9 @@ function App() {
                   path="/accounting/customer-financial"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><CustomerFinancialPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <CustomerFinancialPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -305,7 +323,9 @@ function App() {
                   path="/accounting/invoice-integration"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><InvoiceLedgerIntegrationPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <InvoiceLedgerIntegrationPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -313,7 +333,9 @@ function App() {
                   path="/accounting/expenses"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><ExpensesPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <ExpensesPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -321,7 +343,9 @@ function App() {
                   path="/accounting/expense-categories"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><ExpenseCategoriesPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <ExpenseCategoriesPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -329,7 +353,9 @@ function App() {
                   path="/accounting/invoices"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><ComprehensiveInvoicesPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <ComprehensiveInvoicesPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -337,7 +363,9 @@ function App() {
                   path="/accounting/customer-payments"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><CustomerPaymentsPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <CustomerPaymentsPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -345,7 +373,9 @@ function App() {
                   path="/accounting/supplier-payments"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><SupplierPaymentsPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <SupplierPaymentsPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -353,7 +383,9 @@ function App() {
                   path="/accounting/profit-loss"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><ProfitLossPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <ProfitLossPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -361,7 +393,9 @@ function App() {
                   path="/accounting/reconciliation"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><ReconciliationPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <ReconciliationPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -369,7 +403,9 @@ function App() {
                   path="/accounting/journal-entries"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><JournalEntriesPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <JournalEntriesPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -377,7 +413,9 @@ function App() {
                   path="/accounting/periods"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><PeriodManagementPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <PeriodManagementPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -385,7 +423,9 @@ function App() {
                   path="/accounting/banking"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <AccountingLayout><BankingPage /></AccountingLayout>
+                      <AccountingLayout>
+                        <BankingPage />
+                      </AccountingLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -469,7 +509,9 @@ function App() {
                   path="/inventory"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']}>
-                      <InventoryLayout><StockLevelsPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <StockLevelsPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -477,7 +519,9 @@ function App() {
                   path="/inventory/products"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <InventoryLayout><ProductsPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <ProductsPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -485,7 +529,9 @@ function App() {
                   path="/inventory/batches"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <InventoryLayout><BatchManagementPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <BatchManagementPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -493,7 +539,19 @@ function App() {
                   path="/inventory/stock-movements"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']}>
-                      <InventoryLayout><StockMovementsPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <StockMovementsPage />
+                      </InventoryLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/inventory/adjustments"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <InventoryLayout>
+                        <InventoryAdjustmentsPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -501,7 +559,9 @@ function App() {
                   path="/inventory/purchase-orders"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <InventoryLayout><PurchaseOrdersPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <PurchaseOrdersPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -509,7 +569,9 @@ function App() {
                   path="/inventory/goods-receipts"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <InventoryLayout><GoodsReceiptsPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <GoodsReceiptsPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -517,7 +579,9 @@ function App() {
                   path="/inventory/uoms"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
-                      <InventoryLayout><UomManagementPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <UomManagementPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />
@@ -525,7 +589,9 @@ function App() {
                   path="/inventory/barcode-lookup"
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']}>
-                      <InventoryLayout><BarcodeLookupPage /></InventoryLayout>
+                      <InventoryLayout>
+                        <BarcodeLookupPage />
+                      </InventoryLayout>
                     </ProtectedRoute>
                   }
                 />

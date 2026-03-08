@@ -1,10 +1,23 @@
 import axios from 'axios';
-import type { User, Product, Customer, PurchaseOrder, GoodsReceipt, Sale, InventoryBatch, StockMovement } from '../types/business';
 import type {
-  CreateProductInput, UpdateProductInput,
-  CreateCustomerInput, UpdateCustomerInput,
-  CreateSaleInput, SaleListFilters,
-  CreatePurchaseOrderInput, CreateGoodsReceiptInput,
+  User,
+  Product,
+  Customer,
+  PurchaseOrder,
+  GoodsReceipt,
+  Sale,
+  InventoryBatch,
+  StockMovement,
+} from '../types/business';
+import type {
+  CreateProductInput,
+  UpdateProductInput,
+  CreateCustomerInput,
+  UpdateCustomerInput,
+  CreateSaleInput,
+  SaleListFilters,
+  CreatePurchaseOrderInput,
+  CreateGoodsReceiptInput,
   InventoryAdjustmentInput,
 } from '../types/inputs';
 
@@ -77,6 +90,8 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  error_code?: string;
+  details?: Record<string, unknown>;
   message?: string;
 }
 
@@ -90,8 +105,16 @@ export const authApi = {
     return response.data;
   },
 
-  register: async (data: { email: string; password: string; fullName: string; role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF' }) => {
-    const response = await api.post<ApiResponse<{ user: User; token: string }>>('/auth/register', data);
+  register: async (data: {
+    email: string;
+    password: string;
+    fullName: string;
+    role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
+  }) => {
+    const response = await api.post<ApiResponse<{ user: User; token: string }>>(
+      '/auth/register',
+      data
+    );
     return response.data;
   },
 
@@ -151,17 +174,22 @@ export const salesApi = {
 // Inventory API
 export const inventoryApi = {
   getBatches: async (productId: string) => {
-    const response = await api.get<ApiResponse<InventoryBatch[]>>(`/inventory/batches?productId=${productId}`);
+    const response = await api.get<ApiResponse<InventoryBatch[]>>(
+      `/inventory/batches?productId=${productId}`
+    );
     return response.data;
   },
 
   getExpiringSoon: async (daysThreshold = 30) => {
-    const response = await api.get<ApiResponse<InventoryBatch[]>>(`/inventory/batches/expiring?daysThreshold=${daysThreshold}`);
+    const response = await api.get<ApiResponse<InventoryBatch[]>>(
+      `/inventory/batches/expiring?daysThreshold=${daysThreshold}`
+    );
     return response.data;
   },
 
   getStockLevels: async () => {
-    const response = await api.get<ApiResponse<Record<string, unknown>[]>>('/inventory/stock-levels');
+    const response =
+      await api.get<ApiResponse<Record<string, unknown>[]>>('/inventory/stock-levels');
     return response.data;
   },
 
@@ -179,7 +207,9 @@ export const inventoryApi = {
 // Customers API
 export const customersApi = {
   list: async (page = 1, limit = 50) => {
-    const response = await api.get<ApiResponse<Customer[]>>(`/customers?page=${page}&limit=${limit}`);
+    const response = await api.get<ApiResponse<Customer[]>>(
+      `/customers?page=${page}&limit=${limit}`
+    );
     return response.data;
   },
 

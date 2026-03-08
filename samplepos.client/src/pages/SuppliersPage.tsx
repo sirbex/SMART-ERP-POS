@@ -1,10 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
-import { useSuppliers, useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../hooks/useSuppliers';
+import {
+  useSuppliers,
+  useCreateSupplier,
+  useUpdateSupplier,
+  useDeleteSupplier,
+} from '../hooks/useSuppliers';
 import { supplierInvoiceService } from '../services/comprehensive-accounting';
 import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
+import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
 
 // TIMEZONE STRATEGY: Display dates without conversion
@@ -169,7 +175,11 @@ export default function SuppliersPage() {
   const limit = 20;
 
   // Invoice summary stats for top cards
-  const [invoiceSummary, setInvoiceSummary] = useState<{ totalInvoices: number; unpaidInvoices: number; totalOutstanding: number }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
+  const [invoiceSummary, setInvoiceSummary] = useState<{
+    totalInvoices: number;
+    unpaidInvoices: number;
+    totalOutstanding: number;
+  }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
   // API queries
   const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit });
@@ -191,19 +201,20 @@ export default function SuppliersPage() {
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((supplier: Supplier) =>
-        supplier.name?.toLowerCase().includes(query) ||
-        supplier.contactPerson?.toLowerCase().includes(query) ||
-        supplier.email?.toLowerCase().includes(query) ||
-        supplier.phone?.toLowerCase().includes(query) ||
-        supplier.address?.toLowerCase().includes(query)
+      filtered = filtered.filter(
+        (supplier: Supplier) =>
+          supplier.name?.toLowerCase().includes(query) ||
+          supplier.contactPerson?.toLowerCase().includes(query) ||
+          supplier.email?.toLowerCase().includes(query) ||
+          supplier.phone?.toLowerCase().includes(query) ||
+          supplier.address?.toLowerCase().includes(query)
       );
     }
 
     // Payment terms filter
     if (filterPaymentTerms) {
-      filtered = filtered.filter((supplier: Supplier) =>
-        supplier.paymentTerms === filterPaymentTerms
+      filtered = filtered.filter(
+        (supplier: Supplier) => supplier.paymentTerms === filterPaymentTerms
       );
     }
 
@@ -238,9 +249,12 @@ export default function SuppliersPage() {
 
   // Fetch invoice summary on mount
   useEffect(() => {
-    supplierInvoiceService.getInvoiceSummary()
+    supplierInvoiceService
+      .getInvoiceSummary()
       .then(setInvoiceSummary)
-      .catch(() => { /* keep defaults */ });
+      .catch(() => {
+        /* keep defaults */
+      });
   }, []);
 
   // Calculate statistics
@@ -261,7 +275,16 @@ export default function SuppliersPage() {
 
   // Export to CSV
   const handleExportCSV = () => {
-    const headers = ['Name', 'Contact Person', 'Email', 'Phone', 'Address', 'Payment Terms', 'Status', 'Created At'];
+    const headers = [
+      'Name',
+      'Contact Person',
+      'Email',
+      'Phone',
+      'Address',
+      'Payment Terms',
+      'Status',
+      'Created At',
+    ];
     const rows = suppliers.map((s: Supplier) => [
       s.name || '',
       s.contactPerson || '',
@@ -275,7 +298,7 @@ export default function SuppliersPage() {
 
     const csv = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
     ].join('\n');
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -297,7 +320,7 @@ export default function SuppliersPage() {
       setShowCreateModal(false);
       alert('Supplier created successfully!');
     } catch (error) {
-      alert('Failed to create supplier');
+      handleApiError(error, { fallback: 'Failed to create supplier' });
     }
   };
 
@@ -309,7 +332,7 @@ export default function SuppliersPage() {
       setEditingSupplier(null);
       alert('Supplier updated successfully!');
     } catch (error) {
-      alert('Failed to update supplier');
+      handleApiError(error, { fallback: 'Failed to update supplier' });
     }
   };
 
@@ -320,7 +343,7 @@ export default function SuppliersPage() {
       await deleteMutation.mutateAsync(id);
       alert('Supplier deleted successfully!');
     } catch (error) {
-      alert('Failed to delete supplier');
+      handleApiError(error, { fallback: 'Failed to delete supplier' });
     }
   };
 
@@ -416,7 +439,9 @@ export default function SuppliersPage() {
           </div>
           <div className="bg-white rounded-lg shadow p-4">
             <div className="text-sm text-gray-600">Total Invoices</div>
-            <div className="text-2xl font-bold text-blue-600 mt-1">{invoiceSummary.totalInvoices}</div>
+            <div className="text-2xl font-bold text-blue-600 mt-1">
+              {invoiceSummary.totalInvoices}
+            </div>
             <div className="text-xs text-gray-500 mt-1">
               {invoiceSummary.unpaidInvoices > 0
                 ? `${invoiceSummary.unpaidInvoices} unpaid`
@@ -448,7 +473,9 @@ export default function SuppliersPage() {
 
             {/* Payment Terms Filter */}
             <div className="lg:col-span-2">
-              <label htmlFor="filter-payment-terms" className="sr-only">Filter by Payment Terms</label>
+              <label htmlFor="filter-payment-terms" className="sr-only">
+                Filter by Payment Terms
+              </label>
               <select
                 id="filter-payment-terms"
                 value={filterPaymentTerms}
@@ -456,7 +483,7 @@ export default function SuppliersPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">All Terms</option>
-                {PAYMENT_TERMS.map(term => (
+                {PAYMENT_TERMS.map((term) => (
                   <option key={term.value} value={term.value}>
                     {term.label}
                   </option>
@@ -466,7 +493,9 @@ export default function SuppliersPage() {
 
             {/* Sort */}
             <div className="lg:col-span-2">
-              <label htmlFor="sort-field" className="sr-only">Sort By</label>
+              <label htmlFor="sort-field" className="sr-only">
+                Sort By
+              </label>
               <select
                 id="sort-field"
                 value={sortField}
@@ -517,19 +546,21 @@ export default function SuppliersPage() {
             <div className="flex gap-2">
               <button
                 onClick={() => setViewMode('table')}
-                className={`px-3 py-1 rounded-lg ${viewMode === 'table'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                className={`px-3 py-1 rounded-lg ${
+                  viewMode === 'table'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
               >
                 📋 Table
               </button>
               <button
                 onClick={() => setViewMode('cards')}
-                className={`px-3 py-1 rounded-lg ${viewMode === 'cards'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                className={`px-3 py-1 rounded-lg ${
+                  viewMode === 'cards'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
               >
                 🗂️ Cards
               </button>
@@ -597,16 +628,12 @@ export default function SuppliersPage() {
 
                         {/* Email */}
                         <td className="px-4 py-4">
-                          <div className="text-sm text-gray-900">
-                            {supplier.email || '-'}
-                          </div>
+                          <div className="text-sm text-gray-900">{supplier.email || '-'}</div>
                         </td>
 
                         {/* Phone */}
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {supplier.phone || '-'}
-                          </div>
+                          <div className="text-sm text-gray-900">{supplier.phone || '-'}</div>
                         </td>
 
                         {/* Payment Terms */}
@@ -618,10 +645,13 @@ export default function SuppliersPage() {
 
                         {/* Status */}
                         <td className="px-4 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                            }`}>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              supplier.isActive
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}
+                          >
                             {supplier.isActive ? '✓ Active' : '○ Inactive'}
                           </span>
                         </td>
@@ -677,13 +707,14 @@ export default function SuppliersPage() {
                   {/* Card Header */}
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex-1">
-                      <h3 className="text-lg font-bold text-gray-900 mb-1">
-                        {supplier.name}
-                      </h3>
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-gray-100 text-gray-800'
-                        }`}>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">{supplier.name}</h3>
+                      <span
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          supplier.isActive
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
                       </span>
                     </div>
@@ -700,7 +731,10 @@ export default function SuppliersPage() {
                     {supplier.email && (
                       <div className="flex items-start gap-2 text-sm">
                         <span className="text-gray-500">📧</span>
-                        <a href={`mailto:${supplier.email}`} className="text-blue-600 hover:underline">
+                        <a
+                          href={`mailto:${supplier.email}`}
+                          className="text-blue-600 hover:underline"
+                        >
                           {supplier.email}
                         </a>
                       </div>
@@ -783,11 +817,25 @@ export default function SuppliersPage() {
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h3 className="text-sm font-medium text-blue-900 mb-2">📋 Supplier Management</h3>
           <ul className="text-xs text-blue-800 space-y-1">
-            <li>• <strong>Payment Terms:</strong> Standard terms NET30 (30 days), NET60, NET90, COD, or Prepaid</li>
-            <li>• <strong>Contact Information:</strong> Keep supplier details up-to-date for smooth communication</li>
-            <li>• <strong>Active Status:</strong> Inactive suppliers won't appear in purchase order creation</li>
-            <li>• <strong>BR-PO-001:</strong> Valid supplier required for all purchase orders</li>
-            <li>• <strong>Search:</strong> Find suppliers quickly by name, contact person, email, or phone</li>
+            <li>
+              • <strong>Payment Terms:</strong> Standard terms NET30 (30 days), NET60, NET90, COD,
+              or Prepaid
+            </li>
+            <li>
+              • <strong>Contact Information:</strong> Keep supplier details up-to-date for smooth
+              communication
+            </li>
+            <li>
+              • <strong>Active Status:</strong> Inactive suppliers won't appear in purchase order
+              creation
+            </li>
+            <li>
+              • <strong>BR-PO-001:</strong> Valid supplier required for all purchase orders
+            </li>
+            <li>
+              • <strong>Search:</strong> Find suppliers quickly by name, contact person, email, or
+              phone
+            </li>
           </ul>
         </div>
 
@@ -827,7 +875,9 @@ interface SupplierDetailModalProps {
 }
 
 function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'performance' | 'orders' | 'products' | 'invoices'>('info');
+  const [activeTab, setActiveTab] = useState<
+    'info' | 'performance' | 'orders' | 'products' | 'invoices'
+  >('info');
   const [performance, setPerformance] = useState<SupplierPerformance | null>(null);
   const [orders, setOrders] = useState<SupplierOrder[]>([]);
   const [products, setProducts] = useState<SupplierProduct[]>([]);
@@ -848,7 +898,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
 
-  const paymentTermInfo = PAYMENT_TERMS.find(t => t.value === supplier.paymentTerms);
+  const paymentTermInfo = PAYMENT_TERMS.find((t) => t.value === supplier.paymentTerms);
 
   // Load data when tabs change
   const loadPerformance = async () => {
@@ -969,7 +1019,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     }
     const balance = Number(payingInvoice.outstandingBalance || 0);
     if (amount > balance) {
-      setPaymentError(`Amount cannot exceed outstanding balance of ${formatCurrency(balance, true, 0)}`);
+      setPaymentError(
+        `Amount cannot exceed outstanding balance of ${formatCurrency(balance, true, 0)}`
+      );
       return;
     }
     setSubmittingPayment(true);
@@ -986,7 +1038,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
       if (!data.success) {
         throw new Error(data.error || 'Failed to record payment');
       }
-      setPaymentSuccess(`Payment of ${formatCurrency(amount, true, 0)} recorded successfully (${data.data?.paymentNumber || ''})`);
+      setPaymentSuccess(
+        `Payment of ${formatCurrency(amount, true, 0)} recorded successfully (${data.data?.paymentNumber || ''})`
+      );
       // Refresh invoices after short delay
       setTimeout(() => {
         setPayingInvoice(null);
@@ -1006,8 +1060,14 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   // Removed inline formatCurrency — using shared import from utils/currency
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg p-6 max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg p-6 max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold text-gray-900">{supplier.name}</h3>
           <button
@@ -1023,46 +1083,51 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
         <div className="flex gap-2 mb-6 border-b border-gray-200">
           <button
             onClick={() => handleTabChange('info')}
-            className={`px-4 py-2 font-medium ${activeTab === 'info'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
+            className={`px-4 py-2 font-medium ${
+              activeTab === 'info'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
           >
             📋 Information
           </button>
           <button
             onClick={() => handleTabChange('performance')}
-            className={`px-4 py-2 font-medium ${activeTab === 'performance'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
+            className={`px-4 py-2 font-medium ${
+              activeTab === 'performance'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
           >
             📊 Performance
           </button>
           <button
             onClick={() => handleTabChange('orders')}
-            className={`px-4 py-2 font-medium ${activeTab === 'orders'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
+            className={`px-4 py-2 font-medium ${
+              activeTab === 'orders'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
           >
             📦 Purchase Orders
           </button>
           <button
             onClick={() => handleTabChange('products')}
-            className={`px-4 py-2 font-medium ${activeTab === 'products'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
+            className={`px-4 py-2 font-medium ${
+              activeTab === 'products'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
           >
             🏷️ Items Supplied
           </button>
           <button
             onClick={() => handleTabChange('invoices')}
-            className={`px-4 py-2 font-medium ${activeTab === 'invoices'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
+            className={`px-4 py-2 font-medium ${
+              activeTab === 'invoices'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
           >
             📄 Invoices
           </button>
@@ -1090,7 +1155,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <label className="text-sm font-medium text-gray-500">Email</label>
                     <div className="mt-1">
                       {supplier.email ? (
-                        <a href={`mailto:${supplier.email}`} className="text-blue-600 hover:underline">
+                        <a
+                          href={`mailto:${supplier.email}`}
+                          className="text-blue-600 hover:underline"
+                        >
                           {supplier.email}
                         </a>
                       ) : (
@@ -1122,7 +1190,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                         {paymentTermInfo?.label || supplier.paymentTerms || 'NET30'}
                       </span>
                       {paymentTermInfo && (
-                        <div className="text-xs text-gray-500 mt-1">{paymentTermInfo.description}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {paymentTermInfo.description}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1130,10 +1200,13 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <div>
                     <label className="text-sm font-medium text-gray-500">Status</label>
                     <div className="mt-1">
-                      <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${supplier.isActive
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-gray-100 text-gray-800'
-                        }`}>
+                      <span
+                        className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${
+                          supplier.isActive
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
                       </span>
                     </div>
@@ -1167,7 +1240,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               <div className="mb-6 grid grid-cols-3 gap-4">
                 <div className="bg-blue-50 rounded-lg p-3 text-center">
                   <div className="text-xs text-blue-600 mb-1">Supplier ID</div>
-                  <div className="text-sm font-mono text-blue-900">{supplier.id.slice(0, 8)}...</div>
+                  <div className="text-sm font-mono text-blue-900">
+                    {supplier.id.slice(0, 8)}...
+                  </div>
                 </div>
                 <div className="bg-purple-50 rounded-lg p-3 text-center">
                   <div className="text-xs text-purple-600 mb-1">Payment Days</div>
@@ -1201,19 +1276,27 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                     <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
                       <div className="text-xs text-blue-600 mb-1">Total Orders</div>
-                      <div className="text-2xl font-bold text-blue-900">{performance.totalOrders}</div>
+                      <div className="text-2xl font-bold text-blue-900">
+                        {performance.totalOrders}
+                      </div>
                     </div>
                     <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-4">
                       <div className="text-xs text-yellow-600 mb-1">Pending Orders</div>
-                      <div className="text-2xl font-bold text-yellow-900">{performance.pendingOrders}</div>
+                      <div className="text-2xl font-bold text-yellow-900">
+                        {performance.pendingOrders}
+                      </div>
                     </div>
                     <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
                       <div className="text-xs text-green-600 mb-1">Completed</div>
-                      <div className="text-2xl font-bold text-green-900">{performance.completedOrders}</div>
+                      <div className="text-2xl font-bold text-green-900">
+                        {performance.completedOrders}
+                      </div>
                     </div>
                     <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4">
                       <div className="text-xs text-purple-600 mb-1">Products</div>
-                      <div className="text-2xl font-bold text-purple-900">{performance.uniqueProducts}</div>
+                      <div className="text-2xl font-bold text-purple-900">
+                        {performance.uniqueProducts}
+                      </div>
                     </div>
                   </div>
 
@@ -1221,12 +1304,18 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div className="bg-white border-2 border-blue-200 rounded-lg p-6">
                       <div className="text-sm text-gray-600 mb-2">Total Purchase Value</div>
-                      <div className="text-3xl font-bold text-blue-600">{formatCurrency(performance.totalValue)}</div>
-                      <div className="text-xs text-gray-500 mt-2">All orders (completed + pending)</div>
+                      <div className="text-3xl font-bold text-blue-600">
+                        {formatCurrency(performance.totalValue)}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        All orders (completed + pending)
+                      </div>
                     </div>
                     <div className="bg-white border-2 border-red-200 rounded-lg p-6">
                       <div className="text-sm text-gray-600 mb-2">Outstanding Amount</div>
-                      <div className="text-3xl font-bold text-red-600">{formatCurrency(performance.outstandingAmount)}</div>
+                      <div className="text-3xl font-bold text-red-600">
+                        {formatCurrency(performance.outstandingAmount)}
+                      </div>
                       <div className="text-xs text-gray-500 mt-2">Money demanded by supplier</div>
                     </div>
                   </div>
@@ -1242,9 +1331,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   )}
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500">
-                  No performance data available
-                </div>
+                <div className="text-center py-12 text-gray-500">No performance data available</div>
               )}
             </div>
           )}
@@ -1258,7 +1345,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               ) : orders.length > 0 ? (
                 <div className="space-y-3">
                   {orders.map((order: SupplierOrder) => (
-                    <div key={order.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                    <div
+                      key={order.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50"
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <div className="font-semibold text-blue-600">{order.poNumber}</div>
@@ -1266,12 +1356,15 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                             {formatDisplayDate(order.orderDate)}
                           </div>
                         </div>
-                        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${order.status === 'COMPLETED'
-                          ? 'bg-green-100 text-green-800'
-                          : order.status === 'PENDING'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-gray-100 text-gray-800'
-                          }`}>
+                        <span
+                          className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                            order.status === 'COMPLETED'
+                              ? 'bg-green-100 text-green-800'
+                              : order.status === 'PENDING'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-800'
+                          }`}
+                        >
                           {order.status}
                         </span>
                       </div>
@@ -1292,9 +1385,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500">
-                  No purchase orders yet
-                </div>
+                <div className="text-center py-12 text-gray-500">No purchase orders yet</div>
               )}
             </div>
           )}
@@ -1310,23 +1401,44 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Orders</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Avg Cost</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Price Range</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Order</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          Product
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Orders
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Total Qty
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Avg Cost
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                          Price Range
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          Last Order
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {products.map((product: SupplierProduct, idx: number) => (
                         <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{product.productName}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">{product.orderCount}</td>
-                          <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{product.totalQuantity}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900">{formatCurrency(product.avgUnitCost)}</td>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            {product.productName}
+                          </td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {formatCurrency(product.minUnitCost)} - {formatCurrency(product.maxUnitCost)}
+                            {product.orderCount}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
+                            {product.totalQuantity}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-900">
+                            {formatCurrency(product.avgUnitCost)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">
+                            {formatCurrency(product.minUnitCost)} -{' '}
+                            {formatCurrency(product.maxUnitCost)}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-600">
                             {formatDisplayDate(product.lastOrderDate)}
@@ -1337,9 +1449,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500">
-                  No products supplied yet
-                </div>
+                <div className="text-center py-12 text-gray-500">No products supplied yet</div>
               )}
             </div>
           )}
@@ -1361,13 +1471,30 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <div className="bg-green-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-green-600 mb-1">Total Amount</div>
                       <div className="text-lg font-bold text-green-900">
-                        {formatCurrency(invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => new Decimal(sum).plus(Number(inv.totalAmount || 0)).toNumber(), 0))}
+                        {formatCurrency(
+                          invoices.reduce(
+                            (sum: number, inv: SupplierInvoiceSummary) =>
+                              new Decimal(sum).plus(Number(inv.totalAmount || 0)).toNumber(),
+                            0
+                          )
+                        )}
                       </div>
                     </div>
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-red-600 mb-1">Outstanding</div>
                       <div className="text-lg font-bold text-red-900">
-                        {formatCurrency(Math.max(0, invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => new Decimal(sum).plus(Number(inv.outstandingBalance || 0)).toNumber(), 0)))}
+                        {formatCurrency(
+                          Math.max(
+                            0,
+                            invoices.reduce(
+                              (sum: number, inv: SupplierInvoiceSummary) =>
+                                new Decimal(sum)
+                                  .plus(Number(inv.outstandingBalance || 0))
+                                  .toNumber(),
+                              0
+                            )
+                          )
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1377,15 +1504,33 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Invoice #
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Ref
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Date
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Due Date
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                            Total
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                            Paid
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                            Balance
+                          </th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                            Actions
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1393,25 +1538,51 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           const total = Number(inv.totalAmount || 0);
                           const paid = Number(inv.amountPaid || 0);
                           const balance = Number(inv.outstandingBalance || 0);
-                          const statusColor = inv.status === 'Paid' ? 'bg-green-100 text-green-800'
-                            : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
-                              : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
-                                : 'bg-gray-100 text-gray-800';
+                          const statusColor =
+                            inv.status === 'Paid'
+                              ? 'bg-green-100 text-green-800'
+                              : inv.status === 'PartiallyPaid'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : inv.status === 'Pending'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-gray-100 text-gray-800';
                           return (
                             <tr key={inv.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-blue-600">
+                                {inv.invoiceNumber}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {inv.supplierInvoiceNumber || '-'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-900">
+                                {formatDisplayDate(inv.invoiceDate)}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}
+                              </td>
                               <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>
+                                <span
+                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}
+                                >
                                   {inv.status}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
-                              <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
+                              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
+                                {formatCurrency(total)}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-green-600">
+                                {formatCurrency(paid)}
+                              </td>
                               <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
-                                {balance > 0 ? formatCurrency(balance) : (balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>)}
+                                {balance > 0 ? (
+                                  formatCurrency(balance)
+                                ) : balance < 0 ? (
+                                  <span className="text-green-600">
+                                    Overpaid {formatCurrency(Math.abs(balance))}
+                                  </span>
+                                ) : (
+                                  <span className="text-green-600">Paid</span>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
@@ -1463,19 +1634,30 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           </h4>
                           <p className="text-sm text-gray-600">
                             {formatDisplayDate(invoiceDetails.invoice.invoiceDate)}
-                            {invoiceDetails.invoice.dueDate && ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
+                            {invoiceDetails.invoice.dueDate &&
+                              ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
                           <button
-                            onClick={() => handleDownloadPdf(selectedInvoice, invoiceDetails.invoice.invoiceNumber)}
+                            onClick={() =>
+                              handleDownloadPdf(
+                                selectedInvoice,
+                                invoiceDetails.invoice.invoiceNumber
+                              )
+                            }
                             disabled={downloadingPdf === selectedInvoice}
                             className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1"
                           >
-                            {downloadingPdf === selectedInvoice ? '⏳ Generating...' : '📄 Download PDF'}
+                            {downloadingPdf === selectedInvoice
+                              ? '⏳ Generating...'
+                              : '📄 Download PDF'}
                           </button>
                           <button
-                            onClick={() => { setSelectedInvoice(null); setInvoiceDetails(null); }}
+                            onClick={() => {
+                              setSelectedInvoice(null);
+                              setInvoiceDetails(null);
+                            }}
                             className="text-gray-400 hover:text-gray-600 text-xl"
                           >
                             ✕
@@ -1490,73 +1672,137 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           {/* Line Items */}
                           {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (
                             <div>
-                              <h5 className="text-sm font-semibold text-gray-700 mb-3">Line Items</h5>
+                              <h5 className="text-sm font-semibold text-gray-700 mb-3">
+                                Line Items
+                              </h5>
                               <table className="min-w-full divide-y divide-gray-200 text-sm">
                                 <thead className="bg-gray-50">
                                   <tr>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product/Service</th>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit Cost</th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                      #
+                                    </th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                      Product/Service
+                                    </th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                      Description
+                                    </th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                                      Qty
+                                    </th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                                      Unit Cost
+                                    </th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                                      Total
+                                    </th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                  {invoiceDetails.lineItems.map((item: InvoiceLineItem, idx: number) => (
-                                    <tr key={item.id || idx} className="hover:bg-gray-50">
-                                      <td className="px-3 py-2 text-gray-500">{item.lineNumber || idx + 1}</td>
-                                      <td className="px-3 py-2 font-medium text-gray-900">{item.productName}</td>
-                                      <td className="px-3 py-2 text-gray-600">{item.description || '-'}</td>
-                                      <td className="px-3 py-2 text-right text-gray-900">
-                                        {item.quantity} {item.unitOfMeasure || ''}
-                                      </td>
-                                      <td className="px-3 py-2 text-right text-gray-900">{formatCurrency(item.unitCost)}</td>
-                                      <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(item.lineTotal)}</td>
-                                    </tr>
-                                  ))}
+                                  {invoiceDetails.lineItems.map(
+                                    (item: InvoiceLineItem, idx: number) => (
+                                      <tr key={item.id || idx} className="hover:bg-gray-50">
+                                        <td className="px-3 py-2 text-gray-500">
+                                          {item.lineNumber || idx + 1}
+                                        </td>
+                                        <td className="px-3 py-2 font-medium text-gray-900">
+                                          {item.productName}
+                                        </td>
+                                        <td className="px-3 py-2 text-gray-600">
+                                          {item.description || '-'}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-gray-900">
+                                          {item.quantity} {item.unitOfMeasure || ''}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-gray-900">
+                                          {formatCurrency(item.unitCost)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-semibold text-gray-900">
+                                          {formatCurrency(item.lineTotal)}
+                                        </td>
+                                      </tr>
+                                    )
+                                  )}
                                 </tbody>
                                 <tfoot className="bg-gray-50">
                                   <tr>
-                                    <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Subtotal:</td>
+                                    <td
+                                      colSpan={5}
+                                      className="px-3 py-2 text-right font-semibold text-gray-700"
+                                    >
+                                      Subtotal:
+                                    </td>
                                     <td className="px-3 py-2 text-right font-bold text-gray-900">
-                                      {formatCurrency(Number(invoiceDetails.invoice.subtotal || invoiceDetails.invoice.totalAmount || 0))}
+                                      {formatCurrency(
+                                        Number(
+                                          invoiceDetails.invoice.subtotal ||
+                                            invoiceDetails.invoice.totalAmount ||
+                                            0
+                                        )
+                                      )}
                                     </td>
                                   </tr>
                                   {Number(invoiceDetails.invoice.taxAmount || 0) > 0 && (
                                     <tr>
-                                      <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Tax:</td>
+                                      <td
+                                        colSpan={5}
+                                        className="px-3 py-2 text-right font-semibold text-gray-700"
+                                      >
+                                        Tax:
+                                      </td>
                                       <td className="px-3 py-2 text-right font-bold text-gray-900">
                                         {formatCurrency(Number(invoiceDetails.invoice.taxAmount))}
                                       </td>
                                     </tr>
                                   )}
                                   <tr className="border-t-2 border-gray-300">
-                                    <td colSpan={5} className="px-3 py-2 text-right font-bold text-gray-900">Total:</td>
+                                    <td
+                                      colSpan={5}
+                                      className="px-3 py-2 text-right font-bold text-gray-900"
+                                    >
+                                      Total:
+                                    </td>
                                     <td className="px-3 py-2 text-right font-bold text-blue-600 text-lg">
-                                      {formatCurrency(Number(invoiceDetails.invoice.totalAmount || 0))}
+                                      {formatCurrency(
+                                        Number(invoiceDetails.invoice.totalAmount || 0)
+                                      )}
                                     </td>
                                   </tr>
                                 </tfoot>
                               </table>
                             </div>
                           ) : (
-                            <div className="text-sm text-gray-500 italic">No line items recorded for this invoice.</div>
+                            <div className="text-sm text-gray-500 italic">
+                              No line items recorded for this invoice.
+                            </div>
                           )}
 
                           {/* Payments */}
                           {invoiceDetails.allocations && invoiceDetails.allocations.length > 0 && (
                             <div>
-                              <h5 className="text-sm font-semibold text-gray-700 mb-3">Payment History</h5>
+                              <h5 className="text-sm font-semibold text-gray-700 mb-3">
+                                Payment History
+                              </h5>
                               <div className="space-y-2">
                                 {invoiceDetails.allocations.map((alloc: InvoiceAllocation) => (
-                                  <div key={alloc.id} className="flex justify-between items-center bg-green-50 rounded-lg px-4 py-3">
+                                  <div
+                                    key={alloc.id}
+                                    className="flex justify-between items-center bg-green-50 rounded-lg px-4 py-3"
+                                  >
                                     <div>
-                                      <span className="font-medium text-gray-900">{alloc.paymentNumber}</span>
-                                      <span className="ml-2 text-sm text-gray-500">{formatDisplayDate(alloc.allocationDate)}</span>
-                                      <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">{alloc.paymentMethod}</span>
+                                      <span className="font-medium text-gray-900">
+                                        {alloc.paymentNumber}
+                                      </span>
+                                      <span className="ml-2 text-sm text-gray-500">
+                                        {formatDisplayDate(alloc.allocationDate)}
+                                      </span>
+                                      <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">
+                                        {alloc.paymentMethod}
+                                      </span>
                                     </div>
-                                    <span className="font-bold text-green-700">{formatCurrency(alloc.amountAllocated)}</span>
+                                    <span className="font-bold text-green-700">
+                                      {formatCurrency(alloc.amountAllocated)}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
@@ -1570,7 +1816,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                 <div className="flex justify-between items-center mt-1">
                                   <span className="font-semibold text-gray-700">Balance Due:</span>
                                   <span className="font-bold text-red-600 text-lg">
-                                    {formatCurrency(Number(invoiceDetails.invoice.outstandingBalance))}
+                                    {formatCurrency(
+                                      Number(invoiceDetails.invoice.outstandingBalance)
+                                    )}
                                   </span>
                                 </div>
                               )}
@@ -1581,7 +1829,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           {invoiceDetails.invoice.notes && (
                             <div>
                               <h5 className="text-sm font-semibold text-gray-700 mb-1">Notes</h5>
-                              <p className="text-sm text-gray-600">{invoiceDetails.invoice.notes}</p>
+                              <p className="text-sm text-gray-600">
+                                {invoiceDetails.invoice.notes}
+                              </p>
                             </div>
                           )}
                         </div>
@@ -1600,8 +1850,14 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
 
         {/* Supplier Payment Modal */}
         {payingInvoice && (
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60]" onClick={() => !submittingPayment && setPayingInvoice(null)}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60]"
+            onClick={() => !submittingPayment && setPayingInvoice(null)}
+          >
+            <div
+              className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex justify-between items-center mb-4">
                 <h4 className="text-lg font-bold text-gray-900">💰 Record Payment</h4>
                 <button
@@ -1621,15 +1877,21 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-gray-600">Total</span>
-                  <span className="text-gray-900">{formatCurrency(Number(payingInvoice.totalAmount || 0))}</span>
+                  <span className="text-gray-900">
+                    {formatCurrency(Number(payingInvoice.totalAmount || 0))}
+                  </span>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-gray-600">Paid</span>
-                  <span className="text-green-600">{formatCurrency(Number(payingInvoice.amountPaid || 0))}</span>
+                  <span className="text-green-600">
+                    {formatCurrency(Number(payingInvoice.amountPaid || 0))}
+                  </span>
                 </div>
                 <div className="flex justify-between mt-1 pt-1 border-t border-gray-200">
                   <span className="font-semibold text-gray-700">Outstanding</span>
-                  <span className="font-bold text-red-600">{formatCurrency(Number(payingInvoice.outstandingBalance || 0))}</span>
+                  <span className="font-bold text-red-600">
+                    {formatCurrency(Number(payingInvoice.outstandingBalance || 0))}
+                  </span>
                 </div>
               </div>
 
@@ -1661,7 +1923,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <div className="flex gap-2 mt-1">
                     <button
                       type="button"
-                      onClick={() => setPaymentAmount(Number(payingInvoice.outstandingBalance || 0).toString())}
+                      onClick={() =>
+                        setPaymentAmount(Number(payingInvoice.outstandingBalance || 0).toString())
+                      }
                       className="text-xs text-purple-600 hover:text-purple-800 underline"
                       disabled={submittingPayment || !!paymentSuccess}
                     >
@@ -1671,7 +1935,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment Method *
+                  </label>
                   <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
@@ -1731,9 +1997,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                         <span className="animate-spin">⏳</span> Processing...
                       </>
                     ) : (
-                      <>
-                        💰 Record Payment
-                      </>
+                      <>💰 Record Payment</>
                     )}
                   </button>
                 )}
@@ -1797,8 +2061,14 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold">
             {supplier ? 'Edit Supplier' : 'Add New Supplier'}
@@ -1898,7 +2168,7 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
               onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              {PAYMENT_TERMS.map(term => (
+              {PAYMENT_TERMS.map((term) => (
                 <option key={term.value} value={term.value}>
                   {term.label}
                 </option>

@@ -2,29 +2,38 @@ import React, { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CreateExpenseSchema } from '@shared/zod/expense';
-import { CreateExpenseData, EXPENSE_CATEGORIES, PAYMENT_METHODS, Expense } from '@shared/types/expense';
+import {
+  CreateExpenseData,
+  EXPENSE_CATEGORIES,
+  PAYMENT_METHODS,
+  Expense,
+} from '@shared/types/expense';
 import { useCreateExpense, usePaymentAccounts } from '../../hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { DatePicker } from '@/components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import { Loader2, Receipt, FileText } from 'lucide-react';
 import { toast } from 'sonner';
+import { getStructuredErrorMessage } from '../../utils/errorHandler';
 
 interface CreateExpenseFormProps {
   onSuccess?: (expense: Expense) => void;
   onCancel?: () => void;
 }
 
-export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
-  onSuccess,
-  onCancel
-}) => {
+export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess, onCancel }) => {
   const createExpense = useCreateExpense();
   const { data: paymentAccounts = [], isLoading: accountsLoading } = usePaymentAccounts();
   const [uploadedDocuments] = useState<string[]>([]);
@@ -34,7 +43,7 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
     control,
     handleSubmit,
     watch,
-    formState: { errors, isValid }
+    formState: { errors, isValid },
   } = useForm<CreateExpenseData>({
     resolver: zodResolver(CreateExpenseSchema),
     defaultValues: {
@@ -42,9 +51,9 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
       receiptRequired: false,
       documentIds: [],
       paymentStatus: 'UNPAID',
-      paymentAccountId: null
+      paymentAccountId: null,
     },
-    mode: 'onChange'
+    mode: 'onChange',
   });
 
   const watchedAmount = watch('amount');
@@ -55,19 +64,19 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
     try {
       const expenseData = {
         ...data,
-        documentIds: uploadedDocuments.length > 0 ? uploadedDocuments : undefined
+        documentIds: uploadedDocuments.length > 0 ? uploadedDocuments : undefined,
       };
 
       const expense = await createExpense.mutateAsync(expenseData);
 
       toast.success('Expense created successfully', {
-        description: `Expense ${expense.expenseNumber} has been created`
+        description: `Expense ${expense.expenseNumber} has been created`,
       });
 
       onSuccess?.(expense);
     } catch (error) {
       toast.error('Failed to create expense', {
-        description: error instanceof Error ? error.message : 'Please try again'
+        description: getStructuredErrorMessage(error, 'Please try again'),
       });
     }
   };
@@ -86,19 +95,25 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Title */}
               <div className="md:col-span-2">
-                <Label htmlFor="title" className="text-sm font-medium">Expense Title *</Label>
+                <Label htmlFor="title" className="text-sm font-medium">
+                  Expense Title *
+                </Label>
                 <Input
                   id="title"
                   placeholder="Enter expense title"
                   {...register('title')}
                   className={errors.title ? 'border-red-500 h-9' : 'h-9'}
                 />
-                {errors.title && <p className="text-xs text-red-600 mt-0.5">{errors.title.message}</p>}
+                {errors.title && (
+                  <p className="text-xs text-red-600 mt-0.5">{errors.title.message}</p>
+                )}
               </div>
 
               {/* Amount */}
               <div>
-                <Label htmlFor="amount" className="text-sm font-medium">Amount *</Label>
+                <Label htmlFor="amount" className="text-sm font-medium">
+                  Amount *
+                </Label>
                 <Input
                   id="amount"
                   type="number"
@@ -108,13 +123,19 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
                   {...register('amount', { valueAsNumber: true })}
                   className={errors.amount ? 'border-red-500 h-9' : 'h-9'}
                 />
-                {errors.amount && <p className="text-xs text-red-600 mt-0.5">{errors.amount.message}</p>}
-                {watchedAmount > 0 && <p className="text-xs text-gray-600 mt-0.5">{formatCurrency(watchedAmount)}</p>}
+                {errors.amount && (
+                  <p className="text-xs text-red-600 mt-0.5">{errors.amount.message}</p>
+                )}
+                {watchedAmount > 0 && (
+                  <p className="text-xs text-gray-600 mt-0.5">{formatCurrency(watchedAmount)}</p>
+                )}
               </div>
 
               {/* Date */}
               <div>
-                <Label htmlFor="expenseDate" className="text-sm font-medium">Date *</Label>
+                <Label htmlFor="expenseDate" className="text-sm font-medium">
+                  Date *
+                </Label>
                 <Controller
                   name="expenseDate"
                   control={control}
@@ -128,7 +149,9 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
                     />
                   )}
                 />
-                {errors.expenseDate && <p className="text-xs text-red-600 mt-0.5">{errors.expenseDate.message}</p>}
+                {errors.expenseDate && (
+                  <p className="text-xs text-red-600 mt-0.5">{errors.expenseDate.message}</p>
+                )}
               </div>
 
               {/* Category */}
@@ -144,13 +167,17 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
                       </SelectTrigger>
                       <SelectContent>
                         {Object.entries(EXPENSE_CATEGORIES).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                          <SelectItem key={value} value={value}>
+                            {label}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   )}
                 />
-                {errors.category && <p className="text-xs text-red-600 mt-0.5">{errors.category.message}</p>}
+                {errors.category && (
+                  <p className="text-xs text-red-600 mt-0.5">{errors.category.message}</p>
+                )}
               </div>
 
               {/* Payment Method */}
@@ -161,23 +188,31 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
                   control={control}
                   render={({ field }) => (
                     <Select value={field.value ?? ''} onValueChange={field.onChange}>
-                      <SelectTrigger className={errors.paymentMethod ? 'border-red-500 h-9' : 'h-9'}>
+                      <SelectTrigger
+                        className={errors.paymentMethod ? 'border-red-500 h-9' : 'h-9'}
+                      >
                         <SelectValue placeholder="Select method" />
                       </SelectTrigger>
                       <SelectContent>
                         {Object.entries(PAYMENT_METHODS).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                          <SelectItem key={value} value={value}>
+                            {label}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   )}
                 />
-                {errors.paymentMethod && <p className="text-xs text-red-600 mt-0.5">{errors.paymentMethod.message}</p>}
+                {errors.paymentMethod && (
+                  <p className="text-xs text-red-600 mt-0.5">{errors.paymentMethod.message}</p>
+                )}
               </div>
 
               {/* Vendor */}
               <div>
-                <Label htmlFor="vendor" className="text-sm font-medium">Vendor</Label>
+                <Label htmlFor="vendor" className="text-sm font-medium">
+                  Vendor
+                </Label>
                 <Input
                   id="vendor"
                   placeholder="Vendor name"
@@ -217,9 +252,19 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
                     name="paymentAccountId"
                     control={control}
                     render={({ field }) => (
-                      <Select value={field.value ?? ''} onValueChange={field.onChange} disabled={accountsLoading}>
-                        <SelectTrigger className={errors.paymentAccountId ? 'border-red-500 h-9 mt-1' : 'h-9 mt-1'}>
-                          <SelectValue placeholder={accountsLoading ? 'Loading...' : 'Select account'} />
+                      <Select
+                        value={field.value ?? ''}
+                        onValueChange={field.onChange}
+                        disabled={accountsLoading}
+                      >
+                        <SelectTrigger
+                          className={
+                            errors.paymentAccountId ? 'border-red-500 h-9 mt-1' : 'h-9 mt-1'
+                          }
+                        >
+                          <SelectValue
+                            placeholder={accountsLoading ? 'Loading...' : 'Select account'}
+                          />
                         </SelectTrigger>
                         <SelectContent>
                           {paymentAccounts.map((account) => (
@@ -231,13 +276,17 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
                       </Select>
                     )}
                   />
-                  {errors.paymentAccountId && <p className="text-xs text-red-600 mt-0.5">{errors.paymentAccountId.message}</p>}
+                  {errors.paymentAccountId && (
+                    <p className="text-xs text-red-600 mt-0.5">{errors.paymentAccountId.message}</p>
+                  )}
                 </div>
               )}
 
               {/* Description */}
               <div className="md:col-span-2">
-                <Label htmlFor="description" className="text-sm font-medium">Description</Label>
+                <Label htmlFor="description" className="text-sm font-medium">
+                  Description
+                </Label>
                 <Textarea
                   id="description"
                   placeholder="Enter description (optional)"
@@ -249,7 +298,9 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
 
               {/* Notes */}
               <div className="md:col-span-2">
-                <Label htmlFor="notes" className="text-sm font-medium">Notes</Label>
+                <Label htmlFor="notes" className="text-sm font-medium">
+                  Notes
+                </Label>
                 <Textarea
                   id="notes"
                   placeholder="Additional notes (optional)"
@@ -261,15 +312,19 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
             </div>
 
             {/* Receipt Alert (compact) */}
-            {(watchedCategory === 'FUEL' || watchedCategory === 'MEALS' || watchedCategory === 'ACCOMMODATION' ||
-              watchedCategory === 'EQUIPMENT' || watchedCategory === 'MAINTENANCE' || (watchedAmount && watchedAmount > 50)) && (
-                <Alert className="py-2">
-                  <Receipt className="h-4 w-4" />
-                  <AlertDescription className="text-xs">
-                    Receipt required for this category/amount
-                  </AlertDescription>
-                </Alert>
-              )}
+            {(watchedCategory === 'FUEL' ||
+              watchedCategory === 'MEALS' ||
+              watchedCategory === 'ACCOMMODATION' ||
+              watchedCategory === 'EQUIPMENT' ||
+              watchedCategory === 'MAINTENANCE' ||
+              (watchedAmount && watchedAmount > 50)) && (
+              <Alert className="py-2">
+                <Receipt className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  Receipt required for this category/amount
+                </AlertDescription>
+              </Alert>
+            )}
 
             {/* Document Upload (compact) */}
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center bg-gray-50">

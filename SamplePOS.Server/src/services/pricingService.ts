@@ -5,6 +5,7 @@
 import Decimal from 'decimal.js';
 import { VM } from 'vm2';
 import { pool as globalPool } from '../db/pool.js';
+import { BusinessError, NotFoundError } from '../middleware/errorHandler.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import type pg from 'pg';
 import logger from '../utils/logger.js';
@@ -58,33 +59,36 @@ interface ProductPricing {
  * @param context - Pricing context (product, customer group, quantity)
  * @returns Calculated price with base price, discount, and applied tier info
  * @throws Error if product not found
- * 
+ *
  * Pricing Resolution Priority:
  * 1. **Pricing Tier** (customer-specific quantity breaks)
  * 2. **Customer Group Discount** (percentage off base price)
  * 3. **Product Formula** (e.g., cost * 1.20 for 20% markup)
  * 4. **Base Selling Price** (fallback from products.selling_price)
- * 
+ *
  * Caching Strategy:
  * - Cache key: productId + customerGroupId + quantity
  * - TTL: 1 hour (pricingCacheService.ts)
  * - Expected hit rate: ~95% for high-volume products
  * - Cache invalidation: On cost/price updates
- * 
+ *
  * Formula Evaluation:
  * - Sandboxed VM2 execution for security
  * - Variables: cost, avgCost, lastCost, sellingPrice, quantity
  * - Example: "cost * 1.25" (25% markup on current cost)
- * 
+ *
  * Tier Matching:
  * - Active tiers only (valid_from <= now <= valid_until)
  * - Quantity range: min_quantity <= quantity <= max_quantity
  * - Highest priority wins if multiple matches
- * 
+ *
  * Performance: Sub-millisecond with cache, ~5-10ms cache miss
  * Precision: Bank-grade using Decimal.js (20 digits, ROUND_HALF_UP)
  */
-export async function calculatePrice(context: PricingContext, dbPool?: pg.Pool | pg.PoolClient): Promise<CalculatedPrice> {
+export async function calculatePrice(
+  context: PricingContext,
+  dbPool?: pg.Pool | pg.PoolClient
+): Promise<CalculatedPrice> {
   const pool = dbPool || globalPool;
   const { productId, customerGroupId, quantity = 1 } = context;
 
@@ -109,7 +113,7 @@ export async function calculatePrice(context: PricingContext, dbPool?: pg.Pool |
   );
 
   if (productResult.rows.length === 0) {
-    throw new Error(`Product ${productId} not found`);
+    throw new NotFoundError(`Product ${productId}`);
   }
 
   const product = productResult.rows[0];
@@ -244,7 +248,7 @@ export async function evaluateFormula(
   );
 
   if (result.rows.length === 0) {
-    throw new Error(`Product ${productId} not found`);
+    throw new NotFoundError(`Product ${productId}`);
   }
 
   const product = result.rows[0];
@@ -269,11 +273,18 @@ export async function evaluateFormula(
     const result = vm.run(formula);
 
     if (typeof result !== 'number' || !isFinite(result)) {
-      throw new Error('Formula must return a finite number');
+      throw new BusinessError('Formula must return a finite number', 'ERR_PRICING_001', {
+        formula,
+        productId,
+      });
     }
 
     if (result < 0) {
-      throw new Error('Formula result cannot be negative');
+      throw new BusinessError('Formula result cannot be negative', 'ERR_PRICING_002', {
+        formula,
+        productId,
+        result,
+      });
     }
 
     return result;
@@ -284,7 +295,11 @@ export async function evaluateFormula(
       context,
       error: (error as Error).message,
     });
-    throw new Error(`Invalid formula: ${(error as Error).message}`);
+    throw new BusinessError(`Invalid formula: ${(error as Error).message}`, 'ERR_PRICING_003', {
+      formula,
+      productId,
+      originalError: (error as Error).message,
+    });
   }
 }
 
@@ -327,7 +342,10 @@ export function validateFormula(formula: string): { valid: boolean; error?: stri
  * Update calculated_price for all pricing tiers of a product (using existing client)
  * Core logic that can run within an external transaction.
  */
-async function updatePricingTiersWithClient(client: pg.PoolClient, productId: string): Promise<void> {
+async function updatePricingTiersWithClient(
+  client: pg.PoolClient,
+  productId: string
+): Promise<void> {
   const tiersResult = await client.query<PricingTierRow>(
     `SELECT * FROM pricing_tiers WHERE product_id = $1 AND is_active = TRUE`,
     [productId]
@@ -377,7 +395,10 @@ export async function updatePricingTiers(productId: string, dbPool?: pg.Pool): P
  * Update product selling_price using its pricing formula
  * Called when auto_update_price is true and cost changes
  */
-export async function updateProductPrice(productId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<void> {
+export async function updateProductPrice(
+  productId: string,
+  dbPool?: pg.Pool | pg.PoolClient
+): Promise<void> {
   const pool = dbPool || globalPool;
   const result = await pool.query<ProductPricing>(
     `SELECT pv.pricing_formula, pv.auto_update_price FROM product_valuation pv WHERE pv.product_id = $1`,
@@ -385,7 +406,7 @@ export async function updateProductPrice(productId: string, dbPool?: pg.Pool | p
   );
 
   if (result.rows.length === 0) {
-    throw new Error(`Product ${productId} not found`);
+    throw new NotFoundError(`Product ${productId}`);
   }
 
   const product = result.rows[0];
@@ -397,10 +418,10 @@ export async function updateProductPrice(productId: string, dbPool?: pg.Pool | p
   try {
     const newPrice = await evaluateFormula(product.pricing_formula, productId);
 
-    await pool.query(`UPDATE product_valuation SET selling_price = $1, updated_at = NOW() WHERE product_id = $2`, [
-      newPrice,
-      productId,
-    ]);
+    await pool.query(
+      `UPDATE product_valuation SET selling_price = $1, updated_at = NOW() WHERE product_id = $2`,
+      [newPrice, productId]
+    );
 
     logger.info('Product price auto-updated', {
       productId,

@@ -16,21 +16,18 @@ import {
   User,
   Calendar,
   DollarSign,
-  AlertTriangle
+  AlertTriangle,
 } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
 import { toast } from 'sonner';
-
+import { getStructuredErrorMessage } from '../../utils/errorHandler';
 
 interface ExpenseApprovalProps {
   expense: Expense;
   onStatusChange?: () => void;
 }
 
-export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({
-  expense,
-  onStatusChange
-}) => {
+export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({ expense, onStatusChange }) => {
   const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
@@ -43,7 +40,7 @@ export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({
     try {
       await approveMutation.mutateAsync({
         id: expense.id,
-        notes: approvalNotes || undefined
+        notes: approvalNotes || undefined,
       });
 
       toast.success('Expense approved successfully');
@@ -52,7 +49,7 @@ export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({
       onStatusChange?.();
     } catch (error) {
       toast.error('Failed to approve expense', {
-        description: error instanceof Error ? error.message : 'Please try again'
+        description: getStructuredErrorMessage(error, 'Please try again'),
       });
     }
   };
@@ -66,7 +63,7 @@ export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({
     try {
       await rejectMutation.mutateAsync({
         id: expense.id,
-        reason: rejectionReason
+        reason: rejectionReason,
       });
 
       toast.success('Expense rejected');
@@ -75,7 +72,7 @@ export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({
       onStatusChange?.();
     } catch (error) {
       toast.error('Failed to reject expense', {
-        description: error instanceof Error ? error.message : 'Please try again'
+        description: getStructuredErrorMessage(error, 'Please try again'),
       });
     }
   };
@@ -282,8 +279,8 @@ export const ExpenseApproval: React.FC<ExpenseApprovalProps> = ({
           <div className="space-y-4">
             <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-red-800">
-                You are about to reject expense {expense.expenseNumber}.
-                Please provide a reason for rejection.
+                You are about to reject expense {expense.expenseNumber}. Please provide a reason for
+                rejection.
               </p>
             </div>
 

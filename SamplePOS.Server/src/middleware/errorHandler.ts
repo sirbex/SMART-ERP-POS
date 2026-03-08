@@ -31,6 +31,18 @@ export class ValidationError extends AppError {
   }
 }
 
+// Structured business rule error — carries error_code + typed details for frontend parsing
+export class BusinessError extends AppError {
+  constructor(
+    message: string,
+    public errorCode: string,
+    public details: Record<string, unknown> = {}
+  ) {
+    super(400, message);
+    Object.setPrototypeOf(this, BusinessError.prototype);
+  }
+}
+
 export class UnauthorizedError extends AppError {
   constructor(message: string = 'Unauthorized') {
     super(401, message);
@@ -73,7 +85,7 @@ export function errorHandler(
   if (error instanceof AppError) {
     logger.error('Application error', {
       statusCode: error.statusCode,
-      message: (error instanceof Error ? error.message : String(error)),
+      message: error instanceof Error ? error.message : String(error),
       path: req.path,
       method: req.method,
       user: req.user?.id,
@@ -102,8 +114,8 @@ export function errorHandler(
     });
   } else {
     logger.error('Unhandled error', {
-      error: (error instanceof Error ? error.message : String(error)),
-      stack: (error instanceof Error ? error.stack : undefined),
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
       path: req.path,
       method: req.method,
       requestId: req.requestId,
@@ -126,11 +138,23 @@ export function errorHandler(
     return;
   }
 
+  // Handle BusinessError (structured details for frontend)
+  if (error instanceof BusinessError) {
+    res.status(error.statusCode).json({
+      success: false,
+      error: error.message,
+      error_code: error.errorCode,
+      details: error.details,
+      requestId: req.requestId,
+    });
+    return;
+  }
+
   // Handle AppError
   if (error instanceof AppError) {
     res.status(error.statusCode).json({
       success: false,
-      error: (error instanceof Error ? error.message : String(error)),
+      error: error instanceof Error ? error.message : String(error),
       requestId: req.requestId,
     });
     return;
@@ -159,7 +183,7 @@ export function errorHandler(
     success: false,
     error: error instanceof Error ? error.message : 'Internal server error',
     requestId: req.requestId,
-    ...(isDevelopment && { stack: (error instanceof Error ? error.stack : undefined) }),
+    ...(isDevelopment && { stack: error instanceof Error ? error.stack : undefined }),
   });
 }
 

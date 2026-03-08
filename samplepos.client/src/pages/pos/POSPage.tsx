@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Decimal from 'decimal.js';
@@ -18,7 +17,11 @@ import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { useCreateInvoice } from '../../hooks/useApi';
 import { api } from '../../utils/api';
 import type { ReceiptData } from '../../lib/print';
-import { findProductByBarcode, preWarmProductCache, getProductCatalog } from '../../services/barcodeService';
+import {
+  findProductByBarcode,
+  preWarmProductCache,
+  getProductCatalog,
+} from '../../services/barcodeService';
 import {
   syncProductCatalog,
   getPersistedCart,
@@ -37,7 +40,12 @@ import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/ca
 import { useCurrentSession } from '../../hooks/useCashRegister';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
 import quotationApi from '../../api/quotations';
-import type { QuickQuoteItemInput, Quotation, QuotationDetail, QuotationItem } from '@shared/types/quotation';
+import type {
+  QuickQuoteItemInput,
+  Quotation,
+  QuotationDetail,
+  QuotationItem,
+} from '@shared/types/quotation';
 import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 
@@ -142,7 +150,13 @@ interface POSProductInput {
 /** Axios-like error shape for typed catch blocks */
 interface AxiosLikeError {
   response?: {
-    data?: { error?: string; message?: string; success?: boolean };
+    data?: {
+      error?: string;
+      message?: string;
+      success?: boolean;
+      error_code?: string;
+      details?: Record<string, unknown>;
+    };
     status?: number;
   };
   message?: string;
@@ -222,7 +236,9 @@ export default function POSPage() {
   const [items, setItems] = useState<LineItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<
+    'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT'
+  >('CASH');
 
   // Cash register session for drawer tracking
   const { data: currentSession, isLoading: isLoadingSession } = useCurrentSession();
@@ -241,14 +257,16 @@ export default function POSPage() {
   const [isLoadingDeposits, setIsLoadingDeposits] = useState(false);
 
   // Split payment state
-  const [paymentLines, setPaymentLines] = useState<Array<{
-    id: string;
-    paymentMethodId: string;
-    paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
-    amount: number;
-    reference?: string;
-    createdAt: string;
-  }>>([]);
+  const [paymentLines, setPaymentLines] = useState<
+    Array<{
+      id: string;
+      paymentMethodId: string;
+      paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
+      amount: number;
+      reference?: string;
+      createdAt: string;
+    }>
+  >([]);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [isProcessingSale, setIsProcessingSale] = useState(false);
@@ -263,7 +281,8 @@ export default function POSPage() {
   const createSale = useCreatePOSSale();
   // createInvoice kept for future manual invoice creation
   useCreateInvoice();
-  const { isOnline, saveSaleOffline, syncPendingSales, pendingCount, reviewCount, failedCount } = useOfflineMode();
+  const { isOnline, saveSaleOffline, syncPendingSales, pendingCount, reviewCount, failedCount } =
+    useOfflineMode();
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
@@ -275,7 +294,10 @@ export default function POSPage() {
 
   // Discount state
   const [showDiscountDialog, setShowDiscountDialog] = useState(false);
-  const [discountTarget, setDiscountTarget] = useState<{ type: 'cart' | 'item'; itemIndex?: number } | null>(null);
+  const [discountTarget, setDiscountTarget] = useState<{
+    type: 'cart' | 'item';
+    itemIndex?: number;
+  } | null>(null);
   const [cartDiscount, setCartDiscount] = useState<{
     type: DiscountType;
     value: number;
@@ -329,7 +351,7 @@ export default function POSPage() {
 
   useEffect(() => {
     const handleStorageChange = () => {
-      setStorageVersion(prev => prev + 1);
+      setStorageVersion((prev) => prev + 1);
     };
 
     window.addEventListener('storage', handleStorageChange);
@@ -377,7 +399,7 @@ export default function POSPage() {
   // Sync pending sales when coming online
   useEffect(() => {
     if (isOnline && pendingCount > 0) {
-      syncPendingSales(apiClient).then(results => {
+      syncPendingSales(apiClient).then((results) => {
         if (results && results.length > 0) {
           const synced = results.filter((r: SyncResult) => r.success).length;
           const failed = results.filter((r: SyncResult) => !r.success).length;
@@ -390,7 +412,7 @@ export default function POSPage() {
         }
       });
       // Also re-sync catalog when coming back online
-      syncProductCatalog().catch(() => { });
+      syncProductCatalog().catch(() => {});
     }
   }, [isOnline, pendingCount]);
 
@@ -494,7 +516,11 @@ export default function POSPage() {
         return;
       }
 
-      console.log('🔍 Fetching deposit balance for customer:', selectedCustomer.id, selectedCustomer.name);
+      console.log(
+        '🔍 Fetching deposit balance for customer:',
+        selectedCustomer.id,
+        selectedCustomer.name
+      );
       setIsLoadingDeposits(true);
       try {
         const response = await api.deposits.getCustomerBalance(selectedCustomer.id);
@@ -508,7 +534,10 @@ export default function POSPage() {
           setCustomerDepositBalance(0);
         }
       } catch (error: unknown) {
-        console.error('❌ Failed to fetch customer deposit balance:', getAxiosErrorMessage(error, 'Unknown error'));
+        console.error(
+          '❌ Failed to fetch customer deposit balance:',
+          getAxiosErrorMessage(error, 'Unknown error')
+        );
         setCustomerDepositBalance(0);
       } finally {
         setIsLoadingDeposits(false);
@@ -523,16 +552,18 @@ export default function POSPage() {
     if (activeUser?.token) {
       const timer = setTimeout(() => {
         // Pre-warm barcode cache
-        preWarmProductCache().catch(err => {
+        preWarmProductCache().catch((err) => {
           console.error('Failed to pre-warm product cache:', err);
         });
         // Sync full POS product catalog for offline search
         if (navigator.onLine) {
-          syncProductCatalog().then((products) => {
-            console.log(`[OfflineCatalog] Synced ${products.length} products for offline use`);
-          }).catch(err => {
-            console.error('[OfflineCatalog] Failed to sync catalog:', err);
-          });
+          syncProductCatalog()
+            .then((products) => {
+              console.log(`[OfflineCatalog] Synced ${products.length} products for offline use`);
+            })
+            .catch((err) => {
+              console.error('[OfflineCatalog] Failed to sync catalog:', err);
+            });
         }
       }, 100);
       return () => clearTimeout(timer);
@@ -569,8 +600,10 @@ export default function POSPage() {
       if (!match) {
         toast.error(`Product not found: ${barcode}`);
         // Play error beep
-        const errorBeep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgA');
-        errorBeep.play().catch(() => { });
+        const errorBeep = new Audio(
+          'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgA'
+        );
+        errorBeep.play().catch(() => {});
         return;
       }
 
@@ -588,8 +621,10 @@ export default function POSPage() {
 
       // Success feedback
       toast.success(`Added: ${match.product.name} (${match.uom.name})`);
-      const successBeep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBztH1/LJfiwE');
-      successBeep.play().catch(() => { });
+      const successBeep = new Audio(
+        'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBztH1/LJfiwE'
+      );
+      successBeep.play().catch(() => {});
     } catch (error) {
       console.error('Barcode scan error:', error);
       toast.error('Barcode scanning failed');
@@ -664,7 +699,7 @@ export default function POSPage() {
         // Arrow Down: Move to next cart item
         if (e.key === 'ArrowDown' && e.ctrlKey) {
           e.preventDefault();
-          setFocusedCartIndex(prev => {
+          setFocusedCartIndex((prev) => {
             const newIndex = Math.min(prev + 1, items.length - 1);
             // Focus the row
             setTimeout(() => {
@@ -682,7 +717,7 @@ export default function POSPage() {
         // Arrow Up: Move to previous cart item
         if (e.key === 'ArrowUp' && e.ctrlKey) {
           e.preventDefault();
-          setFocusedCartIndex(prev => {
+          setFocusedCartIndex((prev) => {
             const newIndex = Math.max(prev - 1, 0);
             // Focus the row
             setTimeout(() => {
@@ -712,7 +747,7 @@ export default function POSPage() {
         // Delete: Remove focused cart item
         if (e.key === 'Delete' && focusedCartIndex >= 0) {
           e.preventDefault();
-          setItems(prev => prev.filter((_, i) => i !== focusedCartIndex));
+          setItems((prev) => prev.filter((_, i) => i !== focusedCartIndex));
           setFocusedCartIndex(-1);
           return;
         }
@@ -741,13 +776,13 @@ export default function POSPage() {
   const handleClearAllData = () => {
     const confirmed = window.confirm(
       '⚠️ Clear ALL Data?\n\n' +
-      'This will clear:\n' +
-      '• Current cart items\n' +
-      '• Customer selection\n' +
-      '• All discounts\n' +
-      '• Offline sales queue\n' +
-      '• Persisted cart backup\n\n' +
-      'This action cannot be undone!'
+        'This will clear:\n' +
+        '• Current cart items\n' +
+        '• Customer selection\n' +
+        '• All discounts\n' +
+        '• Offline sales queue\n' +
+        '• Persisted cart backup\n\n' +
+        'This action cannot be undone!'
     );
 
     if (!confirmed) return;
@@ -797,129 +832,162 @@ export default function POSPage() {
   }, [showUomModal, uomModalItemIndex]);
 
   // Add product handler
-  const handleAddProduct = useCallback((product: POSProductInput) => {
-    // Use computeUomPrices to get correct price/cost for selected UoM
-    type UomEntry = NonNullable<POSProductInput['uoms']>[number];
-    const uom: UomEntry | undefined = product.selectedUom || product.uoms?.find((u: UomEntry) => u.isDefault) || product.uoms?.[0];
+  const handleAddProduct = useCallback(
+    (product: POSProductInput) => {
+      // Use computeUomPrices to get correct price/cost for selected UoM
+      type UomEntry = NonNullable<POSProductInput['uoms']>[number];
+      const uom: UomEntry | undefined =
+        product.selectedUom ||
+        product.uoms?.find((u: UomEntry) => u.isDefault) ||
+        product.uoms?.[0];
 
-    // Handle case where UoM already has price/cost (from inventory API)
-    if (uom && uom.price && uom.cost) {
-      // Use pre-calculated prices from inventory API
+      // Handle case where UoM already has price/cost (from inventory API)
+      if (uom && uom.price && uom.cost) {
+        // Use pre-calculated prices from inventory API
+        const newItem: LineItem = {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          uom: uom.symbol || uom.name || product.unitOfMeasure || 'PIECE',
+          quantity: 1,
+          unitPrice: uom.price,
+          costPrice: uom.cost,
+          marginPct:
+            uom.price > 0
+              ? new Decimal(uom.price).minus(uom.cost).dividedBy(uom.price).times(100).toNumber()
+              : 0,
+          subtotal: uom.price,
+          isTaxable: product.isTaxable ?? false,
+          taxRate: product.taxRate || 0,
+          availableUoms: product.uoms || [],
+          selectedUomId: uom.uomId,
+          baseCost: product.costPrice || product.averageCost || product.average_cost || 0,
+        };
+        setItems([...items, newItem]);
+        return;
+      }
+
+      // Fallback: compute prices if not provided
+      const baseCost = product.costPrice || product.averageCost || product.average_cost || 0;
+      if (baseCost === 0) {
+        alert('Product cost is not available. Please set product cost first.');
+        return;
+      }
+
+      const pricing = computeUomPrices({
+        baseCost: baseCost,
+        units: [
+          uom
+            ? { factor: uom.conversionFactor, name: uom.name, uomId: uom.uomId }
+            : { factor: 1, name: product.unitOfMeasure || 'PIECE' },
+        ],
+        defaultMultiplier: 1.2,
+        currencyDecimals: 0,
+        roundingMode: 'ROUND_HALF_UP',
+      });
+      const row = pricing.rows[0];
       const newItem: LineItem = {
         id: product.id,
         name: product.name,
         sku: product.sku,
-        uom: uom.symbol || uom.name || product.unitOfMeasure || 'PIECE',
+        uom: uom?.symbol || uom?.name || product.unitOfMeasure || 'PIECE',
         quantity: 1,
-        unitPrice: uom.price,
-        costPrice: uom.cost,
-        marginPct: uom.price > 0 ? new Decimal(uom.price).minus(uom.cost).dividedBy(uom.price).times(100).toNumber() : 0,
-        subtotal: uom.price,
+        unitPrice: row.sellingPrice,
+        costPrice: row.unitCost,
+        marginPct:
+          row.unitCost > 0
+            ? new Decimal(row.sellingPrice)
+                .minus(row.unitCost)
+                .dividedBy(row.sellingPrice)
+                .times(100)
+                .toNumber()
+            : 0,
+        subtotal: row.sellingPrice,
         isTaxable: product.isTaxable ?? false,
         taxRate: product.taxRate || 0,
         availableUoms: product.uoms || [],
-        selectedUomId: uom.uomId,
-        baseCost: product.costPrice || product.averageCost || product.average_cost || 0,
+        selectedUomId: uom?.uomId,
+        baseCost: baseCost,
       };
-      setItems([...items, newItem]);
-      return;
-    }
-
-    // Fallback: compute prices if not provided
-    const baseCost = product.costPrice || product.averageCost || product.average_cost || 0;
-    if (baseCost === 0) {
-      alert('Product cost is not available. Please set product cost first.');
-      return;
-    }
-
-    const pricing = computeUomPrices({
-      baseCost: baseCost,
-      units: [uom ? { factor: uom.conversionFactor, name: uom.name, uomId: uom.uomId } : { factor: 1, name: product.unitOfMeasure || 'PIECE' }],
-      defaultMultiplier: 1.2,
-      currencyDecimals: 0,
-      roundingMode: 'ROUND_HALF_UP',
-    });
-    const row = pricing.rows[0];
-    const newItem: LineItem = {
-      id: product.id,
-      name: product.name,
-      sku: product.sku,
-      uom: uom?.symbol || uom?.name || product.unitOfMeasure || 'PIECE',
-      quantity: 1,
-      unitPrice: row.sellingPrice,
-      costPrice: row.unitCost,
-      marginPct: row.unitCost > 0 ? new Decimal(row.sellingPrice).minus(row.unitCost).dividedBy(row.sellingPrice).times(100).toNumber() : 0,
-      subtotal: row.sellingPrice,
-      isTaxable: product.isTaxable ?? false,
-      taxRate: product.taxRate || 0,
-      availableUoms: product.uoms || [],
-      selectedUomId: uom?.uomId,
-      baseCost: baseCost,
-    };
-    // Validate with Zod
-    const validation = ProductCreateSchema.safeParse({
-      name: newItem.name,
-      sku: newItem.sku,
-      barcode: product.barcode,
-      unitOfMeasure: newItem.uom,
-      conversionFactor: uom?.conversionFactor || 1,
-      costPrice: newItem.costPrice,
-      sellingPrice: newItem.unitPrice,
-      costingMethod: product.costingMethod || 'FIFO',
-      taxRate: product.taxRate || 0,
-      pricingFormula: product.pricingFormula || '',
-      autoUpdatePrice: product.autoUpdatePrice ?? false,
-      reorderLevel: product.reorderLevel || 0,
-      trackExpiry: product.trackExpiry ?? false,
-      isActive: true,
-    });
-    if (!validation.success) {
-      console.error('Product validation failed:', validation.error.errors);
-      console.error('Product data:', newItem);
-      const errorDetails = validation.error?.errors?.map(e => `• ${e.path.join('.')}: ${e.message}`).join('\n') || 'Validation failed';
-      alert(`⚠️ Product Validation Error\n\nCannot add "${product.name}" to cart\n\nIssues found:\n${errorDetails}\n\n🔧 This product may have incomplete data.\nPlease check Inventory Management.`);
-      return;
-    }
-    setItems(prev => {
-      // If already exists with same UoM, increment quantity
-      const idx = prev.findIndex(i => i.id === newItem.id && i.selectedUomId === newItem.selectedUomId);
-      if (idx >= 0) {
-        const updated = [...prev];
-        const item = updated[idx];
-        const qty = item.quantity + 1;
-        updated[idx] = {
-          ...item,
-          quantity: qty,
-          subtotal: new Decimal(qty).times(item.unitPrice).toNumber(),
-        };
-        return updated;
+      // Validate with Zod
+      const validation = ProductCreateSchema.safeParse({
+        name: newItem.name,
+        sku: newItem.sku,
+        barcode: product.barcode,
+        unitOfMeasure: newItem.uom,
+        conversionFactor: uom?.conversionFactor || 1,
+        costPrice: newItem.costPrice,
+        sellingPrice: newItem.unitPrice,
+        costingMethod: product.costingMethod || 'FIFO',
+        taxRate: product.taxRate || 0,
+        pricingFormula: product.pricingFormula || '',
+        autoUpdatePrice: product.autoUpdatePrice ?? false,
+        reorderLevel: product.reorderLevel || 0,
+        trackExpiry: product.trackExpiry ?? false,
+        isActive: true,
+      });
+      if (!validation.success) {
+        console.error('Product validation failed:', validation.error.errors);
+        console.error('Product data:', newItem);
+        const errorDetails =
+          validation.error?.errors?.map((e) => `• ${e.path.join('.')}: ${e.message}`).join('\n') ||
+          'Validation failed';
+        alert(
+          `⚠️ Product Validation Error\n\nCannot add "${product.name}" to cart\n\nIssues found:\n${errorDetails}\n\n🔧 This product may have incomplete data.\nPlease check Inventory Management.`
+        );
+        return;
       }
-      return [...prev, newItem];
-    });
+      setItems((prev) => {
+        // If already exists with same UoM, increment quantity
+        const idx = prev.findIndex(
+          (i) => i.id === newItem.id && i.selectedUomId === newItem.selectedUomId
+        );
+        if (idx >= 0) {
+          const updated = [...prev];
+          const item = updated[idx];
+          const qty = item.quantity + 1;
+          updated[idx] = {
+            ...item,
+            quantity: qty,
+            subtotal: new Decimal(qty).times(item.unitPrice).toNumber(),
+          };
+          return updated;
+        }
+        return [...prev, newItem];
+      });
 
-    // CRITICAL: Reset and refocus search immediately to prevent double entries
-    // This ensures pressing Enter again won't add the same product twice
-    setTimeout(() => {
-      productSearchRef.current?.clearSearch();
-      productSearchRef.current?.focusSearch();
-    }, 50);
-  }, [items]); // Dependency: items (used in setItems spread)
+      // CRITICAL: Reset and refocus search immediately to prevent double entries
+      // This ensures pressing Enter again won't add the same product twice
+      setTimeout(() => {
+        productSearchRef.current?.clearSearch();
+        productSearchRef.current?.focusSearch();
+      }, 50);
+    },
+    [items]
+  ); // Dependency: items (used in setItems spread)
 
   // Handle UoM change for existing cart item
   const handleUomChange = (itemIndex: number, newUomId: string) => {
-    setItems(prev => {
+    setItems((prev) => {
       const updated = [...prev];
       const item = updated[itemIndex];
 
       if (!item.availableUoms || item.availableUoms.length === 0) return prev;
 
-      const newUom = item.availableUoms.find(u => u.uomId === newUomId);
+      const newUom = item.availableUoms.find((u) => u.uomId === newUomId);
       if (!newUom) return prev;
 
       // Update item with new UoM pricing
       const newUnitPrice = newUom.price;
       const newCostPrice = newUom.cost;
-      const newMarginPct = newUnitPrice > 0 ? new Decimal(newUnitPrice).minus(newCostPrice).dividedBy(newUnitPrice).times(100).toNumber() : 0;
+      const newMarginPct =
+        newUnitPrice > 0
+          ? new Decimal(newUnitPrice)
+              .minus(newCostPrice)
+              .dividedBy(newUnitPrice)
+              .times(100)
+              .toNumber()
+          : 0;
 
       updated[itemIndex] = {
         ...item,
@@ -984,11 +1052,15 @@ export default function POSPage() {
       originalAmount = item.subtotal;
     }
 
-    const discountAmount = discount.type === 'PERCENTAGE'
-      ? new Decimal(originalAmount).times(discount.value).dividedBy(100).toNumber()
-      : discount.value;
+    const discountAmount =
+      discount.type === 'PERCENTAGE'
+        ? new Decimal(originalAmount).times(discount.value).dividedBy(100).toNumber()
+        : discount.value;
 
-    const discountPercentage = new Decimal(discountAmount).dividedBy(originalAmount).times(100).toNumber();
+    const discountPercentage = new Decimal(discountAmount)
+      .dividedBy(originalAmount)
+      .times(100)
+      .toNumber();
 
     // Check if requires manager approval
     if (discountPercentage > userLimit) {
@@ -1011,7 +1083,9 @@ export default function POSPage() {
     if (discount.scope === 'CART') {
       // Validate discount doesn't exceed subtotal
       if (discountAmount > subtotal) {
-        toast.error(`Discount amount (${formatCurrency(discountAmount)}) cannot exceed subtotal (${formatCurrency(subtotal)})`);
+        toast.error(
+          `Discount amount (${formatCurrency(discountAmount)}) cannot exceed subtotal (${formatCurrency(subtotal)})`
+        );
         return;
       }
 
@@ -1026,13 +1100,15 @@ export default function POSPage() {
     } else if (discount.lineItemIndex !== undefined) {
       // Apply line-item discount
       const lineIdx = discount.lineItemIndex;
-      setItems(prev => {
+      setItems((prev) => {
         const updated = [...prev];
         const item = updated[lineIdx];
 
         // Validate discount doesn't exceed line item subtotal
         if (discountAmount > item.subtotal) {
-          toast.error(`Discount amount (${formatCurrency(discountAmount)}) cannot exceed item subtotal (${formatCurrency(item.subtotal)})`);
+          toast.error(
+            `Discount amount (${formatCurrency(discountAmount)}) cannot exceed item subtotal (${formatCurrency(item.subtotal)})`
+          );
           return prev;
         }
 
@@ -1072,7 +1148,7 @@ export default function POSPage() {
       setCartDiscount(null);
       toast.success('Cart discount removed');
     } else if (itemIndex !== undefined) {
-      setItems(prev => {
+      setItems((prev) => {
         const updated = [...prev];
         const item = updated[itemIndex];
         if (item.discount) {
@@ -1101,7 +1177,11 @@ export default function POSPage() {
       // CRITICAL: Always check response.data.success (not response.success)
       // Axios wraps backend response: { data: { success, data, message } }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Hold API accepts richer payload than CreateHoldOrderInput
-      const response = await (api.hold.create as unknown as (data: Record<string, unknown>) => ReturnType<typeof api.hold.create>)({
+      const response = await (
+        api.hold.create as unknown as (
+          data: Record<string, unknown>
+        ) => ReturnType<typeof api.hold.create>
+      )({
         userId: activeUser.id,
         terminalId: 'TERMINAL-001',
         customerName: selectedCustomer?.name,
@@ -1148,7 +1228,7 @@ export default function POSPage() {
         setShowDatePicker(false);
 
         // Update held orders count
-        setHeldOrdersCount(prev => prev + 1);
+        setHeldOrdersCount((prev) => prev + 1);
 
         // Focus back on search for next transaction
         setTimeout(() => productSearchRef.current?.focusSearch(), 100);
@@ -1173,32 +1253,50 @@ export default function POSPage() {
       const hold = response.data.data as HoldOrder;
 
       // Restore cart from hold
-      setItems(hold.items.map((item: HoldLineItem) => {
-        // Service/custom items have null productId — generate a unique custom ID
-        const isServiceItem = !item.productId || item.productType === 'service';
-        const itemId = isServiceItem
-          ? `custom_svc_${item.productName?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-          : item.productId!;
+      setItems(
+        hold.items.map((item: HoldLineItem) => {
+          // Service/custom items have null productId — generate a unique custom ID
+          const isServiceItem = !item.productId || item.productType === 'service';
+          const itemId = isServiceItem
+            ? `custom_svc_${item.productName?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+            : item.productId!;
 
-        return {
-          id: itemId,
-          name: item.productName,
-          sku: item.productSku,
-          uom: item.uomName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          costPrice: item.costPrice,
-          marginPct: item.unitPrice > 0 ? new Decimal(item.unitPrice).minus(item.costPrice).dividedBy(item.unitPrice).times(100).toNumber() : 0,
-          subtotal: item.subtotal,
-          isTaxable: item.isTaxable,
-          taxRate: item.taxRate,
-          selectedUomId: item.uomId,
-          discount: typeof item.discountAmount === 'number' && item.discountAmount > 0
-            ? { type: 'FIXED_AMOUNT' as DiscountType, value: item.discountAmount, amount: item.discountAmount, reason: '' }
-            : undefined,
-          productType: (item.productType || 'inventory') as 'inventory' | 'consumable' | 'service',
-        };
-      }));
+          return {
+            id: itemId,
+            name: item.productName,
+            sku: item.productSku,
+            uom: item.uomName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            costPrice: item.costPrice,
+            marginPct:
+              item.unitPrice > 0
+                ? new Decimal(item.unitPrice)
+                    .minus(item.costPrice)
+                    .dividedBy(item.unitPrice)
+                    .times(100)
+                    .toNumber()
+                : 0,
+            subtotal: item.subtotal,
+            isTaxable: item.isTaxable,
+            taxRate: item.taxRate,
+            selectedUomId: item.uomId,
+            discount:
+              typeof item.discountAmount === 'number' && item.discountAmount > 0
+                ? {
+                    type: 'FIXED_AMOUNT' as DiscountType,
+                    value: item.discountAmount,
+                    amount: item.discountAmount,
+                    reason: '',
+                  }
+                : undefined,
+            productType: (item.productType || 'inventory') as
+              | 'inventory'
+              | 'consumable'
+              | 'service',
+          };
+        })
+      );
 
       if (hold.customerName) {
         toast(`Customer: ${hold.customerName}`, {
@@ -1211,7 +1309,7 @@ export default function POSPage() {
       await api.hold.delete(hold.id);
 
       // Update held orders count
-      setHeldOrdersCount(prev => Math.max(0, prev - 1));
+      setHeldOrdersCount((prev) => Math.max(0, prev - 1));
 
       toast.success(`Resumed hold: ${hold.holdNumber}`);
       setShowResumeDialog(false);
@@ -1268,12 +1366,12 @@ export default function POSPage() {
       setIsSavingQuote(true);
 
       // Convert cart items to quote items
-      const quoteItems: QuickQuoteItemInput[] = items.map(item => {
+      const quoteItems: QuickQuoteItemInput[] = items.map((item) => {
         // Service/custom items have no real product in DB — send null productId
         const isServiceOrCustom = item.productType === 'service' || item.id.startsWith('custom_');
         return {
           productId: isServiceOrCustom ? null : item.id,
-          itemType: isServiceOrCustom ? 'service' as const : 'product' as const,
+          itemType: isServiceOrCustom ? ('service' as const) : ('product' as const),
           sku: item.sku,
           description: item.name,
           quantity: item.quantity,
@@ -1305,7 +1403,7 @@ export default function POSPage() {
       setShowQuoteSuccessDialog(true);
 
       // Update quotes count
-      setQuotesCount(prev => prev + 1);
+      setQuotesCount((prev) => prev + 1);
     } catch (error: unknown) {
       console.error('Save quote error:', error);
       toast.error(getAxiosErrorMessage(error, 'Failed to save quote'));
@@ -1376,11 +1474,12 @@ export default function POSPage() {
       // Load quote items into cart
       const cartItems: LineItem[] = itemsToLoad.map((item: QuotationItem) => {
         // Service/custom items have null productId — generate a unique custom ID
-        const isServiceItem = !item.productId || item.itemType === 'service' || item.itemType === 'custom';
+        const isServiceItem =
+          !item.productId || item.itemType === 'service' || item.itemType === 'custom';
         const itemId = isServiceItem
           ? `custom_svc_${item.description?.replace(/\s+/g, '_').toLowerCase() || 'item'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
           : item.productId!;
-        const productType = isServiceItem ? 'service' : (item.productType || 'inventory');
+        const productType = isServiceItem ? 'service' : item.productType || 'inventory';
 
         return {
           id: itemId,
@@ -1413,7 +1512,10 @@ export default function POSPage() {
 
       // Set customer if available - ENHANCED with better error handling and logging
       if (quotation.customerId) {
-        console.log('📋 Loading customer for quote:', { customerId: quotation.customerId, customerName: quotation.customerName });
+        console.log('📋 Loading customer for quote:', {
+          customerId: quotation.customerId,
+          customerName: quotation.customerName,
+        });
         // Fetch customer details using shared api client
         try {
           const customerResponse = await api.customers.getById(quotation.customerId);
@@ -1481,11 +1583,11 @@ export default function POSPage() {
   const handleQuantityChange = (itemIndex: number, newQuantity: number) => {
     if (newQuantity <= 0) {
       // Remove item
-      setItems(prev => prev.filter((_, idx) => idx !== itemIndex));
+      setItems((prev) => prev.filter((_, idx) => idx !== itemIndex));
       return;
     }
 
-    setItems(prev => {
+    setItems((prev) => {
       const updated = [...prev];
       const item = updated[itemIndex];
       updated[itemIndex] = {
@@ -1517,23 +1619,25 @@ export default function POSPage() {
   }, 0);
 
   const grandTotal = new Decimal(subtotalAfterDiscount).plus(tax).toNumber();
-  const avgMargin = items.length ? items.reduce((sum, i) => new Decimal(sum).plus(i.marginPct).toNumber(), 0) / items.length : 0;
+  const avgMargin = items.length
+    ? items.reduce((sum, i) => new Decimal(sum).plus(i.marginPct).toNumber(), 0) / items.length
+    : 0;
 
   // Handler to add a service/non-inventory item to the cart
   const handleAddServiceItem = useCallback((serviceItem: LineItem) => {
-    setItems(prev => [...prev, serviceItem]);
+    setItems((prev) => [...prev, serviceItem]);
     toast.success(`Added: ${serviceItem.name}`);
   }, []);
 
   // Service items detection and revenue calculation
   const serviceItemsCount = useMemo(() => {
-    return items.filter(item => item.productType === 'service').length;
+    return items.filter((item) => item.productType === 'service').length;
   }, [items]);
 
   const serviceRevenue = useMemo(() => {
     if (serviceItemsCount === 0) return 0;
     return items
-      .filter(item => item.productType === 'service')
+      .filter((item) => item.productType === 'service')
       .reduce((sum, item) => new Decimal(sum).plus(item.subtotal).toNumber(), 0);
   }, [items, serviceItemsCount]);
 
@@ -1556,7 +1660,7 @@ export default function POSPage() {
 
   // Check if all payments are cash (for overpayment allowance)
   const hasCashPayment = useMemo(() => {
-    return paymentLines.some(line => line.paymentMethod === 'CASH');
+    return paymentLines.some((line) => line.paymentMethod === 'CASH');
   }, [paymentLines]);
 
   // Can complete if: paid exact amount OR overpaid with cash OR credit with remaining balance
@@ -1564,7 +1668,7 @@ export default function POSPage() {
     if (paymentLines.length === 0) return false;
 
     // Check if any payment is CREDIT
-    const hasCreditPayment = paymentLines.some(line => line.paymentMethod === 'CREDIT');
+    const hasCreditPayment = paymentLines.some((line) => line.paymentMethod === 'CREDIT');
 
     console.log('🔍 canCompleteSale check:', {
       paymentLinesCount: paymentLines.length,
@@ -1572,7 +1676,7 @@ export default function POSPage() {
       selectedCustomerId: selectedCustomer?.id,
       selectedCustomerName: selectedCustomer?.name,
       remainingBalance,
-      hasCashPayment
+      hasCashPayment,
     });
 
     // Exact payment (balance = 0)
@@ -1597,7 +1701,12 @@ export default function POSPage() {
     if (showPaymentModal) {
       console.log('💳 Payment Modal Opened:', {
         itemsCount: items.length,
-        items: items.map(i => ({ name: i.name, qty: i.quantity, price: i.unitPrice, subtotal: i.subtotal })),
+        items: items.map((i) => ({
+          name: i.name,
+          qty: i.quantity,
+          price: i.unitPrice,
+          subtotal: i.subtotal,
+        })),
         subtotal,
         cartDiscountAmount,
         tax,
@@ -1605,10 +1714,18 @@ export default function POSPage() {
         paymentLines: paymentLines.length,
         totalPaid,
         remainingBalance,
-        canCompleteSale
+        canCompleteSale,
       });
     }
-  }, [showPaymentModal, items.length, grandTotal, paymentLines.length, totalPaid, remainingBalance, canCompleteSale]);
+  }, [
+    showPaymentModal,
+    items.length,
+    grandTotal,
+    paymentLines.length,
+    totalPaid,
+    remainingBalance,
+    canCompleteSale,
+  ]);
 
   // Add payment line handler
   const handleAddPayment = () => {
@@ -1616,12 +1733,16 @@ export default function POSPage() {
 
     // Validation - allow zero amount for CREDIT with customer (full credit sale)
     if (!paymentAmount || isNaN(amount)) {
-      alert('⚠️ Invalid Payment Amount\n\nPlease enter a valid number.\n\nExamples:\n• 50000 (for UGX 50,000)\n• 125000 (for UGX 125,000)\n• 1000.50 (for UGX 1,000.50)\n\nTip: Enter numbers only, no currency symbols.');
+      alert(
+        '⚠️ Invalid Payment Amount\n\nPlease enter a valid number.\n\nExamples:\n• 50000 (for UGX 50,000)\n• 125000 (for UGX 125,000)\n• 1000.50 (for UGX 1,000.50)\n\nTip: Enter numbers only, no currency symbols.'
+      );
       return;
     }
 
     if (amount < 0) {
-      alert('⚠️ Negative Amount Not Allowed\n\nPayment amount cannot be negative.\n\nPlease enter a positive number.');
+      alert(
+        '⚠️ Negative Amount Not Allowed\n\nPayment amount cannot be negative.\n\nPlease enter a positive number.'
+      );
       return;
     }
 
@@ -1629,26 +1750,40 @@ export default function POSPage() {
     if (amount === 0 && paymentMethod === 'CREDIT' && selectedCustomer) {
       // Valid - full credit sale
     } else if (amount <= 0) {
-      alert('⚠️ Zero Amount Not Allowed\n\nPayment amount must be greater than zero.\n\nCurrent remaining balance: ' + formatCurrency(remainingBalance));
+      alert(
+        '⚠️ Zero Amount Not Allowed\n\nPayment amount must be greater than zero.\n\nCurrent remaining balance: ' +
+          formatCurrency(remainingBalance)
+      );
       return;
     }
 
     // Allow overpayment ONLY for CASH (to give change)
     // For other payment methods, amount must not exceed remaining balance
-    if (paymentMethod !== 'CASH' && paymentMethod !== 'CREDIT' && paymentMethod !== 'DEPOSIT' && amount > remainingBalance + 0.01) {
-      alert(`⚠️ Payment Exceeds Balance\n\n${paymentMethod} Payment: ${formatCurrency(amount)}\nRemaining Balance: ${formatCurrency(remainingBalance)}\nOverpayment: ${formatCurrency(amount - remainingBalance)}\n\n❌ Overpayment is only allowed with CASH\n(to give change to customer)\n\n💡 Options:\n1. Enter ${formatCurrency(remainingBalance)} to pay exact amount\n2. Switch to CASH if customer is paying more\n3. Split payment: pay ${formatCurrency(remainingBalance)} now`);
+    if (
+      paymentMethod !== 'CASH' &&
+      paymentMethod !== 'CREDIT' &&
+      paymentMethod !== 'DEPOSIT' &&
+      amount > remainingBalance + 0.01
+    ) {
+      alert(
+        `⚠️ Payment Exceeds Balance\n\n${paymentMethod} Payment: ${formatCurrency(amount)}\nRemaining Balance: ${formatCurrency(remainingBalance)}\nOverpayment: ${formatCurrency(amount - remainingBalance)}\n\n❌ Overpayment is only allowed with CASH\n(to give change to customer)\n\n💡 Options:\n1. Enter ${formatCurrency(remainingBalance)} to pay exact amount\n2. Switch to CASH if customer is paying more\n3. Split payment: pay ${formatCurrency(remainingBalance)} now`
+      );
       return;
     }
 
     if (paymentMethod === 'CREDIT' && !selectedCustomer) {
-      alert('⚠️ Customer Required for Credit\n\nCredit payments require a customer to be selected.\n\n📋 How to add customer:\n1. Use customer search at top of screen\n2. Type customer name\n3. Select from dropdown\n4. Then add credit payment\n\n💡 Tip: Credit payments create invoices for later payment.');
+      alert(
+        '⚠️ Customer Required for Credit\n\nCredit payments require a customer to be selected.\n\n📋 How to add customer:\n1. Use customer search at top of screen\n2. Type customer name\n3. Select from dropdown\n4. Then add credit payment\n\n💡 Tip: Credit payments create invoices for later payment.'
+      );
       return;
     }
 
     // DEPOSIT validation - must have customer with available deposit balance
     if (paymentMethod === 'DEPOSIT') {
       if (!selectedCustomer) {
-        alert('⚠️ Customer Required for Deposit\n\nDeposit payments require a customer to be selected.');
+        alert(
+          '⚠️ Customer Required for Deposit\n\nDeposit payments require a customer to be selected.'
+        );
         return;
       }
       if (customerDepositBalance <= 0) {
@@ -1657,23 +1792,34 @@ export default function POSPage() {
       }
       // Calculate already applied deposits in this transaction
       const appliedDeposits = paymentLines
-        .filter(line => line.paymentMethod === 'DEPOSIT')
+        .filter((line) => line.paymentMethod === 'DEPOSIT')
         .reduce((sum, line) => new Decimal(sum).plus(line.amount).toNumber(), 0);
-      const availableDeposit = new Decimal(customerDepositBalance).minus(appliedDeposits).toNumber();
+      const availableDeposit = new Decimal(customerDepositBalance)
+        .minus(appliedDeposits)
+        .toNumber();
 
       if (amount > availableDeposit + 0.01) {
-        alert(`⚠️ Insufficient Deposit Balance\n\nRequested: ${formatCurrency(amount)}\nAvailable: ${formatCurrency(availableDeposit)}\n\n💡 Tip: Enter ${formatCurrency(Math.min(availableDeposit, remainingBalance))} to use maximum available deposit.`);
+        alert(
+          `⚠️ Insufficient Deposit Balance\n\nRequested: ${formatCurrency(amount)}\nAvailable: ${formatCurrency(availableDeposit)}\n\n💡 Tip: Enter ${formatCurrency(Math.min(availableDeposit, remainingBalance))} to use maximum available deposit.`
+        );
         return;
       }
     }
 
     // Optional: Warn about missing reference for card/mobile money
-    if ((paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY') && !paymentReference.trim()) {
-      const proceed = confirm(`ℹ️ Reference Number Recommended\n\nYou haven't entered a reference number for this ${paymentMethod} payment.\n\n💡 Why reference numbers matter:\n• Helps reconcile payments\n• Resolves disputes\n• Required for audits\n• Tracks transactions\n\nDo you want to continue without a reference?`);
+    if (
+      (paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY') &&
+      !paymentReference.trim()
+    ) {
+      const proceed = confirm(
+        `ℹ️ Reference Number Recommended\n\nYou haven't entered a reference number for this ${paymentMethod} payment.\n\n💡 Why reference numbers matter:\n• Helps reconcile payments\n• Resolves disputes\n• Required for audits\n• Tracks transactions\n\nDo you want to continue without a reference?`
+      );
       if (!proceed) {
         // Focus on reference input
         setTimeout(() => {
-          const refInput = document.querySelector('input[placeholder="Transaction reference"]') as HTMLInputElement;
+          const refInput = document.querySelector(
+            'input[placeholder="Transaction reference"]'
+          ) as HTMLInputElement;
           refInput?.focus();
         }, 100);
         return;
@@ -1699,7 +1845,9 @@ export default function POSPage() {
     if (remainingAfter <= 0.01) {
       // Payment complete or overpaid
       if (remainingAfter < -0.01 && paymentMethod === 'CASH') {
-        console.log(`✅ Payment added! Change to give: ${formatCurrency(Math.abs(remainingAfter))}`);
+        console.log(
+          `✅ Payment added! Change to give: ${formatCurrency(Math.abs(remainingAfter))}`
+        );
       } else {
         console.log('✅ Payment complete! Ready to finalize sale.');
       }
@@ -1710,7 +1858,7 @@ export default function POSPage() {
 
   // Remove payment line handler
   const handleRemovePaymentLine = (id: string) => {
-    setPaymentLines(paymentLines.filter(line => line.id !== id));
+    setPaymentLines(paymentLines.filter((line) => line.id !== id));
   };
 
   // Quick fill remaining balance
@@ -1797,7 +1945,9 @@ export default function POSPage() {
     if (items.length === 0) {
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
-      alert('❌ Cannot complete sale\n\nCart is empty. Please add items before completing the sale.');
+      alert(
+        '❌ Cannot complete sale\n\nCart is empty. Please add items before completing the sale.'
+      );
       return;
     }
 
@@ -1805,7 +1955,9 @@ export default function POSPage() {
     if (grandTotal < 0) {
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
-      alert(`❌ Cannot Complete Sale\n\n💰 Total Amount is Negative\nCurrent total: ${formatCurrency(grandTotal)}\n\n⚠️ The discount amount is too large!\n\nTo fix this:\n1. Reduce the discount amount\n2. Current subtotal: ${formatCurrency(subtotal)}\n3. Current discount: ${formatCurrency(cartDiscountAmount)}\n4. Discount should be less than subtotal\n\nTip: Close payment modal and adjust discount in cart.`);
+      alert(
+        `❌ Cannot Complete Sale\n\n💰 Total Amount is Negative\nCurrent total: ${formatCurrency(grandTotal)}\n\n⚠️ The discount amount is too large!\n\nTo fix this:\n1. Reduce the discount amount\n2. Current subtotal: ${formatCurrency(subtotal)}\n3. Current discount: ${formatCurrency(cartDiscountAmount)}\n4. Discount should be less than subtotal\n\nTip: Close payment modal and adjust discount in cart.`
+      );
       return;
     }
 
@@ -1813,13 +1965,15 @@ export default function POSPage() {
     if (paymentLines.length === 0) {
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
-      alert(`❌ Cannot Complete Sale\n\n💳 No Payment Added\n\nTotal to pay: ${formatCurrency(grandTotal)}\n\nPlease add payment:\n\n1. Select payment method (Cash/Card/Mobile Money)\n2. Enter amount\n3. Click "Add Payment"\n4. Then click "Complete Sale"\n\n💡 Tip: You can split payments across multiple methods!`);
+      alert(
+        `❌ Cannot Complete Sale\n\n💳 No Payment Added\n\nTotal to pay: ${formatCurrency(grandTotal)}\n\nPlease add payment:\n\n1. Select payment method (Cash/Card/Mobile Money)\n2. Enter amount\n3. Click "Add Payment"\n4. Then click "Complete Sale"\n\n💡 Tip: You can split payments across multiple methods!`
+      );
       return;
     }
 
     // BUSINESS LOGIC: Auto-calculate credit for unpaid balance when customer is selected
     // If customer selected and there's remaining balance, automatically create CREDIT payment line
-    const hasCashPayment = paymentLines.some(line => line.paymentMethod === 'CASH');
+    const hasCashPayment = paymentLines.some((line) => line.paymentMethod === 'CASH');
     let finalPaymentLines = [...paymentLines];
     let finalRemainingBalance = remainingBalance; // Track updated balance
 
@@ -1846,7 +2000,9 @@ export default function POSPage() {
       // No customer and unpaid balance = cannot complete sale
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
-      alert(`❌ Cannot Complete Sale\n\n💰 Unpaid Balance Remaining\n\nTotal: ${formatCurrency(grandTotal)}\nPaid: ${formatCurrency(new Decimal(grandTotal).minus(remainingBalance).toNumber())}\nBalance: ${formatCurrency(remainingBalance)}\n\n📋 To complete this sale:\n\nOption 1: Add More Payments\n• Click payment method button\n• Enter ${formatCurrency(remainingBalance)}\n• Add to payments\n\nOption 2: Create Invoice (Recommended)\n• Select a customer from dropdown\n• System will automatically:\n  - Create invoice for balance\n  - Complete the sale\n  - Customer pays later\n\n💡 Tip: Use customer search at top of screen`);
+      alert(
+        `❌ Cannot Complete Sale\n\n💰 Unpaid Balance Remaining\n\nTotal: ${formatCurrency(grandTotal)}\nPaid: ${formatCurrency(new Decimal(grandTotal).minus(remainingBalance).toNumber())}\nBalance: ${formatCurrency(remainingBalance)}\n\n📋 To complete this sale:\n\nOption 1: Add More Payments\n• Click payment method button\n• Enter ${formatCurrency(remainingBalance)}\n• Add to payments\n\nOption 2: Create Invoice (Recommended)\n• Select a customer from dropdown\n• System will automatically:\n  - Create invoice for balance\n  - Complete the sale\n  - Customer pays later\n\n💡 Tip: Use customer search at top of screen`
+      );
       return;
     }
 
@@ -1878,20 +2034,26 @@ export default function POSPage() {
       subtotalAfterDiscount,
       tax,
       grandTotal,
-      calculation: `${subtotalAfterDiscount} + ${tax} = ${grandTotal}`
+      calculation: `${subtotalAfterDiscount} + ${tax} = ${grandTotal}`,
     });
 
     // Strip temp_ customer IDs — they're placeholders for quotation customers with no DB record
-    const resolvedCustomerId = selectedCustomer?.id?.startsWith('temp_') ? undefined : selectedCustomer?.id;
+    const resolvedCustomerId = selectedCustomer?.id?.startsWith('temp_')
+      ? undefined
+      : selectedCustomer?.id;
 
     const saleData = {
       customerId: resolvedCustomerId,
       quoteId: loadedQuoteId || undefined, // Pass quote ID for auto-conversion
       cashRegisterSessionId: currentSession?.id, // Link to cash register for drawer tracking
-      lineItems: items.map(item => {
-        const itemTax = item.isTaxable && item.taxRate > 0
-          ? new Decimal(item.subtotal).times(item.taxRate / 100).toDecimalPlaces(2).toNumber()
-          : 0;
+      lineItems: items.map((item) => {
+        const itemTax =
+          item.isTaxable && item.taxRate > 0
+            ? new Decimal(item.subtotal)
+                .times(item.taxRate / 100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0;
 
         return {
           productId: item.id,
@@ -1912,7 +2074,7 @@ export default function POSPage() {
       taxAmount: tax,
       totalAmount: grandTotal,
       saleDate: formattedSaleDate,
-      paymentLines: finalPaymentLines.map(line => ({
+      paymentLines: finalPaymentLines.map((line) => ({
         paymentMethod: line.paymentMethod,
         amount: line.amount,
         reference: line.reference,
@@ -1931,7 +2093,7 @@ export default function POSPage() {
       let errorMessages = 'Validation failed';
       if (validation.error && 'errors' in validation.error) {
         errorMessages = validation.error.errors
-          .map(e => {
+          .map((e) => {
             const field = e.path.join('.');
             const msg = e.message;
             // Add helpful context for common errors
@@ -1945,7 +2107,9 @@ export default function POSPage() {
         errorMessages = (validation.error as { message: string }).message;
       }
 
-      alert(`❌ Sale Validation Failed\n\nCannot complete this sale due to data issues:\n\n${errorMessages}\n\n🔧 Please check:\n• All products have valid prices\n• Payment amounts are positive\n• No negative quantities\n\nIf error persists, contact support.`);
+      alert(
+        `❌ Sale Validation Failed\n\nCannot complete this sale due to data issues:\n\n${errorMessages}\n\n🔧 Please check:\n• All products have valid prices\n• Payment amounts are positive\n• No negative quantities\n\nIf error persists, contact support.`
+      );
       console.error('🛑 VALIDATION STOPPED SALE');
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
@@ -1960,7 +2124,9 @@ export default function POSPage() {
         const offlineId = saveSaleOffline(saleData as unknown as OfflineSaleData);
         toast.success(`Sale saved offline (${offlineId}). Will sync when online.`);
       } catch (stockErr: unknown) {
-        toast.error(stockErr instanceof Error ? stockErr.message : 'Insufficient stock for offline sale');
+        toast.error(
+          stockErr instanceof Error ? stockErr.message : 'Insufficient stock for offline sale'
+        );
         isSubmittingRef.current = false;
         setIsProcessingSale(false);
         return;
@@ -2000,10 +2166,15 @@ export default function POSPage() {
         const customerForInvoice = selectedCustomer;
         // Use finalPaymentLines (not paymentLines) to check for credit payment
         // finalPaymentLines is the actual payments sent to backend (includes auto-credit)
-        const hasCreditForInvoice = finalPaymentLines.some(line => line.paymentMethod === 'CREDIT');
+        const hasCreditForInvoice = finalPaymentLines.some(
+          (line) => line.paymentMethod === 'CREDIT'
+        );
 
         // Prepare receipt data with payment lines (use finalPaymentLines which includes auto-credit)
-        const itemDiscountTotal = items.reduce((sum, item) => new Decimal(sum).plus(item.discount?.amount || 0).toNumber(), 0);
+        const itemDiscountTotal = items.reduce(
+          (sum, item) => new Decimal(sum).plus(item.discount?.amount || 0).toNumber(),
+          0
+        );
         setReceiptData({
           saleNumber: sale.saleNumber || sale.sale_number || '',
           saleDate: sale.saleDate || sale.sale_date || new Date().toISOString(),
@@ -2012,7 +2183,7 @@ export default function POSPage() {
           taxAmount: tax,
           totalAmount: sale.totalAmount || sale.total_amount || grandTotal,
           cashierName: currentUser?.fullName,
-          items: items.map(item => ({
+          items: items.map((item) => ({
             name: item.name,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
@@ -2020,7 +2191,7 @@ export default function POSPage() {
             uom: item.uom,
             discountAmount: item.discount?.amount,
           })),
-          payments: finalPaymentLines.map(line => ({
+          payments: finalPaymentLines.map((line) => ({
             method: line.paymentMethod,
             amount: line.amount,
             reference: line.reference,
@@ -2059,7 +2230,10 @@ export default function POSPage() {
         console.log('🔍 Checking invoice creation conditions:', {
           customerForInvoice: customerForInvoice?.name,
           hasCreditForInvoice,
-          finalPaymentLines: finalPaymentLines.map(p => ({ method: p.paymentMethod, amount: p.amount })),
+          finalPaymentLines: finalPaymentLines.map((p) => ({
+            method: p.paymentMethod,
+            amount: p.amount,
+          })),
         });
 
         // NOTE: Backend automatically creates invoices for credit sales inside the sale transaction
@@ -2092,21 +2266,77 @@ export default function POSPage() {
       const axErr = error as AxiosLikeError;
       console.error('Error response:', axErr.response?.data);
 
-      const errorMsg = axErr.response?.data?.error || axErr.message || 'Unknown error';
+      const respData = axErr.response?.data;
+      const errorMsg = respData?.error || axErr.message || 'Unknown error';
+      const errorCode = respData?.error_code;
+      const details = respData?.details as Record<string, unknown> | undefined;
       const statusCode = axErr.response?.status;
 
       let userMessage = '❌ Sale Creation Failed\n\n';
 
       if (statusCode === 400) {
-        userMessage += `🔍 Invalid Data\n${errorMsg}\n\n💡 Check:\n• All payment amounts are valid\n• Products have correct prices\n• Customer information is complete`;
+        if (errorCode === 'ERR_STOCK_001' || errorCode === 'ERR_EXPIRY_001') {
+          const product = String(details?.product ?? 'Unknown');
+          const requested = Number(details?.requested ?? 0);
+          const available = Number(details?.available ?? 0);
+          const shortBy = Number(details?.shortBy ?? 0);
+          const expiryDate = details?.expiryDate ? String(details.expiryDate) : null;
+          const minDays = details?.minDaysBeforeExpiry ? Number(details.minDaysBeforeExpiry) : null;
+
+          userMessage += `📦 Insufficient Stock\n\n`;
+          userMessage += `Product:  ${product}\n`;
+          userMessage += `Requested:  ${requested} units\n`;
+          userMessage += `Available:  ${available} units\n`;
+          userMessage += `Short by:  ${shortBy} units\n`;
+
+          if (expiryDate && minDays) {
+            userMessage += `\n⚠️ Expiry Rule Active\n`;
+            userMessage += `Nearest batch expires: ${expiryDate}\n`;
+            userMessage += `Minimum ${minDays} days before expiry required to sell.\n`;
+          } else if (expiryDate) {
+            userMessage += `\nNearest batch expires: ${expiryDate}\n`;
+          }
+
+          userMessage += `\n💡 What you can do:\n`;
+          if (minDays) {
+            userMessage += `• Go to Inventory → Batch Management to check batch expiry dates\n`;
+            userMessage += `• Lower the "Min Days Before Expiry" setting on this product\n`;
+          }
+          userMessage += `• Reduce the quantity in the cart\n`;
+          userMessage += `• Receive new stock via Purchase Order → Goods Receipt`;
+        } else if (errorCode === 'ERR_PAYMENT_001') {
+          const total = Number(details?.totalAmount ?? 0);
+          const received = Number(details?.amountReceived ?? 0);
+          const shortfall = Number(details?.shortfall ?? 0);
+
+          userMessage += `💰 Insufficient Payment\n\n`;
+          userMessage += `Sale Total:  ${total.toFixed(2)}\n`;
+          userMessage += `Amount Received:  ${received.toFixed(2)}\n`;
+          userMessage += `Short by:  ${shortfall.toFixed(2)}\n`;
+          userMessage += `\n💡 What you can do:\n`;
+          userMessage += `• Increase the payment amount\n`;
+          userMessage += `• Add another payment method (split payment)\n`;
+          userMessage += `• Change to Credit sale if customer has credit terms`;
+        } else if (errorCode === 'ERR_SALE_002' || errorCode === 'ERR_SALE_003') {
+          userMessage += `👤 Customer Required\n\n${errorMsg}\n\n💡 What you can do:\n• Select a customer before completing the sale\n• Search for an existing customer or create a new one`;
+        } else if (errorCode === 'ERR_PAYMENT_002') {
+          userMessage += `💰 Invalid Payment Amount\n\n${errorMsg}\n\n💡 Enter a valid positive payment amount.`;
+        } else if (errorCode === 'ERR_PAYMENT_003') {
+          userMessage += `💰 Overpayment Not Allowed\n\n${errorMsg}\n\n💡 For credit sales, payment cannot exceed the total. Reduce the payment amount.`;
+        } else if (errorCode?.startsWith('ERR_SALE_') || errorCode?.startsWith('ERR_PAYMENT_')) {
+          userMessage += `⚠️ Sale Error [${errorCode}]\n\n${errorMsg}`;
+        } else {
+          // Fallback for other 400 errors without a known error_code
+          userMessage += `🔍 Invalid Data\n${errorMsg}\n\n💡 Check:\n• All payment amounts are valid\n• Products have correct prices\n• Customer information is complete`;
+        }
       } else if (statusCode === 401 || statusCode === 403) {
         userMessage += `🔐 Authentication Error\n${errorMsg}\n\n💡 Please:\n• Log out and log back in\n• Check your permissions\n• Contact administrator if issue persists`;
       } else if (statusCode === 404) {
         userMessage += `🔍 Not Found\n${errorMsg}\n\n💡 This may indicate:\n• Product was deleted\n• Customer was deleted\n• Database connection issue`;
       } else if (statusCode === 409) {
         userMessage += `⚠️ Conflict\n${errorMsg}\n\n💡 This may indicate:\n• Duplicate sale number\n• Inventory already sold\n• Please try again`;
-      } else if (statusCode && (statusCode === 500 || statusCode >= 500)) {
-        userMessage += `🔧 Server Error\n${errorMsg}\n\n💡 Server is having issues:\n• Sale was NOT saved\n• Please try again\n• If offline, sale will sync when online\n• Contact support if persists`;
+      } else if (statusCode && statusCode >= 500) {
+        userMessage += `🔧 Server Error [${errorCode || statusCode}]\n${errorMsg}\n\n💡 Server is having issues:\n• Sale was NOT saved\n• Please try again\n• If offline, sale will sync when online\n• Contact support if persists`;
       } else if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
         userMessage += `📡 Network Error\n\nNo internet connection detected.\n\n💡 Options:\n• Check your internet connection\n• Sale will be saved offline\n• It will sync when connection restored\n\nDon't worry - no data is lost!`;
       } else {
@@ -2128,7 +2358,9 @@ export default function POSPage() {
         <div className="flex items-center gap-2 sm:gap-4">
           {/* Cash Register Status */}
           <RegisterStatusIndicator compact />
-          <span className={`text-xs px-2 py-1 rounded ${isOnline ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+          <span
+            className={`text-xs px-2 py-1 rounded ${isOnline ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+          >
             {isOnline ? 'Online' : 'Offline'}
           </span>
           {pendingCount > 0 && (
@@ -2158,7 +2390,9 @@ export default function POSPage() {
           </div>
           <div className="flex items-center gap-3 text-xs">
             {pendingCount > 0 && (
-              <span className="bg-amber-600 px-2 py-0.5 rounded">{pendingCount} sale(s) queued</span>
+              <span className="bg-amber-600 px-2 py-0.5 rounded">
+                {pendingCount} sale(s) queued
+              </span>
             )}
             <span className="opacity-75">Credit, deposit &amp; discount approval disabled</span>
           </div>
@@ -2173,7 +2407,11 @@ export default function POSPage() {
       >
         {/* Left: Product search - Full width on mobile, 1/4 on desktop */}
         <section className="w-full lg:w-1/4 lg:min-w-[280px] bg-white border-b lg:border-b-0 lg:border-r p-3 sm:p-4 flex flex-col max-h-[30vh] lg:max-h-none overflow-y-auto lg:overflow-y-visible">
-          <POSProductSearch ref={productSearchRef} onSelect={handleAddProduct} isOnline={isOnline} />
+          <POSProductSearch
+            ref={productSearchRef}
+            onSelect={handleAddProduct}
+            isOnline={isOnline}
+          />
         </section>
 
         {/* Center: Line items - Scrollable cart */}
@@ -2193,14 +2431,21 @@ export default function POSPage() {
               </thead>
               <tbody>
                 {items.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-8 text-gray-400">No items in cart</td></tr>
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 text-gray-400">
+                      No items in cart
+                    </td>
+                  </tr>
                 ) : (
                   items.map((item, idx) => (
                     <tr
                       key={`${item.id}-${item.selectedUomId}-${idx}`}
-                      ref={(el) => { cartRowRefs.current[idx] = el; }}
-                      className={`border-b hover:bg-gray-50 transition-colors ${idx === focusedCartIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
-                        }`}
+                      ref={(el) => {
+                        cartRowRefs.current[idx] = el;
+                      }}
+                      className={`border-b hover:bg-gray-50 transition-colors ${
+                        idx === focusedCartIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
+                      }`}
                       onClick={() => setFocusedCartIndex(idx)}
                     >
                       <td className="px-2 py-2">
@@ -2208,7 +2453,9 @@ export default function POSPage() {
                           <div>
                             <div className="font-medium text-gray-900">{item.name}</div>
                             <div className="text-xs text-gray-500">SKU: {item.sku}</div>
-                            <div className="text-xs text-gray-500 sm:hidden">Margin: {item.marginPct.toFixed(1)}%</div>
+                            <div className="text-xs text-gray-500 sm:hidden">
+                              Margin: {item.marginPct.toFixed(1)}%
+                            </div>
                           </div>
                           {item.productType === 'service' && <ServiceBadge />}
                         </div>
@@ -2222,7 +2469,7 @@ export default function POSPage() {
                             className="border rounded px-1 sm:px-2 py-1 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 w-full"
                             aria-label={`Unit of measure for ${item.name}`}
                           >
-                            {item.availableUoms.map(u => (
+                            {item.availableUoms.map((u) => (
                               <option key={u.uomId} value={u.uomId}>
                                 {u.symbol || u.name}
                               </option>
@@ -2238,26 +2485,45 @@ export default function POSPage() {
                           min="0"
                           step="1"
                           value={item.quantity}
-                          onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
+                          onChange={(e) =>
+                            handleQuantityChange(idx, parseFloat(e.target.value) || 0)
+                          }
                           onFocus={() => setFocusedCartIndex(idx)}
                           className="w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
                           aria-label={`Quantity for ${item.name}`}
                         />
                       </td>
-                      <td className="px-2 py-2 text-right text-xs sm:text-sm">{formatCurrency(item.unitPrice)}</td>
+                      <td className="px-2 py-2 text-right text-xs sm:text-sm">
+                        {formatCurrency(item.unitPrice)}
+                      </td>
                       <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">
                         {item.discount ? (
                           <div>
-                            <span className="line-through text-gray-400 text-[10px]">{formatCurrency(item.quantity * item.unitPrice)}</span>
+                            <span className="line-through text-gray-400 text-[10px]">
+                              {formatCurrency(item.quantity * item.unitPrice)}
+                            </span>
                             <br />
                             <span>{formatCurrency(item.subtotal)}</span>
-                            <span className="text-red-500 text-[10px] ml-1">(-{formatCurrency(item.discount.amount)})</span>
+                            <span className="text-red-500 text-[10px] ml-1">
+                              (-{formatCurrency(item.discount.amount)})
+                            </span>
                           </div>
                         ) : (
                           formatCurrency(item.subtotal)
                         )}
                       </td>
-                      <td className={"px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm " + (item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600')}>{item.marginPct.toFixed(1)}%</td>
+                      <td
+                        className={
+                          'px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm ' +
+                          (item.marginPct < 10
+                            ? 'text-red-600'
+                            : item.marginPct < 20
+                              ? 'text-yellow-600'
+                              : 'text-green-600')
+                        }
+                      >
+                        {item.marginPct.toFixed(1)}%
+                      </td>
                       <td className="px-2 py-2 text-center">
                         <div className="flex items-center justify-center gap-1">
                           {item.discount ? (
@@ -2282,7 +2548,7 @@ export default function POSPage() {
                             </button>
                           )}
                           <button
-                            onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))}
+                            onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
                             onFocus={() => setFocusedCartIndex(idx)}
                             className="text-red-600 hover:text-red-800 font-bold text-xl px-2"
                             aria-label={`Remove ${item.name}`}
@@ -2310,11 +2576,15 @@ export default function POSPage() {
           <div className="mb-4">
             <div className="font-semibold text-base sm:text-lg text-gray-900">Totals</div>
             <div className="flex flex-col gap-1 sm:gap-2 mt-2 text-sm sm:text-base">
-              <div className="flex justify-between"><span>Subtotal:</span><span className="font-medium">{formatCurrency(subtotal)}</span></div>
+              <div className="flex justify-between">
+                <span>Subtotal:</span>
+                <span className="font-medium">{formatCurrency(subtotal)}</span>
+              </div>
               {cartDiscount && (
                 <div className="flex justify-between items-center text-red-600">
                   <span className="flex items-center gap-1">
-                    Discount ({cartDiscount.type === 'PERCENTAGE' ? `${cartDiscount.value}%` : 'Fixed'}):
+                    Discount (
+                    {cartDiscount.type === 'PERCENTAGE' ? `${cartDiscount.value}%` : 'Fixed'}):
                     <button
                       onClick={() => handleRemoveDiscount('cart')}
                       className="text-xs text-red-500 hover:text-red-700 underline"
@@ -2326,9 +2596,28 @@ export default function POSPage() {
                   <span className="font-medium">-{formatCurrency(cartDiscount.amount)}</span>
                 </div>
               )}
-              <div className="flex justify-between"><span>Tax:</span><span className="font-medium">{formatCurrency(tax)}</span></div>
-              <div className="flex justify-between font-bold text-base sm:text-lg"><span>Grand Total:</span><span>{formatCurrency(grandTotal)}</span></div>
-              <div className="flex justify-between text-xs sm:text-sm"><span>Avg Margin:</span><span className={avgMargin < 10 ? 'text-red-600' : avgMargin < 20 ? 'text-yellow-600' : 'text-green-600'}>{avgMargin.toFixed(1)}%</span></div>
+              <div className="flex justify-between">
+                <span>Tax:</span>
+                <span className="font-medium">{formatCurrency(tax)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-base sm:text-lg">
+                <span>Grand Total:</span>
+                <span>{formatCurrency(grandTotal)}</span>
+              </div>
+              <div className="flex justify-between text-xs sm:text-sm">
+                <span>Avg Margin:</span>
+                <span
+                  className={
+                    avgMargin < 10
+                      ? 'text-red-600'
+                      : avgMargin < 20
+                        ? 'text-yellow-600'
+                        : 'text-green-600'
+                  }
+                >
+                  {avgMargin.toFixed(1)}%
+                </span>
+              </div>
             </div>
           </div>
 
@@ -2490,7 +2779,9 @@ export default function POSPage() {
                       className="w-full px-4 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50"
                       onClick={() => {
                         setShowReceiptModal(false);
-                        navigate(`/customers/${selectedCustomer.id}?tab=invoices&createInvoice=1&saleId=${encodeURIComponent(lastSale.id || '')}`);
+                        navigate(
+                          `/customers/${selectedCustomer.id}?tab=invoices&createInvoice=1&saleId=${encodeURIComponent(lastSale.id || '')}`
+                        );
                       }}
                     >
                       Create Invoice Manually
@@ -2563,8 +2854,10 @@ export default function POSPage() {
                   // Already handled by handlePaymentAmountKeyDown
                   return;
                 }
-                if (target.tagName === 'TEXTAREA' ||
-                  (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'text')) {
+                if (
+                  target.tagName === 'TEXTAREA' ||
+                  (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'text')
+                ) {
                   // Don't trigger in text fields
                   return;
                 }
@@ -2597,7 +2890,9 @@ export default function POSPage() {
             }}
             className="max-h-[85vh] overflow-y-auto"
           >
-            <div className="mb-3 sm:mb-4 font-semibold text-base sm:text-lg text-gray-900">Payment</div>
+            <div className="mb-3 sm:mb-4 font-semibold text-base sm:text-lg text-gray-900">
+              Payment
+            </div>
             <div className="mb-3 sm:mb-4">
               <div className="flex justify-between mb-2">
                 <span className="font-medium text-sm sm:text-base">Total Amount:</span>
@@ -2605,32 +2900,37 @@ export default function POSPage() {
               </div>
             </div>
             <div className="mb-4 sm:mb-6">
-              <label className="block text-sm sm:text-base font-semibold text-gray-800 mb-2">Payment Method</label>
+              <label className="block text-sm sm:text-base font-semibold text-gray-800 mb-2">
+                Payment Method
+              </label>
               <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <button
                   onClick={() => setPaymentMethod('CASH')}
-                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'CASH'
-                    ? 'bg-green-600 text-white ring-2 sm:ring-4 ring-green-300 shadow-lg transform scale-105'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
-                    }`}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
+                    paymentMethod === 'CASH'
+                      ? 'bg-green-600 text-white ring-2 sm:ring-4 ring-green-300 shadow-lg transform scale-105'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                  }`}
                 >
                   <span className="hidden sm:inline">💵 </span>Cash
                 </button>
                 <button
                   onClick={() => setPaymentMethod('CARD')}
-                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'CARD'
-                    ? 'bg-blue-600 text-white ring-2 sm:ring-4 ring-blue-300 shadow-lg transform scale-105'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
-                    }`}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
+                    paymentMethod === 'CARD'
+                      ? 'bg-blue-600 text-white ring-2 sm:ring-4 ring-blue-300 shadow-lg transform scale-105'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                  }`}
                 >
                   <span className="hidden sm:inline">💳 </span>Card
                 </button>
                 <button
                   onClick={() => setPaymentMethod('MOBILE_MONEY')}
-                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'MOBILE_MONEY'
-                    ? 'bg-purple-600 text-white ring-2 sm:ring-4 ring-purple-300 shadow-lg transform scale-105'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
-                    }`}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
+                    paymentMethod === 'MOBILE_MONEY'
+                      ? 'bg-purple-600 text-white ring-2 sm:ring-4 ring-purple-300 shadow-lg transform scale-105'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                  }`}
                 >
                   <span className="hidden sm:inline">📱 </span>Mobile Money
                 </button>
@@ -2641,12 +2941,13 @@ export default function POSPage() {
                   <button
                     onClick={() => customerDepositBalance > 0 && setPaymentMethod('DEPOSIT')}
                     disabled={customerDepositBalance <= 0 || isLoadingDeposits}
-                    className={`w-full py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${customerDepositBalance <= 0 || isLoadingDeposits
-                      ? 'bg-gray-100 text-gray-400 border-2 border-gray-200 cursor-not-allowed'
-                      : paymentMethod === 'DEPOSIT'
-                        ? 'bg-amber-600 text-white ring-2 sm:ring-4 ring-amber-300 shadow-lg transform scale-105'
-                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-2 border-amber-400'
-                      }`}
+                    className={`w-full py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
+                      customerDepositBalance <= 0 || isLoadingDeposits
+                        ? 'bg-gray-100 text-gray-400 border-2 border-gray-200 cursor-not-allowed'
+                        : paymentMethod === 'DEPOSIT'
+                          ? 'bg-amber-600 text-white ring-2 sm:ring-4 ring-amber-300 shadow-lg transform scale-105'
+                          : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-2 border-amber-400'
+                    }`}
                   >
                     <span className="flex items-center justify-center gap-2">
                       <span>🏦 Use Customer Deposit</span>
@@ -2671,7 +2972,8 @@ export default function POSPage() {
               {selectedCustomer && (
                 <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <p className="text-xs sm:text-sm text-blue-800">
-                    <span className="font-semibold">ℹ️ Customer Selected:</span> Any unpaid balance will automatically be added to {selectedCustomer.name}'s invoice.
+                    <span className="font-semibold">ℹ️ Customer Selected:</span> Any unpaid balance
+                    will automatically be added to {selectedCustomer.name}'s invoice.
                   </p>
                 </div>
               )}
@@ -2701,41 +3003,53 @@ export default function POSPage() {
                     className="py-4 px-3 bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-bold text-base shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
                     title="Pay exact amount and complete"
                   >
-                    ✓ Exact<br />
+                    ✓ Exact
+                    <br />
                     <span className="text-sm font-normal">{formatCurrency(grandTotal)}</span>
                   </button>
-                  {[1000, 2000, 5000, 10000, 20000, 50000, 100000].filter(amount => amount >= grandTotal).slice(0, 5).map(amount => (
-                    <button
-                      key={amount}
-                      onClick={() => {
-                        setPaymentAmount(amount.toString());
-                        setTimeout(() => {
-                          const newLine = {
-                            id: `payment_${Date.now()}_${Math.random()}`,
-                            paymentMethodId: 'CASH',
-                            paymentMethod: 'CASH' as const,
-                            amount: amount,
-                            reference: undefined,
-                            createdAt: new Date().toISOString(),
-                          };
-                          setPaymentLines([newLine]);
-                        }, 50);
-                      }}
-                      className="py-3 sm:py-4 px-2 sm:px-3 bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-bold text-base sm:text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
-                      title={`Pay ${formatCurrency(amount)} (change: ${formatCurrency(new Decimal(amount).minus(grandTotal).toNumber())})`}
-                    >
-                      <span className="block">{amount >= 1000 ? `${(amount / 1000).toFixed(0)}k` : amount}</span>
-                      <span className="text-xs font-normal hidden sm:block">-{formatCurrency(new Decimal(amount).minus(grandTotal).toNumber())}</span>
-                    </button>
-                  ))}
+                  {[1000, 2000, 5000, 10000, 20000, 50000, 100000]
+                    .filter((amount) => amount >= grandTotal)
+                    .slice(0, 5)
+                    .map((amount) => (
+                      <button
+                        key={amount}
+                        onClick={() => {
+                          setPaymentAmount(amount.toString());
+                          setTimeout(() => {
+                            const newLine = {
+                              id: `payment_${Date.now()}_${Math.random()}`,
+                              paymentMethodId: 'CASH',
+                              paymentMethod: 'CASH' as const,
+                              amount: amount,
+                              reference: undefined,
+                              createdAt: new Date().toISOString(),
+                            };
+                            setPaymentLines([newLine]);
+                          }, 50);
+                        }}
+                        className="py-3 sm:py-4 px-2 sm:px-3 bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-bold text-base sm:text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
+                        title={`Pay ${formatCurrency(amount)} (change: ${formatCurrency(new Decimal(amount).minus(grandTotal).toNumber())})`}
+                      >
+                        <span className="block">
+                          {amount >= 1000 ? `${(amount / 1000).toFixed(0)}k` : amount}
+                        </span>
+                        <span className="text-xs font-normal hidden sm:block">
+                          -{formatCurrency(new Decimal(amount).minus(grandTotal).toNumber())}
+                        </span>
+                      </button>
+                    ))}
                 </div>
-                <p className="text-xs text-green-800 text-center font-medium">💡 Click to add payment instantly</p>
+                <p className="text-xs text-green-800 text-center font-medium">
+                  💡 Click to add payment instantly
+                </p>
               </div>
             )}
 
             {/* Payment Amount Input */}
             <div className="mb-4 sm:mb-6">
-              <label className="block text-sm sm:text-base font-semibold text-gray-800 mb-2">Payment Amount</label>
+              <label className="block text-sm sm:text-base font-semibold text-gray-800 mb-2">
+                Payment Amount
+              </label>
               <div className="flex gap-2 sm:gap-3">
                 <input
                   type="number"
@@ -2758,7 +3072,7 @@ export default function POSPage() {
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mt-2 sm:mt-3">
-                {[1000, 5000, 10000, 20000].map(amount => (
+                {[1000, 5000, 10000, 20000].map((amount) => (
                   <button
                     key={amount}
                     onClick={() => setPaymentAmount(amount.toString())}
@@ -2789,10 +3103,15 @@ export default function POSPage() {
             {/* Payment Lines List */}
             {paymentLines.length > 0 && (
               <div className="mb-3 sm:mb-4 border rounded-lg p-2 sm:p-3 bg-gray-50">
-                <h4 className="text-xs sm:text-sm font-semibold text-gray-700 mb-1.5 sm:mb-2">Payment Lines</h4>
+                <h4 className="text-xs sm:text-sm font-semibold text-gray-700 mb-1.5 sm:mb-2">
+                  Payment Lines
+                </h4>
                 <div className="space-y-1.5 sm:space-y-2">
                   {paymentLines.map((line) => (
-                    <div key={line.id} className="flex items-center justify-between bg-white p-1.5 sm:p-2 rounded border">
+                    <div
+                      key={line.id}
+                      className="flex items-center justify-between bg-white p-1.5 sm:p-2 rounded border"
+                    >
                       <div className="flex-1">
                         <div className="font-medium text-xs sm:text-sm">{line.paymentMethod}</div>
                         {line.reference && (
@@ -2800,7 +3119,9 @@ export default function POSPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 sm:gap-2">
-                        <span className="font-semibold text-sm sm:text-base">{formatCurrency(line.amount)}</span>
+                        <span className="font-semibold text-sm sm:text-base">
+                          {formatCurrency(line.amount)}
+                        </span>
                         <button
                           onClick={() => handleRemovePaymentLine(line.id)}
                           className="text-red-600 hover:text-red-800 font-bold px-1.5 sm:px-2 text-lg"
@@ -2819,33 +3140,47 @@ export default function POSPage() {
             <div className="mb-4 sm:mb-6 border-t-2 sm:border-t-4 border-gray-200 pt-3 sm:pt-4">
               <div className="space-y-2 sm:space-y-3">
                 <div className="flex justify-between items-center bg-gray-100 p-2 sm:p-3 rounded-lg">
-                  <span className="font-semibold text-sm sm:text-lg text-gray-700">Sale Total:</span>
-                  <span className="font-bold text-lg sm:text-2xl text-gray-900">{formatCurrency(grandTotal)}</span>
+                  <span className="font-semibold text-sm sm:text-lg text-gray-700">
+                    Sale Total:
+                  </span>
+                  <span className="font-bold text-lg sm:text-2xl text-gray-900">
+                    {formatCurrency(grandTotal)}
+                  </span>
                 </div>
                 {paymentLines.length > 0 && (
                   <div className="flex justify-between items-center bg-green-50 p-2 sm:p-3 rounded-lg">
                     <span className="font-semibold text-sm sm:text-lg text-green-700">Paid:</span>
-                    <span className="font-bold text-lg sm:text-2xl text-green-600">{formatCurrency(totalPaid)}</span>
+                    <span className="font-bold text-lg sm:text-2xl text-green-600">
+                      {formatCurrency(totalPaid)}
+                    </span>
                   </div>
                 )}
                 {remainingBalance > 0.01 ? (
                   <div className="flex justify-between items-center bg-red-50 p-3 sm:p-4 rounded-lg border-2 border-red-300">
-                    <span className="font-bold text-base sm:text-xl text-red-700"><span className="hidden sm:inline">⚠️ </span>Remaining:</span>
+                    <span className="font-bold text-base sm:text-xl text-red-700">
+                      <span className="hidden sm:inline">⚠️ </span>Remaining:
+                    </span>
                     <span className="font-bold text-2xl sm:text-3xl text-red-600">
                       {formatCurrency(remainingBalance)}
                     </span>
                   </div>
                 ) : remainingBalance < -0.01 ? (
                   <div className="flex justify-between items-center bg-blue-50 p-3 sm:p-4 rounded-lg border-2 border-blue-300 animate-pulse">
-                    <span className="font-bold text-base sm:text-xl text-blue-700"><span className="hidden sm:inline">💰 </span>Change Due:</span>
+                    <span className="font-bold text-base sm:text-xl text-blue-700">
+                      <span className="hidden sm:inline">💰 </span>Change Due:
+                    </span>
                     <span className="font-bold text-2xl sm:text-3xl text-blue-600">
                       {formatCurrency(changeAmount)}
                     </span>
                   </div>
                 ) : (
                   <div className="flex justify-between items-center bg-green-50 p-3 sm:p-4 rounded-lg border-2 border-green-300">
-                    <span className="font-bold text-base sm:text-xl text-green-700"><span className="hidden sm:inline">✓ </span>Status:</span>
-                    <span className="font-bold text-lg sm:text-2xl text-green-600">Exact Payment</span>
+                    <span className="font-bold text-base sm:text-xl text-green-700">
+                      <span className="hidden sm:inline">✓ </span>Status:
+                    </span>
+                    <span className="font-bold text-lg sm:text-2xl text-green-600">
+                      Exact Payment
+                    </span>
                   </div>
                 )}
               </div>
@@ -2861,11 +3196,14 @@ export default function POSPage() {
                       Invoice Will Be Created
                     </h3>
                     <p className="text-xs sm:text-sm text-orange-800 mb-2">
-                      <span className="font-semibold">{selectedCustomer.name}</span> will be invoiced for the unpaid balance:
+                      <span className="font-semibold">{selectedCustomer.name}</span> will be
+                      invoiced for the unpaid balance:
                     </p>
                     <div className="bg-white rounded-lg p-2 sm:p-3 border border-orange-200">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs sm:text-sm font-medium text-gray-700">Credit Amount:</span>
+                        <span className="text-xs sm:text-sm font-medium text-gray-700">
+                          Credit Amount:
+                        </span>
                         <span className="text-lg sm:text-xl font-bold text-orange-600">
                           {formatCurrency(remainingBalance)}
                         </span>
@@ -2888,7 +3226,9 @@ export default function POSPage() {
                     onChange={(e) => setAutoCreateInvoice(e.target.checked)}
                     className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="font-medium text-gray-700">Auto-create invoice for this credit sale</span>
+                  <span className="font-medium text-gray-700">
+                    Auto-create invoice for this credit sale
+                  </span>
                 </label>
                 <p className="text-xs text-gray-600 mt-1 ml-5 sm:ml-6">
                   Invoice will be created automatically after sale completes
@@ -2912,7 +3252,9 @@ export default function POSPage() {
               </label>
               {showDatePicker && (
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Sale Date</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                    Sale Date
+                  </label>
                   <input
                     type="datetime-local"
                     value={saleDate}
@@ -2922,7 +3264,9 @@ export default function POSPage() {
                     aria-label="Sale date"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    {saleDate ? `Sale will be recorded as: ${saleDate}` : 'Leave empty for current date/time'}
+                    {saleDate
+                      ? `Sale will be recorded as: ${saleDate}`
+                      : 'Leave empty for current date/time'}
                   </p>
                 </div>
               )}
@@ -2949,7 +3293,7 @@ export default function POSPage() {
                 // When user has entered an amount, ALWAYS show "Add Payment" button
                 // This fixes the bug where deposit/card/mobile payments couldn't be added
                 // when a customer was selected (the button showed disabled "Complete & Invoice" instead)
-                (paymentAmount && parseFloat(paymentAmount) > 0) ? (
+                paymentAmount && parseFloat(paymentAmount) > 0 ? (
                   <POSButton
                     variant="primary"
                     onClick={handleAddPayment}
@@ -2978,7 +3322,9 @@ export default function POSPage() {
                     className="flex-1 text-sm sm:text-base py-3 sm:py-4 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
                     title={`Complete sale and create invoice for ${formatCurrency(remainingBalance)} (or press Enter)`}
                   >
-                    {(isProcessingSale || createSale.isPending) ? 'Processing...' : (
+                    {isProcessingSale || createSale.isPending ? (
+                      'Processing...'
+                    ) : (
                       <>
                         <span className="block sm:hidden">Complete & Invoice</span>
                         <span className="hidden sm:block">
@@ -2996,9 +3342,7 @@ export default function POSPage() {
                     className="flex-1 text-sm sm:text-base py-3 sm:py-4"
                     title="Enter a payment amount first"
                   >
-                    <span className="block sm:hidden">
-                      Add Payment
-                    </span>
+                    <span className="block sm:hidden">Add Payment</span>
                     <span className="hidden sm:block">
                       Add Payment ({formatCurrency(remainingBalance)} remaining)
                     </span>
@@ -3019,9 +3363,17 @@ export default function POSPage() {
                   }}
                   disabled={!canCompleteSale || isProcessingSale || createSale.isPending}
                   className="flex-1 text-sm sm:text-base py-3 sm:py-4"
-                  title={!canCompleteSale ? 'Add at least one payment to complete sale' : (isProcessingSale || createSale.isPending) ? 'Processing...' : 'Complete sale (press Enter)'}
+                  title={
+                    !canCompleteSale
+                      ? 'Add at least one payment to complete sale'
+                      : isProcessingSale || createSale.isPending
+                        ? 'Processing...'
+                        : 'Complete sale (press Enter)'
+                  }
                 >
-                  {(isProcessingSale || createSale.isPending) ? 'Processing...' : (
+                  {isProcessingSale || createSale.isPending ? (
+                    'Processing...'
+                  ) : (
                     <>
                       <span className="block sm:hidden">Complete ✓</span>
                       <span className="hidden sm:block">Complete Sale ✓</span>
@@ -3069,8 +3421,12 @@ export default function POSPage() {
                 {items[uomModalItemIndex].availableUoms?.map((uom, idx) => (
                   <POSButton
                     key={uom.uomId}
-                    ref={(el) => { uomButtonRefs.current[idx] = el; }}
-                    variant={uom.uomId === items[uomModalItemIndex].selectedUomId ? 'primary' : 'secondary'}
+                    ref={(el) => {
+                      uomButtonRefs.current[idx] = el;
+                    }}
+                    variant={
+                      uom.uomId === items[uomModalItemIndex].selectedUomId ? 'primary' : 'secondary'
+                    }
                     onClick={() => {
                       handleUomChange(uomModalItemIndex, uom.uomId);
                     }}
@@ -3081,8 +3437,9 @@ export default function POSPage() {
                         handleUomChange(uomModalItemIndex, uom.uomId);
                       }
                     }}
-                    className={`w-full justify-between transition-all ${idx === selectedUomIndex ? 'ring-4 ring-blue-400 scale-105' : ''
-                      }`}
+                    className={`w-full justify-between transition-all ${
+                      idx === selectedUomIndex ? 'ring-4 ring-blue-400 scale-105' : ''
+                    }`}
                     aria-label={`Select ${uom.symbol || uom.name} at ${formatCurrency(uom.price)}`}
                     tabIndex={0}
                     autoFocus={idx === 0}
@@ -3180,9 +3537,7 @@ export default function POSPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Customer Phone
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Phone</label>
               <input
                 type="tel"
                 value={quoteCustomerPhone}
@@ -3207,7 +3562,11 @@ export default function POSPage() {
                 aria-label="Quote validity in days"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Quote will be valid for {quoteValidityDays} days (until {new Date(Date.now() + quoteValidityDays * 24 * 60 * 60 * 1000).toLocaleDateString()})
+                Quote will be valid for {quoteValidityDays} days (until{' '}
+                {new Date(
+                  Date.now() + quoteValidityDays * 24 * 60 * 60 * 1000
+                ).toLocaleDateString()}
+                )
               </p>
             </div>
 
@@ -3228,9 +3587,7 @@ export default function POSPage() {
               <p className="text-sm text-gray-700 mb-1">
                 <span className="font-semibold">Items:</span> {items.length}
               </p>
-              <p className="text-lg font-bold text-gray-900">
-                Total: {formatCurrency(grandTotal)}
-              </p>
+              <p className="text-lg font-bold text-gray-900">Total: {formatCurrency(grandTotal)}</p>
             </div>
 
             <div className="flex gap-3">
@@ -3273,9 +3630,7 @@ export default function POSPage() {
           <div className="space-y-4">
             {/* Search Box */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Search Quotes
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Search Quotes</label>
               <input
                 type="text"
                 value={quoteSearchTerm}
@@ -3296,44 +3651,69 @@ export default function POSPage() {
               ) : availableQuotes.length === 0 ? (
                 <div className="p-8 text-center">
                   <p className="text-gray-600">No quotes found</p>
-                  <p className="text-sm text-gray-500 mt-1">Create a quote first by adding items to cart and pressing Ctrl+Q</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Create a quote first by adding items to cart and pressing Ctrl+Q
+                  </p>
                 </div>
               ) : (
                 <div className="divide-y">
                   {availableQuotes
-                    .filter(q =>
-                      !quoteSearchTerm ||
-                      String(q.quoteNumber ?? '').toLowerCase().includes(quoteSearchTerm.toLowerCase()) ||
-                      (q.customerName && String(q.customerName).toLowerCase().includes(quoteSearchTerm.toLowerCase()))
+                    .filter(
+                      (q) =>
+                        !quoteSearchTerm ||
+                        String(q.quoteNumber ?? '')
+                          .toLowerCase()
+                          .includes(quoteSearchTerm.toLowerCase()) ||
+                        (q.customerName &&
+                          String(q.customerName)
+                            .toLowerCase()
+                            .includes(quoteSearchTerm.toLowerCase()))
                     )
                     .map((quote: Quotation) => (
                       <button
                         key={quote.id}
-                        onClick={() => handleLoadQuoteToCart({ quotation: quote, items: (quote as Quotation & { items?: QuotationItem[] }).items || [] })}
+                        onClick={() =>
+                          handleLoadQuoteToCart({
+                            quotation: quote,
+                            items: (quote as Quotation & { items?: QuotationItem[] }).items || [],
+                          })
+                        }
                         className="w-full p-4 text-left hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <p className="font-semibold text-blue-600">{quote.quoteNumber}</p>
-                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${(quote.status as string) === 'DRAFT' ? 'bg-gray-100 text-gray-800' :
-                                (quote.status as string) === 'SENT' ? 'bg-blue-100 text-blue-800' :
-                                  (quote.status as string) === 'ACCEPTED' ? 'bg-green-100 text-green-800' :
-                                    'bg-gray-100 text-gray-800'
-                                }`}>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  (quote.status as string) === 'DRAFT'
+                                    ? 'bg-gray-100 text-gray-800'
+                                    : (quote.status as string) === 'SENT'
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : (quote.status as string) === 'ACCEPTED'
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                }`}
+                              >
                                 {quote.status}
                               </span>
                             </div>
-                            <p className="text-gray-900 mt-1">{quote.customerName || 'Walk-in Customer'}</p>
+                            <p className="text-gray-900 mt-1">
+                              {quote.customerName || 'Walk-in Customer'}
+                            </p>
                             <p className="text-sm text-gray-600 mt-1">
-                              {new Date(quote.createdAt).toLocaleDateString()} ·
-                              Valid until {new Date(quote.validUntil).toLocaleDateString()}
+                              {new Date(quote.createdAt).toLocaleDateString()} · Valid until{' '}
+                              {new Date(quote.validUntil).toLocaleDateString()}
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className="font-bold text-gray-900">{formatCurrency(quote.totalAmount)}</p>
+                            <p className="font-bold text-gray-900">
+                              {formatCurrency(quote.totalAmount)}
+                            </p>
                             <p className="text-xs text-gray-600 mt-1">
-                              {(quote as Quotation & { items?: QuotationItem[] }).items?.length || 0} items
+                              {(quote as Quotation & { items?: QuotationItem[] }).items?.length ||
+                                0}{' '}
+                              items
                             </p>
                           </div>
                         </div>
@@ -3345,7 +3725,8 @@ export default function POSPage() {
 
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
               <p className="text-sm text-yellow-800">
-                <span className="font-semibold">⚠️ Note:</span> Loading a quote will replace your current cart items.
+                <span className="font-semibold">⚠️ Note:</span> Loading a quote will replace your
+                current cart items.
               </p>
             </div>
 
@@ -3392,34 +3773,23 @@ export default function POSPage() {
             <div className="space-y-2">
               <p className="text-sm font-medium text-gray-700">What would you like to do?</p>
 
-              <POSButton
-                variant="primary"
-                onClick={handleViewQuote}
-                className="w-full"
-              >
+              <POSButton variant="primary" onClick={handleViewQuote} className="w-full">
                 👁️ View Quote Details
               </POSButton>
 
-              <POSButton
-                variant="secondary"
-                onClick={handleClearCartAfterQuote}
-                className="w-full"
-              >
+              <POSButton variant="secondary" onClick={handleClearCartAfterQuote} className="w-full">
                 🗑️ Clear Cart
               </POSButton>
 
-              <POSButton
-                variant="secondary"
-                onClick={handleKeepWorking}
-                className="w-full"
-              >
+              <POSButton variant="secondary" onClick={handleKeepWorking} className="w-full">
                 ➡️ Keep Working with Current Cart
               </POSButton>
             </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-xs text-blue-800">
-                💡 <span className="font-semibold">Tip:</span> You can find all your quotes in the Quotations menu
+                💡 <span className="font-semibold">Tip:</span> You can find all your quotes in the
+                Quotations menu
               </p>
             </div>
           </div>
@@ -3468,13 +3838,24 @@ export default function POSPage() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-yellow-100 flex items-center justify-center">
-              <svg className="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              <svg
+                className="w-8 h-8 text-yellow-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"
+                />
               </svg>
             </div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">Cash Register Required</h2>
             <p className="text-gray-600 mb-6">
-              You must open a cash register before processing sales. This ensures proper cash accountability and audit trail.
+              You must open a cash register before processing sales. This ensures proper cash
+              accountability and audit trail.
             </p>
             <button
               onClick={() => setShowOpenRegisterDialog(true)}

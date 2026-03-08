@@ -1,8 +1,15 @@
 import { Pool } from 'pg';
-import { salesRepository, CreateSaleData, CreateSaleItemData, SaleRecord, SaleItemRecord } from './salesRepository.js';
+import {
+  salesRepository,
+  CreateSaleData,
+  CreateSaleItemData,
+  SaleRecord,
+  SaleItemRecord,
+} from './salesRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import { BankingService } from '../../services/bankingService.js';
 import { cashRegisterService } from '../cash-register/index.js';
+import { ValidationError, BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
 import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
@@ -13,7 +20,7 @@ import {
   batchFetchProducts,
   batchFetchProductUoms,
   type ProductBatchRow,
-  type ProductUomRow
+  type ProductUomRow,
 } from '../../db/batchFetch.js';
 
 export interface SaleItemInput {
@@ -56,7 +63,9 @@ export const salesService = {
     const costLayers = await salesRepository.getFIFOCostLayers(pool, productId);
 
     if (costLayers.length === 0) {
-      throw new Error(`No cost layers found for product ${productId}`);
+      throw new BusinessError(`No cost layers found for product ${productId}`, 'ERR_SALE_001', {
+        productId,
+      });
     }
 
     let remainingQty = new Decimal(quantity);
@@ -74,8 +83,10 @@ export const salesService = {
     }
 
     if (remainingQty.greaterThan(0)) {
-      throw new Error(
-        `Insufficient inventory for product ${productId}. Short by ${remainingQty.toFixed(4)} units`
+      throw new BusinessError(
+        `Insufficient inventory for product ${productId}. Short by ${remainingQty.toFixed(4)} units`,
+        'ERR_STOCK_001',
+        { productId, requested: quantity, shortBy: parseFloat(remainingQty.toFixed(4)) }
       );
     }
 
@@ -108,13 +119,13 @@ export const salesService = {
    * @param input - Sale creation data with items, payment, customer
    * @returns Created sale with generated sale_number, profit calculation, and cost layers consumed
    * @throws Error if validation fails or insufficient inventory
-   * 
+   *
    * Business Rules Enforced:
    * - BR-SAL-002: Sale must have at least one item
    * - BR-SAL-003: Credit sales require customer association
    * - BR-INV-001: FIFO cost layer consumption on sale
    * - BR-INV-002: Stock movement audit trail
-   * 
+   *
    * Transaction Flow:
    * 1. Validate sale items and payment method
    * 2. Calculate FIFO cost for each item
@@ -123,10 +134,18 @@ export const salesService = {
    * 5. Consume cost layers (FIFO)
    * 6. Create stock movement records
    * 7. Commit transaction atomically
-   * 
+   *
    * Financial Precision: Uses Decimal.js for all calculations
    */
-  async createSale(pool: Pool, input: CreateSaleInput): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines: PaymentLineInput[]; warnings?: string[] }> {
+  async createSale(
+    pool: Pool,
+    input: CreateSaleInput
+  ): Promise<{
+    sale: SaleRecord;
+    items: SaleItemRecord[];
+    paymentLines: PaymentLineInput[];
+    warnings?: string[];
+  }> {
     const client = await pool.connect();
     const warnings: string[] = [];
 
@@ -144,10 +163,12 @@ export const salesService = {
 
       // BR-SAL-003: Validate credit sales
       if (input.paymentMethod === 'CREDIT') {
-        const totalAmount = input.items.reduce(
-          (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitPrice)),
-          new Decimal(0)
-        ).toNumber();
+        const totalAmount = input.items
+          .reduce(
+            (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitPrice)),
+            new Decimal(0)
+          )
+          .toNumber();
         await SalesBusinessRules.validateCreditSale(
           client,
           input.customerId || null,
@@ -173,8 +194,8 @@ export const salesService = {
       // Collect all regular product IDs and fetch in bulk before the per-item loop.
       // Previously each item triggered 2-3 individual product queries.
       const regularProductIds = input.items
-        .filter(it => !it.productId?.startsWith('custom_'))
-        .map(it => it.productId);
+        .filter((it) => !it.productId?.startsWith('custom_'))
+        .map((it) => it.productId);
 
       const [productsMap, uomsMap] = await Promise.all([
         batchFetchProducts(client, regularProductIds),
@@ -227,11 +248,11 @@ export const salesService = {
           // Use pre-fetched product data (batch query instead of per-item)
           const prefetchedProduct = productsMap.get(item.productId);
           if (!prefetchedProduct) {
-            throw new Error(`Product ${item.productId} not found`);
+            throw new NotFoundError(`Product ${item.productId}`);
           }
           // Use pre-fetched UoMs (batch query instead of per-item)
           const productUoms = uomsMap.get(item.productId) || [];
-          const defaultUom = productUoms.find(u => u.is_default);
+          const defaultUom = productUoms.find((u) => u.is_default);
           baseUnit = defaultUom?.symbol || 'PIECE';
 
           // If UoM provided and different from base, try find conversion
@@ -270,17 +291,16 @@ export const salesService = {
         // Use pre-fetched product data (eliminates duplicate per-item query)
         const productData = productsMap.get(item.productId);
         if (!productData) {
-          throw new Error(`Product ${item.productId} not found`);
+          throw new NotFoundError(`Product ${item.productId}`);
         }
-        const costingMethod = (productData.costing_method || 'FIFO') as 'FIFO' | 'AVCO' | 'STANDARD';
+        const costingMethod = (productData.costing_method || 'FIFO') as
+          | 'FIFO'
+          | 'AVCO'
+          | 'STANDARD';
         const originalPrice = parseFloat(productData.selling_price || String(item.unitPrice));
 
         // BR-SAL-004: Validate minimum price
-        await SalesBusinessRules.validateMinimumPrice(
-          client,
-          item.productId,
-          item.unitPrice
-        );
+        await SalesBusinessRules.validateMinimumPrice(client, item.productId, item.unitPrice);
 
         // BR-SAL-006: Validate discount
         if (item.unitPrice < originalPrice) {
@@ -324,9 +344,13 @@ export const salesService = {
           logger.debug(`Using average cost fallback for product ${item.productId}`, {
             productId: item.productId,
             averageCost: unitCost,
-            reason: (error instanceof Error ? error.message : String(error))?.includes('Insufficient cost layers')
+            reason: (error instanceof Error ? error.message : String(error))?.includes(
+              'Insufficient cost layers'
+            )
               ? 'No cost layers (not received via GR)'
-              : (error instanceof Error ? error.message : String(error)),
+              : error instanceof Error
+                ? error.message
+                : String(error),
           });
         }
 
@@ -348,10 +372,9 @@ export const salesService = {
         // Look up the actual uom_id from product_uoms if provided
         let actualUomId: string | undefined = undefined;
         if (item.uomId) {
-          const uomLookup = await client.query(
-            'SELECT uom_id FROM product_uoms WHERE id = $1',
-            [item.uomId]
-          );
+          const uomLookup = await client.query('SELECT uom_id FROM product_uoms WHERE id = $1', [
+            item.uomId,
+          ]);
           actualUomId = uomLookup.rows[0]?.uom_id;
         }
 
@@ -373,7 +396,9 @@ export const salesService = {
       const taxAmount = input.taxAmount ? new Decimal(input.taxAmount) : new Decimal(0);
 
       // Use provided discount if available, otherwise default to 0
-      const discountAmount = input.discountAmount ? new Decimal(input.discountAmount) : new Decimal(0);
+      const discountAmount = input.discountAmount
+        ? new Decimal(input.discountAmount)
+        : new Decimal(0);
 
       // DEBUG: Log received values
       logger.info('💰 TAX CALCULATION DEBUG', {
@@ -381,7 +406,7 @@ export const salesService = {
         'input.taxAmount': input.taxAmount,
         'input.subtotal': input.subtotal,
         'input.discountAmount': input.discountAmount,
-        'calculated_totalAmount_from_items': totalAmount.toFixed(2),
+        calculated_totalAmount_from_items: totalAmount.toFixed(2),
       });
 
       // Use provided totalAmount if available (from POS), otherwise calculate from items + tax - discount
@@ -395,9 +420,7 @@ export const salesService = {
       });
 
       // Calculate subtotal: if provided use it, otherwise use line item totals
-      const subtotal = input.subtotal
-        ? new Decimal(input.subtotal)
-        : totalAmount;
+      const subtotal = input.subtotal ? new Decimal(input.subtotal) : totalAmount;
 
       // For CREDIT/split payment sales, allow partial or zero payment
       // For other payment methods (CASH, CARD, MOBILE_MONEY), require full payment
@@ -405,7 +428,7 @@ export const salesService = {
       // Check if payment lines contain CREDIT
       const hasPaymentLines = input.paymentLines && input.paymentLines.length > 0;
       const hasCreditPayment = hasPaymentLines
-        ? (input.paymentLines?.some(line => line.paymentMethod === 'CREDIT') ?? false)
+        ? (input.paymentLines?.some((line) => line.paymentMethod === 'CREDIT') ?? false)
         : input.paymentMethod === 'CREDIT';
 
       // ============================================================
@@ -418,17 +441,17 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-          ?.filter(line => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
-        )
+            ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+          new Decimal(0))
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-          ?.filter(line => line.paymentMethod === 'CREDIT')
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ?? new Decimal(0)
-        )
+            ?.filter((line) => line.paymentMethod === 'CREDIT')
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+          new Decimal(0))
         : new Decimal(0);
 
       logger.info('Payment breakdown calculated', {
@@ -445,17 +468,28 @@ export const salesService = {
       if (hasCreditPayment) {
         // BUSINESS RULE: Credit sales MUST have a customer
         if (!input.customerId) {
-          throw new Error('Credit payment requires a customer to be selected. Cannot process credit sale without customer linkage.');
+          throw new BusinessError(
+            'Credit payment requires a customer to be selected. Cannot process credit sale without customer linkage.',
+            'ERR_SALE_002',
+            { paymentMethod: 'CREDIT' }
+          );
         }
 
         // Credit sales: Allow 0 to full payment (partial payments allowed)
         if (paymentReceived.lessThan(0)) {
-          throw new Error('Payment amount cannot be negative');
+          throw new BusinessError('Payment amount cannot be negative', 'ERR_PAYMENT_002', {
+            amountReceived: parseFloat(paymentReceived.toFixed(2)),
+          });
         }
         // Allow underpayment or exact payment for credit
         if (paymentReceived.greaterThan(finalTotalAmount.plus(0.01))) {
-          throw new Error(
-            `Overpayment not allowed for credit sales. Total: ${finalTotalAmount.toFixed(2)}, Received: ${paymentReceived.toFixed(2)}`
+          throw new BusinessError(
+            `Overpayment not allowed for credit sales. Total: ${finalTotalAmount.toFixed(2)}, Received: ${paymentReceived.toFixed(2)}`,
+            'ERR_PAYMENT_003',
+            {
+              totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
+              amountReceived: parseFloat(paymentReceived.toFixed(2)),
+            }
           );
         }
 
@@ -475,8 +509,14 @@ export const salesService = {
         );
 
         if (changeAmount.lessThan(0)) {
-          throw new Error(
-            `Insufficient payment. Total: ${finalTotalAmount.toFixed(2)}, Received: ${paymentReceived.toFixed(2)}`
+          throw new BusinessError(
+            `Insufficient payment. Total: ${finalTotalAmount.toFixed(2)}, Received: ${paymentReceived.toFixed(2)}`,
+            'ERR_PAYMENT_001',
+            {
+              totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
+              amountReceived: parseFloat(paymentReceived.toFixed(2)),
+              shortfall: parseFloat(changeAmount.abs().toFixed(2)),
+            }
           );
         }
       }
@@ -504,9 +544,14 @@ export const salesService = {
       // Any sale with outstanding balance REQUIRES a customer for invoice tracking
       // This is the SINGLE SOURCE OF TRUTH enforcement point
       if (hasOutstandingBalance && !input.customerId) {
-        throw new Error(
-          `CUSTOMER REQUIRED: Cannot create sale with outstanding balance of ${(actualTotalAmount - actualAmountPaid).toFixed(2)} without customer linkage. ` +
-          `An invoice must be created to track receivables. Please select a customer before proceeding.`
+        throw new BusinessError(
+          `Customer required: Cannot create sale with outstanding balance of ${(actualTotalAmount - actualAmountPaid).toFixed(2)} without customer linkage. An invoice must be created to track receivables.`,
+          'ERR_SALE_003',
+          {
+            outstandingBalance: parseFloat((actualTotalAmount - actualAmountPaid).toFixed(2)),
+            totalAmount: actualTotalAmount,
+            amountPaid: actualAmountPaid,
+          }
         );
       }
 
@@ -518,10 +563,7 @@ export const salesService = {
         );
 
         if (customerCheck.rows.length === 0) {
-          throw new Error(
-            `INVALID CUSTOMER: Customer ID ${input.customerId} does not exist in the system. ` +
-            `Cannot create sale linked to non-existent customer. This would create a ghost transaction.`
-          );
+          throw new NotFoundError(`Customer ${input.customerId}`);
         }
 
         const customer = customerCheck.rows[0];
@@ -561,13 +603,20 @@ export const salesService = {
 
       const saleData: CreateSaleData = {
         customerId: input.customerId || null,
-        subtotal: input.subtotal ? parseFloat(new Decimal(input.subtotal).toFixed(2)) : parseFloat(subtotal.toFixed(2)),
+        subtotal: input.subtotal
+          ? parseFloat(new Decimal(input.subtotal).toFixed(2))
+          : parseFloat(subtotal.toFixed(2)),
         totalAmount: actualTotalAmount,
         totalCost: parseFloat(totalCost.toFixed(2)),
-        discountAmount: input.discountAmount ? parseFloat(new Decimal(input.discountAmount).toFixed(2)) : 0,
+        discountAmount: input.discountAmount
+          ? parseFloat(new Decimal(input.discountAmount).toFixed(2))
+          : 0,
         taxAmount: parseFloat(taxAmount.toFixed(2)),
         paymentMethod: effectivePaymentMethod,
-        paymentReceived: actualAmountPaid,
+        // amount_paid = net amount applied to the sale, NOT cash tendered
+        // Fully-paid: amount_paid = total_amount (excess returned as change)
+        // Partial/credit: amount_paid = what was actually received
+        paymentReceived: hasOutstandingBalance ? actualAmountPaid : actualTotalAmount,
         changeAmount: hasOutstandingBalance
           ? 0 // No change for credit/partial payment sales
           : parseFloat(changeAmount.toFixed(2)),
@@ -725,15 +774,41 @@ export const salesService = {
         // This is critical for products with expiry dates and physical stock tracking
         let remainingQty = new Decimal(baseQty.toNumber());
 
-        // Get batches ordered by expiry date (FEFO)
-        const batchesResult = await client.query(
-          `SELECT id, remaining_quantity, expiry_date, cost_price
-           FROM inventory_batches
-           WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-           ORDER BY expiry_date ASC NULLS LAST, received_date ASC
-           FOR UPDATE`,
+        // Fetch min_days_before_expiry_sale for this product
+        const expiryRuleRes = await client.query(
+          `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
+           FROM products WHERE id = $1`,
           [item.productId]
         );
+        const minDaysBeforeExpiry = parseInt(expiryRuleRes.rows[0]?.min_days ?? '0', 10);
+
+        // Get batches ordered by expiry date (FEFO)
+        // When min_days_before_expiry_sale > 0, first try excluding near-expiry batches
+        // If that yields no results, fall back to all active batches so the sale isn't blocked
+        let batchesResult;
+        if (minDaysBeforeExpiry > 0) {
+          batchesResult = await client.query(
+            `SELECT id, remaining_quantity, expiry_date, cost_price
+             FROM inventory_batches
+             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE + $2 * INTERVAL '1 day')
+             ORDER BY expiry_date ASC NULLS LAST, received_date ASC
+             FOR UPDATE`,
+            [item.productId, minDaysBeforeExpiry]
+          );
+        }
+
+        // Fallback: if no non-expiring batches or no threshold configured, use all active batches
+        if (!batchesResult || batchesResult.rows.length === 0) {
+          batchesResult = await client.query(
+            `SELECT id, remaining_quantity, expiry_date, cost_price
+             FROM inventory_batches
+             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+             ORDER BY expiry_date ASC NULLS LAST, received_date ASC
+             FOR UPDATE`,
+            [item.productId]
+          );
+        }
 
         // Generate movement number ONCE for all batch deductions per item
         // This drastically reduces DB queries (from O(batches) to O(1) per item)
@@ -773,7 +848,9 @@ export const salesService = {
           movementSeq++;
 
           // Determine unit cost from batch with bank precision
-          const unitCost = parseFloat(new Decimal(batch.cost_price ?? batch.costPrice ?? 0).toFixed(2));
+          const unitCost = parseFloat(
+            new Decimal(batch.cost_price ?? batch.costPrice ?? 0).toFixed(2)
+          );
 
           // Record stock movement with batch reference and unit cost
           await client.query(
@@ -806,9 +883,36 @@ export const salesService = {
         }
 
         if (remainingQty.greaterThan(0)) {
-          throw new Error(
-            `Failed to deduct full quantity for product ${item.productName}. ` +
-            `Short by ${remainingQty.toFixed(4)} units. Check inventory batches.`
+          const nearestExpiry =
+            batchesResult.rows.length > 0 ? batchesResult.rows[0].expiry_date : null;
+          const totalAvailable = batchesResult.rows.reduce(
+            (sum: number, b: { remaining_quantity: string | number }) =>
+              sum + parseFloat(String(b.remaining_quantity)),
+            0
+          );
+          const isExpiryBlock = minDaysBeforeExpiry > 0 && nearestExpiry;
+          const errorCode =
+            batchesResult.rows.length === 0
+              ? 'ERR_STOCK_001'
+              : isExpiryBlock
+                ? 'ERR_EXPIRY_001'
+                : 'ERR_STOCK_001';
+
+          throw new BusinessError(
+            `Not enough stock for "${item.productName}". ` +
+              `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+              `Short by: ${remainingQty.toFixed(2)}.`,
+            errorCode,
+            {
+              product: item.productName,
+              productId: item.productId,
+              requested: parseFloat(baseQty.toFixed(2)),
+              available: parseFloat(totalAvailable.toFixed(2)),
+              shortBy: parseFloat(remainingQty.toFixed(2)),
+              expiryDate: nearestExpiry,
+              minDaysBeforeExpiry: minDaysBeforeExpiry > 0 ? minDaysBeforeExpiry : undefined,
+              batchCount: batchesResult.rows.length,
+            }
           );
         }
 
@@ -830,7 +934,8 @@ export const salesService = {
       // Customer balance represents accounts receivable (amount owed by customer)
 
       // Check if any payment line is CREDIT
-      const hasCreditInPaymentLines = input.paymentLines?.some(line => line.paymentMethod === 'CREDIT') || false;
+      const hasCreditInPaymentLines =
+        input.paymentLines?.some((line) => line.paymentMethod === 'CREDIT') || false;
       const isCreditSale = input.paymentMethod === 'CREDIT' || hasCreditInPaymentLines;
 
       // creditAmount is already calculated above (from payment lines or as Decimal)
@@ -877,17 +982,26 @@ export const salesService = {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           paymentCount: input.paymentLines.length,
-          totalPaid: input.paymentLines.reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+          totalPaid: input.paymentLines
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0))
+            .toDecimalPlaces(2)
+            .toNumber(),
         });
 
         // ========== APPLY DEPOSITS (if DEPOSIT payment method used) ==========
-        const depositPaymentLines = input.paymentLines.filter(line => line.paymentMethod === 'DEPOSIT');
+        const depositPaymentLines = input.paymentLines.filter(
+          (line) => line.paymentMethod === 'DEPOSIT'
+        );
         if (depositPaymentLines.length > 0 && input.customerId) {
-          const totalDepositAmount = depositPaymentLines.reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)).toNumber();
+          const totalDepositAmount = depositPaymentLines
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0))
+            .toNumber();
 
           if (totalDepositAmount > 0) {
             try {
-              const { applyDepositsToSaleInTransaction } = await import('../deposits/depositsService.js');
+              const { applyDepositsToSaleInTransaction } = await import(
+                '../deposits/depositsService.js'
+              );
 
               const depositResult = await applyDepositsToSaleInTransaction(
                 client,
@@ -909,9 +1023,13 @@ export const salesService = {
                 saleId: sale.id,
                 customerId: input.customerId,
                 requestedAmount: totalDepositAmount,
-                error: (depositError instanceof Error ? depositError.message : String(depositError)),
+                error: depositError instanceof Error ? depositError.message : String(depositError),
               });
-              throw new Error(`Failed to apply customer deposits: ${(depositError instanceof Error ? depositError.message : String(depositError))}`);
+              throw new BusinessError(
+                `Failed to apply customer deposits: ${depositError instanceof Error ? depositError.message : String(depositError)}`,
+                'ERR_SALE_004',
+                { customerId: input.customerId, requestedAmount: totalDepositAmount }
+              );
             }
           }
         }
@@ -930,13 +1048,12 @@ export const salesService = {
           });
 
           // BR-QUOTE-001: Verify quotation exists and isn't already converted
-          const quoteCheck = await client.query(
-            'SELECT status FROM quotations WHERE id = $1',
-            [input.quoteId]
-          );
+          const quoteCheck = await client.query('SELECT status FROM quotations WHERE id = $1', [
+            input.quoteId,
+          ]);
 
           if (!quoteCheck.rows[0]) {
-            throw new Error('Quotation not found');
+            throw new NotFoundError('Quotation');
           }
 
           const quoteStatus = quoteCheck.rows[0].status;
@@ -945,7 +1062,11 @@ export const salesService = {
           // (customer payment in POS implies acceptance)
           const allowedStatuses = ['DRAFT', 'SENT', 'ACCEPTED'];
           if (!allowedStatuses.includes(quoteStatus)) {
-            throw new Error(`Cannot convert quotation with status: ${quoteStatus}. Already converted, cancelled, or rejected.`);
+            throw new BusinessError(
+              `Cannot convert quotation with status: ${quoteStatus}. Already converted, cancelled, or rejected.`,
+              'ERR_SALE_005',
+              { quoteId: input.quoteId, currentStatus: quoteStatus, allowedStatuses }
+            );
           }
 
           logger.info('✅ Quotation verified for POS conversion', {
@@ -960,10 +1081,9 @@ export const salesService = {
             const { invoiceRepository } = await import('../invoices/invoiceRepository.js');
 
             // Fetch customer name for invoice (required field)
-            const customerResult = await client.query(
-              'SELECT name FROM customers WHERE id = $1',
-              [input.customerId]
-            );
+            const customerResult = await client.query('SELECT name FROM customers WHERE id = $1', [
+              input.customerId,
+            ]);
             const customerName = customerResult.rows[0]?.name || 'Unknown Customer';
 
             // Calculate due date (30 days from today)
@@ -988,11 +1108,20 @@ export const salesService = {
             if (input.paymentLines && input.paymentLines.length > 0 && invoiceId) {
               // VALIDATION: Ensure total payment amount doesn't exceed invoice total
               const totalPayments = input.paymentLines
-                .filter(p => p.paymentMethod !== 'CREDIT' && p.amount > 0)
-                .reduce((sum, p) => sum.plus(new Decimal(p.amount)), new Decimal(0)).toNumber();
+                .filter((p) => p.paymentMethod !== 'CREDIT' && p.amount > 0)
+                .reduce((sum, p) => sum.plus(new Decimal(p.amount)), new Decimal(0))
+                .toNumber();
 
-              if (new Decimal(totalPayments).greaterThan(new Decimal(input.totalAmount || 0).plus('0.01'))) {
-                throw new Error(`Payment amount (${totalPayments}) exceeds invoice total (${input.totalAmount})`);
+              if (
+                new Decimal(totalPayments).greaterThan(
+                  new Decimal(input.totalAmount || 0).plus('0.01')
+                )
+              ) {
+                throw new BusinessError(
+                  `Payment amount (${totalPayments}) exceeds invoice total (${input.totalAmount})`,
+                  'ERR_PAYMENT_004',
+                  { totalPayments, invoiceTotal: input.totalAmount }
+                );
               }
 
               // Record each non-CREDIT payment separately (matches invoice_payments table structure)
@@ -1001,7 +1130,11 @@ export const salesService = {
                   await invoiceRepository.addPayment(client, {
                     invoiceId,
                     amount: parseFloat(paymentLine.amount.toFixed(2)),
-                    paymentMethod: paymentLine.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
+                    paymentMethod: paymentLine.paymentMethod as
+                      | 'CASH'
+                      | 'CARD'
+                      | 'MOBILE_MONEY'
+                      | 'BANK_TRANSFER',
                     paymentDate: undefined, // Use current date
                     referenceNumber: paymentLine.reference || null,
                     notes: null,
@@ -1067,7 +1200,9 @@ export const salesService = {
           });
           // Don't fail the sale if quote conversion fails
           // The sale is already successful, just log the issue
-          warnings.push(`Quote conversion failed for quote ${input.quoteId}: ${quoteError instanceof Error ? quoteError.message : String(quoteError)}. Sale created but quotation status not updated.`);
+          warnings.push(
+            `Quote conversion failed for quote ${input.quoteId}: ${quoteError instanceof Error ? quoteError.message : String(quoteError)}. Sale created but quotation status not updated.`
+          );
         }
       }
       // CREDIT SALE INVOICE: Create invoice if there's any outstanding balance
@@ -1086,9 +1221,10 @@ export const salesService = {
           );
 
           if (customerResult.rows.length === 0) {
-            throw new Error(
-              `GHOST INVOICE PREVENTION: Cannot create invoice for non-existent customer ${input.customerId}. ` +
-              `This would create an orphaned receivable that cannot be tracked or collected.`
+            throw new BusinessError(
+              `Cannot create invoice for non-existent customer. This would create an orphaned receivable.`,
+              'ERR_SALE_006',
+              { customerId: input.customerId }
             );
           }
 
@@ -1142,7 +1278,11 @@ export const salesService = {
                 await invoiceRepository.addPayment(client, {
                   invoiceId,
                   amount: parseFloat(paymentLine.amount.toFixed(2)),
-                  paymentMethod: paymentLine.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
+                  paymentMethod: paymentLine.paymentMethod as
+                    | 'CASH'
+                    | 'CARD'
+                    | 'MOBILE_MONEY'
+                    | 'BANK_TRANSFER',
                   paymentDate: undefined,
                   referenceNumber: paymentLine.reference || null,
                   notes: 'Initial payment from sale',
@@ -1187,7 +1327,11 @@ export const salesService = {
           });
           // CRITICAL: Invoice is MANDATORY for credit sales - must rollback!
           // Without invoice, accounts receivable cannot be tracked
-          throw new Error(`Credit sale requires invoice but invoice creation failed: ${invoiceError instanceof Error ? invoiceError.message : String(invoiceError)}`);
+          throw new BusinessError(
+            `Credit sale requires invoice but invoice creation failed: ${invoiceError instanceof Error ? invoiceError.message : String(invoiceError)}`,
+            'ERR_SALE_007',
+            { saleId: sale.id, saleNumber: sale.saleNumber }
+          );
         }
       }
 
@@ -1210,12 +1354,19 @@ export const salesService = {
           });
         } catch (error: unknown) {
           // Cost layer deduction failed - inventory already deducted but FIFO/AVCO tracking incomplete
-          if ((error instanceof Error ? error.message : String(error))?.includes('Insufficient cost layers')) {
+          if (
+            (error instanceof Error ? error.message : String(error))?.includes(
+              'Insufficient cost layers'
+            )
+          ) {
             // Expected case: product uses average cost or has no layers
-            logger.debug(`No cost layers available for product ${deduction.productId}, using average cost`, {
-              productId: deduction.productId,
-              quantity: deduction.quantity,
-            });
+            logger.debug(
+              `No cost layers available for product ${deduction.productId}, using average cost`,
+              {
+                productId: deduction.productId,
+                quantity: deduction.quantity,
+              }
+            );
           } else {
             // Unexpected failure - log for manual review
             logger.warn('Cost layer deduction failed - FIFO/AVCO tracking may be inaccurate', {
@@ -1223,10 +1374,12 @@ export const salesService = {
               saleNumber: sale.saleNumber,
               productId: deduction.productId,
               quantity: deduction.quantity,
-              error: (error instanceof Error ? error.message : String(error)),
+              error: error instanceof Error ? error.message : String(error),
               remediation: 'Review cost layers for this product and adjust if needed',
             });
-            warnings.push(`Cost layer deduction failed for product ${deduction.productId}: ${(error instanceof Error ? error.message : String(error))}. FIFO/AVCO tracking may be inaccurate.`);
+            warnings.push(
+              `Cost layer deduction failed for product ${deduction.productId}: ${error instanceof Error ? error.message : String(error)}. FIFO/AVCO tracking may be inaccurate.`
+            );
           }
         }
       }
@@ -1245,7 +1398,10 @@ export const salesService = {
         // Process payment lines for bank transactions
         const paymentLinesToProcess = input.paymentLines || [];
         const nonCashPayments = paymentLinesToProcess.filter(
-          line => line.paymentMethod !== 'CASH' && line.paymentMethod !== 'CREDIT' && line.paymentMethod !== 'DEPOSIT'
+          (line) =>
+            line.paymentMethod !== 'CASH' &&
+            line.paymentMethod !== 'CREDIT' &&
+            line.paymentMethod !== 'DEPOSIT'
         );
 
         for (const payment of nonCashPayments) {
@@ -1265,7 +1421,11 @@ export const salesService = {
         }
 
         // Also handle single payment method if no payment lines
-        if (paymentLinesToProcess.length === 0 && effectivePaymentMethod !== 'CASH' && effectivePaymentMethod !== 'CREDIT') {
+        if (
+          paymentLinesToProcess.length === 0 &&
+          effectivePaymentMethod !== 'CASH' &&
+          effectivePaymentMethod !== 'CREDIT'
+        ) {
           await BankingService.createFromSale(
             sale.id,
             sale.saleNumber,
@@ -1286,10 +1446,12 @@ export const salesService = {
         logger.error('CRITICAL: Banking integration failed - REQUIRES MANUAL REMEDIATION', {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
-          error: (error instanceof Error ? error.message : String(error)),
+          error: error instanceof Error ? error.message : String(error),
           remediation: 'Create bank transaction manually via Banking module',
         });
-        warnings.push(`Banking integration failed for sale ${sale.saleNumber}: ${(error instanceof Error ? error.message : String(error))}. Manual remediation required.`);
+        warnings.push(
+          `Banking integration failed for sale ${sale.saleNumber}: ${error instanceof Error ? error.message : String(error)}. Manual remediation required.`
+        );
         // Note: Not throwing here because sale is already committed
         // The GL entry exists (via trigger), only bank_transactions record is missing
       }
@@ -1334,8 +1496,9 @@ export const salesService = {
           }
         } else {
           // No session provided - log warning if CASH payment
-          const hasCashPayment = input.paymentLines?.some(l => l.paymentMethod === 'CASH')
-            || effectivePaymentMethod === 'CASH';
+          const hasCashPayment =
+            input.paymentLines?.some((l) => l.paymentMethod === 'CASH') ||
+            effectivePaymentMethod === 'CASH';
 
           if (hasCashPayment) {
             logger.warn('Cash sale without register session - drawer tracking will be incomplete', {
@@ -1352,10 +1515,12 @@ export const salesService = {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           sessionId: input.cashRegisterSessionId,
-          error: (error instanceof Error ? error.message : String(error)),
+          error: error instanceof Error ? error.message : String(error),
           remediation: 'Manually record cash movement in cash register',
         });
-        warnings.push(`Cash register integration failed: ${(error instanceof Error ? error.message : String(error))}. Drawer tracking incomplete.`);
+        warnings.push(
+          `Cash register integration failed: ${error instanceof Error ? error.message : String(error)}. Drawer tracking incomplete.`
+        );
       }
 
       const result = {
@@ -1392,11 +1557,18 @@ export const salesService = {
   /**
    * Get sale by ID
    */
-  async getSaleById(pool: Pool, id: string): Promise<{ sale: SaleRecord; items: SaleItemRecord[]; paymentLines?: Record<string, unknown>[] }> {
+  async getSaleById(
+    pool: Pool,
+    id: string
+  ): Promise<{
+    sale: SaleRecord;
+    items: SaleItemRecord[];
+    paymentLines?: Record<string, unknown>[];
+  }> {
     const result = await salesRepository.getSaleById(pool, id);
 
     if (!result) {
-      throw new Error(`Sale with ID ${id} not found`);
+      throw new NotFoundError(`Sale ${id}`);
     }
 
     return result;
@@ -1409,7 +1581,13 @@ export const salesService = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; customerId?: string; cashierId?: string; startDate?: string; endDate?: string }
+    filters?: {
+      status?: string;
+      customerId?: string;
+      cashierId?: string;
+      startDate?: string;
+      endDate?: string;
+    }
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     return salesRepository.listSales(pool, page, limit, filters);
   },
@@ -1506,7 +1684,7 @@ export const salesService = {
 
   /**
    * Void a sale (requires manager approval for high-value sales)
-   * 
+   *
    * Business Rules:
    * - Only COMPLETED sales can be voided
    * - Void reason is MANDATORY
@@ -1515,7 +1693,7 @@ export const salesService = {
    * - Cost layers are restored (FIFO reversal)
    * - Customer balance is adjusted if credit sale
    * - Audit trail is created
-   * 
+   *
    * @param pool - Database connection pool
    * @param saleId - UUID of sale to void
    * @param voidedById - UUID of user requesting void
@@ -1530,7 +1708,12 @@ export const salesService = {
     voidReason: string,
     approvedById?: string,
     amountThreshold: number = 1000000
-  ): Promise<{ success: boolean; sale: Record<string, unknown>; itemsRestored: number; totalAmount: number }> {
+  ): Promise<{
+    success: boolean;
+    sale: Record<string, unknown>;
+    itemsRestored: number;
+    totalAmount: number;
+  }> {
     const client = await pool.connect();
 
     try {
@@ -1541,25 +1724,26 @@ export const salesService = {
       await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
       // Get sale details
-      const saleResult = await client.query(
-        `SELECT * FROM sales WHERE id = $1`,
-        [saleId]
-      );
+      const saleResult = await client.query(`SELECT * FROM sales WHERE id = $1`, [saleId]);
 
       if (saleResult.rows.length === 0) {
-        throw new Error('Sale not found');
+        throw new NotFoundError('Sale');
       }
 
       const sale = saleResult.rows[0];
 
       // Validate sale can be voided
       if (sale.status !== 'COMPLETED') {
-        throw new Error(`Cannot void sale with status ${sale.status}. Only COMPLETED sales can be voided.`);
+        throw new BusinessError(
+          `Cannot void sale with status ${sale.status}. Only COMPLETED sales can be voided.`,
+          'ERR_SALE_008',
+          { saleId, currentStatus: sale.status, requiredStatus: 'COMPLETED' }
+        );
       }
 
       // Validate void reason
       if (!voidReason || voidReason.trim().length === 0) {
-        throw new Error('Void reason is required');
+        throw new BusinessError('Void reason is required', 'ERR_SALE_009', { saleId });
       }
 
       // Check if manager approval is required
@@ -1567,8 +1751,10 @@ export const salesService = {
       const requiresApproval = totalAmount > amountThreshold;
 
       if (requiresApproval && !approvedById) {
-        throw new Error(
-          `Manager approval required for sales over ${amountThreshold}. Total amount: ${totalAmount}`
+        throw new BusinessError(
+          `Manager approval required for sales over ${amountThreshold}. Total amount: ${totalAmount}`,
+          'ERR_SALE_010',
+          { saleId, totalAmount, amountThreshold }
         );
       }
 
@@ -1576,7 +1762,9 @@ export const salesService = {
       if (approvedById) {
         const isManager = await salesRepository.isManager(client, approvedById);
         if (!isManager) {
-          throw new Error('Approver must have MANAGER or ADMIN role');
+          throw new BusinessError('Approver must have MANAGER or ADMIN role', 'ERR_SALE_011', {
+            approvedById,
+          });
         }
       }
 
@@ -1623,7 +1811,7 @@ export const salesService = {
           } catch (error: unknown) {
             logger.error('Failed to restore cost layer', {
               productId,
-              error: (error instanceof Error ? error.message : String(error)),
+              error: error instanceof Error ? error.message : String(error),
             });
             // Don't fail transaction - inventory restoration is more critical
           }
@@ -1785,10 +1973,10 @@ export const salesService = {
 
         if (creditAmount > 0) {
           // Reduce customer balance (they no longer owe us this money)
-          await client.query(
-            'UPDATE customers SET balance = balance - $1 WHERE id = $2',
-            [creditAmount, sale.customer_id]
-          );
+          await client.query('UPDATE customers SET balance = balance - $1 WHERE id = $2', [
+            creditAmount,
+            sale.customer_id,
+          ]);
 
           logger.info('Customer balance adjusted for voided credit sale (no invoice)', {
             customerId: sale.customer_id,
