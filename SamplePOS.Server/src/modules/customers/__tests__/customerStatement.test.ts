@@ -1,18 +1,37 @@
-import { getCustomerStatement } from '../customerService.js';
-import * as customerRepository from '../customerRepository.js';
-import type { Customer } from '../../../../../shared/zod/customer.js';
+import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 import Decimal from 'decimal.js';
+import type { Customer } from '../../../../../shared/zod/customer.js';
 
-jest.mock('../customerRepository.js');
+type AnyMock = jest.Mock<(...args: any[]) => any>;
 
-const mockRepo = customerRepository as jest.Mocked<typeof customerRepository>;
+// ESM-compatible module mock — must come before dynamic import
+jest.unstable_mockModule('../customerRepository.js', () => ({
+  findCustomerById: jest.fn(),
+  getOpeningBalance: jest.fn(),
+  getStatementEntries: jest.fn(),
+  getDepositEntries: jest.fn(),
+  getCustomerDepositSummary: jest.fn(),
+}));
+
+const { findCustomerById, getOpeningBalance, getStatementEntries, getDepositEntries, getCustomerDepositSummary } =
+  (await import('../customerRepository.js')) as unknown as {
+    findCustomerById: AnyMock;
+    getOpeningBalance: AnyMock;
+    getStatementEntries: AnyMock;
+    getDepositEntries: AnyMock;
+    getCustomerDepositSummary: AnyMock;
+  };
+
+const { getCustomerStatement } = await import('../customerService.js');
 
 describe('getCustomerStatement', () => {
   const customerId = '11111111-1111-1111-1111-111111111111';
 
   beforeEach(() => {
     jest.resetAllMocks();
-    mockRepo.findCustomerById.mockResolvedValue({
+    (getDepositEntries as AnyMock).mockResolvedValue([]);
+    (getCustomerDepositSummary as AnyMock).mockResolvedValue({ totalDeposits: 0, totalApplied: 0, balance: 0 });
+    (findCustomerById as AnyMock).mockResolvedValue({
       id: customerId,
       name: 'Test Customer',
       email: null,
@@ -28,8 +47,8 @@ describe('getCustomerStatement', () => {
   });
 
   test('no entries returns opening=closing and empty array', async () => {
-    mockRepo.getOpeningBalance.mockResolvedValue(0);
-    mockRepo.getStatementEntries.mockResolvedValue([]);
+    (getOpeningBalance as AnyMock).mockResolvedValue(0);
+    (getStatementEntries as AnyMock).mockResolvedValue([]);
     const stmt = await getCustomerStatement(customerId);
     expect(stmt.openingBalance).toBe(0);
     expect(stmt.closingBalance).toBe(0);
@@ -37,8 +56,8 @@ describe('getCustomerStatement', () => {
   });
 
   test('only payments reduces balance', async () => {
-    mockRepo.getOpeningBalance.mockResolvedValue(50000);
-    mockRepo.getStatementEntries.mockResolvedValue([
+    (getOpeningBalance as AnyMock).mockResolvedValue(50000);
+    (getStatementEntries as AnyMock).mockResolvedValue([
       { date: new Date(), type: 'PAYMENT', reference: 'RCPT-1', description: 'Payment', debit: 0, credit: 20000 },
       { date: new Date(Date.now() + 1000), type: 'PAYMENT', reference: 'RCPT-2', description: 'Payment', debit: 0, credit: 30000 },
     ]);
@@ -50,8 +69,8 @@ describe('getCustomerStatement', () => {
   });
 
   test('large debit then many credits maintains precision', async () => {
-    mockRepo.getOpeningBalance.mockResolvedValue(0);
-    mockRepo.getStatementEntries.mockResolvedValue([
+    (getOpeningBalance as AnyMock).mockResolvedValue(0);
+    (getStatementEntries as AnyMock).mockResolvedValue([
       { date: new Date(), type: 'INVOICE', reference: 'SALE-1', description: 'Big Sale', debit: 99999.99, credit: 0 },
       { date: new Date(Date.now() + 1000), type: 'PAYMENT', reference: 'RCPT-1', description: 'Part Pay', debit: 0, credit: 33333.33 },
       { date: new Date(Date.now() + 2000), type: 'PAYMENT', reference: 'RCPT-2', description: 'Part Pay', debit: 0, credit: 33333.33 },
@@ -67,12 +86,12 @@ describe('getCustomerStatement', () => {
   });
 
   test('pagination slices entries correctly', async () => {
-    mockRepo.getOpeningBalance.mockResolvedValue(0);
+    (getOpeningBalance as AnyMock).mockResolvedValue(0);
     const entries: Array<{ date: Date; type: string; reference: string; description: string; debit: number; credit: number }> = [];
     for (let i = 0; i < 25; i++) {
       entries.push({ date: new Date(Date.now() + i * 1000), type: 'INVOICE', reference: `SALE-${i}`, description: 'Sale', debit: 100, credit: 0 });
     }
-    mockRepo.getStatementEntries.mockResolvedValue(entries);
+    (getStatementEntries as AnyMock).mockResolvedValue(entries);
     const stmtPage1 = await getCustomerStatement(customerId, undefined, undefined, 1, 10);
     const stmtPage3 = await getCustomerStatement(customerId, undefined, undefined, 3, 10);
     expect(stmtPage1.entries).toHaveLength(10);

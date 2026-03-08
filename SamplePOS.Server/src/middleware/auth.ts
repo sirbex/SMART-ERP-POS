@@ -25,7 +25,16 @@ interface JwtPayload {
   exp?: number;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  const msg = 'FATAL: JWT_SECRET environment variable is not set. Server cannot start without it.';
+  if (process.env.NODE_ENV === 'production') {
+    console.error(msg);
+    process.exit(1);
+  }
+  console.warn(`⚠️  ${msg} Using insecure default for development only.`);
+}
+const jwtSecret = JWT_SECRET || 'dev-only-insecure-key-do-not-use-in-production';
 
 // Extend Express Request interface to include enhanced user
 declare global {
@@ -73,7 +82,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 
   try {
     // Verify the token
-    const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    const payload = jwt.verify(token, jwtSecret) as JwtPayload;
     req.tokenPayload = payload;
 
     // SECURITY: Use the tenant-scoped pool (set by tenantMiddleware) for user lookup.
@@ -159,7 +168,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
     const token = authHeader.substring(7);
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+      const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
 
       // Map JWT payload field names to req.user shape
       // JWT uses 'userId' but req.user expects 'id'
@@ -206,7 +215,7 @@ export function generateToken(user: {
   if (user.tenantSlug) payload.tenantSlug = user.tenantSlug;
 
   // @ts-ignore - JWT types are overly strict, expiresIn accepts string
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '24h' });
+  return jwt.sign(payload, jwtSecret, { expiresIn: process.env.JWT_EXPIRES_IN || '24h' });
 }
 
 /**

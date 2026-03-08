@@ -660,14 +660,22 @@ export const ReorderRecommendationsItemSchema = z.object({
   sku: z.string().optional(),
   currentStock: z.number().nonnegative(),
   reorderLevel: z.number().nonnegative(),
-  averageDailySales: z.number().nonnegative(),
-  daysOfStockRemaining: z.number().nonnegative(),
-  recommendedOrderQuantity: z.number().nonnegative(),
-  preferredSupplierId: z.string().uuid().optional(),
-  preferredSupplierName: z.string().optional(),
-  lastOrderDate: z.string().optional(),
-  urgency: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
-}).strict();
+  dailySalesVelocity: z.number().nonnegative(),
+  daysUntilStockout: z.number().nullable(),
+  suggestedOrderQuantity: z.number().nonnegative(),
+  estimatedOrderCost: z.number().nonnegative(),
+  preferredSupplier: z.string().nullable(),
+  priority: z.enum(['URGENT', 'HIGH', 'MEDIUM']),
+  leadTimeDays: z.number().int().nonnegative(),
+  safetyStock: z.number().int().nonnegative(),
+  reorderPoint: z.number().int().nonnegative(),
+  demandTrend: z.enum(['INCREASING', 'DECREASING', 'STABLE']),
+  trendRatio: z.number().nonnegative(),
+  // Self-learning engine fields
+  forecastDemand30d: z.number().nullable(),
+  seasonalIndex: z.number().nullable(),
+  learningCycles: z.number().int().nonnegative(),
+});
 
 export const ReorderRecommendationsParamsSchema = z.object({
   days_to_consider: z.coerce.number().int().positive().default(30),

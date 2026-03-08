@@ -1135,42 +1135,6 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              {/* Pricing Formula & Auto-Update */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div>
-                  <label htmlFor="pricing-formula" className="block text-sm font-medium text-gray-700 mb-1">
-                    Pricing Formula (optional)
-                  </label>
-                  <input
-                    id="pricing-formula"
-                    type="text"
-                    value={formData.pricingFormula}
-                    onChange={(e) => handleFieldChange('pricingFormula', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="e.g., cost * 1.20"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Formula to auto-calculate selling price</p>
-                </div>
-
-                <div className="flex items-start gap-2 pt-6">
-                  <input
-                    id="auto-update-price"
-                    type="checkbox"
-                    checked={formData.autoUpdatePrice}
-                    onChange={(e) => handleFieldChange('autoUpdatePrice', e.target.checked)}
-                    className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <div>
-                    <label htmlFor="auto-update-price" className="text-sm font-medium text-gray-700">
-                      Auto-Update Price
-                    </label>
-                    <p className="text-xs text-gray-500">
-                      Automatically update selling price when cost changes
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               {/* Margin Display */}
               {formData.costPrice && formData.sellingPrice && (
                 <div className="mt-3 p-3 bg-blue-50 rounded-lg">

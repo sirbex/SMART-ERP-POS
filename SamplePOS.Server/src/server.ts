@@ -50,6 +50,11 @@ import { platformRoutes } from './modules/platform/platformRoutes.js';
 import { syncRoutes } from './modules/platform/syncRoutes.js';
 import { tenantMiddleware } from './middleware/tenantMiddleware.js';
 import { connectionManager } from './db/connectionManager.js';
+import { authenticate } from './middleware/auth.js';
+import { correlationId } from './middleware/correlationId.js';
+import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger.js';
 
 // All modules now use consistent named exports for maintainability
 
@@ -72,10 +77,17 @@ initializeRbacMiddleware(pool);
 // Security headers
 app.use(helmet());
 
+// Correlation ID for request tracing
+app.use(correlationId);
+
 // CORS - Allow both localhost and 127.0.0.1
+const CORS_ORIGINS = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',')
+  : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: CORS_ORIGINS,
     credentials: true,
   })
 );
@@ -89,7 +101,7 @@ app.use(compression());
 
 // Request logging
 app.use((req, res, next) => {
-  logger.http(`${req.method} ${req.path}`);
+  logger.http(`${req.method} ${req.path}`, { requestId: req.requestId });
   next();
 });
 
@@ -104,11 +116,10 @@ app.use(tenantMiddleware);
 // ROUTES
 // ============================================================
 
-// Health check - simple version without accounting integration
+// Health check - single fast query, no retries (unlike testConnection used at startup)
 app.get('/health', async (req, res) => {
   try {
-    // Test database connection
-    await testConnection();
+    await pool.query('SELECT 1');
 
     res.json({
       success: true,
@@ -132,6 +143,12 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// API Documentation (Swagger UI)
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'SMART-ERP-POS API Docs',
+}));
+app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
+
 // API routes
 
 // Platform routes (super admin — tenant management, no tenant middleware needed)
@@ -143,7 +160,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/accounting', accountingRoutes);  // Move accounting routes early to avoid interference
 app.use('/api/accounting/comprehensive', comprehensiveAccountingRoutes);  // Comprehensive accounting features
-app.use('/api/accounting/integrity', integrityRoutes);  // Accounting integrity checks
+app.use('/api/accounting/integrity', authenticate, integrityRoutes);  // Accounting integrity checks
 app.use('/api/erp-accounting', erpAccountingRoutes);  // ERP-grade financial reporting and controls
 app.use('/api/banking', bankingRoutes);  // Banking module - accounts, transactions, reconciliation
 app.use('/api/documents', documentRoutes);  // Document management for file uploads
@@ -163,9 +180,9 @@ app.use('/api/reports', createReportsRouter(pool));
 app.use('/api/users', createUserRoutes());
 app.use('/api/admin', adminRoutes);
 app.use('/api/system', systemManagementRoutes);  // ERP-grade backup, reset, restore
-app.use('/api/discounts', discountRoutes);
+app.use('/api/discounts', authenticate, discountRoutes);
 app.use('/api/payments', createPaymentsRoutes());
-app.use('/api/audit', auditRoutes);
+app.use('/api/audit', authenticate, auditRoutes);
 app.use('/api/deposits', depositsRoutes);  // Customer deposits management
 app.use('/api/pos/hold', createHoldRoutes(pool));
 app.use('/api/pos/sync-offline-sales', createOfflineSyncRoutes(pool));  // Offline sales sync
@@ -215,6 +232,7 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 API endpoint: http://localhost:${PORT}`);
       console.log(`📍 Health check: http://localhost:${PORT}/health`);
+      console.log(`📍 API docs:     http://localhost:${PORT}/api/docs`);
       console.log(`📍 Frontend URL: ${FRONTEND_URL}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('📚 Available modules:');
@@ -243,6 +261,13 @@ async function startServer() {
       console.log('');
 
       logger.info(`Server started on port ${PORT}`);
+
+      // Initialize self-learning demand forecast jobs (requires Redis)
+      try {
+        initDemandForecastJobs(pool);
+      } catch (err) {
+        logger.warn('Demand forecast jobs not started (Redis may be offline)', { error: err instanceof Error ? err.message : String(err) });
+      }
     });
 
     server.on('error', (error: Error) => {

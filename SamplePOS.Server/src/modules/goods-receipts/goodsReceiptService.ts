@@ -439,9 +439,10 @@ export const goodsReceiptService = {
         if (expiryDate) InventoryBusinessRules.validateExpiryDate(expiryDate, false);
 
         // Check previous cost for alert
-        const prodRes = await client.query('SELECT name, cost_price FROM products WHERE id = $1', [
-          productId,
-        ]);
+        const prodRes = await client.query(
+          'SELECT p.name, pv.cost_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
+          [productId]
+        );
         const previousCostNum: number = prodRes.rows.length
           ? Number(prodRes.rows[0].cost_price || 0)
           : 0;
@@ -475,6 +476,19 @@ export const goodsReceiptService = {
           purchaseOrderItemId: poItemId ?? null,
           isBonus,
         });
+
+        // Update product_inventory quantity_on_hand (app-layer single source of truth)
+        await client.query(
+          `UPDATE product_inventory
+           SET quantity_on_hand = (
+             SELECT COALESCE(SUM(remaining_quantity), 0)
+             FROM inventory_batches
+             WHERE product_id = $1 AND status = 'ACTIVE'
+           ),
+           updated_at = CURRENT_TIMESTAMP
+           WHERE product_id = $1`,
+          [productId]
+        );
 
         // Record stock movement (RECEIVE)
         // Generate movement number
@@ -782,11 +796,15 @@ export const goodsReceiptService = {
           data.receivedQuantity,
           'goods receipt item'
         );
-        PurchaseOrderBusinessRules.validateReceivedQuantity(
-          item.orderedQuantity ?? item.receivedQuantity,
-          data.receivedQuantity,
-          false
-        );
+        // Only validate against ordered quantity when GR is linked to a PO and we have PO-sourced orderedQuantity
+        const orderedQty = Number(item.orderedQuantity ?? 0);
+        if (gr.purchaseOrderId && orderedQty > 0) {
+          PurchaseOrderBusinessRules.validateReceivedQuantity(
+            orderedQty,
+            data.receivedQuantity,
+            false
+          );
+        }
       }
 
       // Server-side normalization for unitCost
@@ -796,7 +814,7 @@ export const goodsReceiptService = {
 
         // Check if unitCost is a UoM multiple of product base cost
         const productId = item.productId;
-        const productRes = await client.query('SELECT cost_price FROM products WHERE id = $1', [
+        const productRes = await client.query('SELECT cost_price FROM product_valuation WHERE product_id = $1', [
           productId,
         ]);
         if (productRes.rows.length > 0) {

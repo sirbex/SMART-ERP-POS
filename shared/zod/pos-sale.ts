@@ -11,6 +11,7 @@ export const POSSaleLineItemSchema = z.object({
   unitPrice: z.number().nonnegative().finite(),
   costPrice: z.number().nonnegative().finite(),
   subtotal: z.number().nonnegative().finite(),
+  discountAmount: z.number().nonnegative().finite().optional(), // Per-item discount amount
   taxAmount: z.number().nonnegative().finite().optional(),
   notes: z.string().max(500).optional().or(z.null()).transform(val => val ?? undefined), // Line item notes (converts null to undefined)
 }).strict();

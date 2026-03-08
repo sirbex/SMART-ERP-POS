@@ -56,7 +56,11 @@ const RecordMovementSchema = z.object({
     paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'OTHER']).optional(),
     // For customer payments - link to invoice
     invoiceId: z.string().uuid().optional(),
-    customerId: z.string().uuid().optional()
+    customerId: z.string().uuid().optional(),
+    // Enterprise: flexible metadata (expense_type, receipt_number, etc.)
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    // Offline safety: client-generated UUID for deduplication
+    clientUuid: z.string().uuid().optional()
 });
 
 const SessionQuerySchema = z.object({
@@ -67,6 +71,14 @@ const SessionQuerySchema = z.object({
     endDate: z.string().optional(),
     limit: z.coerce.number().positive().max(100).optional(),
     offset: z.coerce.number().nonnegative().optional()
+});
+
+const UuidParamSchema = z.object({
+    id: z.string().uuid(),
+});
+
+const ApproveVarianceBodySchema = z.object({
+    notes: z.string().max(1000).optional(),
 });
 
 // =============================================================================
@@ -129,12 +141,45 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
     });
 }));
 
+// =============================================================================
+// Z-REPORT HISTORY (must be before /:id to avoid route shadowing)
+// =============================================================================
+
+const ZReportQuerySchema = z.object({
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    registerId: z.string().uuid().optional(),
+    limit: z.coerce.number().positive().max(100).optional(),
+    offset: z.coerce.number().nonnegative().optional()
+});
+
+/**
+ * GET /api/cash-registers/z-reports
+ * Get Z-Report history with filters (enterprise audit)
+ * NOTE: Must be defined before /:id to prevent Express matching 'z-reports' as :id param
+ */
+router.get('/z-reports', authenticate, asyncHandler(async (req, res) => {
+    const filters = ZReportQuerySchema.parse(req.query);
+    const result = await cashRegisterService.getZReportHistory(filters);
+
+    res.json({
+        success: true,
+        data: result.reports,
+        pagination: {
+            total: result.total,
+            limit: filters.limit || 50,
+            offset: filters.offset || 0
+        }
+    });
+}));
+
 /**
  * GET /api/cash-registers/:id
  * Get register by ID
  */
 router.get('/:id', authenticate, asyncHandler(async (req, res) => {
-    const register = await cashRegisterService.getRegisterById(req.params.id);
+    const { id } = UuidParamSchema.parse(req.params);
+    const register = await cashRegisterService.getRegisterById(id);
 
     if (!register) {
         return res.status(404).json({
@@ -171,10 +216,11 @@ router.post('/', authenticate, requirePermission('pos.create'), asyncHandler(asy
  * Update a register (admin/manager only)
  */
 router.put('/:id', authenticate, requirePermission('pos.create'), asyncHandler(async (req, res) => {
+    const { id } = UuidParamSchema.parse(req.params);
     const data = UpdateRegisterSchema.parse(req.body);
     const user = req.user as { id: string };
 
-    const register = await cashRegisterService.updateRegister(req.params.id, data, user.id);
+    const register = await cashRegisterService.updateRegister(id, data, user.id);
 
     if (!register) {
         return res.status(404).json({
@@ -232,7 +278,8 @@ router.get('/sessions', authenticate, asyncHandler(async (req, res) => {
  * Get session by ID
  */
 router.get('/sessions/:id', authenticate, asyncHandler(async (req, res) => {
-    const session = await cashRegisterService.getSessionById(req.params.id);
+    const { id } = UuidParamSchema.parse(req.params);
+    const session = await cashRegisterService.getSessionById(id);
 
     if (!session) {
         return res.status(404).json({
@@ -252,7 +299,8 @@ router.get('/sessions/:id', authenticate, asyncHandler(async (req, res) => {
  * Get full session summary with movements
  */
 router.get('/sessions/:id/summary', authenticate, asyncHandler(async (req, res) => {
-    const summary = await cashRegisterService.getSessionSummary(req.params.id);
+    const { id } = UuidParamSchema.parse(req.params);
+    const summary = await cashRegisterService.getSessionSummary(id);
 
     if (!summary) {
         return res.status(404).json({
@@ -292,11 +340,12 @@ router.post('/sessions/open', authenticate, asyncHandler(async (req, res) => {
  * Close a register session
  */
 router.post('/sessions/:id/close', authenticate, asyncHandler(async (req, res) => {
+    const { id } = UuidParamSchema.parse(req.params);
     const data = CloseSessionSchema.parse(req.body);
     const user = req.user as { id: string };
 
     const session = await cashRegisterService.closeSession({
-        sessionId: req.params.id,
+        sessionId: id,
         ...data
     }, user.id);
 
@@ -317,8 +366,9 @@ router.post(
     requirePermission('pos.approve'),
     async (req, res) => {
         try {
+            const { id } = UuidParamSchema.parse(req.params);
             const user = req.user as { id: string };
-            const session = await cashRegisterService.reconcileSession(req.params.id, user.id);
+            const session = await cashRegisterService.reconcileSession(id, user.id);
 
             res.json({
                 success: true,
@@ -354,8 +404,9 @@ router.post(
     requirePermission('pos.approve'),
     async (req, res) => {
         try {
+            const { id } = UuidParamSchema.parse(req.params);
             const user = req.user as { id: string };
-            const session = await cashRegisterService.forceCloseSession(req.params.id, user.id);
+            const session = await cashRegisterService.forceCloseSession(id, user.id);
 
             res.json({
                 success: true,
@@ -389,7 +440,8 @@ router.post(
  * Get movements for a session
  */
 router.get('/sessions/:id/movements', authenticate, asyncHandler(async (req, res) => {
-    const movements = await cashRegisterService.getSessionMovements(req.params.id);
+    const { id } = UuidParamSchema.parse(req.params);
+    const movements = await cashRegisterService.getSessionMovements(id);
 
     res.json({
         success: true,
@@ -420,7 +472,9 @@ router.post('/movements', authenticate, asyncHandler(async (req, res) => {
 
     const movement = await cashRegisterService.recordMovement({
         ...data,
-        userId: user.id
+        userId: user.id,
+        metadata: data.metadata as Record<string, unknown> | undefined,
+        clientUuid: data.clientUuid
     });
 
     res.status(201).json({
@@ -441,7 +495,8 @@ router.post('/movements', authenticate, asyncHandler(async (req, res) => {
  * QuickBooks/Odoo equivalent: Interim cash register report
  */
 router.get('/sessions/:id/x-report', authenticate, asyncHandler(async (req, res) => {
-    const report = await cashRegisterService.generateXReport(req.params.id);
+    const { id } = UuidParamSchema.parse(req.params);
+    const report = await cashRegisterService.generateXReport(id);
 
     res.json({
         success: true,
@@ -462,11 +517,12 @@ const ZReportSchema = z.object({
  * QuickBooks/Odoo equivalent: End-of-day closing report
  */
 router.post('/sessions/:id/z-report', authenticate, asyncHandler(async (req, res) => {
+    const { id } = UuidParamSchema.parse(req.params);
     const data = ZReportSchema.parse(req.body);
     const user = req.user as { id: string };
 
     const report = await cashRegisterService.generateZReport(
-        req.params.id,
+        id,
         data.actualClosing,
         data.denominationBreakdown,
         data.varianceReason,
@@ -492,11 +548,12 @@ router.post(
     requirePermission('pos.approve'),
     async (req, res) => {
         try {
+            const { id } = UuidParamSchema.parse(req.params);
             const user = req.user as { id: string };
-            const { notes } = req.body;
+            const { notes } = ApproveVarianceBodySchema.parse(req.body);
 
             const session = await cashRegisterService.approveVariance(
-                req.params.id,
+                id,
                 user.id,
                 notes
             );
@@ -523,5 +580,48 @@ router.post(
         }
     }
 );
+
+// =============================================================================
+// RECONCILIATION HISTORY (Enterprise Upgrade 1)
+// =============================================================================
+
+/**
+ * GET /api/cash-registers/sessions/:id/reconciliations
+ * Get reconciliation audit trail for a session
+ */
+router.get('/sessions/:id/reconciliations', authenticate, asyncHandler(async (req, res) => {
+    const { id } = UuidParamSchema.parse(req.params);
+    const reconciliations = await cashRegisterService.getSessionReconciliations(id);
+
+    res.json({
+        success: true,
+        data: reconciliations
+    });
+}));
+
+// =============================================================================
+// Z-REPORT STORED (Enterprise Upgrade 3 - per-session reprint)
+// =============================================================================
+
+/**
+ * GET /api/cash-registers/sessions/:id/z-report-stored
+ * Get persisted Z-Report for a session (for reprint)
+ */
+router.get('/sessions/:id/z-report-stored', authenticate, asyncHandler(async (req, res) => {
+    const { id } = UuidParamSchema.parse(req.params);
+    const report = await cashRegisterService.getStoredZReport(id);
+
+    if (!report) {
+        return res.status(404).json({
+            success: false,
+            error: 'No Z-Report found for this session'
+        });
+    }
+
+    res.json({
+        success: true,
+        data: report
+    });
+}));
 
 export default router;

@@ -65,13 +65,43 @@ export default defineConfig({
                         '@radix-ui/react-tabs',
                         '@radix-ui/react-label',
                         '@radix-ui/react-slot',
+                        '@radix-ui/react-checkbox',
+                        '@radix-ui/react-popover',
+                        '@radix-ui/react-switch',
+                        '@radix-ui/react-tooltip',
+                        '@radix-ui/react-alert-dialog',
+                        '@radix-ui/react-radio-group',
+                        '@radix-ui/react-scroll-area',
+                        '@radix-ui/react-separator',
+                        '@radix-ui/react-toggle',
+                        '@radix-ui/react-navigation-menu',
+                        '@radix-ui/react-visually-hidden',
+                        '@radix-ui/react-aspect-ratio',
                         'lucide-react'
-                    ]
+                    ],
+
+                    // Router
+                    'router': ['react-router-dom'],
+
+                    // Charts
+                    'charts': ['chart.js', 'react-chartjs-2'],
+
+                    // Forms and validation
+                    'forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
+
+                    // PDF generation
+                    'pdf': ['jspdf', 'jspdf-autotable'],
+
+                    // Data fetching and state
+                    'query': ['@tanstack/react-query', 'axios', 'zustand'],
+
+                    // Animation and utilities
+                    'utils': ['framer-motion', 'date-fns', 'decimal.js', 'clsx', 'tailwind-merge', 'class-variance-authority']
                 }
             }
         },
         // Optimize chunk size
-        chunkSizeWarningLimit: 1000,
+        chunkSizeWarningLimit: 2000,
         target: 'esnext',
         minify: 'esbuild'
     },

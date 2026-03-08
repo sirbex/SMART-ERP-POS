@@ -23,6 +23,7 @@ export const DiscountSchema = z.object({
   validUntil: z.string().datetime().optional().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  version: z.number().int().optional(),
 }).strict();
 
 export const ApplyDiscountSchema = z.object({

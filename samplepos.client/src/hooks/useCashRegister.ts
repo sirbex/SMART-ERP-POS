@@ -77,6 +77,26 @@ export function useCreateRegister() {
     });
 }
 
+/**
+ * Update a register (name, location, isActive)
+ */
+export function useUpdateRegister() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async ({ id, ...data }: { id: string; name?: string; location?: string | null; isActive?: boolean }) => {
+            const response = await api.put<{ success: boolean; data: CashRegister }>(
+                `/cash-registers/${id}`,
+                data
+            );
+            return response.data.data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.registers });
+        },
+    });
+}
+
 // ============================================================================
 // SESSION HOOKS
 // ============================================================================

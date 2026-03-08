@@ -77,7 +77,7 @@ export const purchaseOrderService = {
 
         // Server-side normalization: ensure unitCost is base unit cost
         // If it looks like a UoM multiple of product base cost, normalize it
-        const productRes = await client.query('SELECT cost_price FROM products WHERE id = $1', [
+        const productRes = await client.query('SELECT cost_price FROM product_valuation WHERE product_id = $1', [
           item.productId,
         ]);
         if (productRes.rows.length > 0) {

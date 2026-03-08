@@ -38,8 +38,44 @@ const ListSalesQuerySchema = z.object({
     .transform((val) => (val ? parseInt(val) : 50)),
   status: z.enum(['COMPLETED', 'CANCELLED', 'REFUNDED']).optional(),
   customerId: z.string().uuid().optional(),
+  cashierId: z.string().uuid().optional(),
   startDate: z.string().optional(), // Keep as string (YYYY-MM-DD format)
   endDate: z.string().optional(), // Keep as string (YYYY-MM-DD format)
+});
+
+const UuidParamSchema = z.object({
+  id: z.string().uuid(),
+});
+
+const SalesSummaryQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  groupBy: z.string().optional(),
+});
+
+const ProductSalesSummaryQuerySchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  productId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+});
+
+const TopSellingQuerySchema = z.object({
+  limit: z.coerce.number().positive().max(100).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+const SalesByDateQuerySchema = z.object({
+  groupBy: z.enum(['day', 'week', 'month']).optional().default('day'),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+const VoidSaleBodySchema = z.object({
+  reason: z.string().min(1).trim(),
+  approvedById: z.string().uuid().optional(),
+  amountThreshold: z.number().positive().optional(),
 });
 
 export const salesController = {
@@ -50,90 +86,91 @@ export const salesController = {
    * 2. Legacy format: { customerId?, items[], paymentMethod, paymentReceived, soldBy }
    */
   async createSale(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      let validatedData: z.infer<typeof POSSaleSchema> | z.infer<typeof CreateSaleSchema> | undefined;
-      let serviceInput: CreateSaleInput & { customerName?: string | null };
+    const pool = req.tenantPool || globalPool;
+    let validatedData: z.infer<typeof POSSaleSchema> | z.infer<typeof CreateSaleSchema> | undefined;
+    let serviceInput: CreateSaleInput & { customerName?: string | null };
 
-      // Try new POS format first
-      const posValidation = POSSaleSchema.safeParse(req.body);
-      if (posValidation.success) {
-    const posData = posValidation.data;
+    // Try new POS format first
+    const posValidation = POSSaleSchema.safeParse(req.body);
+    if (posValidation.success) {
+      const posData = posValidation.data;
 
-    // Convert POS format to service format
-    serviceInput = {
-      customerId: posData.customerId || null,
-      quoteId: posData.quoteId || null, // Link to quotation for auto-conversion
-      cashRegisterSessionId: posData.cashRegisterSessionId || undefined, // Link to cash register for drawer tracking
-      customerName: null, // Will be fetched from DB if needed
-      items: posData.lineItems.map((item: z.infer<typeof POSSaleLineItemSchema>) => ({
-        productId: item.productId,
-        productName: item.productName,
-        uom: item.uom,
-        uomId: item.uomId, // Include UOM ID for tracking
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-      })),
-      subtotal: posData.subtotal,
-      discountAmount: posData.discountAmount || 0,
-      taxAmount: posData.taxAmount,
-      totalAmount: posData.totalAmount,
-      paymentMethod: posData.paymentMethod || (posData.paymentLines && posData.paymentLines.length > 0
-        ? posData.paymentLines.reduce((primary, line) => line.amount > primary.amount ? line : primary, posData.paymentLines[0]).paymentMethod
-        : 'CASH'), // Use highest-amount payment line as primary method
-      paymentReceived: posData.amountTendered || posData.totalAmount,
-      soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // From auth middleware - null UUID for system
-      saleDate: posData.saleDate || undefined, // Backdated sale date if provided
-      paymentLines: posData.paymentLines || undefined, // Include payment lines for split payment
-    };
-      } else {
-    // Log POS validation errors
-    console.error('POS Schema validation failed:', JSON.stringify(posValidation.error.errors, null, 2));
-    console.error('Request body:', JSON.stringify(req.body, null, 2));
-
-    // Try legacy format
-    const legacyValidation = CreateSaleSchema.safeParse(req.body);
-    if (legacyValidation.success) {
-      serviceInput = legacyValidation.data;
+      // Convert POS format to service format
+      serviceInput = {
+        customerId: posData.customerId || null,
+        quoteId: posData.quoteId || null, // Link to quotation for auto-conversion
+        cashRegisterSessionId: posData.cashRegisterSessionId || undefined, // Link to cash register for drawer tracking
+        customerName: null, // Will be fetched from DB if needed
+        items: posData.lineItems.map((item: z.infer<typeof POSSaleLineItemSchema>) => ({
+          productId: item.productId,
+          productName: item.productName,
+          uom: item.uom,
+          uomId: item.uomId, // Include UOM ID for tracking
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountAmount: item.discountAmount || 0, // Per-item discount
+        })),
+        subtotal: posData.subtotal,
+        discountAmount: posData.discountAmount || 0,
+        taxAmount: posData.taxAmount,
+        totalAmount: posData.totalAmount,
+        paymentMethod: posData.paymentMethod || (posData.paymentLines && posData.paymentLines.length > 0
+          ? posData.paymentLines.reduce((primary, line) => line.amount > primary.amount ? line : primary, posData.paymentLines[0]).paymentMethod
+          : 'CASH'), // Use highest-amount payment line as primary method
+        paymentReceived: posData.amountTendered || posData.totalAmount,
+        soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // From auth middleware - null UUID for system
+        saleDate: posData.saleDate || undefined, // Backdated sale date if provided
+        paymentLines: posData.paymentLines || undefined, // Include payment lines for split payment
+      };
     } else {
-      // Both validations failed - return POS schema errors as they're more relevant
-      console.error('Legacy Schema validation also failed:', JSON.stringify(legacyValidation.error.errors, null, 2));
-      res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: posValidation.error.errors,
-      });
-      return;
-    }
+      // Log POS validation errors
+      console.error('POS Schema validation failed:', JSON.stringify(posValidation.error.errors, null, 2));
+      console.error('Request body:', JSON.stringify(req.body, null, 2));
+
+      // Try legacy format
+      const legacyValidation = CreateSaleSchema.safeParse(req.body);
+      if (legacyValidation.success) {
+        serviceInput = legacyValidation.data;
+      } else {
+        // Both validations failed - return POS schema errors as they're more relevant
+        console.error('Legacy Schema validation also failed:', JSON.stringify(legacyValidation.error.errors, null, 2));
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: posValidation.error.errors,
+        });
+        return;
       }
+    }
 
-      const result = await salesService.createSale(pool, serviceInput);
+    const result = await salesService.createSale(pool, serviceInput);
 
-      // Log audit trail with context from request
-      try {
-    const auditContext = req.auditContext || {
-      userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
-      userName: req.user?.fullName,
-      userRole: req.user?.role,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    };
+    // Log audit trail with context from request
+    try {
+      const auditContext = req.auditContext || {
+        userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
 
-    // Import audit service dynamically
-    const { logSaleCreated } = await import('../audit/auditService.js');
-    await logSaleCreated(
-      pool,
-      result.sale.id,
-      result.sale.saleNumber,
-      {
-        itemCount: result.items.length,
-        totalAmount: result.sale.totalAmount,
-        totalCost: result.sale.totalCost ?? 0,
-        profit: result.sale.profit ?? 0,
-        paymentMethod: result.sale.paymentMethod,
-        customerId: result.sale.customerId,
-      },
-      auditContext
-    );
+      // Import audit service dynamically
+      const { logSaleCreated } = await import('../audit/auditService.js');
+      await logSaleCreated(
+        pool,
+        result.sale.id,
+        result.sale.saleNumber,
+        {
+          itemCount: result.items.length,
+          totalAmount: result.sale.totalAmount,
+          totalCost: result.sale.totalCost ?? 0,
+          profit: result.sale.profit ?? 0,
+          paymentMethod: result.sale.paymentMethod,
+          customerId: result.sale.customerId,
+        },
+        auditContext
+      );
 
       res.status(201).json({
         success: true,
@@ -163,126 +200,133 @@ export const salesController = {
    * Get sale by ID
    */
   async getSaleById(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await salesService.getSaleById(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await salesService.getSaleById(pool, id);
 
-      res.json({
-    success: true,
-    data: normalizeResponse(result),
-      });
+    res.json({
+      success: true,
+      data: normalizeResponse(result),
+    });
   },
 
   /**
    * List sales with pagination and filters
+   * CASHIER role is always restricted to their own sales (server-enforced)
    */
   async listSales(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const query = ListSalesQuerySchema.parse(req.query);
-      const result = await salesService.listSales(pool, query.page, query.limit, {
-    status: query.status,
-    customerId: query.customerId,
-    startDate: query.startDate,
-    endDate: query.endDate,
-      });
+    const pool = req.tenantPool || globalPool;
+    const query = ListSalesQuerySchema.parse(req.query);
 
-      res.json({
-    success: true,
-    data: result.sales.map((sale) => normalizeResponse(sale)),
-    pagination: {
-      page: query.page,
-      limit: query.limit,
-      total: result.total,
-      totalPages: Math.ceil(result.total / query.limit),
-    },
-      });
+    // Server-enforced: cashiers can ONLY see their own sales
+    const effectiveCashierId = req.user?.role === 'CASHIER'
+      ? req.user.id
+      : query.cashierId;
+
+    const result = await salesService.listSales(pool, query.page, query.limit, {
+      status: query.status,
+      customerId: query.customerId,
+      cashierId: effectiveCashierId,
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
+
+    res.json({
+      success: true,
+      data: result.sales.map((sale) => normalizeResponse(sale)),
+      pagination: {
+        page: query.page,
+        limit: query.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / query.limit),
+      },
+    });
   },  /**
    * Get sales summary (totals, count, by payment method)
    */
   async getSalesSummary(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { startDate, endDate, groupBy } = req.query;
+    const pool = req.tenantPool || globalPool;
+    const { startDate, endDate, groupBy } = SalesSummaryQuerySchema.parse(req.query);
 
-      const filters: { startDate?: string; endDate?: string; groupBy?: string } = {};
-      if (startDate) filters.startDate = startDate as string;
-      if (endDate) filters.endDate = endDate as string;
-      if (groupBy) filters.groupBy = groupBy as string;
+    const filters: { startDate?: string; endDate?: string; groupBy?: string; cashierId?: string } = {};
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    if (groupBy) filters.groupBy = groupBy;
+    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
-      const result = await salesService.getSalesSummary(pool, filters);
+    const result = await salesService.getSalesSummary(pool, filters);
 
-      res.json({
-    success: true,
-    data: result,
-      });
+    res.json({
+      success: true,
+      data: result,
+    });
   },
 
   /**
    * Get product sales summary report
    */
   async getProductSalesSummary(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { startDate, endDate, productId, customerId } = req.query;
+    const pool = req.tenantPool || globalPool;
+    const { startDate, endDate, productId, customerId } = ProductSalesSummaryQuerySchema.parse(req.query);
 
-      const filters: { startDate?: string; endDate?: string; productId?: string; customerId?: string } = {};
-      if (startDate) filters.startDate = startDate as string;
-      if (endDate) filters.endDate = endDate as string;
-      if (productId) filters.productId = productId as string;
-      if (customerId) filters.customerId = customerId as string;
+    const filters: { startDate?: string; endDate?: string; productId?: string; customerId?: string; cashierId?: string } = {};
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    if (productId) filters.productId = productId;
+    if (customerId) filters.customerId = customerId;
+    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
-      const result = await salesService.getProductSalesSummary(pool, filters);
+    const result = await salesService.getProductSalesSummary(pool, filters);
 
-      res.json({
-    success: true,
-    data: result,
-    message: `Retrieved sales summary for ${result.length} product(s)`,
-      });
+    res.json({
+      success: true,
+      data: result,
+      message: `Retrieved sales summary for ${result.length} product(s)`,
+    });
   },
 
   /**
    * Get top selling products
    */
   async getTopSellingProducts(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { limit, startDate, endDate } = req.query;
+    const pool = req.tenantPool || globalPool;
+    const query = TopSellingQuerySchema.parse(req.query);
 
-      const filters: { startDate?: string; endDate?: string } = {};
-      if (startDate) filters.startDate = startDate as string;
-      if (endDate) filters.endDate = endDate as string;
+    const filters: { startDate?: string; endDate?: string; cashierId?: string } = {};
+    if (query.startDate) filters.startDate = query.startDate;
+    if (query.endDate) filters.endDate = query.endDate;
+    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
-      const result = await salesService.getTopSellingProducts(
-    pool,
-    limit ? parseInt(limit as string) : 10,
-    filters
-      );
+    const result = await salesService.getTopSellingProducts(
+      pool,
+      query.limit ?? 10,
+      filters
+    );
 
-      res.json({
-    success: true,
-    data: result,
-      });
+    res.json({
+      success: true,
+      data: result,
+    });
   },
 
   /**
    * Get sales summary by date
    */
   async getSalesSummaryByDate(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { groupBy, startDate, endDate } = req.query;
+    const pool = req.tenantPool || globalPool;
+    const { groupBy, startDate, endDate } = SalesByDateQuerySchema.parse(req.query);
 
-      const filters: { startDate?: string; endDate?: string } = {};
-      // Keep dates as strings (YYYY-MM-DD format) to avoid timezone issues
-      if (startDate) filters.startDate = startDate as string;
-      if (endDate) filters.endDate = endDate as string;
+    const filters: { startDate?: string; endDate?: string; cashierId?: string } = {};
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
-      const validGroupBy = ['day', 'week', 'month'].includes(groupBy as string)
-    ? (groupBy as 'day' | 'week' | 'month')
-    : 'day';
+    const result = await salesService.getSalesSummaryByDate(pool, groupBy, filters);
 
-      const result = await salesService.getSalesSummaryByDate(pool, validGroupBy, filters);
-
-      res.json({
-    success: true,
-    data: result,
-      });
+    res.json({
+      success: true,
+      data: result,
+    });
   },
 
   /**
@@ -291,62 +335,53 @@ export const salesController = {
    * Body: { reason: string, approvedById?: string }
    */
   async voidSale(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const { reason, approvedById, amountThreshold } = req.body;
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const { reason, approvedById, amountThreshold } = VoidSaleBodySchema.parse(req.body);
 
-      // Validate inputs
-      if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
-    res.status(400).json({
-      success: false,
-      error: 'Void reason is required',
-    });
-    return;
-      }
+    const voidedById = req.user?.id;
+    if (!voidedById) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated',
+      });
+      return;
+    }
 
-      const voidedById = req.user?.id;
-      if (!voidedById) {
-    res.status(401).json({
-      success: false,
-      error: 'User not authenticated',
-    });
-    return;
-      }
-
-      // Void the sale
-      const result = await salesService.voidSale(
-    pool,
-    id,
-    voidedById,
-    reason.trim(),
-    approvedById || undefined,
-    amountThreshold || 1000000 // Default threshold: 1M UGX
-      );
-
-      // Log audit trail
-      try {
-    const auditContext = req.auditContext || {
-      userId: voidedById,
-      userName: req.user?.fullName,
-      userRole: req.user?.role,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    };
-
-    const { logSaleVoided } = await import('../audit/auditService.js');
-    await logSaleVoided(
+    // Void the sale
+    const result = await salesService.voidSale(
       pool,
       id,
-      String(result.sale.saleNumber || ''),
-      reason.trim(),
-      {
-        totalAmount: result.totalAmount,
-        itemsRestored: result.itemsRestored,
-        voidedById,
-        approvedById: approvedById || null,
-      },
-      auditContext
+      voidedById,
+      reason,
+      approvedById || undefined,
+      amountThreshold || 1000000 // Default threshold: 1M UGX
     );
+
+    // Log audit trail
+    try {
+      const auditContext = req.auditContext || {
+        userId: voidedById,
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      const { logSaleVoided } = await import('../audit/auditService.js');
+      await logSaleVoided(
+        pool,
+        id,
+        String(result.sale.saleNumber || ''),
+        reason.trim(),
+        {
+          totalAmount: result.totalAmount,
+          itemsRestored: result.itemsRestored,
+          voidedById,
+          approvedById: approvedById || null,
+        },
+        auditContext
+      );
 
       res.json({
         success: true,

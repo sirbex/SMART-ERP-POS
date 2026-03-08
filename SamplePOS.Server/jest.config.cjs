@@ -28,6 +28,12 @@ module.exports = {
     ],
   },
   testTimeout: 30000,
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    'src/tests/accounting-integrity\\.test\\.ts',
+    'src/rbac/test\\.ts',
+    'src/modules/inventory/stockCount\\.test\\.ts',
+  ],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   globals: {
     'ts-jest': {

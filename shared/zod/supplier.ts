@@ -14,6 +14,7 @@ export const SupplierSchema = z.object({
   isActive: z.boolean().default(true),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  version: z.number().int().optional(),
 }).strict();
 
 export const CreateSupplierSchema = z.object({

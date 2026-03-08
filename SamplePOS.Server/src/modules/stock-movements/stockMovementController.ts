@@ -1,14 +1,18 @@
 // Stock Movement Controller - HTTP request handlers
 // Validates input, calls service layer, formats responses
 
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { MovementType } from './types.js';
 import * as stockMovementService from './stockMovementService.js';
 import { PaginationHelper } from '../../utils/pagination.js';
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 // Validation schemas
+const UuidParamSchema = z.object({ productId: z.string().uuid() });
+const BatchIdParamSchema = z.object({ batchId: z.string().uuid() });
+
 const RecordMovementSchema = z
   .object({
     productId: z.string().uuid(),
@@ -52,15 +56,6 @@ const ListMovementsQuerySchema = z.object({
     .transform((val) => (val ? new Date(val) : undefined)),
 });
 
-// Async wrapper — catches thrown errors and forwards to Express error handler
-function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
-) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
 /**
  * Record manual stock movement
  * POST /api/stock-movements
@@ -84,7 +79,7 @@ export const recordMovement = asyncHandler(async (req, res) => {
  */
 export const getMovementsByProduct = asyncHandler(async (req, res) => {
   const pool = req.tenantPool || globalPool;
-  const { productId } = req.params;
+  const { productId } = UuidParamSchema.parse(req.params);
   const pg = PaginationHelper.fromQuery(req.query as Record<string, string | undefined>, { limit: 100 });
 
   const result = await stockMovementService.getMovementsByProduct(pool, productId, pg.page, pg.limit);
@@ -102,7 +97,7 @@ export const getMovementsByProduct = asyncHandler(async (req, res) => {
  */
 export const getMovementsByBatch = asyncHandler(async (req, res) => {
   const pool = req.tenantPool || globalPool;
-  const { batchId } = req.params;
+  const { batchId } = BatchIdParamSchema.parse(req.params);
   const pg = PaginationHelper.fromQuery(req.query as Record<string, string | undefined>, { limit: 100 });
 
   const result = await stockMovementService.getMovementsByBatch(pool, batchId, pg.page, pg.limit);

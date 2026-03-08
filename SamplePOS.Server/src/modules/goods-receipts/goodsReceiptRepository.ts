@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export interface GoodsReceipt {
   id: string;
@@ -115,7 +116,8 @@ export const goodsReceiptRepository = {
         notes as "supplierDeliveryNote",
         received_by_id as "receivedBy",
         created_at as "createdAt",
-        updated_at as "updatedAt"`,
+        updated_at as "updatedAt",
+        version`,
       [
         grNumber,
         data.purchaseOrderId || null,
@@ -167,7 +169,8 @@ export const goodsReceiptRepository = {
         batch_number as "batchNumber",
         expiry_date as "expiryDate",
         cost_price as "unitCost",
-        created_at as "createdAt"`,
+        created_at as "createdAt",
+        version`,
       values
     );
 
@@ -194,6 +197,7 @@ export const goodsReceiptRepository = {
          COALESCE(u.full_name, u.email) as "receivedByName",
          gr.created_at as "createdAt",
          gr.updated_at as "updatedAt",
+         gr.version,
          po.order_number AS "poNumber",
          po.supplier_id as "supplierId",
          s."CompanyName" as "supplierName"
@@ -231,15 +235,16 @@ export const goodsReceiptRepository = {
          ROUND(gri.cost_price::numeric, 2) as "unitCost",
          gri.is_bonus as "isBonus",
          ROUND(poi.po_unit_price::numeric, 2) as "poUnitPrice",
-         ROUND(p.cost_price::numeric, 2) as "productCostPrice",
+         ROUND(pv.cost_price::numeric, 2) as "productCostPrice",
          ROUND((gri.received_quantity - COALESCE(poi.ordered_quantity, gri.received_quantity))::numeric, 2) as "qtyVariance",
-         ROUND((gri.cost_price - COALESCE(poi.po_unit_price, p.cost_price))::numeric, 2) as "costVariance",
+         ROUND((gri.cost_price - COALESCE(poi.po_unit_price, pv.cost_price))::numeric, 2) as "costVariance",
          u.name as "uomName",
          u.symbol as "uomSymbol",
          COALESCE(pu.conversion_factor, 1) as "conversionFactor"
        FROM goods_receipt_items gri
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
        JOIN products p ON gri.product_id = p.id
+       LEFT JOIN product_valuation pv ON pv.product_id = p.id
        LEFT JOIN poi ON poi.purchase_order_id = gr.purchase_order_id
                     AND poi.product_id = gri.product_id
        LEFT JOIN uoms u ON u.id = poi.uom_id
@@ -262,7 +267,7 @@ export const goodsReceiptRepository = {
     pool: Pool | PoolClient,
     itemId: string
   ): Promise<{ item: GoodsReceiptItem & { ordered_quantity?: number }; gr: GoodsReceipt } | null> {
-    // Fetch item with proper camelCase aliases
+    // Fetch item with proper camelCase aliases, joining PO items for ordered quantity
     const itemRes = await pool.query(
       `SELECT 
          gri.id,
@@ -275,9 +280,10 @@ export const goodsReceiptRepository = {
          gri.expiry_date as "expiryDate",
          gri.cost_price as "unitCost",
          COALESCE(gri.is_bonus, false) as "isBonus",
-         gri.received_quantity as "orderedQuantity"
+         COALESCE(poi.ordered_quantity, gri.received_quantity) as "orderedQuantity"
        FROM goods_receipt_items gri
        JOIN products p ON gri.product_id = p.id
+       LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
        WHERE gri.id = $1`,
       [itemId]
     );
@@ -348,13 +354,17 @@ export const goodsReceiptRepository = {
            expiry_date as "expiryDate",
            cost_price as "unitCost",
            COALESCE(is_bonus, false) as "isBonus",
-           created_at as "createdAt"
+           created_at as "createdAt",
+           version
          FROM goods_receipt_items WHERE id = $1`,
         [itemId]
       );
       if (current.rows.length === 0) throw new Error(`Goods receipt item ${itemId} not found`);
       return current.rows[0];
     }
+
+    // Always bump version on GR item updates
+    fields.push(`version = version + 1`);
 
     const result = await pool.query(
       `UPDATE goods_receipt_items
@@ -369,7 +379,8 @@ export const goodsReceiptRepository = {
          expiry_date as "expiryDate",
          cost_price as "unitCost",
          is_bonus as "isBonus",
-         created_at as "createdAt"`,
+         created_at as "createdAt",
+         version`,
       [...values, itemId]
     );
 
@@ -423,6 +434,7 @@ export const goodsReceiptRepository = {
          COALESCE(u.full_name, u.email) as "receivedByName",
          gr.created_at as "createdAt",
          gr.updated_at as "updatedAt",
+         gr.version,
          po.order_number AS "poNumber",
          s."CompanyName" as "supplierName"
        FROM goods_receipts gr
@@ -448,7 +460,14 @@ export const goodsReceiptRepository = {
   async finalizeGR(pool: Pool | PoolClient, id: string): Promise<GoodsReceipt> {
     const result = await pool.query(
       `UPDATE goods_receipts 
-       SET status = $1, updated_at = CURRENT_TIMESTAMP 
+       SET status = $1,
+           version = version + 1,
+           total_value = (
+             SELECT COALESCE(SUM(received_quantity * cost_price), 0)
+             FROM goods_receipt_items
+             WHERE goods_receipt_id = $2
+           ),
+           updated_at = CURRENT_TIMESTAMP 
        WHERE id = $2 
        RETURNING 
          id,
@@ -459,7 +478,8 @@ export const goodsReceiptRepository = {
          notes as "supplierDeliveryNote",
          received_by_id as "receivedBy",
          created_at as "createdAt",
-         updated_at as "updatedAt"`,
+         updated_at as "updatedAt",
+         version`,
       ['COMPLETED', id]
     );
 

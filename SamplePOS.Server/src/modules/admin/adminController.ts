@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Pool } from 'pg';
+import { z } from 'zod';
 import { adminService } from './adminService.js';
 import logger from '../../utils/logger.js';
 import path from 'path';
@@ -7,6 +8,15 @@ import fs from 'fs/promises';
 import { createReadStream } from 'fs';
 import { adminRepository } from './adminRepository.js';
 import { asyncHandler, ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
+
+// Zod schemas for admin operations
+const RestoreBodySchema = z.object({ filePath: z.string().min(1, 'Backup file path is required') });
+const ClearTransactionsSchema = z.object({ confirmation: z.string().min(1, 'Confirmation phrase is required') });
+const FileNameParamSchema = z.object({
+  fileName: z.string().min(1)
+    .refine(v => !v.includes('..') && !v.includes('/') && !v.includes('\\'), 'Invalid file name'),
+});
+const CleanupBackupsSchema = z.object({ keepCount: z.number().int().positive().optional().default(10) });
 
 /**
  * Admin Controller - HTTP handlers for admin operations
@@ -75,9 +85,7 @@ export const adminController = {
    */
   restore: asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
-    const { filePath: requestedFile } = req.body;
-
-    if (!requestedFile) throw new ValidationError('No backup file path provided');
+    const { filePath: requestedFile } = RestoreBodySchema.parse(req.body);
 
     const pool = authReq.pool!;
 
@@ -114,9 +122,7 @@ export const adminController = {
    */
   clearTransactions: asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
-    const { confirmation } = req.body;
-
-    if (!confirmation) throw new ValidationError('Confirmation phrase is required');
+    const { confirmation } = ClearTransactionsSchema.parse(req.body);
 
     const pool = authReq.pool!;
     const userId = authReq.user?.id || 'unknown';
@@ -168,11 +174,7 @@ export const adminController = {
    */
   deleteBackup: asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
-    const { fileName } = req.params;
-
-    if (fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
-      throw new ValidationError('Invalid file name');
-    }
+    const { fileName } = FileNameParamSchema.parse(req.params);
 
     const backupDir = path.join(process.cwd(), 'backups');
     const filePath = path.join(backupDir, fileName);
@@ -196,7 +198,7 @@ export const adminController = {
    */
   cleanupBackups: asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
-    const { keepCount = 10 } = req.body;
+    const { keepCount } = CleanupBackupsSchema.parse(req.body);
 
     const deletedCount = await adminService.cleanupOldBackups(keepCount);
 

@@ -125,6 +125,56 @@ export interface RecordMovementData {
   referenceId?: string;
   approvedBy?: string;
   paymentMethod?: PaymentMethod; // Track payment method for sales
+  metadata?: Record<string, unknown>; // Flexible JSONB for expense_type, receipt_number, etc.
+  clientUuid?: string; // Offline deduplication UUID
+}
+
+// Enterprise: Reconciliation audit trail
+export interface CashReconciliation {
+  id: string;
+  sessionId: string;
+  reconciledBy: string;
+  reconciledByName?: string;
+  expectedAmount: number;
+  countedAmount: number;
+  variance: number;
+  variancePercent: number;
+  approved: boolean;
+  approvedBy: string | null;
+  approvedByName?: string;
+  approvedAt: Date | null;
+  reason: string | null;
+  notes: string | null;
+  denominationBreakdown: DenominationBreakdown | null;
+  createdAt: Date;
+}
+
+// Enterprise: Persistent Z-Report
+export interface ZReportRecord {
+  id: string;
+  sessionId: string;
+  reportNumber: string;
+  registerName: string;
+  cashierName: string;
+  cashierId: string;
+  openedAt: Date;
+  closedAt: Date;
+  openingFloat: number;
+  expectedClosing: number;
+  actualClosing: number;
+  variance: number;
+  varianceReason: string | null;
+  totalSales: number;
+  totalRefunds: number;
+  totalCashIn: number;
+  totalCashOut: number;
+  netCashFlow: number;
+  transactionCount: number;
+  paymentSummary: PaymentSummary | null;
+  denominationBreakdown: DenominationBreakdown | null;
+  movementBreakdown: Record<string, number> | null;
+  generatedBy: string;
+  generatedAt: Date;
 }
 
 // =============================================================================
@@ -469,14 +519,21 @@ export const cashRegisterRepository = {
 
   /**
    * Calculate expected closing based on movements
+   * Handles ALL movement types (legacy + specific enterprise subtypes)
    */
   async calculateExpectedClosing(pool: Pool | PoolClient, sessionId: string): Promise<number> {
     const result = await pool.query(`
       SELECT 
         COALESCE(SUM(
           CASE 
-            WHEN movement_type IN ('CASH_IN', 'SALE', 'FLOAT_ADJUSTMENT') THEN amount
-            WHEN movement_type IN ('CASH_OUT', 'REFUND') THEN -amount
+            WHEN movement_type IN (
+              'CASH_IN', 'CASH_IN_FLOAT', 'CASH_IN_PAYMENT', 'CASH_IN_OTHER',
+              'SALE', 'FLOAT_ADJUSTMENT'
+            ) THEN amount
+            WHEN movement_type IN (
+              'CASH_OUT', 'CASH_OUT_BANK', 'CASH_OUT_EXPENSE', 'CASH_OUT_OTHER',
+              'REFUND'
+            ) THEN -amount
             ELSE 0
           END
         ), 0) as expected
@@ -504,6 +561,7 @@ export const cashRegisterRepository = {
       UPDATE cash_register_sessions
       SET 
         status = 'CLOSED',
+        version = version + 1,
         expected_closing = $2,
         actual_closing = $3,
         variance = $4,
@@ -534,7 +592,8 @@ export const cashRegisterRepository = {
         payment_summary as "paymentSummary",
         variance_approved_by as "varianceApprovedBy",
         variance_approved_at as "varianceApprovedAt",
-        variance_threshold as "varianceThreshold"
+        variance_threshold as "varianceThreshold",
+        version
     `, [
       data.sessionId,
       expectedClosing,
@@ -557,8 +616,12 @@ export const cashRegisterRepository = {
       SELECT 
         COALESCE(payment_method, 'CASH') as method,
         SUM(CASE 
-          WHEN movement_type IN ('SALE', 'CASH_IN') THEN amount
-          WHEN movement_type IN ('REFUND', 'CASH_OUT') THEN -amount
+          WHEN movement_type IN (
+            'SALE', 'CASH_IN', 'CASH_IN_FLOAT', 'CASH_IN_PAYMENT', 'CASH_IN_OTHER'
+          ) THEN amount
+          WHEN movement_type IN (
+            'REFUND', 'CASH_OUT', 'CASH_OUT_BANK', 'CASH_OUT_EXPENSE', 'CASH_OUT_OTHER'
+          ) THEN -amount
           ELSE 0
         END) as total
       FROM cash_movements
@@ -585,6 +648,7 @@ export const cashRegisterRepository = {
       UPDATE cash_register_sessions
       SET 
         status = 'RECONCILED',
+        version = version + 1,
         reconciled_at = NOW(),
         reconciled_by = $2
       WHERE id = $1 AND status = 'CLOSED'
@@ -609,7 +673,8 @@ export const cashRegisterRepository = {
         payment_summary as "paymentSummary",
         variance_approved_by as "varianceApprovedBy",
         variance_approved_at as "varianceApprovedAt",
-        variance_threshold as "varianceThreshold"
+        variance_threshold as "varianceThreshold",
+        version
     `, [sessionId, reconciledBy]);
 
     return result.rows[0];
@@ -706,15 +771,16 @@ export const cashRegisterRepository = {
   // ===========================================================================
 
   /**
-   * Record a cash movement
+   * Record a cash movement (with optional metadata + offline UUID)
    */
   async recordMovement(pool: Pool | PoolClient, data: RecordMovementData): Promise<CashMovement> {
     const result = await pool.query(`
       INSERT INTO cash_movements (
         session_id, user_id, movement_type, amount,
-        reason, reference_type, reference_id, approved_by, payment_method
+        reason, reference_type, reference_id, approved_by, payment_method,
+        metadata, client_uuid
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING 
         id,
         session_id as "sessionId",
@@ -726,6 +792,9 @@ export const cashRegisterRepository = {
         reference_id as "referenceId",
         approved_by as "approvedBy",
         payment_method as "paymentMethod",
+        metadata,
+        client_uuid as "clientUuid",
+        sync_status as "syncStatus",
         created_at as "createdAt"
     `, [
       data.sessionId,
@@ -736,7 +805,9 @@ export const cashRegisterRepository = {
       data.referenceType || null,
       data.referenceId || null,
       data.approvedBy || null,
-      data.paymentMethod || null
+      data.paymentMethod || null,
+      data.metadata ? JSON.stringify(data.metadata) : null,
+      data.clientUuid || null
     ]);
 
     return result.rows[0];
@@ -760,6 +831,9 @@ export const cashRegisterRepository = {
         m.approved_by as "approvedBy",
         a.full_name as "approvedByName",
         m.payment_method as "paymentMethod",
+        m.metadata,
+        m.client_uuid as "clientUuid",
+        m.sync_status as "syncStatus",
         m.created_at as "createdAt"
       FROM cash_movements m
       LEFT JOIN users u ON u.id = m.user_id
@@ -855,5 +929,337 @@ export const cashRegisterRepository = {
         }
       }
     };
+  },
+
+  // ===========================================================================
+  // RECONCILIATION OPERATIONS (Enterprise Upgrade 1)
+  // ===========================================================================
+
+  /**
+   * Record a reconciliation attempt
+   */
+  async createReconciliation(
+    pool: Pool | PoolClient,
+    data: {
+      sessionId: string;
+      reconciledBy: string;
+      expectedAmount: number;
+      countedAmount: number;
+      variance: number;
+      reason?: string;
+      notes?: string;
+      denominationBreakdown?: DenominationBreakdown;
+    }
+  ): Promise<CashReconciliation> {
+    const result = await pool.query(`
+      INSERT INTO cash_register_reconciliations (
+        session_id, reconciled_by, expected_amount, counted_amount,
+        variance, reason, notes, denomination_breakdown
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING
+        id,
+        session_id AS "sessionId",
+        reconciled_by AS "reconciledBy",
+        expected_amount AS "expectedAmount",
+        counted_amount AS "countedAmount",
+        variance,
+        variance_percent AS "variancePercent",
+        approved,
+        approved_by AS "approvedBy",
+        approved_at AS "approvedAt",
+        reason,
+        notes,
+        denomination_breakdown AS "denominationBreakdown",
+        created_at AS "createdAt"
+    `, [
+      data.sessionId,
+      data.reconciledBy,
+      data.expectedAmount,
+      data.countedAmount,
+      data.variance,
+      data.reason || null,
+      data.notes || null,
+      data.denominationBreakdown ? JSON.stringify(data.denominationBreakdown) : null
+    ]);
+    return result.rows[0];
+  },
+
+  /**
+   * Approve a reconciliation
+   */
+  async approveReconciliation(
+    pool: Pool | PoolClient,
+    reconciliationId: string,
+    approvedBy: string
+  ): Promise<CashReconciliation> {
+    const result = await pool.query(`
+      UPDATE cash_register_reconciliations
+      SET approved = true, approved_by = $2, approved_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        session_id AS "sessionId",
+        reconciled_by AS "reconciledBy",
+        expected_amount AS "expectedAmount",
+        counted_amount AS "countedAmount",
+        variance,
+        variance_percent AS "variancePercent",
+        approved,
+        approved_by AS "approvedBy",
+        approved_at AS "approvedAt",
+        reason,
+        notes,
+        denomination_breakdown AS "denominationBreakdown",
+        created_at AS "createdAt"
+    `, [reconciliationId, approvedBy]);
+    return result.rows[0];
+  },
+
+  /**
+   * Get reconciliation history for a session
+   */
+  async getSessionReconciliations(
+    pool: Pool | PoolClient,
+    sessionId: string
+  ): Promise<CashReconciliation[]> {
+    const result = await pool.query(`
+      SELECT
+        r.id,
+        r.session_id AS "sessionId",
+        r.reconciled_by AS "reconciledBy",
+        u.full_name AS "reconciledByName",
+        r.expected_amount AS "expectedAmount",
+        r.counted_amount AS "countedAmount",
+        r.variance,
+        r.variance_percent AS "variancePercent",
+        r.approved,
+        r.approved_by AS "approvedBy",
+        a.full_name AS "approvedByName",
+        r.approved_at AS "approvedAt",
+        r.reason,
+        r.notes,
+        r.denomination_breakdown AS "denominationBreakdown",
+        r.created_at AS "createdAt"
+      FROM cash_register_reconciliations r
+      LEFT JOIN users u ON u.id = r.reconciled_by
+      LEFT JOIN users a ON a.id = r.approved_by
+      WHERE r.session_id = $1
+      ORDER BY r.created_at DESC
+    `, [sessionId]);
+    return result.rows;
+  },
+
+  // ===========================================================================
+  // Z-REPORT STORAGE (Enterprise Upgrade 3)
+  // ===========================================================================
+
+  /**
+   * Save a Z-Report permanently
+   */
+  async saveZReport(
+    pool: Pool | PoolClient,
+    data: Omit<ZReportRecord, 'id' | 'reportNumber' | 'generatedAt'>
+  ): Promise<ZReportRecord> {
+    const result = await pool.query(`
+      INSERT INTO z_reports (
+        session_id, report_number, register_name, cashier_name, cashier_id,
+        opened_at, closed_at, opening_float, expected_closing, actual_closing,
+        variance, variance_reason, total_sales, total_refunds,
+        total_cash_in, total_cash_out, net_cash_flow, transaction_count,
+        payment_summary, denomination_breakdown, movement_breakdown, generated_by
+      )
+      VALUES (
+        $1, fn_next_z_report_number(), $2, $3, $4,
+        $5, $6, $7, $8, $9,
+        $10, $11, $12, $13,
+        $14, $15, $16, $17,
+        $18, $19, $20, $21
+      )
+      RETURNING
+        id,
+        session_id AS "sessionId",
+        report_number AS "reportNumber",
+        register_name AS "registerName",
+        cashier_name AS "cashierName",
+        cashier_id AS "cashierId",
+        opened_at AS "openedAt",
+        closed_at AS "closedAt",
+        opening_float AS "openingFloat",
+        expected_closing AS "expectedClosing",
+        actual_closing AS "actualClosing",
+        variance,
+        variance_reason AS "varianceReason",
+        total_sales AS "totalSales",
+        total_refunds AS "totalRefunds",
+        total_cash_in AS "totalCashIn",
+        total_cash_out AS "totalCashOut",
+        net_cash_flow AS "netCashFlow",
+        transaction_count AS "transactionCount",
+        payment_summary AS "paymentSummary",
+        denomination_breakdown AS "denominationBreakdown",
+        movement_breakdown AS "movementBreakdown",
+        generated_by AS "generatedBy",
+        generated_at AS "generatedAt"
+    `, [
+      data.sessionId, data.registerName, data.cashierName, data.cashierId,
+      data.openedAt, data.closedAt, data.openingFloat, data.expectedClosing, data.actualClosing,
+      data.variance, data.varianceReason, data.totalSales, data.totalRefunds,
+      data.totalCashIn, data.totalCashOut, data.netCashFlow, data.transactionCount,
+      data.paymentSummary ? JSON.stringify(data.paymentSummary) : null,
+      data.denominationBreakdown ? JSON.stringify(data.denominationBreakdown) : null,
+      data.movementBreakdown ? JSON.stringify(data.movementBreakdown) : null,
+      data.generatedBy
+    ]);
+    return result.rows[0];
+  },
+
+  /**
+   * Get Z-Report by session ID
+   */
+  async getZReportBySessionId(
+    pool: Pool | PoolClient,
+    sessionId: string
+  ): Promise<ZReportRecord | null> {
+    const result = await pool.query(`
+      SELECT
+        id,
+        session_id AS "sessionId",
+        report_number AS "reportNumber",
+        register_name AS "registerName",
+        cashier_name AS "cashierName",
+        cashier_id AS "cashierId",
+        opened_at AS "openedAt",
+        closed_at AS "closedAt",
+        opening_float AS "openingFloat",
+        expected_closing AS "expectedClosing",
+        actual_closing AS "actualClosing",
+        variance,
+        variance_reason AS "varianceReason",
+        total_sales AS "totalSales",
+        total_refunds AS "totalRefunds",
+        total_cash_in AS "totalCashIn",
+        total_cash_out AS "totalCashOut",
+        net_cash_flow AS "netCashFlow",
+        transaction_count AS "transactionCount",
+        payment_summary AS "paymentSummary",
+        denomination_breakdown AS "denominationBreakdown",
+        movement_breakdown AS "movementBreakdown",
+        generated_by AS "generatedBy",
+        generated_at AS "generatedAt"
+      FROM z_reports
+      WHERE session_id = $1
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `, [sessionId]);
+    return result.rows[0] || null;
+  },
+
+  /**
+   * Get Z-Reports with date range filter (for register or all)
+   */
+  async getZReports(
+    pool: Pool | PoolClient,
+    filters?: { startDate?: string; endDate?: string; registerId?: string; limit?: number; offset?: number }
+  ): Promise<{ reports: ZReportRecord[]; total: number }> {
+    const conditions: string[] = [];
+    const values: (string | number)[] = [];
+    let paramIndex = 1;
+
+    if (filters?.startDate) {
+      conditions.push(`z.generated_at >= $${paramIndex++}`);
+      values.push(filters.startDate);
+    }
+    if (filters?.endDate) {
+      conditions.push(`z.generated_at <= $${paramIndex++}`);
+      values.push(filters.endDate);
+    }
+    if (filters?.registerId) {
+      conditions.push(`s.register_id = $${paramIndex++}`);
+      values.push(filters.registerId);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = filters?.limit || 50;
+    const offset = filters?.offset || 0;
+
+    const [countResult, dataResult] = await Promise.all([
+      pool.query(`
+        SELECT COUNT(*) AS total
+        FROM z_reports z
+        JOIN cash_register_sessions s ON s.id = z.session_id
+        ${whereClause}
+      `, values),
+      pool.query(`
+        SELECT
+          z.id,
+          z.session_id AS "sessionId",
+          z.report_number AS "reportNumber",
+          z.register_name AS "registerName",
+          z.cashier_name AS "cashierName",
+          z.cashier_id AS "cashierId",
+          z.opened_at AS "openedAt",
+          z.closed_at AS "closedAt",
+          z.opening_float AS "openingFloat",
+          z.expected_closing AS "expectedClosing",
+          z.actual_closing AS "actualClosing",
+          z.variance,
+          z.variance_reason AS "varianceReason",
+          z.total_sales AS "totalSales",
+          z.total_refunds AS "totalRefunds",
+          z.total_cash_in AS "totalCashIn",
+          z.total_cash_out AS "totalCashOut",
+          z.net_cash_flow AS "netCashFlow",
+          z.transaction_count AS "transactionCount",
+          z.payment_summary AS "paymentSummary",
+          z.denomination_breakdown AS "denominationBreakdown",
+          z.movement_breakdown AS "movementBreakdown",
+          z.generated_by AS "generatedBy",
+          z.generated_at AS "generatedAt"
+        FROM z_reports z
+        JOIN cash_register_sessions s ON s.id = z.session_id
+        ${whereClause}
+        ORDER BY z.generated_at DESC
+        LIMIT $${paramIndex++} OFFSET $${paramIndex}
+      `, [...values, limit, offset])
+    ]);
+
+    return {
+      reports: dataResult.rows,
+      total: parseInt(countResult.rows[0].total, 10)
+    };
+  },
+
+  // ===========================================================================
+  // OFFLINE SAFETY (Enterprise Upgrade 4)
+  // ===========================================================================
+
+  /**
+   * Check if a movement already exists by clientUuid (offline dedup)
+   */
+  async getMovementByClientUuid(
+    pool: Pool | PoolClient,
+    clientUuid: string
+  ): Promise<CashMovement | null> {
+    const result = await pool.query(`
+      SELECT
+        id,
+        session_id AS "sessionId",
+        user_id AS "userId",
+        movement_type AS "movementType",
+        amount,
+        reason,
+        reference_type AS "referenceType",
+        reference_id AS "referenceId",
+        approved_by AS "approvedBy",
+        payment_method AS "paymentMethod",
+        metadata,
+        client_uuid AS "clientUuid",
+        sync_status AS "syncStatus",
+        created_at AS "createdAt"
+      FROM cash_movements
+      WHERE client_uuid = $1
+    `, [clientUuid]);
+    return result.rows[0] || null;
   }
 };

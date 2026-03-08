@@ -19,12 +19,14 @@ export interface ReceiptData {
   subtotal?: number;
   discountAmount?: number;
   taxAmount?: number;
+  cashierName?: string;
   items?: Array<{
     name: string;
     quantity: number;
     unitPrice: number;
     subtotal: number;
     uom?: string;
+    discountAmount?: number;
   }>;
   // Single payment fields (backward compatible)
   paymentMethod?: string;
@@ -125,7 +127,8 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
     const existingItem = acc.find(i =>
       i.name === item.name &&
       i.unitPrice === item.unitPrice &&
-      i.uom === item.uom
+      i.uom === item.uom &&
+      !i.discountAmount && !item.discountAmount
     );
     if (existingItem) {
       existingItem.quantity += item.quantity;
@@ -140,11 +143,12 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
     unitPrice: number;
     subtotal: number;
     uom?: string;
+    discountAmount?: number;
   }>);
 
   const itemsHTML = combinedItems?.map(item => `
     <tr>
-      <td>${item.name}${item.uom ? ` (${item.uom})` : ''}</td>
+      <td>${item.name}${item.uom ? ` (${item.uom})` : ''}${item.discountAmount ? `<br><small style="color: #d9534f;">Disc: -${formatCurrency(item.discountAmount)}</small>` : ''}</td>
       <td style="text-align: center;">${item.quantity}</td>
       <td style="text-align: right;">${formatCurrency(item.unitPrice)}</td>
       <td style="text-align: right;">${formatCurrency(item.subtotal)}</td>
@@ -228,6 +232,7 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
           <div style="margin-top: 8px;">Sale #: ${data.saleNumber}</div>
           <div>Date: ${data.saleDate}</div>
           ${data.customerName ? `<div>Customer: ${data.customerName}</div>` : ''}
+          ${data.cashierName ? `<div>Served by: ${data.cashierName}</div>` : ''}
         </div>
 
         ${data.items && data.items.length > 0 ? `
@@ -328,7 +333,8 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
     const existingItem = acc.find(i =>
       i.name === item.name &&
       i.unitPrice === item.unitPrice &&
-      i.uom === item.uom
+      i.uom === item.uom &&
+      !i.discountAmount && !item.discountAmount
     );
     if (existingItem) {
       existingItem.quantity += item.quantity;
@@ -343,13 +349,14 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
     unitPrice: number;
     subtotal: number;
     uom?: string;
+    discountAmount?: number;
   }>);
 
   const itemsHTML = combinedItems?.map(item => `
     <div style="display: flex; justify-content: space-between; margin: 3px 0;">
       <div style="flex: 1; padding-right: 10px;">
         ${item.name}${item.uom ? ` (${item.uom})` : ''}
-        <br><small>${item.quantity} x ${formatCurrency(item.unitPrice)}</small>
+        <br><small>${item.quantity} x ${formatCurrency(item.unitPrice)}${item.discountAmount ? ` <span style="color: #d9534f;">(-${formatCurrency(item.discountAmount)})</span>` : ''}</small>
       </div>
       <div style="white-space: nowrap; font-weight: bold;">
         ${formatCurrency(item.subtotal)}
@@ -427,6 +434,7 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
           <div style="margin-top: 4px;">#${data.saleNumber}</div>
           <div style="font-size: 9px;">${data.saleDate}</div>
           ${data.customerName ? `<div style="font-size: 9px;">${data.customerName}</div>` : ''}
+          ${data.cashierName ? `<div style="font-size: 9px;">Served by: ${data.cashierName}</div>` : ''}
         </div>
 
         ${data.items && data.items.length > 0 ? itemsHTML : ''}

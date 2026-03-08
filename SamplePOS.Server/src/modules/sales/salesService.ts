@@ -23,6 +23,7 @@ export interface SaleItemInput {
   uomId?: string; // UUID of product_uom used
   quantity: number;
   unitPrice: number;
+  discountAmount?: number; // Per-item discount amount
 }
 
 export interface PaymentLineInput {
@@ -189,7 +190,9 @@ export const salesService = {
         if (isCustomItem) {
           // Custom items: no product lookup, no cost, no inventory tracking
           const lineTotal = new Decimal(item.quantity).times(item.unitPrice);
-          totalAmount = totalAmount.plus(lineTotal);
+          const customItemDiscount = new Decimal(item.discountAmount || 0);
+          const lineTotalAfterDiscount = lineTotal.minus(customItemDiscount);
+          totalAmount = totalAmount.plus(lineTotalAfterDiscount);
 
           itemsWithCosts.push({
             saleId: '', // Will be set after sale creation
@@ -197,9 +200,10 @@ export const salesService = {
             productName: item.productName,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            lineTotal: parseFloat(lineTotal.toFixed(2)),
+            lineTotal: parseFloat(lineTotalAfterDiscount.toFixed(2)),
             costPrice: 0, // Custom items have no cost tracking
-            profit: parseFloat(lineTotal.toFixed(2)), // Full amount is profit
+            profit: parseFloat(lineTotalAfterDiscount.toFixed(2)), // Full amount is profit
+            discountAmount: parseFloat(customItemDiscount.toFixed(2)),
             uomId: undefined,
           });
 
@@ -259,7 +263,9 @@ export const salesService = {
         await SalesBusinessRules.validateProductActive(client, item.productId);
 
         const lineTotal = new Decimal(item.quantity).times(item.unitPrice);
-        totalAmount = totalAmount.plus(lineTotal);
+        const itemDiscountAmount = new Decimal(item.discountAmount || 0);
+        const lineTotalAfterDiscount = lineTotal.minus(itemDiscountAmount);
+        totalAmount = totalAmount.plus(lineTotalAfterDiscount);
 
         // Use pre-fetched product data (eliminates duplicate per-item query)
         const productData = productsMap.get(item.productId);
@@ -329,7 +335,7 @@ export const salesService = {
 
         const itemCost = new Decimal(unitCost).times(baseQty);
         totalCost = totalCost.plus(itemCost);
-        const profit = lineTotal.minus(itemCost);
+        const profit = lineTotalAfterDiscount.minus(itemCost);
 
         // CRITICAL: costPrice must reflect cost per SELLING UoM unit, not per base unit.
         // When selling 1 Box (12 pieces) at base cost 6,000/piece, costPrice = 72,000/box.
@@ -355,9 +361,10 @@ export const salesService = {
           productName: item.productName,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          lineTotal: parseFloat(lineTotal.toFixed(2)),
+          lineTotal: parseFloat(lineTotalAfterDiscount.toFixed(2)),
           costPrice: costPerSellingUnit,
           profit: parseFloat(profit.toFixed(2)),
+          discountAmount: parseFloat(itemDiscountAmount.toFixed(2)),
           uomId: actualUomId, // Use the actual uom_id from uoms table
         });
       }
@@ -575,9 +582,11 @@ export const salesService = {
       // CRITICAL: DISCOUNT ALLOCATION TO ITEM-LEVEL PROFITS
       // ============================================================
       // Problem: lineTotal and profit were calculated BEFORE discount
-      // Fix: Proportionally allocate discount to each item's profit
+      // Fix: Proportionally allocate discount to each item's profit AND discount_amount
       // Formula: itemDiscountShare = lineTotal * (discountAmount / subtotal)
       //          adjustedProfit = originalProfit - itemDiscountShare
+      // The item-level discount_amount is also set so the DB trigger
+      // (fn_update_sale_totals_internal) can recalculate sale totals correctly.
       // ============================================================
       const discountToAllocate = new Decimal(saleData.discountAmount || 0);
       const saleSubtotal = new Decimal(saleData.subtotal || 0);
@@ -585,7 +594,7 @@ export const salesService = {
       if (discountToAllocate.greaterThan(0) && saleSubtotal.greaterThan(0)) {
         const discountRatio = discountToAllocate.dividedBy(saleSubtotal);
 
-        logger.info('Allocating discount to item profits', {
+        logger.info('Allocating cart discount to items', {
           discountAmount: discountToAllocate.toFixed(2),
           subtotal: saleSubtotal.toFixed(2),
           discountRatio: discountRatio.toFixed(6),
@@ -598,7 +607,7 @@ export const salesService = {
           const item = itemsWithCosts[i];
           const itemLineTotal = new Decimal(item.lineTotal);
 
-          // Calculate this item's share of the discount
+          // Calculate this item's share of the cart discount
           let itemDiscountShare: Decimal;
 
           if (i === itemsWithCosts.length - 1) {
@@ -613,18 +622,27 @@ export const salesService = {
           const adjustedProfit = originalProfit.minus(itemDiscountShare);
 
           item.profit = parseFloat(adjustedProfit.toFixed(2));
+
+          // Distribute cart discount to each item's discount_amount.
+          // This is the correct SAP-style approach: application layer calculates
+          // all totals, and DB only validates (trg_validate_sale_totals).
+          // Cart discount is stored at item level for accurate per-item reporting.
+          const existingItemDiscount = new Decimal(item.discountAmount || 0);
+          item.discountAmount = parseFloat(existingItemDiscount.plus(itemDiscountShare).toFixed(2));
+
           totalDiscountAllocated = totalDiscountAllocated.plus(itemDiscountShare);
 
-          logger.debug('Item profit adjusted for discount', {
+          logger.debug('Item adjusted for cart discount', {
             productName: item.productName,
             lineTotal: item.lineTotal,
             itemDiscountShare: itemDiscountShare.toFixed(2),
+            totalItemDiscount: item.discountAmount,
             originalProfit: originalProfit.toFixed(2),
             adjustedProfit: adjustedProfit.toFixed(2),
           });
         }
 
-        logger.info('Discount allocation complete', {
+        logger.info('Cart discount allocation complete', {
           totalDiscountAllocated: totalDiscountAllocated.toFixed(2),
           expectedDiscount: discountToAllocate.toFixed(2),
           allocationAccurate: totalDiscountAllocated.equals(discountToAllocate),
@@ -687,7 +705,7 @@ export const salesService = {
         }
         // Get product costing method again
         const productResult = await client.query(
-          'SELECT costing_method FROM products WHERE id = $1',
+          'SELECT costing_method FROM product_valuation WHERE product_id = $1',
           [item.productId]
         );
 
@@ -793,6 +811,19 @@ export const salesService = {
             `Short by ${remainingQty.toFixed(4)} units. Check inventory batches.`
           );
         }
+
+        // Update product_inventory quantity_on_hand (app-layer single source of truth)
+        await client.query(
+          `UPDATE product_inventory
+           SET quantity_on_hand = (
+             SELECT COALESCE(SUM(remaining_quantity), 0)
+             FROM inventory_batches
+             WHERE product_id = $1 AND status = 'ACTIVE'
+           ),
+           updated_at = CURRENT_TIMESTAMP
+           WHERE product_id = $1`,
+          [item.productId]
+        );
       }
 
       // BR-SAL-002: Update customer balance for CREDIT sales (split payment support)
@@ -1378,7 +1409,7 @@ export const salesService = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; customerId?: string; startDate?: string; endDate?: string }
+    filters?: { status?: string; customerId?: string; cashierId?: string; startDate?: string; endDate?: string }
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     return salesRepository.listSales(pool, page, limit, filters);
   },
@@ -1392,6 +1423,7 @@ export const salesService = {
       startDate?: string;
       endDate?: string;
       groupBy?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>> {
     return salesRepository.getSalesSummary(pool, filters);
@@ -1407,6 +1439,7 @@ export const salesService = {
       endDate?: string;
       productId?: string;
       customerId?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
     return salesRepository.getProductSalesSummary(pool, filters);
@@ -1421,6 +1454,7 @@ export const salesService = {
     filters?: {
       startDate?: string;
       endDate?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
     return salesRepository.getTopSellingProducts(pool, limit, filters);
@@ -1435,6 +1469,7 @@ export const salesService = {
     filters?: {
       startDate?: string;
       endDate?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
     return salesRepository.getSalesSummaryByDate(pool, groupBy, filters);
@@ -1563,7 +1598,7 @@ export const salesService = {
 
         // Get product costing method
         const productResult = await client.query(
-          'SELECT costing_method FROM products WHERE id = $1',
+          'SELECT costing_method FROM product_valuation WHERE product_id = $1',
           [productId]
         );
         const costingMethod = productResult.rows[0]?.costing_method || 'FIFO';
@@ -1663,6 +1698,19 @@ export const salesService = {
             });
           }
         }
+
+        // Update product_inventory quantity_on_hand after batch restoration
+        await client.query(
+          `UPDATE product_inventory
+           SET quantity_on_hand = (
+             SELECT COALESCE(SUM(remaining_quantity), 0)
+             FROM inventory_batches
+             WHERE product_id = $1 AND status = 'ACTIVE'
+           ),
+           updated_at = CURRENT_TIMESTAMP
+           WHERE product_id = $1`,
+          [productId]
+        );
 
         // 3. Record stock movement (VOID reversal)
         // Advisory lock prevents concurrent duplicate movement number generation

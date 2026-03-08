@@ -13,7 +13,7 @@ services:
     environment:
       POSTGRES_DB: pos_system
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       POSTGRES_MAX_CONNECTIONS: 200
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -35,7 +35,7 @@ services:
       - "-c"
       - "maintenance_work_mem=64MB"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -52,7 +52,7 @@ services:
     networks:
       - samplepos_network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -65,9 +65,9 @@ services:
     container_name: samplepos_backend1
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/pos_system
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/pos_system
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       PORT: 3001
       INSTANCE_ID: backend1
     depends_on:
@@ -84,9 +84,9 @@ services:
     container_name: samplepos_backend2
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/pos_system
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/pos_system
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       PORT: 3001
       INSTANCE_ID: backend2
     depends_on:
@@ -103,9 +103,9 @@ services:
     container_name: samplepos_backend3
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/pos_system
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/pos_system
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       PORT: 3001
       INSTANCE_ID: backend3
     depends_on:
@@ -124,7 +124,7 @@ services:
     command: node dist/workers/jobProcessor.js
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/pos_system
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/pos_system
       REDIS_URL: redis://redis:6379
       WORKER_ID: worker1
       WORKER_CONCURRENCY: 5
@@ -143,7 +143,7 @@ services:
     command: node dist/workers/jobProcessor.js
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/pos_system
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/pos_system
       REDIS_URL: redis://redis:6379
       WORKER_ID: worker2
       WORKER_CONCURRENCY: 5
@@ -212,6 +212,7 @@ volumes:
   nginx_cache:
   prometheus_data:
   grafana_data:
+
 
 networks:
   samplepos_network:

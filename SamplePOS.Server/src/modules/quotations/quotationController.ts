@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import { Pool } from 'pg';
+import { z } from 'zod';
 import {
   CreateQuotationInputSchema,
   UpdateQuotationInputSchema,
@@ -14,6 +15,12 @@ import {
 } from '../../../../shared/zod/quotation';
 import { quotationService } from './quotationService';
 import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
+
+const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
+const UpdateStatusSchema = z.object({
+  status: z.enum(['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED']),
+  notes: z.string().optional(),
+});
 
 export const quotationController = {
   /**
@@ -80,7 +87,7 @@ export const quotationController = {
    */
   getQuotation: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     const quotation = await quotationService.getQuotationById(pool, id);
 
     if (!quotation) {
@@ -130,12 +137,8 @@ export const quotationController = {
    */
   updateQuotationStatus: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
-    const { id } = req.params;
-    const { status, notes } = req.body;
-
-    if (status === 'CONVERTED') {
-      throw new ValidationError('Use the /convert endpoint to convert a quotation to a sale');
-    }
+    const { id } = UuidParamSchema.parse(req.params);
+    const { status, notes } = UpdateStatusSchema.parse(req.body);
 
     const quotation = await quotationService.updateQuotationStatus(pool, id, status, notes);
     res.json({
@@ -150,7 +153,7 @@ export const quotationController = {
    */
   updateQuotation: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     const validatedData = UpdateQuotationInputSchema.parse(req.body);
     const quotation = await quotationService.updateQuotation(pool, id, validatedData);
     res.json({ success: true, data: quotation, message: 'Quotation updated successfully' });
@@ -162,7 +165,7 @@ export const quotationController = {
   convertQuotation: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
     const userId: string = req.user!.id;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     const validatedData = ConvertQuotationInputSchema.parse(req.body);
 
     const result = await quotationService.convertQuotationToSale(pool, id, {
@@ -181,7 +184,7 @@ export const quotationController = {
    */
   deleteQuotation: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     await quotationService.deleteQuotation(pool, id);
     res.json({ success: true, message: 'Quotation deleted successfully' });
   }),

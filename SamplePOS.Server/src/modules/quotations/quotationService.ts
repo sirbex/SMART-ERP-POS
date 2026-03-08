@@ -60,6 +60,7 @@ export interface Quotation {
   revisionNumber: number;
   createdAt: Date;
   updatedAt: Date;
+  version?: number;
 }
 
 export interface QuotationItem {
@@ -134,6 +135,7 @@ function normalizeQuotation(row: QuotationDbRow & { converted_to_sale_number?: s
     revisionNumber: row.revision_number,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    version: row.version,
   };
 }
 

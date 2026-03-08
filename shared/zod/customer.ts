@@ -17,6 +17,7 @@ export const CustomerSchema = z.object({
   isActive: z.boolean().default(true),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  version: z.number().int().optional(),
 }).strict();
 
 export const CreateCustomerSchema = z.object({
@@ -28,7 +29,9 @@ export const CreateCustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
 }).strict();
 
-export const UpdateCustomerSchema = CreateCustomerSchema.partial();
+export const UpdateCustomerSchema = CreateCustomerSchema.partial().extend({
+  version: z.number().int().positive().optional(),
+});
 
 export const CustomerGroupSchema = z.object({
   id: z.string().uuid(),

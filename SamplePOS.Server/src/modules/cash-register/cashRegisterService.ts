@@ -30,7 +30,9 @@ import {
     MovementType,
     SessionStatus,
     PaymentSummary,
-    DenominationBreakdown
+    DenominationBreakdown,
+    CashReconciliation,
+    ZReportRecord
 } from './cashRegisterRepository.js';
 import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import logger from '../../utils/logger.js';
@@ -432,14 +434,15 @@ export const cashRegisterService = {
             throw new SessionNotOpenError(sessionId, session.status);
         }
 
-        // calculateExpectedClosing + UPDATE must be atomic
-        const expectedClosing = session.expectedClosing ?? session.openingFloat;
+        // Calculate expected closing from movements INSIDE the transaction
+        // so force-close sets actualClosing = expectedClosing → variance = 0
         const closedSession = await UnitOfWork.run<CashRegisterSession>(globalPool, async (client) => {
+            const calculatedExpected = await cashRegisterRepository.calculateExpectedClosing(client, sessionId);
             return cashRegisterRepository.closeSession(
                 client,
                 {
                     sessionId,
-                    actualClosing: expectedClosing,
+                    actualClosing: calculatedExpected,
                     varianceReason: undefined,
                     notes: `Force-closed by administrator. Original cashier: ${session.userName || session.userId}`
                 }
@@ -452,7 +455,7 @@ export const cashRegisterService = {
             originalUserId: session.userId,
             originalUserName: session.userName,
             closedByUserId,
-            expectedClosing,
+            expectedClosing: closedSession.expectedClosing,
         });
 
         return closedSession;
@@ -640,6 +643,7 @@ export const cashRegisterService = {
      * Business Rules:
      * - Session must be CLOSED (not OPEN or already RECONCILED)
      * - Only managers/admins should call this (enforced at route level)
+     * - Creates a reconciliation audit entry in cash_register_reconciliations
      */
     async reconcileSession(sessionId: string, reconciledBy: string): Promise<CashRegisterSession> {
         const session = await cashRegisterRepository.getSessionById(globalPool, sessionId);
@@ -649,6 +653,17 @@ export const cashRegisterService = {
         if (session.status !== 'CLOSED') {
             throw new SessionNotClosedError(sessionId, session.status);
         }
+
+        // Create reconciliation audit entry
+        await cashRegisterRepository.createReconciliation(globalPool, {
+            sessionId,
+            reconciledBy,
+            expectedAmount: session.expectedClosing ?? 0,
+            countedAmount: session.actualClosing ?? 0,
+            variance: session.variance ?? 0,
+            reason: session.varianceReason ?? undefined,
+            denominationBreakdown: session.denominationBreakdown ?? undefined,
+        });
 
         const reconciledSession = await cashRegisterRepository.reconcileSession(
             globalPool,
@@ -699,8 +714,21 @@ export const cashRegisterService = {
      * - CASH_OUT may require approval (enforced at route level)
      * - Movements with reference link to source transaction
      * - Posts to GL for movements that require accounting (CASH_OUT_BANK, CASH_OUT_EXPENSE, etc.)
+     * - Offline dedup: if clientUuid provided and already exists, returns existing movement
      */
     async recordMovement(data: RecordMovementData): Promise<CashMovement> {
+        // Offline dedup: if clientUuid provided, check if already processed
+        if (data.clientUuid) {
+            const existing = await cashRegisterRepository.getMovementByClientUuid(globalPool, data.clientUuid);
+            if (existing) {
+                logger.info('Duplicate movement detected (offline dedup)', {
+                    clientUuid: data.clientUuid,
+                    existingMovementId: existing.id
+                });
+                return existing;
+            }
+        }
+
         // Validate session exists and is open
         const session = await cashRegisterRepository.getSessionById(globalPool, data.sessionId);
         if (!session) {
@@ -837,6 +865,7 @@ export const cashRegisterService = {
      * 
      * QuickBooks/Odoo standard: Final report that closes the session
      * Must provide actual closing amount for variance calculation
+     * Enterprise: Persists Z-report to z_reports table for reprint/audit
      */
     async generateZReport(
         sessionId: string,
@@ -845,17 +874,19 @@ export const cashRegisterService = {
         varianceReason?: string,
         userId?: string
     ): Promise<ZReportData> {
+        const effectiveUserId = userId || 'system';
+
         // First close the session
         const closedSession = await this.closeSession({
             sessionId,
             actualClosing,
             denominationBreakdown,
             varianceReason
-        }, userId || 'system');
+        }, effectiveUserId);
 
         const summary = await this.getSessionSummary(sessionId);
 
-        return {
+        const reportData: ZReportData = {
             reportType: 'Z-REPORT',
             sessionNumber: closedSession.sessionNumber,
             registerName: closedSession.registerName || 'Unknown',
@@ -889,6 +920,50 @@ export const cashRegisterService = {
                 cashOutOther: 0
             }
         };
+
+        // Persist Z-Report for reprint/audit
+        try {
+            const stored = await cashRegisterRepository.saveZReport(globalPool, {
+                sessionId,
+                registerName: reportData.registerName,
+                cashierName: reportData.cashierName,
+                cashierId: closedSession.userId,
+                openedAt: reportData.openedAt,
+                closedAt: reportData.closedAt,
+                openingFloat: reportData.openingFloat,
+                expectedClosing: reportData.expectedClosing,
+                actualClosing: reportData.actualClosing,
+                variance: reportData.variance,
+                varianceReason: reportData.varianceReason,
+                totalSales: reportData.totalSales,
+                totalRefunds: reportData.totalRefunds,
+                totalCashIn: reportData.totalCashIn,
+                totalCashOut: reportData.totalCashOut,
+                netCashFlow: reportData.netCashFlow,
+                transactionCount: reportData.transactionCount,
+                paymentSummary: reportData.paymentSummary,
+                denominationBreakdown: reportData.denominationBreakdown,
+                movementBreakdown: reportData.breakdown as unknown as Record<string, number>,
+                generatedBy: effectiveUserId,
+            });
+            logger.info('Z-Report persisted', {
+                reportNumber: stored.reportNumber,
+                sessionId,
+                sessionNumber: closedSession.sessionNumber
+            });
+            // Attach report number to response
+            (reportData as ZReportData & { reportNumber?: string }).reportNumber = stored.reportNumber;
+        } catch (error: unknown) {
+            // If the Z-report already exists for this session, log and continue
+            const msg = error instanceof Error ? error.message : String(error);
+            if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
+                logger.warn('Z-Report already exists for session', { sessionId });
+            } else {
+                logger.error('Failed to persist Z-Report', { sessionId, error: msg });
+            }
+        }
+
+        return reportData;
     },
 
     /**
@@ -928,7 +1003,42 @@ export const cashRegisterService = {
         });
 
         return result.rows[0];
-    }
+    },
+
+    // ===========================================================================
+    // RECONCILIATION HISTORY (Enterprise Upgrade 1)
+    // ===========================================================================
+
+    /**
+     * Get reconciliation audit trail for a session
+     */
+    async getSessionReconciliations(sessionId: string): Promise<CashReconciliation[]> {
+        return cashRegisterRepository.getSessionReconciliations(globalPool, sessionId);
+    },
+
+    // ===========================================================================
+    // Z-REPORT RETRIEVAL (Enterprise Upgrade 3)
+    // ===========================================================================
+
+    /**
+     * Get stored Z-Report by session ID (for reprint)
+     */
+    async getStoredZReport(sessionId: string): Promise<ZReportRecord | null> {
+        return cashRegisterRepository.getZReportBySessionId(globalPool, sessionId);
+    },
+
+    /**
+     * Get Z-Report history with filters
+     */
+    async getZReportHistory(filters?: {
+        startDate?: string;
+        endDate?: string;
+        registerId?: string;
+        limit?: number;
+        offset?: number;
+    }): Promise<{ reports: ZReportRecord[]; total: number }> {
+        return cashRegisterRepository.getZReports(globalPool, filters);
+    },
 };
 
 // =============================================================================

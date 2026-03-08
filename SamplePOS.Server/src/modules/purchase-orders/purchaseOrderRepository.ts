@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export interface PurchaseOrder {
   id: string;
@@ -282,7 +283,7 @@ export const purchaseOrderRepository = {
    */
   async updatePOStatus(pool: Pool | PoolClient, id: string, status: string): Promise<PurchaseOrder> {
     const result = await pool.query(
-      'UPDATE purchase_orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      'UPDATE purchase_orders SET status = $1, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       [status, id]
     );
 

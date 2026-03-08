@@ -2,6 +2,7 @@
 // No business logic, pure data access
 
 import { Pool, PoolClient } from 'pg';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export interface Supplier {
   id: string;
@@ -80,7 +81,8 @@ export async function findAll(pool: Pool, limit: number, offset: number): Promis
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt"
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version
     FROM suppliers 
     WHERE "IsActive" = true
     ORDER BY "CompanyName" ASC
@@ -101,7 +103,8 @@ export async function findById(pool: Pool, id: string): Promise<Supplier | null>
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt"
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version
     FROM suppliers WHERE "Id" = $1`,
     [id]
   );
@@ -119,7 +122,8 @@ export async function findBySupplierNumber(pool: Pool, supplierNumber: string): 
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt"
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version
     FROM suppliers WHERE "SupplierCode" = $1`,
     [supplierNumber]
   );
@@ -137,7 +141,8 @@ export async function searchSuppliers(pool: Pool, searchTerm: string, limit: num
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt"
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version
     FROM suppliers 
     WHERE "IsActive" = true
       AND ("SupplierCode" ILIKE $1
@@ -186,7 +191,8 @@ export async function create(
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt"`,
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version`,
     [
       supplierCode,
       data.name,
@@ -223,7 +229,7 @@ export async function update(
     isActive: boolean;
   }>
 ): Promise<Supplier | null> {
-  const fields: string[] = ['"UpdatedAt" = NOW()'];
+  const fields: string[] = ['"UpdatedAt" = NOW()', 'version = version + 1'];
   const values: unknown[] = [];
   let paramIndex = 1;
 
@@ -269,7 +275,7 @@ export async function update(
     values.push(data.isActive);
   }
 
-  if (fields.length === 1) { // Only UpdatedAt
+  if (fields.length === 2) { // Only UpdatedAt + version
     throw new Error('No fields to update');
   }
 
@@ -285,7 +291,8 @@ export async function update(
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt"`,
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version`,
     values
   );
   return normalizeSupplierRow(result.rows[0]) || null;

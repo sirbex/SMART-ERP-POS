@@ -281,11 +281,11 @@ export function useCustomerStatement(customerId: string, options?: { start?: str
 }
 
 // Sales Hooks
-export function useSales(page = 1, limit = 50, filters?: { startDate?: string; endDate?: string }) {
+export function useSales(page = 1, limit = 50, filters?: { startDate?: string; endDate?: string; cashierId?: string }) {
   // Custom select to include pagination alongside data
   // CRITICAL: Include filters in queryKey so React Query refetches when dates change
   return useQuery({
-    queryKey: [...queryKeys.sales.list(page, limit), filters?.startDate, filters?.endDate],
+    queryKey: [...queryKeys.sales.list(page, limit), filters?.startDate, filters?.endDate, filters?.cashierId],
     queryFn: () => api.sales.list({ page, limit, ...filters }),
     select: (resp) => ({
       data: (resp.data.data ?? []) as unknown[],

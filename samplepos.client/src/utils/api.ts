@@ -223,7 +223,7 @@ export const api = {
 
   // Sales
   sales: {
-    list: (params?: { page?: number; limit?: number; startDate?: string; endDate?: string }) =>
+    list: (params?: { page?: number; limit?: number; startDate?: string; endDate?: string; cashierId?: string }) =>
       apiClient.get<ApiResponse>('sales', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`sales/${id}`),

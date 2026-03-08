@@ -10,12 +10,21 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
 import { authRateLimit, strictRateLimit } from '../../middleware/security.js';
 import * as refreshTokenService from './refreshTokenService.js';
 import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+
+const RefreshTokenSchema = z.object({
+    refreshToken: z.string().min(1, 'Refresh token is required'),
+});
+
+const SessionIdParamSchema = z.object({
+    sessionId: z.string().uuid('Session ID must be a valid UUID'),
+});
 
 const router = Router();
 
@@ -24,15 +33,7 @@ const router = Router();
  * Refresh tokens - get new access/refresh token pair
  */
 router.post('/refresh', authRateLimit, asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-        res.status(400).json({
-            success: false,
-            error: 'Refresh token is required',
-        });
-        return;
-    }
+    const { refreshToken } = RefreshTokenSchema.parse(req.body);
 
     const deviceInfo = req.headers['user-agent'] || undefined;
     const ipAddress = req.ip || req.socket.remoteAddress || undefined;
@@ -76,12 +77,8 @@ router.post('/refresh', authRateLimit, asyncHandler(async (req, res) => {
  */
 router.post('/revoke', asyncHandler(async (req, res) => {
     const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
-
     if (!refreshToken) {
-        res.status(400).json({
-            success: false,
-            error: 'Refresh token is required',
-        });
+        res.status(400).json({ success: false, error: 'Refresh token is required' });
         return;
     }
 
@@ -148,7 +145,7 @@ router.get('/sessions', authenticate, asyncHandler(async (req, res) => {
  */
 router.delete('/sessions/:sessionId', authenticate, asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const { sessionId } = req.params;
+    const { sessionId } = SessionIdParamSchema.parse(req.params);
 
     // Verify session belongs to user and revoke
     const deletePool = req.tenantPool || globalPool;

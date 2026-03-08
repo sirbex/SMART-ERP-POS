@@ -315,5 +315,6 @@ function normalizeDiscount(row: discountRepo.DiscountDbRow): Discount {
     validUntil: row.valid_until || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    version: row.version,
   };
 }

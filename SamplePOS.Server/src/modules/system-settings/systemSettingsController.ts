@@ -1,15 +1,7 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import { systemSettingsService } from './systemSettingsService.js';
 import { pool as globalPool } from '../../db/pool.js';
-
-// Async wrapper — catches thrown errors and forwards to Express error handler
-function asyncHandler(
-    fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
-) {
-    return (req: Request, res: Response, next: NextFunction) => {
-        Promise.resolve(fn(req, res, next)).catch(next);
-    };
-}
+import { asyncHandler } from '../../middleware/errorHandler.js';
 
 export const systemSettingsController = {
     /**

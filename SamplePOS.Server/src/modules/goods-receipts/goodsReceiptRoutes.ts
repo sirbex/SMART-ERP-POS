@@ -78,81 +78,85 @@ const UpdateGRItemSchema = z
     message: 'At least one field must be provided to update',
   });
 
+const UuidParamSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export const goodsReceiptController = {
   /**
    * Create goods receipt
    */
   async createGR(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📦 [GR CREATE] Incoming Request');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('Request Body:', JSON.stringify(req.body, null, 2));
-      console.log('\n🔍 [GR CREATE] Field Analysis:');
-      console.log(
-    '  - purchaseOrderId:',
-    req.body.purchaseOrderId,
-    '(type:',
-    typeof req.body.purchaseOrderId,
-    ')'
-      );
-      console.log(
-    '  - supplierId:',
-    req.body.supplierId,
-    '(type:',
-    typeof req.body.supplierId,
-    ')'
-      );
-      console.log(
-    '  - receivedBy:',
-    req.body.receivedBy,
-    '(type:',
-    typeof req.body.receivedBy,
-    ')'
-      );
-      console.log(
-    '  - receiptDate:',
-    req.body.receiptDate,
-    '(type:',
-    typeof req.body.receiptDate,
-    ')'
-      );
-      console.log('  - items count:', req.body.items?.length || 0);
-      if (req.body.items && req.body.items.length > 0) {
-    console.log('\n📋 [GR CREATE] First Item Sample:');
-    console.log(JSON.stringify(req.body.items[0], null, 2));
-      }
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-      const validatedData = CreateGRSchema.parse(req.body);
-      console.log('✅ [GR CREATE] Validation passed!\n');
-
-      const result = await goodsReceiptService.createGR(pool, validatedData);
-
-      // Log audit trail
-      try {
-    const auditContext = req.auditContext || {
-      userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
-      userName: req.user?.fullName,
-      userRole: req.user?.role,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    };
-
-    const { logGoodsReceiptCreated } = await import('../audit/auditService.js');
-    await logGoodsReceiptCreated(
-      pool,
-      result.gr.id,
-      result.gr.grNumber,
-      {
-        itemCount: result.items?.length || 0,
-        totalAmount: 0, // totalAmount is not on GR header — computed from items if needed
-        supplierId: result.gr.supplierId,
-        purchaseOrderId: result.gr.purchaseOrderId,
-        source: result.manualPO ? 'MANUAL' : 'PURCHASE_ORDER',
-      },
-      auditContext
+    const pool = req.tenantPool || globalPool;
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📦 [GR CREATE] Incoming Request');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('Request Body:', JSON.stringify(req.body, null, 2));
+    console.log('\n🔍 [GR CREATE] Field Analysis:');
+    console.log(
+      '  - purchaseOrderId:',
+      req.body.purchaseOrderId,
+      '(type:',
+      typeof req.body.purchaseOrderId,
+      ')'
     );
+    console.log(
+      '  - supplierId:',
+      req.body.supplierId,
+      '(type:',
+      typeof req.body.supplierId,
+      ')'
+    );
+    console.log(
+      '  - receivedBy:',
+      req.body.receivedBy,
+      '(type:',
+      typeof req.body.receivedBy,
+      ')'
+    );
+    console.log(
+      '  - receiptDate:',
+      req.body.receiptDate,
+      '(type:',
+      typeof req.body.receiptDate,
+      ')'
+    );
+    console.log('  - items count:', req.body.items?.length || 0);
+    if (req.body.items && req.body.items.length > 0) {
+      console.log('\n📋 [GR CREATE] First Item Sample:');
+      console.log(JSON.stringify(req.body.items[0], null, 2));
+    }
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+    const validatedData = CreateGRSchema.parse(req.body);
+    console.log('✅ [GR CREATE] Validation passed!\n');
+
+    const result = await goodsReceiptService.createGR(pool, validatedData);
+
+    // Log audit trail
+    try {
+      const auditContext = req.auditContext || {
+        userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      const { logGoodsReceiptCreated } = await import('../audit/auditService.js');
+      await logGoodsReceiptCreated(
+        pool,
+        result.gr.id,
+        result.gr.grNumber,
+        {
+          itemCount: result.items?.length || 0,
+          totalAmount: 0, // totalAmount is not on GR header — computed from items if needed
+          supplierId: result.gr.supplierId,
+          purchaseOrderId: result.gr.purchaseOrderId,
+          source: result.manualPO ? 'MANUAL' : 'PURCHASE_ORDER',
+        },
+        auditContext
+      );
 
       const responseMessage = result.manualPO
         ? `Manual goods receipt created successfully. Auto-generated PO ${result.manualPO.poNumber} for tracking.`
@@ -204,70 +208,70 @@ export const goodsReceiptController = {
    * Get GR by ID
    */
   async getGRById(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await goodsReceiptService.getGRById(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await goodsReceiptService.getGRById(pool, id);
 
-      res.json({
-    success: true,
-    data: result,
-      });
+    res.json({
+      success: true,
+      data: result,
+    });
   },
 
   /**
    * List goods receipts
    */
   async listGRs(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const query = ListGRsQuerySchema.parse(req.query);
-      const result = await goodsReceiptService.listGRs(pool, query.page, query.limit, {
-    status: query.status,
-    purchaseOrderId: query.purchaseOrderId,
-      });
+    const pool = req.tenantPool || globalPool;
+    const query = ListGRsQuerySchema.parse(req.query);
+    const result = await goodsReceiptService.listGRs(pool, query.page, query.limit, {
+      status: query.status,
+      purchaseOrderId: query.purchaseOrderId,
+    });
 
-      res.json({
-    success: true,
-    data: result.grs,
-    pagination: {
-      page: query.page,
-      limit: query.limit,
-      total: result.total,
-      totalPages: Math.ceil(result.total / query.limit),
-    },
-      });
+    res.json({
+      success: true,
+      data: result.grs,
+      pagination: {
+        page: query.page,
+        limit: query.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / query.limit),
+      },
+    });
   },
 
   /**
    * Finalize goods receipt
    */
   async finalizeGR(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await goodsReceiptService.finalizeGR(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await goodsReceiptService.finalizeGR(pool, id);
 
-      // Log audit trail for finalization
-      try {
-    const auditContext = req.auditContext || {
-      userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
-      userName: req.user?.fullName,
-      userRole: req.user?.role,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    };
+    // Log audit trail for finalization
+    try {
+      const auditContext = req.auditContext || {
+        userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
 
-    const { logGoodsReceiptFinalized } = await import('../audit/auditService.js');
-    await logGoodsReceiptFinalized(
-      pool,
-      result.gr.id,
-      result.gr.grNumber,
-      {
-        itemCount: result.items?.length || 0,
-        totalAmount: 0, // totalAmount is not on GR header — computed from items if needed
-        batchesCreated: result.items?.length || 0, // Each item creates a batch
-        hasAlerts: result.hasAlerts,
-      },
-      auditContext
-    );
+      const { logGoodsReceiptFinalized } = await import('../audit/auditService.js');
+      await logGoodsReceiptFinalized(
+        pool,
+        result.gr.id,
+        result.gr.grNumber,
+        {
+          itemCount: result.items?.length || 0,
+          totalAmount: 0, // totalAmount is not on GR header — computed from items if needed
+          batchesCreated: result.items?.length || 0, // Each item creates a batch
+          hasAlerts: result.hasAlerts,
+        },
+        auditContext
+      );
 
       // Build response with cost price change alerts
       const response: Record<string, unknown> = {
@@ -311,32 +315,32 @@ export const goodsReceiptController = {
    * Hydrate GR items from its Purchase Order (DRAFT only)
    */
   async hydrateFromPO(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await goodsReceiptService.hydrateFromPO(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await goodsReceiptService.hydrateFromPO(pool, id);
 
-      res.json({
-    success: true,
-    data: result,
-    message: 'Goods receipt items hydrated from purchase order',
-      });
+    res.json({
+      success: true,
+      data: result,
+      message: 'Goods receipt items hydrated from purchase order',
+    });
   },
 
   /**
    * Update a GR item (DRAFT only)
    */
   async updateGRItem(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id: grId, itemId } = req.params as { id: string; itemId: string };
-      const payload = UpdateGRItemSchema.parse(req.body);
-      const updated = await goodsReceiptService.updateGRItem(pool, grId, itemId, {
-    receivedQuantity: payload.receivedQuantity,
-    unitCost: payload.unitCost,
-    batchNumber: payload.batchNumber ?? undefined,
-    expiryDate: payload.expiryDate ?? undefined,
-      });
+    const pool = req.tenantPool || globalPool;
+    const { id: grId, itemId } = z.object({ id: z.string().uuid(), itemId: z.string().uuid() }).parse(req.params);
+    const payload = UpdateGRItemSchema.parse(req.body);
+    const updated = await goodsReceiptService.updateGRItem(pool, grId, itemId, {
+      receivedQuantity: payload.receivedQuantity,
+      unitCost: payload.unitCost,
+      batchNumber: payload.batchNumber ?? undefined,
+      expiryDate: payload.expiryDate ?? undefined,
+    });
 
-      res.json({ success: true, data: updated, message: 'Goods receipt item updated' });
+    res.json({ success: true, data: updated, message: 'Goods receipt item updated' });
   },
 };
 

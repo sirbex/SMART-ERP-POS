@@ -103,7 +103,7 @@ export interface ProductBatchRow {
     average_cost: string;
     is_active: boolean;
     min_price: string | null;
-    max_discount_pct: string | null;
+    max_discount_percentage: string | null;
 }
 
 export interface ProductUomRow {
@@ -131,11 +131,12 @@ export async function batchFetchProducts(
 ): Promise<Map<string, ProductBatchRow>> {
     return batchFetchMap<ProductBatchRow>(
         conn,
-        `SELECT id, costing_method, selling_price, cost_price, 
-            COALESCE(average_cost, '0') as average_cost,
-            is_active, min_price, max_discount_pct
-     FROM products 
-     WHERE id = ANY($1::uuid[])`,
+        `SELECT p.id, pv.costing_method, pv.selling_price, pv.cost_price, 
+            COALESCE(pv.average_cost, '0') as average_cost,
+            p.is_active, p.min_price, p.max_discount_percentage
+     FROM products p
+     LEFT JOIN product_valuation pv ON pv.product_id = p.id
+     WHERE p.id = ANY($1::uuid[])`,
         productIds
     );
 }

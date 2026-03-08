@@ -7,6 +7,14 @@ import crypto from 'crypto';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 
+/** Validates that a table name is a safe PostgreSQL identifier (defense-in-depth) */
+const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+function assertSafeTableName(name: string): void {
+    if (!SAFE_IDENTIFIER.test(name)) {
+        throw new Error(`Unsafe table name rejected: ${name}`);
+    }
+}
+
 const execAsync = promisify(exec);
 
 // ============================================================================
@@ -511,6 +519,7 @@ export const systemManagementRepository = {
 
         // Helper function for safe deletion with savepoint
         const safeDelete = async (tableName: string, stepNum: number): Promise<number> => {
+            assertSafeTableName(tableName);
             try {
                 await client.query(`SAVEPOINT sp_delete_${stepNum}`);
                 const result = await client.query(`DELETE FROM ${tableName}`);
@@ -525,6 +534,7 @@ export const systemManagementRepository = {
 
         // Helper function for safe truncate (faster for large tables)
         const safeTruncate = async (tableName: string, stepNum: number): Promise<number> => {
+            assertSafeTableName(tableName);
             try {
                 await client.query(`SAVEPOINT sp_trunc_${stepNum}`);
                 // Get count first
@@ -948,7 +958,7 @@ export const systemManagementRepository = {
             try {
                 await client.query(`SAVEPOINT sp_reset_inventory_fallback`);
                 const fallbackResult = await client.query(`
-                    UPDATE products SET quantity_on_hand = 0, updated_at = NOW() 
+                    UPDATE product_inventory SET quantity_on_hand = 0, updated_at = NOW() 
                     WHERE quantity_on_hand != 0
                 `);
                 balancesReset['inventory'] = fallbackResult.rowCount || 0;
@@ -1053,7 +1063,7 @@ export const systemManagementRepository = {
         // Check for negative inventory
         try {
             const negInv = await pool.query(`
-        SELECT COUNT(*) as count FROM products WHERE quantity_on_hand < 0
+        SELECT COUNT(*) as count FROM product_inventory WHERE quantity_on_hand < 0
       `);
             if (parseInt(negInv.rows[0].count) > 0) {
                 issues.push(`Found ${negInv.rows[0].count} products with negative inventory`);

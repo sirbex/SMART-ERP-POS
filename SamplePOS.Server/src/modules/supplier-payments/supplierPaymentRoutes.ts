@@ -4,6 +4,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
+import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import * as supplierPaymentService from './supplierPaymentService.js';
@@ -13,6 +14,55 @@ import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import Money from '../../utils/money.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+
+// Zod schemas for validation
+const UuidParamSchema = z.object({ id: z.string().uuid() });
+const SupplierIdParamSchema = z.object({ supplierId: z.string().uuid() });
+const PaymentsQuerySchema = z.object({
+    page: z.string().optional().transform(v => v ? parseInt(v) : 1),
+    limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+    supplierId: z.string().uuid().optional(),
+    paymentMethod: z.string().optional(),
+    search: z.string().optional(),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+const CreatePaymentSchema = z.object({
+    supplierId: z.string().uuid(),
+    amount: z.union([z.number().positive(), z.string().transform(Number)]),
+    paymentMethod: z.string().min(1),
+    paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    reference: z.string().optional(),
+    notes: z.string().optional(),
+    targetInvoiceId: z.string().uuid().optional(),
+});
+const InvoicesQuerySchema = z.object({
+    page: z.string().optional().transform(v => v ? parseInt(v) : 1),
+    limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+    supplierId: z.string().uuid().optional(),
+    status: z.string().optional(),
+    search: z.string().optional(),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+const CreateInvoiceSchema = z.object({
+    supplierId: z.string().uuid(),
+    supplierInvoiceNumber: z.string().optional(),
+    invoiceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    notes: z.string().optional(),
+    lineItems: z.array(z.object({
+        productName: z.string().min(1),
+        description: z.string().optional(),
+        quantity: z.number().positive(),
+        unitPrice: z.number().nonnegative(),
+    })).min(1, 'At least one line item is required'),
+});
+const CreateAllocationSchema = z.object({
+    supplierPaymentId: z.string().uuid(),
+    supplierInvoiceId: z.string().uuid(),
+    amount: z.union([z.number().positive(), z.string().transform(Number)]),
+});
 
 export function createSupplierPaymentRoutes(pool: Pool): Router {
     const router = Router();
@@ -26,24 +76,16 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get all supplier payments
     router.get('/payments', asyncHandler(async (req, res) => {
-        const {
-            page = '1',
-            limit = '50',
-            supplierId,
-            paymentMethod,
-            search,
-            startDate,
-            endDate
-        } = req.query as Record<string, string>;
+        const query = PaymentsQuerySchema.parse(req.query);
 
         const result = await supplierPaymentService.getSupplierPayments(pool, {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            supplierId,
-            paymentMethod,
-            search,
-            startDate,
-            endDate
+            page: query.page,
+            limit: query.limit,
+            supplierId: query.supplierId,
+            paymentMethod: query.paymentMethod,
+            search: query.search,
+            startDate: query.startDate,
+            endDate: query.endDate
         });
 
         res.json({
@@ -54,7 +96,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get supplier payment by ID
     router.get('/payments/:id', asyncHandler(async (req, res) => {
-        const payment = await supplierPaymentService.getSupplierPaymentById(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const payment = await supplierPaymentService.getSupplierPaymentById(pool, id);
         if (!payment) {
             return res.status(404).json({ success: false, error: 'Payment not found' });
         }
@@ -63,17 +106,10 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Create supplier payment
     router.post('/payments', requirePermission('suppliers.create'), asyncHandler(async (req, res) => {
-        const { supplierId, amount, paymentMethod, paymentDate, reference, notes, targetInvoiceId } = req.body;
-
-        if (!supplierId || !amount || !paymentMethod) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: supplierId, amount, paymentMethod'
-            });
-        }
+        const validated = CreatePaymentSchema.parse(req.body);
 
         // Use SQL CURRENT_DATE for timezone-safe default (avoids JS Date timezone issues)
-        let resolvedPaymentDate = paymentDate;
+        let resolvedPaymentDate = validated.paymentDate;
         if (!resolvedPaymentDate) {
             const dateResult = await pool.query("SELECT CURRENT_DATE::text as today");
             resolvedPaymentDate = dateResult.rows[0].today;
@@ -81,13 +117,13 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
         const userId = req.user?.id;
         const payment = await supplierPaymentService.createSupplierPayment(pool, {
-            supplierId,
-            amount: new Decimal(amount).toNumber(),
-            paymentMethod,
-            paymentDate: resolvedPaymentDate,
-            reference,
-            notes,
-            targetInvoiceId: targetInvoiceId || undefined
+            supplierId: validated.supplierId,
+            amount: new Decimal(validated.amount).toNumber(),
+            paymentMethod: validated.paymentMethod,
+            paymentDate: resolvedPaymentDate!,
+            reference: validated.reference,
+            notes: validated.notes,
+            targetInvoiceId: validated.targetInvoiceId
         }, userId);
 
         res.status(201).json({ success: true, data: payment });
@@ -95,7 +131,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Update supplier payment
     router.put('/payments/:id', requirePermission('suppliers.update'), asyncHandler(async (req, res) => {
-        const payment = await supplierPaymentService.updateSupplierPayment(pool, req.params.id, req.body);
+        const { id } = UuidParamSchema.parse(req.params);
+        const payment = await supplierPaymentService.updateSupplierPayment(pool, id, req.body);
         if (!payment) {
             return res.status(404).json({ success: false, error: 'Payment not found' });
         }
@@ -104,7 +141,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Delete supplier payment
     router.delete('/payments/:id', requirePermission('suppliers.delete'), asyncHandler(async (req, res) => {
-        const result = await supplierPaymentService.deleteSupplierPayment(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const result = await supplierPaymentService.deleteSupplierPayment(pool, id);
         if (!result) {
             return res.status(404).json({ success: false, error: 'Payment not found' });
         }
@@ -113,14 +151,16 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get payment allocations
     router.get('/payments/:id/allocations', asyncHandler(async (req, res) => {
-        const allocations = await supplierPaymentService.getPaymentAllocations(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const allocations = await supplierPaymentService.getPaymentAllocations(pool, id);
         res.json({ success: true, data: allocations });
     }));
 
     // Auto-allocate payment
     router.post('/payments/:id/auto-allocate', requirePermission('suppliers.create'), asyncHandler(async (req, res) => {
+        const { id } = UuidParamSchema.parse(req.params);
         const userId = req.user?.id;
-        const allocations = await supplierPaymentService.autoAllocatePayment(pool, req.params.id, userId);
+        const allocations = await supplierPaymentService.autoAllocatePayment(pool, id, userId);
         res.json({ success: true, data: allocations });
     }));
 
@@ -142,24 +182,16 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get all supplier invoices
     router.get('/invoices', asyncHandler(async (req, res) => {
-        const {
-            page = '1',
-            limit = '50',
-            supplierId,
-            status,
-            search,
-            startDate,
-            endDate
-        } = req.query as Record<string, string>;
+        const query = InvoicesQuerySchema.parse(req.query);
 
         const result = await supplierPaymentService.getSupplierInvoices(pool, {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            supplierId,
-            status,
-            search,
-            startDate,
-            endDate
+            page: query.page,
+            limit: query.limit,
+            supplierId: query.supplierId,
+            status: query.status,
+            search: query.search,
+            startDate: query.startDate,
+            endDate: query.endDate
         });
 
         res.json({
@@ -170,7 +202,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get supplier invoice with full details (line items + allocations)
     router.get('/invoices/:id/details', asyncHandler(async (req, res) => {
-        const details = await supplierPaymentService.getSupplierInvoiceWithDetails(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const details = await supplierPaymentService.getSupplierInvoiceWithDetails(pool, id);
         if (!details) {
             return res.status(404).json({ success: false, error: 'Invoice not found' });
         }
@@ -179,7 +212,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Generate PDF for supplier invoice
     router.get('/invoices/:id/pdf', asyncHandler(async (req, res) => {
-        const details = await supplierPaymentService.getSupplierInvoiceWithDetails(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const details = await supplierPaymentService.getSupplierInvoiceWithDetails(pool, id);
         if (!details) {
             return res.status(404).json({ success: false, error: 'Invoice not found' });
         }
@@ -426,7 +460,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get supplier invoice by ID
     router.get('/invoices/:id', asyncHandler(async (req, res) => {
-        const invoice = await supplierPaymentService.getSupplierInvoiceById(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const invoice = await supplierPaymentService.getSupplierInvoiceById(pool, id);
         if (!invoice) {
             return res.status(404).json({ success: false, error: 'Invoice not found' });
         }
@@ -435,23 +470,16 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Create supplier invoice
     router.post('/invoices', requirePermission('purchasing.create'), asyncHandler(async (req, res) => {
-        const { supplierId, supplierInvoiceNumber, invoiceDate, dueDate, notes, lineItems } = req.body;
-
-        if (!supplierId || !invoiceDate || !lineItems || lineItems.length === 0) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: supplierId, invoiceDate, lineItems'
-            });
-        }
+        const validated = CreateInvoiceSchema.parse(req.body);
 
         const userId = req.user?.id;
         const invoice = await supplierPaymentService.createSupplierInvoice(pool, {
-            supplierId,
-            supplierInvoiceNumber,
-            invoiceDate,
-            dueDate,
-            notes,
-            lineItems
+            supplierId: validated.supplierId,
+            supplierInvoiceNumber: validated.supplierInvoiceNumber,
+            invoiceDate: validated.invoiceDate,
+            dueDate: validated.dueDate,
+            notes: validated.notes,
+            lineItems: validated.lineItems
         }, userId);
 
         res.status(201).json({ success: true, data: invoice });
@@ -459,7 +487,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Delete supplier invoice
     router.delete('/invoices/:id', requirePermission('purchasing.delete'), asyncHandler(async (req, res) => {
-        const result = await supplierPaymentService.deleteSupplierInvoice(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const result = await supplierPaymentService.deleteSupplierInvoice(pool, id);
         if (!result) {
             return res.status(404).json({ success: false, error: 'Invoice not found' });
         }
@@ -468,13 +497,15 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Get outstanding invoices for a supplier
     router.get('/suppliers/:supplierId/outstanding-invoices', asyncHandler(async (req, res) => {
-        const invoices = await supplierPaymentService.getOutstandingInvoices(pool, req.params.supplierId);
+        const { supplierId } = SupplierIdParamSchema.parse(req.params);
+        const invoices = await supplierPaymentService.getOutstandingInvoices(pool, supplierId);
         res.json({ success: true, data: invoices });
     }));
 
     // Get ALL invoices for a supplier (with line item counts)
     router.get('/suppliers/:supplierId/invoices', asyncHandler(async (req, res) => {
-        const invoices = await supplierPaymentService.getSupplierInvoicesBySupplier(pool, req.params.supplierId);
+        const { supplierId } = SupplierIdParamSchema.parse(req.params);
+        const invoices = await supplierPaymentService.getSupplierInvoicesBySupplier(pool, supplierId);
         res.json({ success: true, data: invoices });
     }));
 
@@ -484,20 +515,13 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Allocate payment to invoice
     router.post('/allocations', requirePermission('suppliers.create'), asyncHandler(async (req, res) => {
-        const { supplierPaymentId, supplierInvoiceId, amount } = req.body;
-
-        if (!supplierPaymentId || !supplierInvoiceId || !amount) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: supplierPaymentId, supplierInvoiceId, amount'
-            });
-        }
+        const validated = CreateAllocationSchema.parse(req.body);
 
         const userId = req.user?.id;
         const allocation = await supplierPaymentService.allocatePayment(pool, {
-            supplierPaymentId,
-            supplierInvoiceId,
-            amount: new Decimal(amount).toNumber()
+            supplierPaymentId: validated.supplierPaymentId,
+            supplierInvoiceId: validated.supplierInvoiceId,
+            amount: new Decimal(validated.amount).toNumber()
         }, userId);
 
         res.status(201).json({ success: true, data: allocation });
@@ -505,7 +529,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     // Remove allocation
     router.delete('/allocations/:id', requirePermission('suppliers.delete'), asyncHandler(async (req, res) => {
-        const result = await supplierPaymentService.removeAllocation(pool, req.params.id);
+        const { id } = UuidParamSchema.parse(req.params);
+        const result = await supplierPaymentService.removeAllocation(pool, id);
         if (!result) {
             return res.status(404).json({ success: false, error: 'Allocation not found' });
         }

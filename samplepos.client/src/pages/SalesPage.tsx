@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useSales, useSalesSummary, useSalesSummaryByDate } from '../hooks/useApi';
+import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
 import Decimal from 'decimal.js';
 import { api } from '../utils/api';
@@ -253,7 +254,9 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
 }
 
 export default function SalesPage() {
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const { user } = useAuth();
+  const isCashier = user?.role === 'CASHIER';
+  const [activeTab, setActiveTab] = useState<TabType>(isCashier ? 'all-sales' : 'overview');
   const [dateFilter, setDateFilter] = useState<DateFilterType>('this-month');
 
   // Initialize with this month's date range
@@ -281,7 +284,8 @@ export default function SalesPage() {
   // Fetch sales data (send dates without timezone conversion)
   const { data: salesData, isLoading: salesLoading } = useSales(currentPage, limit, {
     startDate: startDate ? startDate : undefined,
-    endDate: endDate ? endDate : undefined
+    endDate: endDate ? endDate : undefined,
+    cashierId: isCashier ? user?.id : undefined
   });
 
   // Fetch summary data
@@ -495,13 +499,13 @@ export default function SalesPage() {
   }, [creditSales]);
 
   const tabs = [
-    { id: 'overview' as TabType, label: 'Overview', icon: '📊' },
-    { id: 'all-sales' as TabType, label: 'All Sales', icon: '📝' },
-    { id: 'by-customer' as TabType, label: 'By Customer', icon: '👥' },
-    { id: 'by-user' as TabType, label: 'By Cashier', icon: '🧑‍💼' },
-    { id: 'invoices' as TabType, label: 'Credit Sales', icon: '📄' },
-    { id: 'payments' as TabType, label: 'Partial Payments', icon: '💰' },
-  ];
+    { id: 'overview' as TabType, label: 'Overview', icon: '📊', adminOnly: true },
+    { id: 'all-sales' as TabType, label: isCashier ? 'My Sales' : 'All Sales', icon: '📝', adminOnly: false },
+    { id: 'by-customer' as TabType, label: 'By Customer', icon: '👥', adminOnly: true },
+    { id: 'by-user' as TabType, label: 'By Cashier', icon: '🧑‍💼', adminOnly: true },
+    { id: 'invoices' as TabType, label: 'Credit Sales', icon: '📄', adminOnly: false },
+    { id: 'payments' as TabType, label: 'Partial Payments', icon: '💰', adminOnly: false },
+  ].filter(tab => !isCashier || !tab.adminOnly);
 
   return (
     <Layout>
@@ -509,8 +513,8 @@ export default function SalesPage() {
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Sales Analytics</h1>
-            <p className="text-gray-600 mt-1">Comprehensive sales reporting and insights</p>
+            <h1 className="text-3xl font-bold text-gray-900">{isCashier ? 'My Sales' : 'Sales Analytics'}</h1>
+            <p className="text-gray-600 mt-1">{isCashier ? 'View your sales transactions' : 'Comprehensive sales reporting and insights'}</p>
           </div>
           <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
             <span>📥</span>

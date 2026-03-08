@@ -5,6 +5,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { authenticate, authorize, generateToken } from '../../middleware/auth.js';
 import * as twoFactorService from './twoFactorService.js';
 import * as refreshTokenService from './refreshTokenService.js';
@@ -12,6 +13,15 @@ import { strictRateLimit } from '../../middleware/security.js';
 import logger from '../../utils/logger.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+
+const TwoFactorTokenSchema = z.object({
+  token: z.string().length(6, 'Token must be a 6-digit code'),
+});
+
+const TwoFactorVerifySchema = z.object({
+  userId: z.string().uuid('User ID must be a valid UUID'),
+  token: z.string().min(1, 'Token is required'),
+});
 
 const router = Router();
 
@@ -57,15 +67,7 @@ router.post('/setup', authenticate, asyncHandler(async (req, res) => {
  */
 router.post('/verify-setup', authenticate, strictRateLimit, asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const { token } = req.body;
-
-    if (!token || typeof token !== 'string' || token.length !== 6) {
-        res.status(400).json({
-            success: false,
-            error: 'Invalid token. Please enter a 6-digit code from your authenticator app.',
-        });
-        return;
-    }
+    const { token } = TwoFactorTokenSchema.parse(req.body);
 
     const verified = await twoFactorService.verify2FASetup(userId, token, req.tenantPool);
 
@@ -89,15 +91,7 @@ router.post('/verify-setup', authenticate, strictRateLimit, asyncHandler(async (
  * Returns JWT token on successful verification
  */
 router.post('/verify', strictRateLimit, asyncHandler(async (req, res) => {
-    const { userId, token } = req.body;
-
-    if (!userId || !token) {
-        res.status(400).json({
-            success: false,
-            error: 'User ID and token are required',
-        });
-        return;
-    }
+    const { userId, token } = TwoFactorVerifySchema.parse(req.body);
 
     // Normalize token (remove spaces/dashes for backup codes)
     const normalizedToken = token.toString().replace(/[\s-]/g, '');
@@ -187,15 +181,7 @@ router.post('/verify', strictRateLimit, asyncHandler(async (req, res) => {
  */
 router.post('/disable', authenticate, strictRateLimit, asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const { token } = req.body;
-
-    if (!token) {
-        res.status(400).json({
-            success: false,
-            error: 'Current 2FA token is required to disable 2FA',
-        });
-        return;
-    }
+    const { token } = z.object({ token: z.string().min(1, '2FA token is required') }).parse(req.body);
 
     await twoFactorService.disable2FA(userId, token, req.tenantPool);
 
@@ -211,15 +197,7 @@ router.post('/disable', authenticate, strictRateLimit, asyncHandler(async (req, 
  */
 router.post('/regenerate-backup-codes', authenticate, strictRateLimit, asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const { token } = req.body;
-
-    if (!token) {
-        res.status(400).json({
-            success: false,
-            error: '2FA token is required',
-        });
-        return;
-    }
+    const { token } = z.object({ token: z.string().min(1, '2FA token is required') }).parse(req.body);
 
     const newBackupCodes = await twoFactorService.regenerateBackupCodes(userId, token, req.tenantPool);
 
@@ -233,3 +211,4 @@ router.post('/regenerate-backup-codes', authenticate, strictRateLimit, asyncHand
 }));
 
 export default router;
+

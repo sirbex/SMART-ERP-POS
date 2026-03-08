@@ -100,9 +100,11 @@ export async function calculatePrice(context: PricingContext, dbPool?: pg.Pool |
 
   // Get product details
   const productResult = await pool.query<ProductPricing>(
-    `SELECT id, selling_price, cost_price, average_cost, last_cost, 
-            pricing_formula, auto_update_price, costing_method
-     FROM products WHERE id = $1`,
+    `SELECT p.id, pv.selling_price, pv.cost_price, pv.average_cost, pv.last_cost, 
+            pv.pricing_formula, pv.auto_update_price, pv.costing_method
+     FROM products p
+     LEFT JOIN product_valuation pv ON pv.product_id = p.id
+     WHERE p.id = $1`,
     [productId]
   );
 
@@ -236,8 +238,8 @@ export async function evaluateFormula(
   const pool = dbPool || globalPool;
   // Get product cost data
   const result = await pool.query<ProductPricing>(
-    `SELECT cost_price, average_cost, last_cost, selling_price
-     FROM products WHERE id = $1`,
+    `SELECT pv.cost_price, pv.average_cost, pv.last_cost, pv.selling_price
+     FROM product_valuation pv WHERE pv.product_id = $1`,
     [productId]
   );
 
@@ -378,7 +380,7 @@ export async function updatePricingTiers(productId: string, dbPool?: pg.Pool): P
 export async function updateProductPrice(productId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<void> {
   const pool = dbPool || globalPool;
   const result = await pool.query<ProductPricing>(
-    `SELECT pricing_formula, auto_update_price FROM products WHERE id = $1`,
+    `SELECT pv.pricing_formula, pv.auto_update_price FROM product_valuation pv WHERE pv.product_id = $1`,
     [productId]
   );
 
@@ -395,7 +397,7 @@ export async function updateProductPrice(productId: string, dbPool?: pg.Pool | p
   try {
     const newPrice = await evaluateFormula(product.pricing_formula, productId);
 
-    await pool.query(`UPDATE products SET selling_price = $1, updated_at = NOW() WHERE id = $2`, [
+    await pool.query(`UPDATE product_valuation SET selling_price = $1, updated_at = NOW() WHERE product_id = $2`, [
       newPrice,
       productId,
     ]);

@@ -3,11 +3,26 @@
 
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
+import { z } from 'zod';
 import { CreateProductSchema, UpdateProductSchema } from '../../../../shared/zod/product.js';
 import * as productService from './productService.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 import { normalizeResponse } from '../../utils/caseConverter.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
+
+const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
+
+const ListProductsQuerySchema = z.object({
+  page: z.string().optional().transform(v => v ? parseInt(v) : 1),
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+  includeUoms: z.string().optional().transform(v => v === 'true'),
+});
+
+const ConvertQuantitySchema = z.object({
+  quantity: z.number({ coerce: true }).positive('Quantity must be positive'),
+  fromUomId: z.string().uuid('fromUomId must be a valid UUID'),
+  toUomId: z.string().uuid('toUomId must be a valid UUID'),
+});
 
 interface AuditContext {
   userId: string;
@@ -29,9 +44,7 @@ interface AuthRequest extends Request {
 }
 
 export const getProducts = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
-  const includeUoms = req.query.includeUoms === 'true';
+  const { page, limit, includeUoms } = ListProductsQuerySchema.parse(req.query);
 
   const result = await productService.getAllProducts(page, limit, includeUoms);
 
@@ -43,7 +56,7 @@ export const getProducts = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getProduct = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const includeUoms = req.query.includeUoms === 'true';
 
   if (includeUoms) {
@@ -67,16 +80,12 @@ export const getProduct = asyncHandler(async (req: Request, res: Response) => {
  * Body: { quantity, fromUomId, toUomId }
  */
 export const convertProductQuantity = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { quantity, fromUomId, toUomId } = req.body;
-
-  if (!quantity || !fromUomId || !toUomId) {
-    throw new ValidationError('quantity, fromUomId, and toUomId are required');
-  }
+  const { id } = UuidParamSchema.parse(req.params);
+  const { quantity, fromUomId, toUomId } = ConvertQuantitySchema.parse(req.body);
 
   const result = await productService.convertQuantity(
     id,
-    parseFloat(quantity),
+    quantity,
     fromUomId,
     toUomId
   );
@@ -144,13 +153,13 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const getProductSupplierPrices = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const prices = await supplierProductPriceRepository.getSupplierPricesForProduct(id);
   res.json({ success: true, data: prices });
 });
 
 export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
 
   await productService.deleteProduct(id);
 

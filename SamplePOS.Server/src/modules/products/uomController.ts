@@ -1,17 +1,41 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
+import { z } from 'zod';
 import * as service from './uomService.js';
-import { NotFoundError } from '../../middleware/errorHandler.js';
+import { NotFoundError, asyncHandler } from '../../middleware/errorHandler.js';
 
-// ---------------------------------------------------------------------------
-// Async wrapper — catches thrown errors and forwards to Express error handler
-// ---------------------------------------------------------------------------
-function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
-) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
+const CreateMasterUomSchema = z.object({
+  name: z.string().min(1, 'UoM name is required').max(100),
+  abbreviation: z.string().min(1, 'Abbreviation is required').max(20),
+  category: z.string().optional(),
+});
+
+const UpdateMasterUomSchema = CreateMasterUomSchema.partial();
+
+const UomIdParamSchema = z.object({ uomId: z.string().uuid('UoM ID must be a valid UUID') });
+const ProductIdParamSchema = z.object({ id: z.string().uuid('Product ID must be a valid UUID') });
+const ProductUomIdParamSchema = z.object({ productUomId: z.string().uuid('Product UoM ID must be a valid UUID') });
+
+const AddProductUomSchema = z.object({
+  uomId: z.string().uuid('UoM ID must be a valid UUID'),
+  conversionFactor: z.number({ coerce: true }).positive('Conversion factor must be positive'),
+  barcode: z.string().optional().nullable(),
+  isDefault: z.boolean().optional().default(false),
+  priceOverride: z.number({ coerce: true }).optional().nullable(),
+  costOverride: z.number({ coerce: true }).optional().nullable(),
+  overridePrice: z.number({ coerce: true }).optional().nullable(),
+  overrideCost: z.number({ coerce: true }).optional().nullable(),
+});
+
+const UpdateProductUomSchema = z.object({
+  productId: z.string().uuid().optional(),
+  conversionFactor: z.number({ coerce: true }).positive().optional(),
+  barcode: z.string().optional().nullable(),
+  isDefault: z.boolean().optional(),
+  priceOverride: z.number({ coerce: true }).optional().nullable(),
+  costOverride: z.number({ coerce: true }).optional().nullable(),
+  overridePrice: z.number({ coerce: true }).optional().nullable(),
+  overrideCost: z.number({ coerce: true }).optional().nullable(),
+});
 
 // ---------------------------------------------------------------------------
 // Master UoM CRUD
@@ -23,19 +47,19 @@ export const listUoms = asyncHandler(async (_req, res) => {
 });
 
 export const createUom = asyncHandler(async (req, res) => {
-  const data = await service.createMasterUom(req.body);
+  const data = await service.createMasterUom(CreateMasterUomSchema.parse(req.body));
   res.json({ success: true, data });
 });
 
 export const updateUom = asyncHandler(async (req, res) => {
-  const id = req.params.uomId;
-  const data = await service.updateMasterUom(id, req.body);
+  const { uomId: id } = UomIdParamSchema.parse(req.params);
+  const data = await service.updateMasterUom(id, UpdateMasterUomSchema.parse(req.body));
   if (!data) throw new NotFoundError('UoM');
   res.json({ success: true, data });
 });
 
 export const deleteUom = asyncHandler(async (req, res) => {
-  const id = req.params.uomId;
+  const { uomId: id } = UomIdParamSchema.parse(req.params);
   const ok = await service.deleteMasterUom(id);
   if (!ok) throw new NotFoundError('UoM');
   res.json({ success: true, data: ok });
@@ -46,22 +70,23 @@ export const deleteUom = asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 
 export const getProductUoms = asyncHandler(async (req, res) => {
-  const productId = req.params.id;
+  const { id: productId } = ProductIdParamSchema.parse(req.params);
   const data = await service.getProductUoms(productId);
   res.json({ success: true, data });
 });
 
 export const addProductUom = asyncHandler(async (req, res) => {
+  const validated = AddProductUomSchema.parse(req.body);
   // Normalize payload keys and sanitize to only allowed fields
   const normalized = {
     productId: req.params.id,
-    uomId: req.body.uomId,
-    conversionFactor: req.body.conversionFactor,
-    barcode: req.body.barcode,
-    isDefault: req.body.isDefault,
+    uomId: validated.uomId,
+    conversionFactor: validated.conversionFactor,
+    barcode: validated.barcode,
+    isDefault: validated.isDefault,
     // Accept both priceOverride/costOverride and legacy overridePrice/overrideCost
-    priceOverride: req.body.priceOverride ?? req.body.overridePrice ?? null,
-    costOverride: req.body.costOverride ?? req.body.overrideCost ?? null,
+    priceOverride: validated.priceOverride ?? validated.overridePrice ?? null,
+    costOverride: validated.costOverride ?? validated.overrideCost ?? null,
   };
 
   // Build audit context
@@ -80,30 +105,30 @@ export const addProductUom = asyncHandler(async (req, res) => {
 });
 
 export const updateProductUom = asyncHandler(async (req, res) => {
-  const id = req.params.productUomId;
+  const { productUomId: id } = ProductUomIdParamSchema.parse(req.params);
+  const validated = UpdateProductUomSchema.parse(req.body);
 
   // Normalize payload keys and sanitize to only allowed fields
   // Only include fields that have valid values (not undefined or empty string)
   const normalized: Record<string, unknown> = {};
 
-  // productId optional; include if caller sent it for default handling
-  if (req.body.productId && typeof req.body.productId === 'string' && req.body.productId.trim() !== '') {
-    normalized.productId = req.body.productId;
+  if (validated.productId) {
+    normalized.productId = validated.productId;
   }
-  if (req.body.conversionFactor !== undefined) {
-    normalized.conversionFactor = req.body.conversionFactor;
+  if (validated.conversionFactor !== undefined) {
+    normalized.conversionFactor = validated.conversionFactor;
   }
-  if (req.body.barcode !== undefined) {
-    normalized.barcode = req.body.barcode;
+  if (validated.barcode !== undefined) {
+    normalized.barcode = validated.barcode;
   }
-  if (req.body.isDefault !== undefined) {
-    normalized.isDefault = req.body.isDefault;
+  if (validated.isDefault !== undefined) {
+    normalized.isDefault = validated.isDefault;
   }
-  if (req.body.priceOverride !== undefined || req.body.overridePrice !== undefined) {
-    normalized.priceOverride = req.body.priceOverride ?? req.body.overridePrice;
+  if (validated.priceOverride !== undefined || validated.overridePrice !== undefined) {
+    normalized.priceOverride = validated.priceOverride ?? validated.overridePrice;
   }
-  if (req.body.costOverride !== undefined || req.body.overrideCost !== undefined) {
-    normalized.costOverride = req.body.costOverride ?? req.body.overrideCost;
+  if (validated.costOverride !== undefined || validated.overrideCost !== undefined) {
+    normalized.costOverride = validated.costOverride ?? validated.overrideCost;
   }
 
   // Build audit context
@@ -122,7 +147,7 @@ export const updateProductUom = asyncHandler(async (req, res) => {
 });
 
 export const deleteProductUom = asyncHandler(async (req, res) => {
-  const id = req.params.productUomId;
+  const { productUomId: id } = ProductUomIdParamSchema.parse(req.params);
   const ok = await service.removeProductUom(id);
   res.json({ success: true, data: ok });
 });

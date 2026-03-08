@@ -53,7 +53,12 @@ class ConnectionManager {
 
   constructor() {
     this.dbUser = process.env.DB_USER || 'postgres';
-    this.dbPassword = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || 'password';
+    const dbPass = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD;
+    if (!dbPass && process.env.NODE_ENV === 'production') {
+      console.error('FATAL: DB_PASSWORD environment variable is not set. Cannot start in production without it.');
+      process.exit(1);
+    }
+    this.dbPassword = dbPass || 'password';
 
     // Start idle pool eviction
     this.evictionInterval = setInterval(() => {

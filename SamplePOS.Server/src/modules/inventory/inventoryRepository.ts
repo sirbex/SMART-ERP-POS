@@ -128,16 +128,16 @@ export const inventoryRepository = {
          p.sku,
          p.barcode,
          p.generic_name,
-         p.selling_price,
+         pv.selling_price,
          p.is_taxable,
          p.tax_rate,
          p.min_days_before_expiry_sale,
          p.product_type,
-         COALESCE(NULLIF(p.average_cost, 0), p.cost_price) as average_cost,
-         COALESCE(SUM(b.remaining_quantity), p.quantity_on_hand) as total_stock,
+         COALESCE(NULLIF(pv.average_cost, 0), pv.cost_price) as average_cost,
+         COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) as total_stock,
          MIN(b.expiry_date) as nearest_expiry,
-         p.reorder_level,
-         CASE WHEN COALESCE(SUM(b.remaining_quantity), p.quantity_on_hand) <= p.reorder_level THEN true ELSE false END as needs_reorder,
+         pi.reorder_level,
+         CASE WHEN COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) <= pi.reorder_level THEN true ELSE false END as needs_reorder,
          (
            SELECT json_agg(
              json_build_object(
@@ -146,8 +146,8 @@ export const inventoryRepository = {
                'symbol', u.symbol,
                'conversionFactor', pu.conversion_factor,
                'isDefault', pu.is_default,
-               'price', COALESCE(pu.price_override, p.selling_price * pu.conversion_factor),
-               'cost', COALESCE(pu.cost_override, NULLIF(p.average_cost, 0), p.cost_price) * pu.conversion_factor
+               'price', COALESCE(pu.price_override, pv.selling_price * pu.conversion_factor),
+               'cost', COALESCE(pu.cost_override, NULLIF(pv.average_cost, 0), pv.cost_price) * pu.conversion_factor
              )
            )
            FROM product_uoms pu
@@ -155,9 +155,11 @@ export const inventoryRepository = {
            WHERE pu.product_id = p.id
          ) as uoms
        FROM products p
+       LEFT JOIN product_inventory pi ON pi.product_id = p.id
+       LEFT JOIN product_valuation pv ON pv.product_id = p.id
        LEFT JOIN inventory_batches b ON p.id = b.product_id AND b.status = 'ACTIVE'
        WHERE p.is_active = true
-       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, p.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, p.average_cost, p.cost_price, p.reorder_level
+       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand
        ORDER BY needs_reorder DESC, p.name ASC`
     );
     return result.rows;
@@ -171,13 +173,14 @@ export const inventoryRepository = {
       `SELECT 
          p.id as product_id,
          p.name as product_name,
-         COALESCE(SUM(b.remaining_quantity), p.quantity_on_hand) as total_quantity,
-         p.reorder_level,
-         CASE WHEN COALESCE(SUM(b.remaining_quantity), p.quantity_on_hand) <= p.reorder_level THEN true ELSE false END as needs_reorder
+         COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) as total_quantity,
+         pi.reorder_level,
+         CASE WHEN COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) <= pi.reorder_level THEN true ELSE false END as needs_reorder
        FROM products p
+       LEFT JOIN product_inventory pi ON pi.product_id = p.id
        LEFT JOIN inventory_batches b ON p.id = b.product_id AND b.status = 'ACTIVE'
        WHERE p.id = $1 AND p.is_active = true
-       GROUP BY p.id, p.name, p.reorder_level`,
+       GROUP BY p.id, p.name, pi.reorder_level, pi.quantity_on_hand`,
       [productId]
     );
 

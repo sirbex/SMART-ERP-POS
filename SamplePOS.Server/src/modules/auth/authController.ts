@@ -4,6 +4,7 @@
 
 import type { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from '../platform/tenantRepository.js';
@@ -15,6 +16,18 @@ import { resetAuthRateLimit } from '../../middleware/security.js';
 import { asyncHandler, UnauthorizedError, NotFoundError, ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 
+const LoginSchema = z.object({
+  email: z.string().email('Valid email is required'),
+  password: z.string().min(1, 'Password is required'),
+});
+
+const RegisterSchema = z.object({
+  email: z.string().email('Valid email is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  fullName: z.string().min(1, 'Full name is required').max(255),
+  role: z.enum(['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']).default('STAFF'),
+});
+
 /**
  * Login controller
  * POST /api/auth/login
@@ -25,7 +38,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const tenantId = req.tenantId;
     const tenantSlug = req.tenant?.slug;
-    const result = await authenticateUser(pool, req.body);
+    const credentials = LoginSchema.parse(req.body);
+    const result = await authenticateUser(pool, credentials);
 
     // Successful auth — clear IP-based rate limit so the user is never locked out
     resetAuthRateLimit(req);
@@ -224,7 +238,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const regPool = req.tenantPool || globalPool;
   try {
-    const result = await registerUser(regPool, req.body);
+    const validated = RegisterSchema.parse(req.body);
+    const result = await registerUser(regPool, validated);
     res.status(201).json({
       success: true,
       data: result,

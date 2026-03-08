@@ -2,6 +2,14 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 
+/** Validates that a table name is a safe PostgreSQL identifier (defense-in-depth) */
+const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+function assertSafeTableName(name: string): void {
+  if (!SAFE_IDENTIFIER.test(name)) {
+    throw new Error(`Unsafe table name rejected: ${name}`);
+  }
+}
+
 /**
  * Admin Repository - Database maintenance operations
  * CRITICAL: This handles backup, restore, and transaction clearing
@@ -30,6 +38,7 @@ export const adminRepository = {
       // Using SAVEPOINT for each deletion to handle missing tables gracefully
 
       const safeDelete = async (tableName: string, step: number) => {
+        assertSafeTableName(tableName);
         try {
           await client.query(`SAVEPOINT sp_${step}`);
           const result = await client.query(
@@ -46,6 +55,7 @@ export const adminRepository = {
 
       // Helper for TRUNCATE CASCADE (faster for large tables)
       const safeTruncate = async (tableName: string, step: number) => {
+        assertSafeTableName(tableName);
         try {
           await client.query(`SAVEPOINT sp_trunc_${step}`);
           const countResult = await client.query(`SELECT COUNT(*) as count FROM ${tableName}`);
@@ -261,10 +271,10 @@ export const adminRepository = {
         try {
           await client.query('SAVEPOINT sp_reset_inventory_fallback');
           const inventoryReset = await client.query(`
-            UPDATE products 
+            UPDATE product_inventory 
             SET quantity_on_hand = 0,
                 updated_at = NOW()
-            WHERE id IS NOT NULL
+            WHERE product_id IS NOT NULL
           `);
           resetInventory = inventoryReset.rowCount || 0;
           await client.query('RELEASE SAVEPOINT sp_reset_inventory_fallback');
@@ -578,7 +588,7 @@ export const adminRepository = {
       // Check for negative inventory
       const negativeInventory = await pool.query(`
         SELECT COUNT(*) as count 
-        FROM products 
+        FROM product_inventory 
         WHERE quantity_on_hand < 0
       `);
       if (parseInt(negativeInventory.rows[0].count) > 0) {

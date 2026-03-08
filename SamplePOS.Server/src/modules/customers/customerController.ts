@@ -10,9 +10,18 @@ import { pool as globalPool } from '../../db/pool.js';
 import Money from '../../utils/money.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
+const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
+const PaginationQuerySchema = z.object({
+  page: z.string().optional().transform(v => v ? parseInt(v) : 1),
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+});
+const SearchQuerySchema = z.object({
+  q: z.string().optional().default(''),
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 20),
+});
+
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
+  const { page, limit } = PaginationQuerySchema.parse(req.query);
 
   const result = await customerService.getAllCustomers(page, limit);
 
@@ -24,7 +33,7 @@ export const getCustomers = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const customer = await customerService.getCustomerById(id);
 
   res.json({
@@ -44,8 +53,7 @@ export const getCustomerByNumber = asyncHandler(async (req: Request, res: Respon
 });
 
 export const searchCustomers = asyncHandler(async (req: Request, res: Response) => {
-  const searchTerm = (req.query.q as string) || '';
-  const limit = parseInt(req.query.limit as string) || 20;
+  const { q: searchTerm, limit } = SearchQuerySchema.parse(req.query);
 
   const customers = await customerService.searchCustomers(searchTerm, limit);
 
@@ -106,8 +114,7 @@ export const updateCustomer = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const deleteCustomer = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  await customerService.deleteCustomer(id);
+  const { id } = UuidParamSchema.parse(req.params);
 
   res.json({
     success: true,
@@ -120,7 +127,7 @@ export const deleteCustomer = asyncHandler(async (req: Request, res: Response) =
  * PATCH /api/customers/:id/active
  */
 export const toggleCustomerActive = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const ToggleSchema = z.object({
     isActive: z.boolean(),
   });
@@ -141,9 +148,8 @@ export const toggleCustomerActive = asyncHandler(async (req: Request, res: Respo
  * GET /api/customers/:id/sales
  */
 export const getCustomerSales = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
+  const { id } = UuidParamSchema.parse(req.params);
+  const { page, limit } = PaginationQuerySchema.parse(req.query);
 
   const result = await customerService.getCustomerSales(id, page, limit);
 
@@ -155,9 +161,8 @@ export const getCustomerSales = asyncHandler(async (req: Request, res: Response)
 });
 
 export const getCustomerTransactions = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
+  const { id } = UuidParamSchema.parse(req.params);
+  const { page, limit } = PaginationQuerySchema.parse(req.query);
 
   const result = await customerService.getCustomerTransactions(id, page, limit);
 
@@ -169,7 +174,7 @@ export const getCustomerTransactions = asyncHandler(async (req: Request, res: Re
 });
 
 export const getCustomerSummary = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const summary = await customerService.getCustomerSummary(id);
 
   res.json({

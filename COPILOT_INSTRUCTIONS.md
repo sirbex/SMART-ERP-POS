@@ -273,6 +273,51 @@ Reminder: Product fields must propagate globally across all product views automa
 
 ---
 
+## Role-Based Data Isolation (Cashier Scoping)
+
+### Server-Enforced Filtering Pattern
+All sales-related endpoints enforce **server-side data isolation** for the CASHIER role. This is defense-in-depth — the backend overrides any frontend parameters:
+
+```typescript
+// In salesRoutes.ts — applied to ALL 5 sales controllers:
+// listSales, getSalesSummary, getSalesSummaryByDate, getTopSellingProducts, getProductSalesSummary
+if (req.user?.role === 'CASHIER') {
+  cashierId = req.user.id; // Force — ignores any client-supplied cashierId
+}
+```
+
+**Endpoints with enforced cashier filtering:**
+| Endpoint | Effect |
+|----------|--------|
+| `GET /api/sales` | Returns only the cashier's own sales |
+| `GET /api/sales/summary` | Summary scoped to cashier's transactions |
+| `GET /api/sales/summary-by-date` | Daily/period summary for cashier only |
+| `GET /api/sales/top-products` | Top products sold by this cashier only |
+| `GET /api/sales/product-summary` | Product breakdown for this cashier only |
+
+**Repository layer**: Each repository method accepts `cashierId?: string` and adds `AND s.cashier_id = $N` when present.
+
+### Frontend Role Scoping Pattern
+Use `isCashier` derived from `useAuth()` to conditionally render UI:
+
+```typescript
+const { user } = useAuth();
+const isCashier = user?.role === 'CASHIER';
+
+// Hide sensitive data (profits, margins) for cashiers
+// Restrict navigation to POS, My Sales, Customers only
+// Change headers: "My Sales", "Here's your activity today"
+```
+
+**Applied in**: `Dashboard.tsx` (KPI cards, trend table, navigation modules), `SalesPage.tsx` (tab filtering, header)
+
+### Rules for New Endpoints
+- **Any new sales/financial endpoint** must include the same CASHIER enforcement pattern in the route handler
+- Never trust `cashierId` from query params when `req.user.role === 'CASHIER'`
+- ADMIN and MANAGER roles can view all data (no filtering applied)
+
+---
+
 ## Module Organization (Mandatory Structure)
 
 Each module must follow this structure:

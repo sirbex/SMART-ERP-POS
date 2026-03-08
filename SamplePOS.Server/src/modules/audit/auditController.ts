@@ -10,19 +10,27 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { AuditLogQuerySchema } from '../../../../shared/zod/audit.js';
 import * as auditService from './auditService.js';
-import { ValidationError } from '../../middleware/errorHandler.js';
+import { ValidationError, asyncHandler } from '../../middleware/errorHandler.js';
 
-// Async wrapper — catches thrown errors and forwards to Express error handler
-function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
-) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
+// Zod schemas for audit endpoints
+const EntityAuditTrailParamsSchema = z.object({
+  entityType: z.string().min(1),
+  identifier: z.string().min(1),
+});
+const UserSessionsParamsSchema = z.object({ userId: z.string().uuid() });
+const UserSessionsQuerySchema = z.object({
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 10),
+});
+const FailedTransactionQuerySchema = z.object({
+  days: z.string().optional().transform(v => v ? parseInt(v) : 30),
+});
+const ForceLogoutBodySchema = z.object({
+  idleMinutes: z.union([z.number().int().positive(), z.string().transform(Number)]).optional().default(15),
+});
 
 export class AuditController {
   /**
@@ -49,11 +57,7 @@ export class AuditController {
    */
   getEntityAuditTrail = asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { entityType, identifier } = req.params;
-
-    if (!entityType || !identifier) {
-      throw new ValidationError('Entity type and identifier are required');
-    }
+    const { entityType, identifier } = EntityAuditTrailParamsSchema.parse(req.params);
 
     const trail = await auditService.getEntityAuditTrail(
       pool,
@@ -87,12 +91,8 @@ export class AuditController {
    */
   getUserSessions = asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { userId } = req.params;
-    const limit = parseInt(req.query.limit as string) || 10;
-
-    if (!userId) {
-      throw new ValidationError('User ID is required');
-    }
+    const { userId } = UserSessionsParamsSchema.parse(req.params);
+    const { limit } = UserSessionsQuerySchema.parse(req.query);
 
     const sessions = await auditService.getUserSessions(pool, userId, limit);
 
@@ -108,7 +108,7 @@ export class AuditController {
    */
   getFailedTransactionSummary = asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const days = parseInt(req.query.days as string) || 30;
+    const { days } = FailedTransactionQuerySchema.parse(req.query);
 
     const summary = await auditService.getFailedTransactionSummary(pool, days);
 
@@ -124,7 +124,7 @@ export class AuditController {
    */
   forceLogoutIdleSessions = asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const idleMinutes = parseInt(req.body.idleMinutes as string) || 15;
+    const { idleMinutes } = ForceLogoutBodySchema.parse(req.body);
 
     // TODO: Add admin role check here
     const count = await auditService.forceLogoutIdleSessions(pool, idleMinutes);

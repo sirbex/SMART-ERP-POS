@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: pos_system
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     ports:
       - "5432:5432"
     volumes:
@@ -47,11 +47,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/pos_system
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/pos_system
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-your_super_secret_jwt_key_here}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       ACCOUNTING_API_BASE_URL: http://csharp-accounting-api:5062
-      ACCOUNTING_API_KEY: ${ACCOUNTING_API_KEY:-production_shared_secret}
+      ACCOUNTING_API_KEY: ${ACCOUNTING_API_KEY:?ACCOUNTING_API_KEY must be set}
     ports:
       - "3001:3001"
     depends_on:
@@ -77,8 +77,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5062
-      ConnectionStrings__PostgreSQL: Host=postgres;Database=pos_system;Username=postgres;Password=password
-      ApiKeys__NodeBackend: ${ACCOUNTING_API_KEY:-production_shared_secret}
+      ConnectionStrings__PostgreSQL: Host=postgres;Database=pos_system;Username=postgres;Password=${DB_PASSWORD:?DB_PASSWORD must be set}
+      ApiKeys__NodeBackend: ${ACCOUNTING_API_KEY:?ACCOUNTING_API_KEY must be set}
     ports:
       - "5062:5062"
     depends_on:

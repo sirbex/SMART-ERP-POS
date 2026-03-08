@@ -91,22 +91,36 @@ const formatFieldValue = (key: string, value: unknown): string => {
       lowerKey.endsWith('invoices') ||
       lowerKey.endsWith('users') ||
       lowerKey.endsWith('categories') ||
-      lowerKey.includes('count')
+      lowerKey.includes('count') ||
+      lowerKey.includes('needingreorder')
     );
     if (isCountField) {
       return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
-    // Non-monetary fields that contain currency-adjacent keywords (e.g., paymentTerms, paymentMethod)
+    // Non-monetary numeric fields — velocity, stock levels, lead times, safety stock, forecast
     const isNonMonetaryField = (
       lowerKey.endsWith('terms') ||
       lowerKey.endsWith('method') ||
       lowerKey.endsWith('status') ||
       lowerKey.endsWith('type') ||
-      lowerKey.endsWith('days')
+      lowerKey.endsWith('days') ||
+      lowerKey.includes('velocity') ||
+      lowerKey.includes('safetystock') ||
+      lowerKey.includes('reorderpoint') ||
+      lowerKey.includes('stock') ||
+      lowerKey.includes('level') ||
+      lowerKey.includes('forecast') ||
+      lowerKey.includes('seasonalindex') ||
+      lowerKey.includes('learningcycles')
     );
     if (isNonMonetaryField) {
       return value.toLocaleString();
+    }
+
+    // Trend ratio — displayed as multiplier (×1.19), not percentage
+    if (lowerKey.includes('trendratio') || lowerKey === 'trendRatio') {
+      return `×${value.toFixed(2)}`;
     }
 
     // Currency fields (amount, value, cost, price, revenue, profit, discount, sales, payment, balance)
@@ -127,13 +141,12 @@ const formatFieldValue = (key: string, value: unknown): string => {
       return formatCurrency(value);
     }
 
-    // Percentage fields (margin, rate, percentage, change, ratio)
+    // Percentage fields (margin, rate, percentage, change)
     if (
       lowerKey.includes('margin') ||
       lowerKey.includes('rate') ||
       lowerKey.includes('percentage') ||
-      lowerKey.includes('change') ||
-      lowerKey.includes('ratio')
+      lowerKey.includes('change')
     ) {
       return `${value.toFixed(2)}%`;
     }
@@ -178,6 +191,23 @@ const formatFieldValue = (key: string, value: unknown): string => {
 const getFieldColorClass = (key: string, value: unknown): string => {
   const lowerKey = key.toLowerCase();
 
+  // String-based status/priority coloring
+  if (typeof value === 'string') {
+    const upperVal = value.toUpperCase();
+    if (lowerKey === 'priority' || lowerKey === 'urgency') {
+      if (upperVal === 'URGENT' || upperVal === 'CRITICAL') return 'text-red-600';
+      if (upperVal === 'HIGH') return 'text-orange-600';
+      if (upperVal === 'MEDIUM') return 'text-yellow-600';
+      return 'text-green-600';
+    }
+    if (lowerKey === 'demandtrend' || lowerKey === 'trend') {
+      if (upperVal === 'INCREASING') return 'text-green-600';
+      if (upperVal === 'DECREASING') return 'text-red-600';
+      return 'text-gray-600';
+    }
+    return 'text-gray-900';
+  }
+
   if (typeof value !== 'number') return 'text-gray-900';
 
   // Count-like fields — neutral color, not monetary
@@ -196,19 +226,29 @@ const getFieldColorClass = (key: string, value: unknown): string => {
     lowerKey.endsWith('invoices') ||
     lowerKey.endsWith('users') ||
     lowerKey.endsWith('categories') ||
-    lowerKey.includes('count')
+    lowerKey.includes('count') ||
+    lowerKey.includes('needingreorder')
   );
   if (isCountField) {
     return 'text-blue-600';
   }
 
-  // Non-monetary fields (terms, method, status, type, days)
+  // Non-monetary numeric fields (terms, method, status, days, velocity, stock, safety, reorder, forecast)
   const isNonMonetaryField = (
     lowerKey.endsWith('terms') ||
     lowerKey.endsWith('method') ||
     lowerKey.endsWith('status') ||
     lowerKey.endsWith('type') ||
-    lowerKey.endsWith('days')
+    lowerKey.endsWith('days') ||
+    lowerKey.includes('velocity') ||
+    lowerKey.includes('safetystock') ||
+    lowerKey.includes('reorderpoint') ||
+    lowerKey.includes('stock') ||
+    lowerKey.includes('level') ||
+    lowerKey.includes('trendratio') ||
+    lowerKey.includes('forecast') ||
+    lowerKey.includes('seasonalindex') ||
+    lowerKey.includes('learningcycles')
   );
   if (isNonMonetaryField) {
     return 'text-gray-900';
@@ -506,12 +546,12 @@ const REPORT_OPTIONS: ReportOption[] = [
   },
   {
     value: 'REORDER_RECOMMENDATIONS',
-    label: 'Reorder Recommendations',
-    description: 'Smart reorder suggestions based on sales velocity',
+    label: 'Smart Reorder AI',
+    description: 'AI inventory assistant: sales velocity, lead times, seasonal trends, safety stock',
     requiresDateRange: false,
     supportsFilters: ['daysToConsider', 'category'],
     category: 'Inventory',
-    icon: '🔔',
+    icon: '🤖',
   },
   {
     value: 'SALES_BY_CATEGORY',

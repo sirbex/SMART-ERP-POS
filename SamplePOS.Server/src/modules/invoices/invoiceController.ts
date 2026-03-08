@@ -10,6 +10,8 @@ import Decimal from 'decimal.js';
 import Money from '../../utils/money.js';
 import { asyncHandler, NotFoundError, ConflictError, ValidationError, AppError } from '../../middleware/errorHandler.js';
 
+const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
+
 const ListInvoicesQuerySchema = z.object({
   page: z
     .string()
@@ -51,7 +53,7 @@ export const invoiceController = {
 
   getInvoice: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     const result = await invoiceService.getInvoiceById(pool, id);
     if (!result) throw new NotFoundError('Invoice');
     res.json({ success: true, data: result });
@@ -79,7 +81,7 @@ export const invoiceController = {
 
   addPayment: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     const data = RecordInvoicePaymentSchema.parse(req.body);
     const userId = req.user?.id || null;
 
@@ -96,7 +98,7 @@ export const invoiceController = {
 
   listPayments: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { id } = req.params;
+    const { id } = UuidParamSchema.parse(req.params);
     const payments = await invoiceService.listPayments(pool, id);
     res.json({ success: true, data: payments });
   }),
@@ -104,9 +106,7 @@ export const invoiceController = {
   exportInvoicePdf: asyncHandler(async (req: Request, res: Response) => {
     try {
       const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-
-      // Get invoice settings from database
+      const { id } = UuidParamSchema.parse(req.params);
       const settings = await getSettings(pool);
 
       // Get full invoice with items and payments

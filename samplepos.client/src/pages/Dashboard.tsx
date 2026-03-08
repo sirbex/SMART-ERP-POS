@@ -229,18 +229,26 @@ export default function Dashboard() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   // ─── Quick‑access modules ────────────────────────────────────────
-  const modules = [
-    { name: 'Point of Sale', path: '/pos', icon: ShoppingCart, color: 'bg-blue-500', hoverColor: 'hover:bg-blue-600' },
-    { name: 'Products', path: '/inventory/products', icon: Package, color: 'bg-emerald-500', hoverColor: 'hover:bg-emerald-600' },
-    { name: 'Inventory', path: '/inventory', icon: BarChart3, color: 'bg-purple-500', hoverColor: 'hover:bg-purple-600' },
-    { name: 'Customers', path: '/customers', icon: Users, color: 'bg-amber-500', hoverColor: 'hover:bg-amber-600' },
-    { name: 'Suppliers', path: '/suppliers', icon: Truck, color: 'bg-indigo-500', hoverColor: 'hover:bg-indigo-600' },
-    { name: 'Purchase Orders', path: '/inventory/purchase-orders', icon: ClipboardList, color: 'bg-pink-500', hoverColor: 'hover:bg-pink-600' },
-    { name: 'Goods Receipts', path: '/inventory/goods-receipts', icon: PackageCheck, color: 'bg-teal-500', hoverColor: 'hover:bg-teal-600' },
-    { name: 'Sales', path: '/sales', icon: DollarSign, color: 'bg-orange-500', hoverColor: 'hover:bg-orange-600' },
-    { name: 'Stock Movements', path: '/inventory/stock-movements', icon: ArrowUpDown, color: 'bg-red-500', hoverColor: 'hover:bg-red-600' },
-    { name: 'Reports', path: '/reports', icon: FileText, color: 'bg-cyan-500', hoverColor: 'hover:bg-cyan-600' },
-  ];
+  const isCashier = user?.role === 'CASHIER';
+
+  const modules = isCashier
+    ? [
+      { name: 'Point of Sale', path: '/pos', icon: ShoppingCart, color: 'bg-blue-500', hoverColor: 'hover:bg-blue-600' },
+      { name: 'My Sales', path: '/sales', icon: DollarSign, color: 'bg-orange-500', hoverColor: 'hover:bg-orange-600' },
+      { name: 'Customers', path: '/customers', icon: Users, color: 'bg-amber-500', hoverColor: 'hover:bg-amber-600' },
+    ]
+    : [
+      { name: 'Point of Sale', path: '/pos', icon: ShoppingCart, color: 'bg-blue-500', hoverColor: 'hover:bg-blue-600' },
+      { name: 'Products', path: '/inventory/products', icon: Package, color: 'bg-emerald-500', hoverColor: 'hover:bg-emerald-600' },
+      { name: 'Inventory', path: '/inventory', icon: BarChart3, color: 'bg-purple-500', hoverColor: 'hover:bg-purple-600' },
+      { name: 'Customers', path: '/customers', icon: Users, color: 'bg-amber-500', hoverColor: 'hover:bg-amber-600' },
+      { name: 'Suppliers', path: '/suppliers', icon: Truck, color: 'bg-indigo-500', hoverColor: 'hover:bg-indigo-600' },
+      { name: 'Purchase Orders', path: '/inventory/purchase-orders', icon: ClipboardList, color: 'bg-pink-500', hoverColor: 'hover:bg-pink-600' },
+      { name: 'Goods Receipts', path: '/inventory/goods-receipts', icon: PackageCheck, color: 'bg-teal-500', hoverColor: 'hover:bg-teal-600' },
+      { name: 'Sales', path: '/sales', icon: DollarSign, color: 'bg-orange-500', hoverColor: 'hover:bg-orange-600' },
+      { name: 'Stock Movements', path: '/inventory/stock-movements', icon: ArrowUpDown, color: 'bg-red-500', hoverColor: 'hover:bg-red-600' },
+      { name: 'Reports', path: '/reports', icon: FileText, color: 'bg-cyan-500', hoverColor: 'hover:bg-cyan-600' },
+    ];
 
   const adminModules =
     user?.role === 'ADMIN'
@@ -262,7 +270,9 @@ export default function Dashboard() {
               {greeting}, {user?.fullName?.split(' ')[0] || 'there'}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Here&apos;s what&apos;s happening with your business today
+              {isCashier
+                ? "Here\u0027s your activity today"
+                : "Here\u0027s what\u0027s happening with your business today"}
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -301,7 +311,8 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Today's Profit */}
+          {/* Today's Profit — hidden for cashiers */}
+          {!isCashier && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-medium text-gray-500">Today&apos;s Profit</p>
@@ -322,6 +333,7 @@ export default function Dashboard() {
               </>
             )}
           </div>
+          )}
 
           {/* This Week */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
@@ -563,7 +575,7 @@ export default function Dashboard() {
                       <th className="pb-2 font-medium">Date</th>
                       <th className="pb-2 font-medium text-right">Sales</th>
                       <th className="pb-2 font-medium text-right">Revenue</th>
-                      <th className="pb-2 font-medium text-right">Profit</th>
+                      {!isCashier && <th className="pb-2 font-medium text-right">Profit</th>}
                       <th className="pb-2 font-medium text-right hidden sm:table-cell">Avg</th>
                     </tr>
                   </thead>
@@ -581,6 +593,7 @@ export default function Dashboard() {
                             0
                           )}
                         </td>
+                        {!isCashier && (
                         <td
                           className={`py-2 text-right font-medium ${safeNum(day.total_profit ?? day.totalProfit) >= 0 ? 'text-green-600' : 'text-red-600'}`}
                         >
@@ -590,6 +603,7 @@ export default function Dashboard() {
                             0
                           )}
                         </td>
+                        )}
                         <td className="py-2 text-right text-gray-500 hidden sm:table-cell">
                           {formatCurrency(
                             safeNum(day.avg_transaction_value ?? day.avgTransactionValue),
@@ -614,8 +628,10 @@ export default function Dashboard() {
         {/* ─── All-Time Summary ──────────────────────────────────── */}
         {allTimeData && (
           <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200 p-5">
-            <h2 className="text-base font-semibold text-gray-700 mb-3">All-Time Summary</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <h2 className="text-base font-semibold text-gray-700 mb-3">
+              {isCashier ? 'My All-Time Summary' : 'All-Time Summary'}
+            </h2>
+            <div className={`grid grid-cols-2 ${isCashier ? '' : 'sm:grid-cols-4'} gap-4`}>
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total Sales</p>
                 <p className="text-lg font-bold text-gray-900">
@@ -628,6 +644,8 @@ export default function Dashboard() {
                   {formatCurrency(allTimeData?.totalAmount || 0, true, 0)}
                 </p>
               </div>
+              {!isCashier && (
+              <>
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total Profit</p>
                 <p
@@ -645,6 +663,8 @@ export default function Dashboard() {
                   %
                 </p>
               </div>
+              </>
+              )}
             </div>
           </div>
         )}

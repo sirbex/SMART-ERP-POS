@@ -47,52 +47,78 @@ const ListPOsQuerySchema = z.object({
   supplierId: z.string().uuid().optional(),
 });
 
+const UuidParamSchema = z.object({
+  id: z.string().uuid(),
+});
+
+const CreateInvoiceSchema = z.object({
+  purchaseOrderId: z.string().uuid(),
+  goodsReceiptId: z.string().uuid(),
+  invoiceNumber: z.string().min(1),
+  invoiceDate: z.string(),
+  dueDate: z.string(),
+  supplierId: z.string().uuid(),
+  totalAmount: z.coerce.number().nonnegative(),
+  paymentTerms: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+const RecordPaymentSchema = z.object({
+  invoiceId: z.string().uuid(),
+  supplierId: z.string().uuid(),
+  amount: z.coerce.number().positive(),
+  paymentMethod: z.string().min(1),
+  paymentDate: z.string(),
+  referenceNumber: z.string().optional(),
+  notes: z.string().optional(),
+});
+
 export const purchaseOrderController = {
   /**
    * Create purchase order
    */
   async createPO(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const validatedData = CreatePOSchema.parse(req.body);
+    const pool = req.tenantPool || globalPool;
+    const validatedData = CreatePOSchema.parse(req.body);
 
-      // Use authenticated user's ID if createdBy not provided
-      const createdBy = validatedData.createdBy || req.user?.id;
-      if (!createdBy) {
-    res.status(400).json({
-      success: false,
-      error: 'User ID is required. Please provide createdBy or ensure you are authenticated.',
-    });
-    return;
-      }
-
-      const result = await purchaseOrderService.createPO(pool, {
-    ...validatedData,
-    createdBy,
+    // Use authenticated user's ID if createdBy not provided
+    const createdBy = validatedData.createdBy || req.user?.id;
+    if (!createdBy) {
+      res.status(400).json({
+        success: false,
+        error: 'User ID is required. Please provide createdBy or ensure you are authenticated.',
       });
+      return;
+    }
 
-      // Log audit trail
-      try {
-    const auditContext = req.auditContext || {
-      userId: req.user?.id || createdBy,
-      userName: req.user?.fullName,
-      userRole: req.user?.role,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    };
+    const result = await purchaseOrderService.createPO(pool, {
+      ...validatedData,
+      createdBy,
+    });
 
-    const { logPurchaseOrderCreated } = await import('../audit/auditService.js');
-    await logPurchaseOrderCreated(
-      pool,
-      result.po.id,
-      result.po.poNumber,
-      {
-        itemCount: result.items?.length || 0,
-        totalAmount: result.po.totalAmount,
-        supplierId: result.po.supplierId,
-        status: result.po.status,
-      },
-      auditContext
-    );
+    // Log audit trail
+    try {
+      const auditContext = req.auditContext || {
+        userId: req.user?.id || createdBy,
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      const { logPurchaseOrderCreated } = await import('../audit/auditService.js');
+      await logPurchaseOrderCreated(
+        pool,
+        result.po.id,
+        result.po.poNumber,
+        {
+          itemCount: result.items?.length || 0,
+          totalAmount: result.po.totalAmount,
+          supplierId: result.po.supplierId,
+          status: result.po.status,
+        },
+        auditContext
+      );
 
       res.status(201).json({
         success: true,
@@ -121,72 +147,72 @@ export const purchaseOrderController = {
    * Get PO by ID
    */
   async getPOById(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await purchaseOrderService.getPOById(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await purchaseOrderService.getPOById(pool, id);
 
-      res.json({
-    success: true,
-    data: result,
-      });
+    res.json({
+      success: true,
+      data: result,
+    });
   },
 
   /**
    * List purchase orders
    */
   async listPOs(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const query = ListPOsQuerySchema.parse(req.query);
-      const result = await purchaseOrderService.listPOs(pool, query.page, query.limit, {
-    status: query.status,
-    supplierId: query.supplierId,
-      });
+    const pool = req.tenantPool || globalPool;
+    const query = ListPOsQuerySchema.parse(req.query);
+    const result = await purchaseOrderService.listPOs(pool, query.page, query.limit, {
+      status: query.status,
+      supplierId: query.supplierId,
+    });
 
-      res.json({
-    success: true,
-    data: result.pos,
-    pagination: {
-      page: query.page,
-      limit: query.limit,
-      total: result.total,
-      totalPages: Math.ceil(result.total / query.limit),
-    },
-      });
+    res.json({
+      success: true,
+      data: result.pos,
+      pagination: {
+        page: query.page,
+        limit: query.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / query.limit),
+      },
+    });
   },
 
   /**
    * Update PO status
    */
   async updatePOStatus(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const { status } = UpdatePOStatusSchema.parse(req.body);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const { status } = UpdatePOStatusSchema.parse(req.body);
 
-      // Get current status before update for audit
-      const currentPO = await purchaseOrderService.getPOById(pool, id);
-      const oldStatus = currentPO?.po?.status;
+    // Get current status before update for audit
+    const currentPO = await purchaseOrderService.getPOById(pool, id);
+    const oldStatus = currentPO?.po?.status;
 
-      const result = await purchaseOrderService.updatePOStatus(pool, id, status);
+    const result = await purchaseOrderService.updatePOStatus(pool, id, status);
 
-      // Log audit trail for status change
-      try {
-    const auditContext = req.auditContext || {
-      userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
-      userName: req.user?.fullName,
-      userRole: req.user?.role,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    };
+    // Log audit trail for status change
+    try {
+      const auditContext = req.auditContext || {
+        userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
 
-    const { logPurchaseOrderStatusChanged } = await import('../audit/auditService.js');
-    await logPurchaseOrderStatusChanged(
-      pool,
-      id,
-      result.poNumber,
-      oldStatus || 'UNKNOWN',
-      status,
-      auditContext
-    );
+      const { logPurchaseOrderStatusChanged } = await import('../audit/auditService.js');
+      await logPurchaseOrderStatusChanged(
+        pool,
+        id,
+        result.poNumber,
+        oldStatus || 'UNKNOWN',
+        status,
+        auditContext
+      );
 
       res.json({
         success: true,
@@ -215,126 +241,115 @@ export const purchaseOrderController = {
    * Submit purchase order (DRAFT -> PENDING)
    */
   async submitPO(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await purchaseOrderService.submitPO(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await purchaseOrderService.submitPO(pool, id);
 
-      res.json({
-    success: true,
-    data: result,
-    message: 'Purchase order submitted successfully',
-      });
+    res.json({
+      success: true,
+      data: result,
+      message: 'Purchase order submitted successfully',
+    });
   },
 
   /**
    * Cancel purchase order
    */
   async cancelPO(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const result = await purchaseOrderService.cancelPO(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await purchaseOrderService.cancelPO(pool, id);
 
-      res.json({
-    success: true,
-    data: result,
-    message: 'Purchase order cancelled successfully',
-      });
+    res.json({
+      success: true,
+      data: result,
+      message: 'Purchase order cancelled successfully',
+    });
   },
 
   /**
    * Delete purchase order
    */
   async deletePO(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      await purchaseOrderService.deletePO(pool, id);
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    await purchaseOrderService.deletePO(pool, id);
 
-      res.json({
-    success: true,
-    message: 'Purchase order deleted successfully',
-      });
+    res.json({
+      success: true,
+      message: 'Purchase order deleted successfully',
+    });
   },
 
   /**
    * Send PO to supplier (auto-creates goods receipt draft)
    */
   async sendPOToSupplier(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { id } = req.params;
-      const userId = req.user!.id;
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const userId = req.user!.id;
 
-      const result = await purchaseOrderService.sendPOToSupplier(pool, id, userId);
+    const result = await purchaseOrderService.sendPOToSupplier(pool, id, userId);
 
-      res.json({
-    success: true,
-    data: result,
-    message: 'Purchase order sent to supplier. Goods receipt draft created for receiving.',
-      });
+    res.json({
+      success: true,
+      data: result,
+      message: 'Purchase order sent to supplier. Goods receipt draft created for receiving.',
+    });
   },
 
   /**
    * Create supplier invoice
    */
   async createInvoice(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const {
-    purchaseOrderId,
-    goodsReceiptId,
-    invoiceNumber,
-    invoiceDate,
-    dueDate,
-    supplierId,
-    totalAmount,
-    paymentTerms,
-    notes,
-      } = req.body;
-      const userId = req.user!.id;
+    const pool = req.tenantPool || globalPool;
+    const data = CreateInvoiceSchema.parse(req.body);
+    const userId = req.user!.id;
 
-      const invoice = await purchaseOrderService.createSupplierInvoice(pool, {
-    purchaseOrderId,
-    goodsReceiptId,
-    invoiceNumber,
-    invoiceDate: new Date(invoiceDate),
-    dueDate: new Date(dueDate),
-    supplierId,
-    totalAmount: parseFloat(totalAmount),
-    paymentTerms,
-    notes,
-    createdBy: userId,
-      });
+    const invoice = await purchaseOrderService.createSupplierInvoice(pool, {
+      purchaseOrderId: data.purchaseOrderId,
+      goodsReceiptId: data.goodsReceiptId,
+      invoiceNumber: data.invoiceNumber,
+      invoiceDate: new Date(data.invoiceDate),
+      dueDate: new Date(data.dueDate),
+      supplierId: data.supplierId,
+      totalAmount: data.totalAmount,
+      paymentTerms: data.paymentTerms,
+      notes: data.notes,
+      createdBy: userId,
+    });
 
-      res.status(201).json({
-    success: true,
-    data: invoice,
-    message: 'Supplier invoice created successfully',
-      });
+    res.status(201).json({
+      success: true,
+      data: invoice,
+      message: 'Supplier invoice created successfully',
+    });
   },
 
   /**
    * Record payment
    */
   async recordPayment(req: Request, res: Response): Promise<void> {
-      const pool = req.tenantPool || globalPool;
-      const { invoiceId, supplierId, amount, paymentMethod, paymentDate, referenceNumber, notes } =
-    req.body;
-      const userId = req.user!.id;
+    const pool = req.tenantPool || globalPool;
+    const data = RecordPaymentSchema.parse(req.body);
+    const userId = req.user!.id;
 
-      const payment = await purchaseOrderService.recordPayment(pool, {
-    invoiceId,
-    supplierId,
-    amount: parseFloat(amount),
-    paymentMethod,
-    paymentDate: new Date(paymentDate),
-    referenceNumber,
-    notes,
-    createdBy: userId,
-      });
+    const payment = await purchaseOrderService.recordPayment(pool, {
+      invoiceId: data.invoiceId,
+      supplierId: data.supplierId,
+      amount: data.amount,
+      paymentMethod: data.paymentMethod,
+      paymentDate: new Date(data.paymentDate),
+      referenceNumber: data.referenceNumber,
+      notes: data.notes,
+      createdBy: userId,
+    });
 
-      res.status(201).json({
-    success: true,
-    data: payment,
-    message: 'Payment recorded successfully',
-      });
+    res.status(201).json({
+      success: true,
+      data: payment,
+      message: 'Payment recorded successfully',
+    });
   },
 };
 

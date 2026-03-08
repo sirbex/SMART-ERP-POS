@@ -12,6 +12,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 // ============================================================================
 // DATABASE ROW INTERFACES (snake_case from database)
@@ -51,6 +52,7 @@ export interface QuotationDbRow {
   revision_number: number;
   created_at: Date;
   updated_at: Date;
+  version: number;
 }
 
 export interface QuotationItemDbRow {
@@ -436,6 +438,7 @@ export const quotationRepository = {
     const result = await client.query<QuotationDbRow>(
       `UPDATE quotations 
        SET status = $1::quotation_status,
+           version = version + 1,
            updated_at = NOW()
        WHERE id = $2
        RETURNING *`,
@@ -459,6 +462,7 @@ export const quotationRepository = {
        SET status = 'CONVERTED',
            converted_to_sale_id = $1,
            converted_to_invoice_id = $2,
+           version = version + 1,
            converted_at = NOW(),
            updated_at = NOW()
        WHERE id = $3
@@ -522,6 +526,7 @@ export const quotationRepository = {
       values.push(value);
     });
 
+    fields.push(`version = version + 1`);
     fields.push(`updated_at = NOW()`);
 
     values.push(id);

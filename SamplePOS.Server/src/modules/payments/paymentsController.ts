@@ -5,15 +5,17 @@
  */
 
 import type { Request, Response } from 'express';
+import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { paymentsService } from './paymentsService.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 
-import { z } from 'zod';
-
 // ============================================================================
 // VALIDATION SCHEMAS
 // ============================================================================
+
+const UuidParamSchema = z.object({ saleId: z.string().uuid('Sale ID must be a valid UUID') });
+const CustomerIdParamSchema = z.object({ customerId: z.string().uuid('Customer ID must be a valid UUID') });
 
 const PaymentSegmentSchema = z.object({
   method: z.string().min(1),
@@ -112,11 +114,7 @@ export const paymentsController = {
    */
   getSalePayments: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { saleId } = req.params;
-
-    if (!saleId) {
-      throw new ValidationError('Sale ID required');
-    }
+    const { saleId } = UuidParamSchema.parse(req.params);
 
     const breakdown = await paymentsService.getSalePaymentBreakdown(pool, saleId);
 
@@ -132,11 +130,7 @@ export const paymentsController = {
    */
   getCustomerBalance: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { customerId } = req.params;
-
-    if (!customerId) {
-      throw new ValidationError('Customer ID required');
-    }
+    const { customerId } = CustomerIdParamSchema.parse(req.params);
 
     const balance = await paymentsService.getCustomerCreditBalance(pool, customerId);
 
@@ -152,12 +146,8 @@ export const paymentsController = {
    */
   getCustomerCreditHistory: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { customerId } = req.params;
+    const { customerId } = CustomerIdParamSchema.parse(req.params);
     const limit = parseInt(req.query.limit as string) || 50;
-
-    if (!customerId) {
-      throw new ValidationError('Customer ID required');
-    }
 
     const history = await paymentsService.getCustomerCreditHistory(pool, customerId, limit);
 
@@ -173,12 +163,8 @@ export const paymentsController = {
    */
   recordCustomerPayment: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const { customerId } = req.params;
+    const { customerId } = CustomerIdParamSchema.parse(req.params);
     const userId = req.user?.id;
-
-    if (!customerId) {
-      throw new ValidationError('Customer ID required');
-    }
 
     // Validate request body — ZodError caught by global handler
     const { amount, paymentMethod, reference, notes } = RecordCustomerPaymentSchema.parse(req.body);

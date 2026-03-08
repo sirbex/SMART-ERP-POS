@@ -4,6 +4,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
+import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import type {
   SalesReportRow, SupplierCostAnalysisRow, PaymentReportRow,
   InventoryAdjustmentRow, PurchaseOrderSummaryRow, StockMovementAnalysisRow,
@@ -450,7 +451,7 @@ export const reportsRepository = {
           p.id as product_id,
           p.name as product_name,
           p.sku,
-          p.reorder_level,
+          pi.reorder_level,
           0 as reorder_quantity,
           COALESCE(SUM(
             CASE 
@@ -462,10 +463,11 @@ export const reportsRepository = {
             END
           ), 0) as current_stock
         FROM products p
+        LEFT JOIN product_inventory pi ON pi.product_id = p.id
         LEFT JOIN stock_movements sm ON sm.product_id = p.id
         WHERE p.is_active = true
           ${categoryFilter}
-        GROUP BY p.id, p.name, p.sku, p.reorder_level
+        GROUP BY p.id, p.name, p.sku, pi.reorder_level
       )
       SELECT 
         product_id,
@@ -1903,8 +1905,10 @@ export const reportsRepository = {
   },
 
   /**
-   * REORDER RECOMMENDATIONS REPORT
-   * Smart reorder suggestions based on stock levels and sales velocity
+   * SMART REORDER AI — Inventory Assistant
+   * Analyzes sales history, seasonal demand trends, supplier lead times,
+   * and demand variability to generate intelligent reorder recommendations
+   * with safety stock buffers and lead-time-aware reorder points.
    */
   async getReorderRecommendations(
     pool: Pool,
@@ -1930,8 +1934,9 @@ export const reportsRepository = {
         p.name as product_name,
         p.sku,
         p.category,
-        p.reorder_level,
+        pi.reorder_level,
         COALESCE(SUM(b.remaining_quantity), 0) as current_stock,
+        -- Total units sold in analysis period
         COALESCE((
           SELECT SUM(si.quantity)
           FROM sale_items si
@@ -1939,13 +1944,37 @@ export const reportsRepository = {
           WHERE si.product_id = p.id
             AND s.sale_date >= CURRENT_DATE - INTERVAL '1 day' * $1
         ), 0) as units_sold_period,
+        -- Average daily sales velocity over full period
         COALESCE((
           SELECT SUM(si.quantity)
           FROM sale_items si
           INNER JOIN sales s ON s.id = si.sale_id
           WHERE si.product_id = p.id
             AND s.sale_date >= CURRENT_DATE - INTERVAL '1 day' * $1
-        ) / $1, 0) as daily_sales_velocity,
+        ) / NULLIF($1, 0), 0) as daily_sales_velocity,
+        -- Recent 7-day velocity for trend detection
+        COALESCE((
+          SELECT SUM(si.quantity)
+          FROM sale_items si
+          INNER JOIN sales s ON s.id = si.sale_id
+          WHERE si.product_id = p.id
+            AND s.sale_date >= CURRENT_DATE - INTERVAL '7 days'
+        ) / 7.0, 0) as recent_7day_velocity,
+        -- Daily sales standard deviation for safety stock
+        COALESCE((
+          SELECT STDDEV_POP(daily_qty) FROM (
+            SELECT COALESCE(SUM(si.quantity), 0) as daily_qty
+            FROM generate_series(
+              CURRENT_DATE - INTERVAL '1 day' * $1,
+              CURRENT_DATE - INTERVAL '1 day',
+              INTERVAL '1 day'
+            ) AS d(day)
+            LEFT JOIN sale_items si ON si.product_id = p.id
+            LEFT JOIN sales s ON s.id = si.sale_id AND s.sale_date = d.day::date
+            GROUP BY d.day
+          ) daily_sales
+        ), 0) as sales_std_deviation,
+        -- Days until stockout
         CASE 
           WHEN COALESCE((
             SELECT SUM(si.quantity)
@@ -1953,9 +1982,9 @@ export const reportsRepository = {
             INNER JOIN sales s ON s.id = si.sale_id
             WHERE si.product_id = p.id
               AND s.sale_date >= CURRENT_DATE - INTERVAL '1 day' * $1
-          ) / $1, 0) > 0
+          ) / NULLIF($1, 0), 0) > 0
           THEN COALESCE(SUM(b.remaining_quantity), 0) / (
-            SELECT SUM(si.quantity) / $1
+            SELECT SUM(si.quantity) / NULLIF($1, 0)
             FROM sale_items si
             INNER JOIN sales s ON s.id = si.sale_id
             WHERE si.product_id = p.id
@@ -1963,7 +1992,8 @@ export const reportsRepository = {
           )
           ELSE 999
         END as days_until_stockout,
-        p.cost_price as unit_cost,
+        pv.cost_price as unit_cost,
+        -- Preferred supplier (most recent) with lead time
         (
           SELECT s."CompanyName"
           FROM suppliers s
@@ -1973,13 +2003,36 @@ export const reportsRepository = {
           WHERE gri.product_id = p.id
           ORDER BY po.order_date DESC
           LIMIT 1
-        ) as preferred_supplier
+        ) as preferred_supplier,
+        -- Supplier lead time from most recent supplier
+        COALESCE((
+          SELECT s.lead_time_days
+          FROM suppliers s
+          INNER JOIN purchase_orders po ON po.supplier_id = s."Id"
+          INNER JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+          INNER JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+          WHERE gri.product_id = p.id
+          ORDER BY po.order_date DESC
+          LIMIT 1
+        ), 7) as lead_time_days,
+        -- Actual measured lead time from PO history
+        COALESCE((
+          SELECT AVG(EXTRACT(EPOCH FROM (gr.received_date - po.order_date)) / 86400)
+          FROM purchase_orders po
+          INNER JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+          INNER JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+          WHERE gri.product_id = p.id
+            AND gr.received_date IS NOT NULL
+            AND po.order_date IS NOT NULL
+        ), NULL) as actual_avg_lead_time
       FROM products p
+      LEFT JOIN product_inventory pi ON pi.product_id = p.id
+      LEFT JOIN product_valuation pv ON pv.product_id = p.id
       LEFT JOIN inventory_batches b ON b.product_id = p.id AND b.remaining_quantity > 0
       WHERE p.is_active = true
         ${whereClause}
-      GROUP BY p.id, p.name, p.sku, p.category, p.reorder_level, p.cost_price
-      HAVING COALESCE(SUM(b.remaining_quantity), 0) <= p.reorder_level
+      GROUP BY p.id, p.name, p.sku, p.category, pi.reorder_level, pv.cost_price
+      HAVING COALESCE(SUM(b.remaining_quantity), 0) <= pi.reorder_level
         OR (
           CASE 
             WHEN COALESCE((
@@ -1988,9 +2041,9 @@ export const reportsRepository = {
               INNER JOIN sales s ON s.id = si.sale_id
               WHERE si.product_id = p.id
                 AND s.sale_date >= CURRENT_DATE - INTERVAL '1 day' * $1
-            ) / $1, 0) > 0
+            ) / NULLIF($1, 0), 0) > 0
             THEN COALESCE(SUM(b.remaining_quantity), 0) / (
-              SELECT SUM(si.quantity) / $1
+              SELECT SUM(si.quantity) / NULLIF($1, 0)
               FROM sale_items si
               INNER JOIN sales s ON s.id = si.sale_id
               WHERE si.product_id = p.id
@@ -1998,16 +2051,109 @@ export const reportsRepository = {
             )
             ELSE 999
           END
-        ) <= 7
+        ) <= 14
       ORDER BY days_until_stockout ASC
     `;
 
     const result = await pool.query(query, params);
 
+    // ── Fetch pre-computed learned data (if any learning cycles have run) ──
+    let learnedStats = new Map<string, ProductDemandStats>();
+    let seasonalIndexes = new Map<string, number>();
+    try {
+      learnedStats = await demandForecastRepository.getAllStats(pool);
+      if (learnedStats.size > 0) {
+        const currentMonth = new Date().getMonth() + 1;
+        seasonalIndexes = await demandForecastRepository.getSeasonalityForMonth(pool, currentMonth);
+      }
+    } catch {
+      // Graceful degradation: if tables don't exist yet, continue without learned data
+      logger.warn('Demand forecast data unavailable, using live calculations only');
+    }
+
     return result.rows.map(row => {
+      const productId: string = row.product_id;
+      const learned = learnedStats.get(productId);
+      const seasonalIdx = seasonalIndexes.get(productId) ?? null;
       const dailyVelocity = new Decimal(row.daily_sales_velocity || 0).toDecimalPlaces(2).toNumber();
+      const recent7dayVelocity = new Decimal(row.recent_7day_velocity || 0).toDecimalPlaces(2).toNumber();
+      const salesStdDev = new Decimal(row.sales_std_deviation || 0).toDecimalPlaces(2).toNumber();
       const daysUntilStockout = new Decimal(row.days_until_stockout).toDecimalPlaces(0).toNumber();
-      const suggestedOrderQty = Math.ceil(dailyVelocity * Math.max(daysToAnalyze, 30));
+
+      // Use actual measured lead time if available, otherwise supplier's configured value
+      const leadTimeDays = row.actual_avg_lead_time
+        ? Math.ceil(new Decimal(row.actual_avg_lead_time).toNumber())
+        : new Decimal(row.lead_time_days || 7).toNumber();
+
+      // Seasonal trend: compare recent week vs overall average
+      // ratio > 1 = demand increasing, < 1 = demand decreasing
+      const trendRatio = dailyVelocity > 0
+        ? new Decimal(recent7dayVelocity).dividedBy(dailyVelocity).toDecimalPlaces(2).toNumber()
+        : 1;
+
+      // Effective velocity: weight recent trend (70% current avg + 30% recent trend)
+      const effectiveVelocity = dailyVelocity > 0
+        ? new Decimal(dailyVelocity).times(0.7)
+          .plus(new Decimal(recent7dayVelocity).times(0.3))
+          .toDecimalPlaces(2).toNumber()
+        : 0;
+
+      // ── Self-Learning Override: use pre-computed stats when available ──
+      // When learning_cycles > 0, the demand forecast engine has run at least once
+      // and we trust its pre-computed safety stock, reorder point, and trend.
+      const useLearned = learned && learned.learningCycles > 0;
+
+      const safetyStock = useLearned
+        ? learned.computedSafetyStock
+        : salesStdDev > 0
+          ? Math.ceil(1.65 * salesStdDev * Math.sqrt(leadTimeDays))
+          : 0;
+
+      const currentStock = new Decimal(row.current_stock).toNumber();
+      const reorderLevel = new Decimal(row.reorder_level || 0).toNumber();
+
+      const reorderPoint = useLearned
+        ? learned.computedReorderPoint
+        : Math.ceil(effectiveVelocity * leadTimeDays + safetyStock);
+
+      // ── Seasonal adjustment multiplier ──
+      // seasonalIdx > 1 = hot month (order more), < 1 = cool month (order less)
+      const seasonalMultiplier = (seasonalIdx !== null && seasonalIdx > 0) ? seasonalIdx : 1;
+
+      // Order quantity: cover lead time + review period, minus current stock, plus safety stock
+      // Apply seasonal adjustment to account for demand fluctuations
+      const reviewPeriod = Math.max(daysToAnalyze, 30);
+      let suggestedOrderQty: number;
+      if (effectiveVelocity > 0) {
+        const baseOrder = effectiveVelocity * (leadTimeDays + reviewPeriod) + safetyStock - currentStock;
+        suggestedOrderQty = Math.max(
+          Math.ceil(baseOrder * seasonalMultiplier),
+          0
+        );
+      } else if (reorderLevel > 0 && currentStock < reorderLevel) {
+        suggestedOrderQty = Math.ceil(reorderLevel - currentStock);
+      } else {
+        suggestedOrderQty = 0;
+      }
+
+      // Priority based on days until stockout relative to lead time
+      let priority: string;
+      if (currentStock <= 0 && reorderLevel > 0) {
+        priority = 'URGENT';
+      } else if (daysUntilStockout <= leadTimeDays) {
+        priority = 'URGENT';
+      } else if (daysUntilStockout <= leadTimeDays * 2) {
+        priority = 'HIGH';
+      } else {
+        priority = 'MEDIUM';
+      }
+
+      // Use learned demand trend when available (more accurate from rolling stats)
+      const demandTrend = useLearned
+        ? learned.demandTrend
+        : trendRatio > 1.15 ? 'INCREASING' as const
+          : trendRatio < 0.85 ? 'DECREASING' as const
+            : 'STABLE' as const;
 
       return {
         productId: row.product_id,
@@ -2022,7 +2168,16 @@ export const reportsRepository = {
         suggestedOrderQuantity: suggestedOrderQty,
         estimatedOrderCost: new Decimal(row.unit_cost || 0).times(suggestedOrderQty).toDecimalPlaces(2).toNumber(),
         preferredSupplier: row.preferred_supplier,
-        priority: daysUntilStockout <= 3 ? 'URGENT' : daysUntilStockout <= 7 ? 'HIGH' : 'MEDIUM',
+        priority,
+        leadTimeDays,
+        safetyStock,
+        reorderPoint,
+        demandTrend,
+        trendRatio,
+        // Self-learning engine enrichment
+        forecastDemand30d: useLearned ? learned.forecast30d : null,
+        seasonalIndex: seasonalIdx,
+        learningCycles: learned?.learningCycles ?? 0,
       };
     });
   },
@@ -2412,10 +2567,11 @@ export const reportsRepository = {
         -- Current inventory position
         SELECT 
           COUNT(DISTINCT p.id) as total_products,
-          SUM(CASE WHEN COALESCE(ib.remaining_quantity, 0) <= p.reorder_level THEN 1 ELSE 0 END) as low_stock_items,
+          SUM(CASE WHEN COALESCE(ib.remaining_quantity, 0) <= pi.reorder_level THEN 1 ELSE 0 END) as low_stock_items,
           SUM(CASE WHEN ib.expiry_date <= ($1::date + INTERVAL '30 days') THEN ib.remaining_quantity ELSE 0 END) as expiring_units,
           SUM(ib.remaining_quantity * ib.cost_price) as inventory_value
         FROM products p
+        LEFT JOIN product_inventory pi ON pi.product_id = p.id
         LEFT JOIN inventory_batches ib ON p.id = ib.product_id AND ib.remaining_quantity > 0
       ),
       customer_metrics AS (

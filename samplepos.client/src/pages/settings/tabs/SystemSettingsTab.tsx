@@ -2,6 +2,8 @@ import { useState } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiResponse } from '../../../services/api';
+import { useRegisters, useCreateRegister, useUpdateRegister } from '../../../hooks/useCashRegister';
+import type { CashRegister } from '../../../types/cashRegister';
 
 interface TaxRate {
     name: string;
@@ -141,6 +143,12 @@ export default function SystemSettingsTab() {
                     >
                         Alerts
                     </Tabs.Trigger>
+                    <Tabs.Trigger
+                        value="registers"
+                        className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600"
+                    >
+                        Cash Registers
+                    </Tabs.Trigger>
                 </Tabs.List>
 
                 <Tabs.Content value="general" className="p-6">
@@ -157,6 +165,10 @@ export default function SystemSettingsTab() {
 
                 <Tabs.Content value="alerts" className="p-6">
                     <AlertSettings settings={settings} onSave={handleSave} isSaving={isSaving} />
+                </Tabs.Content>
+
+                <Tabs.Content value="registers" className="p-6">
+                    <RegisterManagement />
                 </Tabs.Content>
             </Tabs.Root>
         </div>
@@ -747,5 +759,263 @@ function AlertSettings({
                 </button>
             </div>
         </form>
+    );
+}
+
+// Register Management Tab
+function RegisterManagement() {
+    const { data: registers, isLoading } = useRegisters();
+    const createRegister = useCreateRegister();
+    const updateRegister = useUpdateRegister();
+
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [newName, setNewName] = useState('');
+    const [newLocation, setNewLocation] = useState('');
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editName, setEditName] = useState('');
+    const [editLocation, setEditLocation] = useState('');
+
+    const handleCreate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newName.trim()) return;
+        await createRegister.mutateAsync({
+            name: newName.trim(),
+            location: newLocation.trim() || undefined,
+        });
+        setNewName('');
+        setNewLocation('');
+        setShowCreateForm(false);
+    };
+
+    const handleUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingId || !editName.trim()) return;
+        await updateRegister.mutateAsync({
+            id: editingId,
+            name: editName.trim(),
+            location: editLocation.trim() || undefined,
+        });
+        setEditingId(null);
+    };
+
+    const handleToggleActive = async (register: CashRegister) => {
+        await updateRegister.mutateAsync({
+            id: register.id,
+            isActive: !register.isActive,
+        });
+    };
+
+    const startEditing = (register: CashRegister) => {
+        setEditingId(register.id);
+        setEditName(register.name);
+        setEditLocation(register.location || '');
+    };
+
+    if (isLoading) {
+        return <p className="text-gray-600">Loading registers...</p>;
+    }
+
+    const allRegisters = registers || [];
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Cash Registers</h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                        Each register represents a physical cash drawer. You need one register per cashier working simultaneously.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setShowCreateForm(true)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium"
+                >
+                    + Add Register
+                </button>
+            </div>
+
+            {/* Create Form */}
+            {showCreateForm && (
+                <form onSubmit={handleCreate} className="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
+                    <h4 className="font-medium text-green-900">New Cash Register</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Register Name *
+                            </label>
+                            <input
+                                type="text"
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                                placeholder="e.g., Register 3"
+                                required
+                                maxLength={100}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Location
+                            </label>
+                            <input
+                                type="text"
+                                value={newLocation}
+                                onChange={(e) => setNewLocation(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                                placeholder="e.g., Front Counter"
+                                maxLength={255}
+                            />
+                        </div>
+                    </div>
+                    {createRegister.error && (
+                        <p className="text-sm text-red-600">
+                            {createRegister.error instanceof Error ? createRegister.error.message : 'Failed to create register'}
+                        </p>
+                    )}
+                    <div className="flex gap-2">
+                        <button
+                            type="submit"
+                            disabled={createRegister.isPending || !newName.trim()}
+                            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 text-sm"
+                        >
+                            {createRegister.isPending ? 'Creating...' : 'Create Register'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => { setShowCreateForm(false); setNewName(''); setNewLocation(''); }}
+                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            )}
+
+            {/* Register List */}
+            {allRegisters.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                    <p className="text-lg font-medium">No registers configured</p>
+                    <p className="text-sm mt-1">Click &quot;Add Register&quot; to create your first cash register.</p>
+                </div>
+            ) : (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current Session</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {allRegisters.map((register) => (
+                                <tr key={register.id} className={!register.isActive ? 'bg-gray-50 opacity-60' : ''}>
+                                    {editingId === register.id ? (
+                                        <>
+                                            <td className="px-6 py-3">
+                                                <input
+                                                    type="text"
+                                                    value={editName}
+                                                    onChange={(e) => setEditName(e.target.value)}
+                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                                                    maxLength={100}
+                                                />
+                                            </td>
+                                            <td className="px-6 py-3">
+                                                <input
+                                                    type="text"
+                                                    value={editLocation}
+                                                    onChange={(e) => setEditLocation(e.target.value)}
+                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                                                    maxLength={255}
+                                                />
+                                            </td>
+                                            <td className="px-6 py-3" />
+                                            <td className="px-6 py-3" />
+                                            <td className="px-6 py-3 text-right space-x-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); handleUpdate(e); }}
+                                                    disabled={updateRegister.isPending}
+                                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                                >
+                                                    Save
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditingId(null)}
+                                                    className="text-sm text-gray-600 hover:text-gray-800"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </td>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <td className="px-6 py-3 text-sm font-medium text-gray-900">{register.name}</td>
+                                            <td className="px-6 py-3 text-sm text-gray-600">{register.location || '—'}</td>
+                                            <td className="px-6 py-3">
+                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                                    register.isActive
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-gray-100 text-gray-600'
+                                                }`}>
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${register.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
+                                                    {register.isActive ? 'Active' : 'Inactive'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-3 text-sm text-gray-600">
+                                                {register.currentSessionId ? (
+                                                    <span className="text-amber-600 font-medium">
+                                                        {register.currentSessionUserName || 'In use'} ({register.currentSessionNumber})
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-400">Available</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-3 text-right space-x-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => startEditing(register)}
+                                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleActive(register)}
+                                                    disabled={updateRegister.isPending}
+                                                    className={`text-sm font-medium ${
+                                                        register.isActive
+                                                            ? 'text-red-600 hover:text-red-800'
+                                                            : 'text-green-600 hover:text-green-800'
+                                                    }`}
+                                                >
+                                                    {register.isActive ? 'Deactivate' : 'Activate'}
+                                                </button>
+                                            </td>
+                                        </>
+                                    )}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                <p className="font-medium">How registers work</p>
+                <ul className="mt-2 space-y-1 list-disc list-inside text-blue-700">
+                    <li>Each register represents a physical cash drawer</li>
+                    <li>Only one cashier can use a register at a time</li>
+                    <li>Each cashier can only have one open session across all registers</li>
+                    <li>If all registers are occupied, new cashiers cannot start until a session is closed</li>
+                    <li>Deactivated registers are hidden from cashiers but their history is preserved</li>
+                </ul>
+            </div>
+        </div>
     );
 }

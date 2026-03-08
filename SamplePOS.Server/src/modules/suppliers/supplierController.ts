@@ -2,6 +2,7 @@
 // Validates input, calls service layer, formats responses
 
 import type { Request, Response } from 'express';
+import { z } from 'zod';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { CreateSupplierSchema, UpdateSupplierSchema } from '../../../../shared/zod/supplier.js';
@@ -9,14 +10,29 @@ import * as supplierService from './supplierService.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
+// Zod schemas for param/query validation
+const UuidParamSchema = z.object({ id: z.string().uuid() });
+const SupplierNumberParamSchema = z.object({ supplierNumber: z.string().min(1) });
+const PaginationQuerySchema = z.object({
+  page: z.string().optional().transform(v => v ? parseInt(v) : 1),
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+});
+const SearchQuerySchema = z.object({
+  q: z.string().optional().default(''),
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 20),
+});
+const OrdersPaginationSchema = z.object({
+  page: z.string().optional().transform(v => v ? parseInt(v) : 1),
+  limit: z.string().optional().transform(v => v ? parseInt(v) : 20),
+});
+
 /**
  * Get all suppliers with pagination
  * GET /api/suppliers
  */
 export const getSuppliers = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
+  const { page, limit } = PaginationQuerySchema.parse(req.query);
 
   const result = await supplierService.getAllSuppliers(pool, page, limit);
 
@@ -33,7 +49,8 @@ export const getSuppliers = asyncHandler(async (req: Request, res: Response) => 
  */
 export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const supplier = await supplierService.getSupplierById(pool, req.params.id);
+  const { id } = UuidParamSchema.parse(req.params);
+  const supplier = await supplierService.getSupplierById(pool, id);
   res.json({ success: true, data: supplier });
 });
 
@@ -43,7 +60,7 @@ export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getSupplierByNumber = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { supplierNumber } = req.params;
+  const { supplierNumber } = SupplierNumberParamSchema.parse(req.params);
   const supplier = await supplierService.getSupplierByNumber(pool, supplierNumber);
   res.json({ success: true, data: supplier });
 });
@@ -54,8 +71,7 @@ export const getSupplierByNumber = asyncHandler(async (req: Request, res: Respon
  */
 export const searchSuppliers = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const searchTerm = (req.query.q as string) || '';
-  const limit = parseInt(req.query.limit as string) || 20;
+  const { q: searchTerm, limit } = SearchQuerySchema.parse(req.query);
   const suppliers = await supplierService.searchSuppliers(pool, searchTerm, limit);
   res.json({ success: true, data: suppliers });
 });
@@ -82,8 +98,9 @@ export const createSupplier = asyncHandler(async (req: Request, res: Response) =
  */
 export const updateSupplier = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
+  const { id } = UuidParamSchema.parse(req.params);
   const validatedData = UpdateSupplierSchema.parse(req.body);
-  const supplier = await supplierService.updateSupplier(pool, req.params.id, validatedData);
+  const supplier = await supplierService.updateSupplier(pool, id, validatedData);
 
   res.json({
     success: true,
@@ -98,7 +115,8 @@ export const updateSupplier = asyncHandler(async (req: Request, res: Response) =
  */
 export const deleteSupplier = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  await supplierService.deleteSupplier(pool, req.params.id);
+  const { id } = UuidParamSchema.parse(req.params);
+  await supplierService.deleteSupplier(pool, id);
 
   res.json({
     success: true,
@@ -112,7 +130,7 @@ export const deleteSupplier = asyncHandler(async (req: Request, res: Response) =
  */
 export const getSupplierPerformance = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const supplierId = req.params.id;
+  const { id: supplierId } = UuidParamSchema.parse(req.params);
   const poResult = await pool.query(
     `SELECT 
       COUNT(*) as total_orders,
@@ -181,9 +199,8 @@ export const getSupplierPerformance = asyncHandler(async (req: Request, res: Res
  */
 export const getSupplierOrders = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const supplierId = req.params.id;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const { id: supplierId } = UuidParamSchema.parse(req.params);
+  const { page, limit } = OrdersPaginationSchema.parse(req.query);
   const offset = (page - 1) * limit;
 
   const result = await pool.query(
@@ -222,7 +239,7 @@ export const getSupplierOrders = asyncHandler(async (req: Request, res: Response
  */
 export const getSupplierProducts = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const supplierId = req.params.id;
+  const { id: supplierId } = UuidParamSchema.parse(req.params);
   const result = await pool.query(
     `SELECT 
       poi.product_id as "productId",

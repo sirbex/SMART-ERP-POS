@@ -2,6 +2,7 @@
 
 import { Pool } from 'pg';
 import { Discount, DiscountAuthorization } from '@shared/zod/discount';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export interface DiscountDbRow {
   id: string;
@@ -18,6 +19,7 @@ export interface DiscountDbRow {
   valid_until: string | null;
   created_at: string;
   updated_at: string;
+  version: number;
 }
 
 export interface DiscountAuthorizationDbRow {
@@ -126,6 +128,9 @@ export async function updateDiscount(
   if (fields.length === 0) {
     return findDiscountById(pool, id);
   }
+
+  // Always bump version
+  fields.push(`version = version + 1`);
 
   values.push(id);
   const result = await pool.query(

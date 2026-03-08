@@ -236,6 +236,12 @@ export default function PrintReceiptDialog({
                                     <span className="font-medium">{receiptData.customerName}</span>
                                 </div>
                             )}
+                            {receiptData.cashierName && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Served by:</span>
+                                    <span className="font-medium">{receiptData.cashierName}</span>
+                                </div>
+                            )}
                             {receiptData.items && receiptData.items.length > 0 && (
                                 <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Items:</span>

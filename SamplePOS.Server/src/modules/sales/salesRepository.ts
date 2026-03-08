@@ -79,6 +79,7 @@ export interface CreateSaleItemData {
   lineTotal: number;
   costPrice: number;
   profit: number;
+  discountAmount?: number; // Per-item discount amount
   uomId?: string; // UUID of the product_uom used (optional for backward compatibility)
 }
 
@@ -198,9 +199,9 @@ export const salesRepository = {
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
-      const offset = index * 10; // 10 fields including product_name and item_type
+      const offset = index * 11; // 11 fields including product_name, item_type, and discount_amount
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`
       );
 
       // Use provided profit if available (may include discount allocation),
@@ -227,13 +228,14 @@ export const salesRepository = {
         parseFloat(lineTotal.toFixed(2)), // Maps to total_price
         parseFloat(costPrice.toFixed(2)), // Maps to unit_cost
         parseFloat(itemProfit.toFixed(2)), // Maps to profit
-        item.uomId || null // Include uom_id (NULL if not provided)
+        item.uomId || null, // Include uom_id (NULL if not provided)
+        item.discountAmount || 0 // Per-item discount amount
       );
     });
 
     const result = await pool.query(
       `INSERT INTO sale_items (
-        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id
+        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount
       ) VALUES ${placeholders.join(', ')}
       RETURNING *`,
       values
@@ -298,7 +300,7 @@ export const salesRepository = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; customerId?: string; startDate?: string; endDate?: string }
+    filters?: { status?: string; customerId?: string; cashierId?: string; startDate?: string; endDate?: string }
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
@@ -313,6 +315,11 @@ export const salesRepository = {
     if (filters?.customerId) {
       whereClauses.push(`s.customer_id = $${paramIndex++}`);
       values.push(filters.customerId);
+    }
+
+    if (filters?.cashierId) {
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
     }
 
     if (filters?.startDate) {
@@ -423,11 +430,17 @@ export const salesRepository = {
       startDate?: string;
       endDate?: string;
       groupBy?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>> {
     const whereClauses: string[] = ['status = $1'];
     const values: unknown[] = ['COMPLETED'];
     let paramIndex = 2;
+
+    if (filters?.cashierId) {
+      whereClauses.push(`cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
+    }
 
     if (filters?.startDate) {
       whereClauses.push(`sale_date >= $${paramIndex++}::date`);
@@ -490,6 +503,7 @@ export const salesRepository = {
       endDate?: string;
       productId?: string;
       customerId?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
     const whereClauses: string[] = [];
@@ -516,6 +530,11 @@ export const salesRepository = {
 
     // Only include completed sales
     whereClauses.push(`s.status = 'COMPLETED'`);
+
+    if (filters?.cashierId) {
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
+    }
 
     if (filters?.startDate) {
       whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
@@ -570,11 +589,17 @@ export const salesRepository = {
     filters?: {
       startDate?: string;
       endDate?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
     const whereClauses: string[] = ['s.status = \'COMPLETED\''];
     const values: unknown[] = [];
     let paramIndex = 1;
+
+    if (filters?.cashierId) {
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
+    }
 
     if (filters?.startDate) {
       whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
@@ -614,11 +639,17 @@ export const salesRepository = {
     filters?: {
       startDate?: string;
       endDate?: string;
+      cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
     const whereClauses: string[] = ['status = \'COMPLETED\''];
     const values: unknown[] = [];
     let paramIndex = 1;
+
+    if (filters?.cashierId) {
+      whereClauses.push(`cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
+    }
 
     if (filters?.startDate) {
       whereClauses.push(`sale_date >= $${paramIndex++}::date`);
@@ -786,8 +817,8 @@ export const salesRepository = {
            voided_at = CURRENT_TIMESTAMP,
            voided_by_id = $2,
            void_reason = $3,
-           void_approved_by_id = $4,
-           void_approved_at = CASE WHEN $4 IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END
+           void_approved_by_id = $4::uuid,
+           void_approved_at = CASE WHEN $4::uuid IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END
        WHERE id = $1 AND status = 'COMPLETED'
        RETURNING 
          id,

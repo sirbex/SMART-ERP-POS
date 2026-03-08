@@ -9,11 +9,25 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
 import { authRateLimit, strictRateLimit } from '../../middleware/security.js';
 import * as passwordPolicy from './passwordPolicyService.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+
+const ValidatePasswordSchema = z.object({
+    password: z.string().min(1, 'Password is required'),
+});
+
+const ChangePasswordSchema = z.object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(1, 'New password is required'),
+    confirmPassword: z.string().min(1, 'Confirm password is required'),
+}).refine(data => data.newPassword === data.confirmPassword, {
+    message: 'New passwords do not match',
+    path: ['confirmPassword'],
+});
 
 const router = Router();
 
@@ -48,15 +62,7 @@ router.get('/policy', (req: Request, res: Response) => {
  * Validate password strength (no auth required - for forms)
  */
 router.post('/validate', authRateLimit, (req: Request, res: Response) => {
-    const { password } = req.body;
-
-    if (!password) {
-        res.status(400).json({
-            success: false,
-            error: 'Password is required',
-        });
-        return;
-    }
+    const { password } = ValidatePasswordSchema.parse(req.body);
 
     const validation = passwordPolicy.validatePassword(password);
 
@@ -91,24 +97,7 @@ router.get('/expiry', authenticate, asyncHandler(async (req, res) => {
  */
 router.post('/change', authenticate, strictRateLimit, asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const { currentPassword, newPassword, confirmPassword } = req.body;
-
-    // Basic validation
-    if (!currentPassword || !newPassword || !confirmPassword) {
-        res.status(400).json({
-            success: false,
-            error: 'All fields are required',
-        });
-        return;
-    }
-
-    if (newPassword !== confirmPassword) {
-        res.status(400).json({
-            success: false,
-            error: 'New passwords do not match',
-        });
-        return;
-    }
+    const { currentPassword, newPassword } = ChangePasswordSchema.parse(req.body);
 
     // Verify current password
     const { findUserByEmail } = await import('./authRepository.js');

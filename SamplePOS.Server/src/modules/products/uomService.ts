@@ -61,7 +61,7 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
 
       // Get product details
       const productResult = await pool.query(
-        'SELECT name, selling_price FROM products WHERE id = $1',
+        'SELECT p.name, pv.selling_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
         [data.productId]
       );
       const product = productResult.rows[0];

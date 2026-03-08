@@ -89,6 +89,36 @@ import {
   CustomerPurchaseHistoryParamsSchema,
   BusinessPositionParamsSchema,
 } from '../../../../shared/zod/reports.js';
+import { z } from 'zod';
+
+// Zod schemas for unvalidated report handlers
+const SalesSummaryByDateQuerySchema = z.object({
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  group_by: z.enum(['day', 'week', 'month']).optional().default('day'),
+  format: z.string().optional(),
+});
+const SalesDetailsQuerySchema = z.object({
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  product_id: z.string().optional(),
+  format: z.string().optional(),
+});
+const SalesByCashierQuerySchema = z.object({
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  user_id: z.string().optional(),
+  format: z.string().optional(),
+});
+const CashRegisterDateRangeSchema = z.object({
+  startDate: z.string().min(1, 'startDate is required'),
+  endDate: z.string().min(1, 'endDate is required'),
+  registerId: z.string().optional(),
+  userId: z.string().optional(),
+});
+const CashRegisterSessionHistorySchema = CashRegisterDateRangeSchema.extend({
+  status: z.enum(['OPEN', 'CLOSED', 'ALL']).optional().default('ALL'),
+});
 
 // Helper to convert ISO datetime string to Date object
 function parseDate(dateString: string | undefined): Date | undefined {
@@ -1634,8 +1664,8 @@ export const reportsController = {
 
       pdfGen.addHeader({
         companyName,
-        title: 'Reorder Recommendations Report',
-        subtitle: `Analysis Period: ${params.days_to_consider || 30} Days`,
+        title: 'Smart Reorder AI Report',
+        subtitle: `Analysis Period: ${params.days_to_consider || 30} Days | Lead Time Aware`,
         generatedAt: formatDateTime(),
       });
 
@@ -1643,17 +1673,19 @@ export const reportsController = {
         { label: 'Products to Reorder', value: String(report.summary.totalProductsNeedingReorder), color: PDFColors.warning },
         { label: 'Urgent Items', value: String(report.summary.urgentCount), color: PDFColors.danger },
         { label: 'Est. Order Value', value: formatCurrencyPDF(report.summary.totalEstimatedCost), color: PDFColors.primary },
-        { label: 'High Priority', value: String(report.summary.highCount), color: PDFColors.info },
+        { label: 'Demand Trending Up', value: String(report.summary.trendingUp), color: PDFColors.info },
       ]);
 
       const columns: PDFTableColumn[] = [
-        { header: 'Product', key: 'productName', width: 0.22 },
-        { header: 'SKU', key: 'sku', width: 0.12 },
-        { header: 'Stock', key: 'currentStock', width: 0.08, align: 'right' },
-        { header: 'Reorder Lvl', key: 'reorderLevel', width: 0.10, align: 'right' },
-        { header: 'Days Left', key: 'daysUntilStockout', width: 0.10, align: 'right', format: (v) => v !== null ? String(v) : '-' },
-        { header: 'Order Qty', key: 'suggestedOrderQuantity', width: 0.10, align: 'right' },
-        { header: 'Priority', key: 'priority', width: 0.10 },
+        { header: 'Product', key: 'productName', width: 0.18 },
+        { header: 'Stock', key: 'currentStock', width: 0.07, align: 'right' },
+        { header: 'Daily Avg', key: 'dailySalesVelocity', width: 0.08, align: 'right' },
+        { header: 'Days Left', key: 'daysUntilStockout', width: 0.08, align: 'right', format: (v) => v !== null ? String(v) : '-' },
+        { header: 'Lead Time', key: 'leadTimeDays', width: 0.08, align: 'right', format: (v) => `${v}d` },
+        { header: 'Safety', key: 'safetyStock', width: 0.07, align: 'right' },
+        { header: 'Order Qty', key: 'suggestedOrderQuantity', width: 0.08, align: 'right' },
+        { header: 'Trend', key: 'demandTrend', width: 0.10 },
+        { header: 'Priority', key: 'priority', width: 0.08 },
         { header: 'Supplier', key: 'preferredSupplier', width: 0.18 },
       ];
 
@@ -2173,20 +2205,12 @@ export const reportsController = {
    * GET /api/reports/sales-summary-by-date
    */
   async getSalesSummaryByDateReport(req: Request, res: Response, pool: Pool) {
-    const { start_date, end_date, group_by, format } = req.query;
+    const { start_date, end_date, group_by: groupBy, format } = SalesSummaryByDateQuerySchema.parse(req.query);
     const userId = req.user?.id;
 
     const filters: Record<string, string | number | Date | undefined> = {};
-    if (start_date) filters.startDate = new Date(start_date as string);
-    if (end_date) filters.endDate = adjustEndDate(end_date as string);
-
-    const groupBy = (group_by as string) || 'day';
-    if (!['day', 'week', 'month'].includes(groupBy)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid group_by parameter. Must be: day, week, or month',
-      });
-    }
+    if (start_date) filters.startDate = new Date(start_date);
+    if (end_date) filters.endDate = adjustEndDate(end_date);
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
@@ -2279,13 +2303,13 @@ export const reportsController = {
    * GET /api/reports/sales-details
    */
   async getSalesDetailsReport(req: Request, res: Response, pool: Pool) {
-    const { start_date, end_date, product_id, format } = req.query;
+    const { start_date, end_date, product_id, format } = SalesDetailsQuerySchema.parse(req.query);
     const userId = req.user?.id;
 
     const filters: Record<string, string | number | Date | undefined> = {};
-    if (start_date) filters.startDate = new Date(start_date as string);
-    if (end_date) filters.endDate = adjustEndDate(end_date as string);
-    if (product_id) filters.productId = product_id as string;
+    if (start_date) filters.startDate = new Date(start_date);
+    if (end_date) filters.endDate = adjustEndDate(end_date);
+    if (product_id) filters.productId = product_id;
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
@@ -2370,13 +2394,13 @@ export const reportsController = {
    * GET /api/reports/sales-by-cashier
    */
   async getSalesByCashierReport(req: Request, res: Response, pool: Pool) {
-    const { start_date, end_date, user_id, format } = req.query;
+    const { start_date, end_date, user_id, format } = SalesByCashierQuerySchema.parse(req.query);
     const userId = req.user?.id;
 
     const filters: Record<string, string | number | Date | undefined> = {};
-    if (start_date) filters.startDate = new Date(start_date as string);
-    if (end_date) filters.endDate = adjustEndDate(end_date as string);
-    if (user_id) filters.userId = user_id as string;
+    if (start_date) filters.startDate = new Date(start_date);
+    if (end_date) filters.endDate = adjustEndDate(end_date);
+    if (user_id) filters.userId = user_id;
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
@@ -2989,20 +3013,13 @@ export const reportsController = {
    * Returns aggregate movement data across sessions for a date range
    */
   async getCashRegisterMovementBreakdown(req: Request, res: Response, pool: Pool) {
-    const { startDate, endDate, registerId, userId: filterUserId } = req.query;
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        error: 'startDate and endDate are required',
-      });
-    }
+    const { startDate, endDate, registerId, userId: filterUserId } = CashRegisterDateRangeSchema.parse(req.query);
 
     const report = await reportsRepository.getCashRegisterMovementBreakdown(pool, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      registerId: registerId as string | undefined,
-      userId: filterUserId as string | undefined,
+      startDate,
+      endDate,
+      registerId,
+      userId: filterUserId,
     });
 
     logger.info('Cash register movement breakdown generated', {
@@ -3024,21 +3041,14 @@ export const reportsController = {
    * Returns list of sessions with summary stats for a date range
    */
   async getCashRegisterSessionHistory(req: Request, res: Response, pool: Pool) {
-    const { startDate, endDate, registerId, userId: filterUserId, status } = req.query;
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        error: 'startDate and endDate are required',
-      });
-    }
+    const { startDate, endDate, registerId, userId: filterUserId, status } = CashRegisterSessionHistorySchema.parse(req.query);
 
     const report = await reportsRepository.getCashRegisterSessionHistory(pool, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      registerId: registerId as string | undefined,
-      userId: filterUserId as string | undefined,
-      status: (status as 'OPEN' | 'CLOSED' | 'ALL') || 'ALL',
+      startDate,
+      endDate,
+      registerId,
+      userId: filterUserId,
+      status,
     });
 
     logger.info('Cash register session history generated', {

@@ -48,14 +48,23 @@ pool.on('error', (err) => {
 });
 
 export async function testConnection(): Promise<boolean> {
-  try {
-    const result = await pool.query('SELECT NOW()');
-    console.log('✅ Database connection test successful:', result.rows[0].now);
-    return true;
-  } catch (error) {
-    console.error('❌ Database connection test failed:', error);
-    return false;
+  const maxRetries = Number(process.env.DB_CONNECT_RETRIES) || 5;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await pool.query('SELECT NOW()');
+      console.log('✅ Database connection test successful:', result.rows[0].now);
+      return true;
+    } catch (error) {
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 16000);
+      console.error(`❌ Database connection attempt ${attempt}/${maxRetries} failed. Retrying in ${delay}ms...`);
+      if (attempt === maxRetries) {
+        console.error('❌ All database connection attempts exhausted:', error);
+        return false;
+      }
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
+  return false;
 }
 
 export default pool;

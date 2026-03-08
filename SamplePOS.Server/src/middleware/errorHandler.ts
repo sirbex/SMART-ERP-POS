@@ -77,6 +77,7 @@ export function errorHandler(
       path: req.path,
       method: req.method,
       user: req.user?.id,
+      requestId: req.requestId,
     });
   } else if (
     error instanceof Error &&
@@ -91,11 +92,13 @@ export function errorHandler(
       path: req.path,
       method: req.method,
       user: req.user?.id,
+      requestId: req.requestId,
     });
   } else if (error instanceof ZodError) {
     logger.debug('Zod validation error', {
       errors: error.errors,
       path: req.path,
+      requestId: req.requestId,
     });
   } else {
     logger.error('Unhandled error', {
@@ -103,6 +106,7 @@ export function errorHandler(
       stack: (error instanceof Error ? error.stack : undefined),
       path: req.path,
       method: req.method,
+      requestId: req.requestId,
     });
   }
 
@@ -117,6 +121,7 @@ export function errorHandler(
       success: false,
       error: 'Validation failed',
       details: formattedErrors,
+      requestId: req.requestId,
     });
     return;
   }
@@ -126,6 +131,7 @@ export function errorHandler(
     res.status(error.statusCode).json({
       success: false,
       error: (error instanceof Error ? error.message : String(error)),
+      requestId: req.requestId,
     });
     return;
   }
@@ -141,6 +147,7 @@ export function errorHandler(
       success: false,
       error: error.message,
       ...(statusError.code ? { code: statusError.code } : {}),
+      requestId: req.requestId,
     });
     return;
   }
@@ -151,6 +158,7 @@ export function errorHandler(
   res.status(500).json({
     success: false,
     error: error instanceof Error ? error.message : 'Internal server error',
+    requestId: req.requestId,
     ...(isDevelopment && { stack: (error instanceof Error ? error.stack : undefined) }),
   });
 }
@@ -162,11 +170,13 @@ export function notFoundHandler(req: Request, res: Response): void {
   logger.debug('Route not found', {
     path: req.path,
     method: req.method,
+    requestId: req.requestId,
   });
 
   res.status(404).json({
     success: false,
     error: `Route ${req.method} ${req.path} not found`,
+    requestId: req.requestId,
   });
 }
 

@@ -1,10 +1,18 @@
 // Discount Controller - HTTP handlers for discount endpoints
 
 import { Request, Response } from 'express';
+import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import * as discountService from './discountService';
 import { DiscountSchema, ApplyDiscountSchema } from '@shared/zod/discount';
 import { asyncHandler, NotFoundError, ValidationError, ForbiddenError } from '../../middleware/errorHandler.js';
+
+const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
+const UpdateDiscountSchema = DiscountSchema.omit({ id: true, createdAt: true, updatedAt: true }).partial();
+const ApproveDiscountSchema = z.object({
+  authorizationId: z.string().uuid('Authorization ID must be a valid UUID'),
+  managerPin: z.string().min(1, 'Manager PIN is required'),
+});
 
 /**
  * GET /api/discounts - Get all active discounts
@@ -20,7 +28,7 @@ export const listDiscounts = asyncHandler(async (req: Request, res: Response) =>
  */
 export const getDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const discount = await discountService.getDiscountById(pool, id);
 
   if (!discount) {
@@ -54,8 +62,8 @@ export const createDiscount = asyncHandler(async (req: Request, res: Response) =
  */
 export const updateDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { id } = req.params;
-  const updates = req.body;
+  const { id } = UuidParamSchema.parse(req.params);
+  const updates = UpdateDiscountSchema.parse(req.body);
   const user = req.user!;
 
   try {
@@ -77,7 +85,7 @@ export const updateDiscount = asyncHandler(async (req: Request, res: Response) =
  */
 export const deleteDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const user = req.user!;
 
   try {
@@ -135,11 +143,7 @@ export const applyDiscount = asyncHandler(async (req: Request, res: Response) =>
  */
 export const approveDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { authorizationId, managerPin } = req.body;
-
-  if (!authorizationId || !managerPin) {
-    throw new ValidationError('authorizationId and managerPin required');
-  }
+  const { authorizationId, managerPin } = ApproveDiscountSchema.parse(req.body);
 
   const user = req.user!;
   const auditContext = {

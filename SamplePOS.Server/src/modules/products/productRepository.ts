@@ -4,31 +4,38 @@
 import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 import type { Product, CreateProduct, UpdateProduct } from '../../../../shared/zod/product.js';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 // ── Shared SQL fragments (DRY) ──────────────────────────────────────────────
 // Single source of truth for product column SELECT & GROUP BY lists.
-// Used by findAll, findById, findBySku, and RETURNING clauses.
+// Uses product_inventory (pi) and product_valuation (pv) for volatile columns.
 
 const PRODUCT_SELECT_COLUMNS = `
       p.id, p.product_number as "productNumber", p.sku, p.barcode, p.name, p.description, p.category,
       p.generic_name as "genericName",
       p.conversion_factor as "conversionFactor",
-      p.cost_price as "costPrice",
-      p.selling_price as "sellingPrice",
+      pv.cost_price as "costPrice",
+      pv.selling_price as "sellingPrice",
       p.is_taxable as "isTaxable",
       p.tax_rate as "taxRate",
-      p.costing_method as "costingMethod",
-      p.average_cost as "averageCost",
-      p.last_cost as "lastCost",
-      p.pricing_formula as "pricingFormula",
-      p.auto_update_price as "autoUpdatePrice",
-      p.quantity_on_hand as "quantityOnHand",
-      p.reorder_level as "reorderLevel",
+      pv.costing_method as "costingMethod",
+      pv.average_cost as "averageCost",
+      pv.last_cost as "lastCost",
+      pv.pricing_formula as "pricingFormula",
+      pv.auto_update_price as "autoUpdatePrice",
+      pi.quantity_on_hand as "quantityOnHand",
+      pi.reorder_level as "reorderLevel",
       p.track_expiry as "trackExpiry",
       p.min_days_before_expiry_sale as "minDaysBeforeExpirySale",
       p.is_active as "isActive",
       p.created_at as "createdAt",
-      p.updated_at as "updatedAt"`;
+      GREATEST(p.updated_at, pi.updated_at, pv.updated_at) as "updatedAt",
+      p.version`;
+
+const PRODUCT_JOINS = `
+    FROM products p
+    LEFT JOIN product_inventory pi ON pi.product_id = p.id
+    LEFT JOIN product_valuation pv ON pv.product_id = p.id`;
 
 const PRODUCT_UOM_AGG = `
       COALESCE(
@@ -48,10 +55,11 @@ const PRODUCT_UOM_AGG = `
       ) as "productUoms"`;
 
 const PRODUCT_GROUP_BY = `p.id, p.product_number, p.sku, p.barcode, p.name, p.description, p.category,
-             p.generic_name, p.conversion_factor, p.cost_price, p.selling_price,
-             p.is_taxable, p.tax_rate, p.costing_method, p.average_cost, p.last_cost,
-             p.pricing_formula, p.auto_update_price, p.quantity_on_hand,
-             p.reorder_level, p.track_expiry, p.min_days_before_expiry_sale, p.is_active, p.created_at, p.updated_at`;
+             p.generic_name, p.conversion_factor, pv.cost_price, pv.selling_price,
+             p.is_taxable, p.tax_rate, pv.costing_method, pv.average_cost, pv.last_cost,
+             pv.pricing_formula, pv.auto_update_price, pi.quantity_on_hand,
+             pi.reorder_level, p.track_expiry, p.min_days_before_expiry_sale, p.is_active, p.created_at,
+             p.updated_at, pi.updated_at, pv.updated_at, p.version`;
 
 // RETURNING clause for INSERT/UPDATE (no table alias prefix needed)
 const PRODUCT_RETURNING_COLUMNS = `
@@ -73,14 +81,15 @@ const PRODUCT_RETURNING_COLUMNS = `
       min_days_before_expiry_sale as "minDaysBeforeExpirySale",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"`;
+      updated_at as "updatedAt",
+      version`;
 
 export async function findAllProducts(limit: number = 50, offset: number = 0, dbPool?: pg.Pool): Promise<Product[]> {
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT ${PRODUCT_SELECT_COLUMNS},
       ${PRODUCT_UOM_AGG}
-    FROM products p
+    ${PRODUCT_JOINS}
     LEFT JOIN product_uoms pu ON p.id = pu.product_id
     LEFT JOIN uoms u ON pu.uom_id = u.id
     WHERE p.is_active = true
@@ -98,7 +107,7 @@ export async function findProductById(id: string, dbPool?: pg.Pool): Promise<Pro
   const result = await pool.query(
     `SELECT ${PRODUCT_SELECT_COLUMNS},
       ${PRODUCT_UOM_AGG}
-    FROM products p
+    ${PRODUCT_JOINS}
     LEFT JOIN product_uoms pu ON p.id = pu.product_id
     LEFT JOIN uoms u ON pu.uom_id = u.id
     WHERE p.id = $1
@@ -114,7 +123,7 @@ export async function findProductBySku(sku: string, dbPool?: pg.Pool): Promise<P
   const result = await pool.query(
     `SELECT ${PRODUCT_SELECT_COLUMNS},
       ${PRODUCT_UOM_AGG}
-    FROM products p
+    ${PRODUCT_JOINS}
     LEFT JOIN product_uoms pu ON p.id = pu.product_id
     LEFT JOIN uoms u ON pu.uom_id = u.id
     WHERE p.sku = $1
@@ -182,83 +191,126 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
 
 export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product | null> {
   const pool = dbPool || globalPool;
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  let paramIndex = 1;
+  const clientVersion = data.version; // OCC: version from the caller
 
-  // Build dynamic UPDATE query
+  // Separate fields into their target tables
+  const masterFields: string[] = [];
+  const masterValues: unknown[] = [];
+  let masterIdx = 1;
+
+  const valFields: string[] = [];
+  const valValues: unknown[] = [];
+  let valIdx = 1;
+
+  const invFields: string[] = [];
+  const invValues: unknown[] = [];
+  let invIdx = 1;
+
+  // ── Master (products table) ──
   if (data.sku !== undefined) {
-    fields.push(`sku = $${paramIndex++}`);
-    values.push(data.sku);
+    masterFields.push(`sku = $${masterIdx++}`);
+    masterValues.push(data.sku);
   }
   if (data.barcode !== undefined) {
-    fields.push(`barcode = $${paramIndex++}`);
-    values.push(data.barcode);
+    masterFields.push(`barcode = $${masterIdx++}`);
+    masterValues.push(data.barcode);
   }
   if (data.name !== undefined) {
-    fields.push(`name = $${paramIndex++}`);
-    values.push(data.name);
+    masterFields.push(`name = $${masterIdx++}`);
+    masterValues.push(data.name);
   }
   if (data.description !== undefined) {
-    fields.push(`description = $${paramIndex++}`);
-    values.push(data.description);
+    masterFields.push(`description = $${masterIdx++}`);
+    masterValues.push(data.description);
   }
   if (data.category !== undefined) {
-    fields.push(`category = $${paramIndex++}`);
-    values.push(data.category);
+    masterFields.push(`category = $${masterIdx++}`);
+    masterValues.push(data.category);
   }
   if (data.genericName !== undefined) {
-    fields.push(`generic_name = $${paramIndex++}`);
-    values.push(data.genericName || null);
-  }
-  if (data.costPrice !== undefined) {
-    fields.push(`cost_price = $${paramIndex++}`);
-    values.push(data.costPrice);
-  }
-  if (data.sellingPrice !== undefined) {
-    fields.push(`selling_price = $${paramIndex++}`);
-    values.push(data.sellingPrice);
+    masterFields.push(`generic_name = $${masterIdx++}`);
+    masterValues.push(data.genericName || null);
   }
   if (data.isTaxable !== undefined) {
-    fields.push(`is_taxable = $${paramIndex++}`);
-    values.push(data.isTaxable);
+    masterFields.push(`is_taxable = $${masterIdx++}`);
+    masterValues.push(data.isTaxable);
   }
   if (data.taxRate !== undefined) {
-    fields.push(`tax_rate = $${paramIndex++}`);
-    values.push(data.taxRate);
-  }
-  if (data.reorderLevel !== undefined) {
-    fields.push(`reorder_level = $${paramIndex++}`);
-    values.push(data.reorderLevel);
+    masterFields.push(`tax_rate = $${masterIdx++}`);
+    masterValues.push(data.taxRate);
   }
   if (data.trackExpiry !== undefined) {
-    fields.push(`track_expiry = $${paramIndex++}`);
-    values.push(data.trackExpiry);
+    masterFields.push(`track_expiry = $${masterIdx++}`);
+    masterValues.push(data.trackExpiry);
   }
   if (data.minDaysBeforeExpirySale !== undefined) {
-    fields.push(`min_days_before_expiry_sale = $${paramIndex++}`);
-    values.push(data.minDaysBeforeExpirySale);
+    masterFields.push(`min_days_before_expiry_sale = $${masterIdx++}`);
+    masterValues.push(data.minDaysBeforeExpirySale);
   }
   if (data.isActive !== undefined) {
-    fields.push(`is_active = $${paramIndex++}`);
-    values.push(data.isActive);
+    masterFields.push(`is_active = $${masterIdx++}`);
+    masterValues.push(data.isActive);
   }
 
-  if (fields.length === 0) {
+  // ── Valuation (product_valuation table) ──
+  if (data.costPrice !== undefined) {
+    valFields.push(`cost_price = $${valIdx++}`);
+    valValues.push(data.costPrice);
+  }
+  if (data.sellingPrice !== undefined) {
+    valFields.push(`selling_price = $${valIdx++}`);
+    valValues.push(data.sellingPrice);
+  }
+
+  // ── Inventory (product_inventory table) ──
+  if (data.reorderLevel !== undefined) {
+    invFields.push(`reorder_level = $${invIdx++}`);
+    invValues.push(data.reorderLevel);
+  }
+
+  const hasChanges = masterFields.length > 0 || valFields.length > 0 || invFields.length > 0;
+  if (!hasChanges) {
     return findProductById(id);
   }
 
-  values.push(id);
+  // Execute updates (each only if there are fields to set)
+  if (masterFields.length > 0) {
+    masterFields.push(`version = version + 1`);
+    masterValues.push(id);
+    let whereClause = `WHERE id = $${masterIdx}`;
+    if (clientVersion !== undefined) {
+      masterValues.push(clientVersion);
+      whereClause += ` AND version = $${masterIdx + 1}`;
+    }
+    const result = await pool.query(
+      `UPDATE products SET ${masterFields.join(', ')} ${whereClause}`,
+      masterValues
+    );
+    if (clientVersion !== undefined) {
+      assertRowUpdated(result.rowCount, 'Product', id);
+    }
+  }
 
-  const result = await pool.query(
-    `UPDATE products 
-     SET ${fields.join(', ')}
-     WHERE id = $${paramIndex}
-     RETURNING ${PRODUCT_RETURNING_COLUMNS}`,
-    values
-  );
+  if (valFields.length > 0) {
+    valFields.push(`version = version + 1`);
+    valValues.push(id);
+    await pool.query(
+      `UPDATE product_valuation SET ${valFields.join(', ')}, updated_at = NOW() WHERE product_id = $${valIdx}`,
+      valValues
+    );
+  }
 
-  return result.rows[0] || null;
+  if (invFields.length > 0) {
+    invFields.push(`version = version + 1`);
+    invValues.push(id);
+    await pool.query(
+      `UPDATE product_inventory SET ${invFields.join(', ')}, updated_at = NOW() WHERE product_id = $${invIdx}`,
+      invValues
+    );
+  }
+
+  // Return the full joined product
+  return findProductById(id);
 }
 
 export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<boolean> {

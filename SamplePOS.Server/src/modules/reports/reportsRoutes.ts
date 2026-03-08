@@ -6,6 +6,8 @@ import { Pool } from 'pg';
 import { reportsController } from './reportsController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import { demandForecastService } from './demandForecastService.js';
+import { demandForecastRepository } from './demandForecastRepository.js';
 
 // Debug: Log available controller methods
 console.log('🔍 reportsController methods:', Object.keys(reportsController));
@@ -72,6 +74,41 @@ export function createReportsRouter(pool: Pool) {
   router.get('/cash-register/session/:sessionId', asyncHandler(async (req, res) => reportsController.getCashRegisterSessionSummary(req, res, pool)));
   router.get('/cash-register/movement-breakdown', asyncHandler(async (req, res) => reportsController.getCashRegisterMovementBreakdown(req, res, pool)));
   router.get('/cash-register/session-history', asyncHandler(async (req, res) => reportsController.getCashRegisterSessionHistory(req, res, pool)));
+
+  // ── Demand Forecasting (Self-Learning Engine) ────────
+  // Manual trigger: run daily demand stats refresh now
+  router.post('/demand-forecast/refresh-daily', asyncHandler(async (req, res) => {
+    const result = await demandForecastService.runDailyUpdate(pool);
+    res.json({ success: true, data: result });
+  }));
+
+  // Manual trigger: run monthly seasonality refresh now
+  router.post('/demand-forecast/refresh-monthly', asyncHandler(async (req, res) => {
+    const result = await demandForecastService.runMonthlyUpdate(pool);
+    res.json({ success: true, data: result });
+  }));
+
+  // Get learned demand stats for a specific product
+  router.get('/demand-forecast/product/:productId', asyncHandler(async (req, res) => {
+    const stats = await demandForecastRepository.getStatsForProduct(pool, req.params.productId);
+    const currentMonth = new Date().getMonth() + 1;
+    const seasonality = await demandForecastRepository.getSeasonalityForMonth(pool, currentMonth);
+    res.json({
+      success: true,
+      data: {
+        demandStats: stats,
+        seasonalIndex: seasonality.get(req.params.productId) ?? null,
+        currentMonth,
+      },
+    });
+  }));
+
+  // Get forecast run history
+  router.get('/demand-forecast/runs', asyncHandler(async (req, res) => {
+    const limit = parseInt(String(req.query.limit || '20'), 10);
+    const runs = await demandForecastRepository.getRecentRuns(pool, limit);
+    res.json({ success: true, data: runs });
+  }));
 
   return router;
 }

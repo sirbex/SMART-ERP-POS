@@ -7,6 +7,7 @@
  */
 
 import { Request, Response } from 'express';
+import { z } from 'zod';
 import logger from '../../utils/logger.js';
 import * as deliveryService from './deliveryService.js';
 import {
@@ -19,6 +20,26 @@ import {
 } from '../../../../shared/zod/delivery.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
+
+// Zod schemas for param/query validation
+const IdentifierParamSchema = z.object({ identifier: z.string().min(1) });
+const UuidParamSchema = z.object({ id: z.string().uuid() });
+const TrackingNumberParamSchema = z.object({ trackingNumber: z.string().min(1) });
+const SaleIdParamSchema = z.object({ saleId: z.string().uuid() });
+const AssignDriverBodySchema = z.object({ driverId: z.string().uuid() });
+const AnalyticsQuerySchema = z.object({
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+const DeliveryFromSaleBodySchema = z.object({
+  deliveryAddress: z.string().optional().default(''),
+  deliveryContactName: z.string().optional(),
+  deliveryContactPhone: z.string().optional(),
+  specialInstructions: z.string().optional(),
+  deliveryFee: z.union([z.number(), z.string().transform(Number)]).optional().default(0),
+  deliveryDate: z.string().optional(),
+});
+const SearchQuerySchema = z.object({ search: z.string().optional() });
 
 // Helper to build audit context from request
 function buildAuditContext(req: Request): AuditContext {
@@ -69,7 +90,7 @@ export const createDeliveryOrder = asyncHandler(async (req: Request, res: Respon
  * Get delivery order by ID or delivery number
  */
 export const getDeliveryOrder = asyncHandler(async (req: Request, res: Response) => {
-  const { identifier } = req.params;
+  const { identifier } = IdentifierParamSchema.parse(req.params);
   const result = await deliveryService.getDeliveryOrder(identifier);
 
   if (result.success && result.data) {
@@ -144,10 +165,8 @@ export const updateDeliveryStatus = asyncHandler(async (req: Request, res: Respo
  * Assign driver to delivery order
  */
 export const assignDriver = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { driverId } = req.body;
-
-  if (!driverId) throw new ValidationError('Driver ID is required');
+  const { id } = UuidParamSchema.parse(req.params);
+  const { driverId } = AssignDriverBodySchema.parse(req.body);
 
   const auditContext = buildAuditContext(req);
   const result = await deliveryService.assignDriver(id, driverId, auditContext);
@@ -177,7 +196,7 @@ export const assignDriver = asyncHandler(async (req: Request, res: Response) => 
  * Public endpoint for customer delivery tracking
  */
 export const trackDelivery = asyncHandler(async (req: Request, res: Response) => {
-  const { trackingNumber } = req.params;
+  const { trackingNumber } = TrackingNumberParamSchema.parse(req.params);
   const result = await deliveryService.trackDelivery(trackingNumber);
 
   if (result.success && result.data) {
@@ -233,7 +252,7 @@ export const createDeliveryRoute = asyncHandler(async (req: Request, res: Respon
  * Get delivery route with all deliveries
  */
 export const getDeliveryRoute = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = UuidParamSchema.parse(req.params);
   const result = await deliveryService.getDeliveryRoute(id);
 
   if (result.success && result.data) {
@@ -280,8 +299,7 @@ export const searchDeliveryRoutes = asyncHandler(async (req: Request, res: Respo
  * Get delivery performance summary
  */
 export const getDeliveryAnalytics = asyncHandler(async (req: Request, res: Response) => {
-  const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom : undefined;
-  const dateTo = typeof req.query.dateTo === 'string' ? req.query.dateTo : undefined;
+  const { dateFrom, dateTo } = AnalyticsQuerySchema.parse(req.query);
 
   const result = await deliveryService.getDeliveryAnalytics(dateFrom, dateTo);
 
@@ -307,21 +325,18 @@ export const getDeliveryAnalytics = asyncHandler(async (req: Request, res: Respo
  * Create delivery note from a completed sale (Tally-style)
  */
 export const createDeliveryFromSale = asyncHandler(async (req: Request, res: Response) => {
-  const { saleId } = req.params;
-
-  if (!saleId || !/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(saleId)) {
-    throw new ValidationError('Valid sale UUID is required');
-  }
+  const { saleId } = SaleIdParamSchema.parse(req.params);
+  const body = DeliveryFromSaleBodySchema.parse(req.body);
 
   const auditContext = buildAuditContext(req);
 
   const result = await deliveryService.createDeliveryFromSale(saleId, {
-    deliveryAddress: req.body.deliveryAddress || '',
-    deliveryContactName: req.body.deliveryContactName,
-    deliveryContactPhone: req.body.deliveryContactPhone,
-    specialInstructions: req.body.specialInstructions,
-    deliveryFee: req.body.deliveryFee ? Number(req.body.deliveryFee) : 0,
-    deliveryDate: req.body.deliveryDate,
+    deliveryAddress: body.deliveryAddress,
+    deliveryContactName: body.deliveryContactName,
+    deliveryContactPhone: body.deliveryContactPhone,
+    specialInstructions: body.specialInstructions,
+    deliveryFee: typeof body.deliveryFee === 'number' ? body.deliveryFee : 0,
+    deliveryDate: body.deliveryDate,
   }, auditContext);
 
   if (result.success && result.data) {
@@ -349,7 +364,7 @@ export const createDeliveryFromSale = asyncHandler(async (req: Request, res: Res
  * List completed sales that don't have an active delivery order
  */
 export const getDeliverableSales = asyncHandler(async (req: Request, res: Response) => {
-  const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+  const { search } = SearchQuerySchema.parse(req.query);
   const result = await deliveryService.getDeliverableSales(search);
 
   if (result.success) {

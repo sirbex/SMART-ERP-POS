@@ -265,7 +265,7 @@ export class StockMovementHandler {
 
     // MAIN batch doesn't exist - create it atomically with ON CONFLICT
     const product = await client.query(
-      'SELECT name, cost_price FROM products WHERE id = $1',
+      'SELECT p.name, pv.cost_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
       [params.productId]
     );
 
@@ -354,14 +354,14 @@ export class StockMovementHandler {
    */
   private async updateProductQuantity(client: PoolClient, productId: string): Promise<void> {
     await client.query(
-      `UPDATE products 
+      `UPDATE product_inventory 
        SET quantity_on_hand = (
          SELECT COALESCE(SUM(remaining_quantity), 0) 
          FROM inventory_batches 
          WHERE product_id = $1 AND status = 'ACTIVE'
        ),
        updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
+       WHERE product_id = $1`,
       [productId]
     );
   }

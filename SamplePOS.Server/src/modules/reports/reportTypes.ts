@@ -559,6 +559,15 @@ export interface ReorderRecommendationRow {
     estimatedOrderCost: number;
     preferredSupplier: string | null;
     priority: string;
+    leadTimeDays: number;
+    safetyStock: number;
+    reorderPoint: number;
+    demandTrend: 'INCREASING' | 'DECREASING' | 'STABLE';
+    trendRatio: number;
+    // Self-learning engine fields (populated when demand_forecast has run)
+    forecastDemand30d: number | null;
+    seasonalIndex: number | null;
+    learningCycles: number;
 }
 
 // ── Sales Comparison ──

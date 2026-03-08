@@ -145,8 +145,8 @@ async function _createCostLayerOnClient(client: pg.PoolClient | pg.Pool, data: C
     ]
   );
 
-  // Update product's last_cost
-  await client.query(`UPDATE products SET last_cost = $1, updated_at = NOW() WHERE id = $2`, [
+  // Update product_valuation's last_cost
+  await client.query(`UPDATE product_valuation SET last_cost = $1, updated_at = NOW() WHERE product_id = $2`, [
     unitCost.toFixed(2),
     data.productId,
   ]);
@@ -436,7 +436,7 @@ export async function calculateActualCost(
     return await calculateAVCOCost(productId, quantity, dbPool, txClient);
   } else if (costingMethod === 'STANDARD') {
     // Standard costing uses the product's average_cost field
-    const result = await queryable.query(`SELECT average_cost FROM products WHERE id = $1`, [productId]);
+    const result = await queryable.query(`SELECT average_cost FROM product_valuation WHERE product_id = $1`, [productId]);
 
     if (result.rows.length === 0) {
       throw new Error(`Product ${productId} not found`);
@@ -588,7 +588,7 @@ export async function updateAverageCost(productId: string, client?: pg.PoolClien
   const averageCost = totalQuantity.gt(0) ? totalValue.dividedBy(totalQuantity) : new Decimal(0);
 
   await queryClient.query(
-    `UPDATE products SET average_cost = $1, updated_at = NOW() WHERE id = $2`,
+    `UPDATE product_valuation SET average_cost = $1, updated_at = NOW() WHERE product_id = $2`,
     [averageCost.toFixed(2), productId]
   );
 

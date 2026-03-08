@@ -4,6 +4,7 @@
 import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
+import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export async function findAllCustomers(
   limit: number = 50,
@@ -19,6 +20,7 @@ export async function findAllCustomers(
       c.is_active as "isActive",
       c.created_at as "createdAt",
       c.updated_at as "updatedAt",
+      c.version,
       COALESCE(dep.available_balance, 0) as "depositBalance"
     FROM customers c
     LEFT JOIN LATERAL (
@@ -44,7 +46,8 @@ export async function findCustomerById(id: string, dbPool?: pg.Pool | pg.PoolCli
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"
+      updated_at as "updatedAt",
+      version
     FROM customers 
     WHERE id = $1`,
     [id]
@@ -62,7 +65,8 @@ export async function findCustomerByEmail(email: string, dbPool?: pg.Pool | pg.P
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"
+      updated_at as "updatedAt",
+      version
     FROM customers 
     WHERE email = $1`,
     [email]
@@ -83,7 +87,8 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"`,
+      updated_at as "updatedAt",
+      version`,
     [
       data.name,
       data.email || null,
@@ -99,6 +104,7 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
 
 export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer | null> {
   const pool = dbPool || globalPool;
+  const clientVersion = data.version;
   const fields: string[] = [];
   const values: unknown[] = [];
   let paramIndex = 1;
@@ -132,21 +138,35 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
     return findCustomerById(id);
   }
 
+  // Always bump version
+  fields.push(`version = version + 1`);
+
   values.push(id);
+  let whereClause = `id = $${paramIndex++}`;
+
+  if (clientVersion !== undefined) {
+    whereClause += ` AND version = $${paramIndex++}`;
+    values.push(clientVersion);
+  }
 
   const result = await pool.query(
     `UPDATE customers 
      SET ${fields.join(', ')}
-     WHERE id = $${paramIndex}
+     WHERE ${whereClause}
      RETURNING 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"`,
+      updated_at as "updatedAt",
+      version`,
     values
   );
+
+  if (clientVersion !== undefined) {
+    assertRowUpdated(result.rowCount, 'Customer', id);
+  }
 
   return result.rows[0] || null;
 }
@@ -162,7 +182,7 @@ export async function toggleCustomerActive(id: string, isActive: boolean, dbPool
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `UPDATE customers 
-     SET is_active = $1
+     SET is_active = $1, version = version + 1
      WHERE id = $2
      RETURNING 
       id, customer_number as "customerNumber", name, email, phone, address,
@@ -170,7 +190,8 @@ export async function toggleCustomerActive(id: string, isActive: boolean, dbPool
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"`,
+      updated_at as "updatedAt",
+      version`,
     [isActive, id]
   );
 
@@ -181,7 +202,7 @@ export async function updateCustomerBalance(id: string, amount: number, dbPool?:
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `UPDATE customers 
-     SET balance = balance + $1
+     SET balance = balance + $1, version = version + 1
      WHERE id = $2
      RETURNING 
       id, name, email, phone, address,
@@ -189,7 +210,8 @@ export async function updateCustomerBalance(id: string, amount: number, dbPool?:
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"`,
+      updated_at as "updatedAt",
+      version`,
     [amount, id]
   );
 
@@ -205,7 +227,8 @@ export async function findCustomerByNumber(customerNumber: string, dbPool?: pg.P
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"
+      updated_at as "updatedAt",
+      version
     FROM customers 
     WHERE customer_number = $1`,
     [customerNumber]
@@ -223,7 +246,8 @@ export async function searchCustomers(searchTerm: string, limit: number = 20, db
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
-      updated_at as "updatedAt"
+      updated_at as "updatedAt",
+      version
     FROM customers 
     WHERE is_active = true
       AND (

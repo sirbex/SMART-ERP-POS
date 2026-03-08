@@ -17,7 +17,7 @@ export const ProductCoreObject = z.object({
   conversionFactor: z.number().positive().finite().default(1),
   costPrice: z.number().min(0, 'Cost price must be >= 0').finite().default(0),
   sellingPrice: z.number().min(0, 'Selling price must be >= 0').finite().default(0),
-  costingMethod: CostingMethodEnum,
+  costingMethod: CostingMethodEnum.default('FIFO'),
   isTaxable: z.boolean().default(false),
   taxRate: z.number().min(0).max(100).default(0),
   pricingFormula: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
@@ -66,7 +66,10 @@ const pricingRefinement = (data: PricingRefinementInput, ctx: z.RefinementCtx) =
 export const ProductCreateSchema = ProductCoreObject.superRefine(pricingRefinement);
 export const ProductUpdateSchema = ProductCoreObject
   .partial()
-  .extend({ id: z.string().uuid().optional() })
+  .extend({
+    id: z.string().uuid().optional(),
+    version: z.number().int().positive().optional(),
+  })
   .superRefine(pricingRefinement);
 
 // Back-compat named exports (if other code expects these names)
@@ -99,6 +102,7 @@ export const ProductSchema = z.object({
   isActive: z.boolean(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
+  version: z.number().int().optional(),
 }).strict();
 
 export type ProductCreateInput = z.infer<typeof ProductCreateSchema>;

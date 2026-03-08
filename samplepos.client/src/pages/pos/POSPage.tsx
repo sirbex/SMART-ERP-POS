@@ -1903,6 +1903,7 @@ export default function POSPage() {
           unitPrice: item.unitPrice,
           costPrice: item.costPrice,
           subtotal: item.subtotal,
+          discountAmount: item.discount?.amount || undefined, // Per-item discount
           taxAmount: itemTax,
         };
       }),
@@ -2002,19 +2003,22 @@ export default function POSPage() {
         const hasCreditForInvoice = finalPaymentLines.some(line => line.paymentMethod === 'CREDIT');
 
         // Prepare receipt data with payment lines (use finalPaymentLines which includes auto-credit)
+        const itemDiscountTotal = items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0);
         setReceiptData({
           saleNumber: sale.saleNumber || sale.sale_number || '',
           saleDate: sale.saleDate || sale.sale_date || new Date().toISOString(),
           subtotal,
-          discountAmount: cartDiscountAmount,
+          discountAmount: cartDiscountAmount + itemDiscountTotal,
           taxAmount: tax,
           totalAmount: sale.totalAmount || sale.total_amount || grandTotal,
+          cashierName: currentUser?.fullName,
           items: items.map(item => ({
             name: item.name,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             subtotal: item.subtotal,
             uom: item.uom,
+            discountAmount: item.discount?.amount,
           })),
           payments: finalPaymentLines.map(line => ({
             method: line.paymentMethod,
@@ -2241,18 +2245,52 @@ export default function POSPage() {
                         />
                       </td>
                       <td className="px-2 py-2 text-right text-xs sm:text-sm">{formatCurrency(item.unitPrice)}</td>
-                      <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">{formatCurrency(item.subtotal)}</td>
+                      <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">
+                        {item.discount ? (
+                          <div>
+                            <span className="line-through text-gray-400 text-[10px]">{formatCurrency(item.quantity * item.unitPrice)}</span>
+                            <br />
+                            <span>{formatCurrency(item.subtotal)}</span>
+                            <span className="text-red-500 text-[10px] ml-1">(-{formatCurrency(item.discount.amount)})</span>
+                          </div>
+                        ) : (
+                          formatCurrency(item.subtotal)
+                        )}
+                      </td>
                       <td className={"px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm " + (item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600')}>{item.marginPct.toFixed(1)}%</td>
                       <td className="px-2 py-2 text-center">
-                        <button
-                          onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))}
-                          onFocus={() => setFocusedCartIndex(idx)}
-                          className="text-red-600 hover:text-red-800 font-bold text-xl px-2"
-                          aria-label={`Remove ${item.name}`}
-                          title="Remove item"
-                        >
-                          ×
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          {item.discount ? (
+                            <button
+                              onClick={() => handleRemoveDiscount('item', idx)}
+                              onFocus={() => setFocusedCartIndex(idx)}
+                              className="text-red-500 hover:text-red-700 text-xs px-1 py-0.5 rounded border border-red-200 hover:border-red-400"
+                              aria-label={`Remove discount from ${item.name}`}
+                              title="Remove item discount"
+                            >
+                              ✕%
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleOpenDiscountDialog('item', idx)}
+                              onFocus={() => setFocusedCartIndex(idx)}
+                              className="text-amber-600 hover:text-amber-800 text-xs px-1 py-0.5 rounded border border-amber-200 hover:border-amber-400"
+                              aria-label={`Add discount to ${item.name}`}
+                              title="Item discount"
+                            >
+                              %
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))}
+                            onFocus={() => setFocusedCartIndex(idx)}
+                            className="text-red-600 hover:text-red-800 font-bold text-xl px-2"
+                            aria-label={`Remove ${item.name}`}
+                            title="Remove item"
+                          >
+                            ×
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))

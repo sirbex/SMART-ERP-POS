@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { z } from 'zod';
 import { RbacService } from './service.js';
 import type { RbacAuditAction } from './types.js';
 import {
@@ -10,6 +11,23 @@ import {
   UserIdParamSchema,
 } from './validation.js';
 import { UnauthorizedError, ValidationError } from '../middleware/errorHandler.js';
+
+const AuditLogsQuerySchema = z.object({
+  actorUserId: z.string().uuid().optional(),
+  targetUserId: z.string().uuid().optional(),
+  targetRoleId: z.string().uuid().optional(),
+  action: z.string().optional(),
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
+  limit: z.coerce.number().positive().max(500).optional(),
+  offset: z.coerce.number().nonnegative().optional(),
+});
+
+const CheckPermissionQuerySchema = z.object({
+  permissionKey: z.string().min(1),
+  scopeType: z.string().optional(),
+  scopeId: z.string().optional(),
+});
 
 function getClientInfo(req: Request): { ipAddress: string | undefined; userAgent: string | undefined } {
   return {
@@ -110,26 +128,17 @@ export class RbacController {
   }
 
   async getAuditLogs(req: Request, res: Response): Promise<void> {
-    const {
-      actorUserId,
-      targetUserId,
-      targetRoleId,
-      action,
-      fromDate,
-      toDate,
-      limit,
-      offset,
-    } = req.query;
+    const query = AuditLogsQuerySchema.parse(req.query);
 
     const result = await this.service.getAuditLogs({
-      actorUserId: actorUserId as string | undefined,
-      targetUserId: targetUserId as string | undefined,
-      targetRoleId: targetRoleId as string | undefined,
-      action: action as string as RbacAuditAction | undefined,
-      fromDate: fromDate as string | undefined,
-      toDate: toDate as string | undefined,
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      offset: offset ? parseInt(offset as string, 10) : undefined,
+      actorUserId: query.actorUserId,
+      targetUserId: query.targetUserId,
+      targetRoleId: query.targetRoleId,
+      action: query.action as RbacAuditAction | undefined,
+      fromDate: query.fromDate,
+      toDate: query.toDate,
+      limit: query.limit,
+      offset: query.offset,
     });
 
     res.json({
@@ -137,25 +146,21 @@ export class RbacController {
       data: result.logs,
       pagination: {
         total: result.total,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: query.limit ?? 50,
+        offset: query.offset ?? 0,
       },
     });
   }
 
   async checkPermission(req: Request, res: Response): Promise<void> {
     const userId = requireAuth(req);
-    const { permissionKey, scopeType, scopeId } = req.query;
-
-    if (!permissionKey || typeof permissionKey !== 'string') {
-      throw new ValidationError('permissionKey is required');
-    }
+    const { permissionKey, scopeType, scopeId } = CheckPermissionQuerySchema.parse(req.query);
 
     const hasPermission = await this.service.checkPermission(
       userId,
       permissionKey,
-      scopeType as string | undefined,
-      scopeId as string | undefined
+      scopeType,
+      scopeId
     );
 
     res.json({ success: true, data: { hasPermission } });

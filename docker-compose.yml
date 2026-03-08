@@ -52,11 +52,11 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-pos_system}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       API_PORT: 3001
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       ACCOUNTING_API_URL: http://accounting-api:5062
-      ACCOUNTING_API_KEY: ${ACCOUNTING_API_KEY:-your_shared_secret_key_here}
+      ACCOUNTING_API_KEY: ${ACCOUNTING_API_KEY:?ACCOUNTING_API_KEY must be set}
     ports:
       - "3001:3001"
     depends_on:
@@ -86,7 +86,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5062
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-pos_system};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password}
-      ApiSettings__SharedSecretKey: ${ACCOUNTING_API_KEY:-your_shared_secret_key_here}
+      ApiSettings__SharedSecretKey: ${ACCOUNTING_API_KEY:?ACCOUNTING_API_KEY must be set}
       Logging__LogLevel__Default: Information
     ports:
       - "5062:5062"

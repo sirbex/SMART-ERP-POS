@@ -1426,7 +1426,10 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getReorderRecommendations(pool, options);
+    const data = await reportsRepository.getReorderRecommendations(pool, {
+      categoryId: options.categoryId,
+      daysToAnalyze: options.daysToConsider,
+    });
 
     const summary = {
       totalProductsNeedingReorder: data.length,
@@ -1434,6 +1437,11 @@ export const reportsService = {
       highCount: data.filter(p => p.priority === 'HIGH').length,
       mediumCount: data.filter(p => p.priority === 'MEDIUM').length,
       totalEstimatedCost: data.reduce((sum, p) => new Decimal(sum).plus(p.estimatedOrderCost), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      trendingUp: data.filter(p => p.demandTrend === 'INCREASING').length,
+      trendingDown: data.filter(p => p.demandTrend === 'DECREASING').length,
+      avgLeadTimeDays: data.length > 0
+        ? new Decimal(data.reduce((sum, p) => sum + p.leadTimeDays, 0)).dividedBy(data.length).toDecimalPlaces(1).toNumber()
+        : 0,
     };
 
     const executionTime = Date.now() - startTime;
