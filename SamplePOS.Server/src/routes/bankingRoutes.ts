@@ -12,8 +12,12 @@ import { z } from 'zod';
 import { BankingService } from '../services/bankingService.js';
 import logger from '../utils/logger.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
+
+// All banking routes require authentication
+router.use(authenticate);
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -120,8 +124,7 @@ const ProcessLineSchema = z.object({
 // =============================================================================
 
 function getUserId(req: Request): string {
-    // Get from auth middleware, fallback to system user
-    return req.user?.id || '00000000-0000-0000-0000-000000000000';
+    return req.user!.id;
 }
 
 // =============================================================================

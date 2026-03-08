@@ -73,7 +73,7 @@ export class ReconciliationService {
      * Compares GL balance with cash payments
      */
     async reconcileCash(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         try {
             const result = await this.pool.query(`
@@ -123,7 +123,7 @@ export class ReconciliationService {
      * Compares GL balance with customer balances and invoice balances
      */
     async reconcileAccountsReceivable(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         try {
             const result = await this.pool.query(`
@@ -177,7 +177,7 @@ export class ReconciliationService {
      * Compares GL balance with inventory valuation (products and batches)
      */
     async reconcileInventory(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         try {
             const result = await this.pool.query(`
@@ -235,7 +235,7 @@ export class ReconciliationService {
      * Compares GL balance with supplier outstanding balances
      */
     async reconcileAccountsPayable(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         try {
             const result = await this.pool.query(`
@@ -289,7 +289,7 @@ export class ReconciliationService {
      * Runs all reconciliations and returns a summary
      */
     async getFullReconciliation(asOfDate?: string): Promise<FullReconciliationSummary> {
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         try {
             const result = await this.pool.query(`
@@ -344,7 +344,7 @@ export class ReconciliationService {
             difference: number;
         }>;
     }> {
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         try {
             let query = '';

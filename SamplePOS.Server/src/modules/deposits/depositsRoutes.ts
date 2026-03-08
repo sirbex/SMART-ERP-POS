@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import * as depositsService from './depositsService.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
@@ -177,9 +178,9 @@ router.post('/apply', asyncHandler(async (req, res) => {
 
 /**
  * POST /api/deposits/:id/refund
- * Refund a deposit
+ * Refund a deposit (requires approval permission)
  */
-router.post('/:id/refund', asyncHandler(async (req, res) => {
+router.post('/:id/refund', requirePermission('accounting.approve'), asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const reason = req.body.reason;
     const deposit = await depositsService.refundDeposit(pool, req.params.id, reason);

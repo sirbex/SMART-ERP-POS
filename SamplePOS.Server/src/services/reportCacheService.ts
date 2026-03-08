@@ -179,7 +179,7 @@ export const TTL_PRESETS = {
  */
 export function getRecommendedTTL(reportType: string, parameters: Record<string, unknown>): number {
   // Real-time reports (today's data)
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toLocaleDateString('en-CA');
   if (parameters.startDate === today || parameters.asOfDate === today) {
     return TTL_PRESETS.REALTIME;
   }

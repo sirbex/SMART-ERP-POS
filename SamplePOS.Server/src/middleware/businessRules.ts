@@ -83,16 +83,15 @@ export class InventoryBusinessRules {
   /**
    * BR-INV-003: Expiry date must be in the future for goods receipt
    */
-  static validateExpiryDate(expiryDate: Date | null, allowPast: boolean = false): void {
+  static validateExpiryDate(expiryDate: string | null, allowPast: boolean = false): void {
     if (!expiryDate) return;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = new Date().toLocaleDateString('en-CA');
 
     if (!allowPast && expiryDate < today) {
       throw new BusinessRuleViolation(
         'BR-INV-003',
-        `Expiry date ${expiryDate.toISOString().split('T')[0]} cannot be in the past`,
+        `Expiry date ${expiryDate} cannot be in the past`,
         'INVALID_EXPIRY_DATE'
       );
     }
@@ -183,17 +182,20 @@ export class InventoryBusinessRules {
   /**
    * BR-INV-007: Expiry date warning (warn if expiring within 30 days)
    */
-  static validateExpiryWarning(expiryDate: Date | null, warningDays: number = 30): boolean {
+  static validateExpiryWarning(expiryDate: string | null, warningDays: number = 30): boolean {
     if (!expiryDate) return false;
 
     const today = new Date();
     const warningDate = new Date();
     warningDate.setDate(warningDate.getDate() + warningDays);
+    const warningStr = warningDate.toLocaleDateString('en-CA');
 
-    if (expiryDate <= warningDate) {
+    if (expiryDate <= warningStr) {
+      const expiryMs = new Date(expiryDate + 'T00:00:00').getTime();
+      const daysRemaining = Math.ceil((expiryMs - today.getTime()) / (1000 * 60 * 60 * 24));
       logger.warn(`BR-INV-007: Item expiring within ${warningDays} days`, {
-        expiryDate: expiryDate.toISOString().split('T')[0],
-        daysRemaining: Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)),
+        expiryDate,
+        daysRemaining,
       });
       return true;
     }
@@ -204,11 +206,11 @@ export class InventoryBusinessRules {
   /**
    * BR-INV-008: Short expiry rejection (reject if expiring within 7 days)
    */
-  static validateShortExpiry(expiryDate: Date | null, minimumDays: number = 7): void {
+  static validateShortExpiry(expiryDate: string | null, minimumDays: number = 7): void {
     if (!expiryDate) return;
 
-    const today = new Date();
-    const daysRemaining = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const expiryMs = new Date(expiryDate + 'T00:00:00').getTime();
+    const daysRemaining = Math.ceil((expiryMs - Date.now()) / (1000 * 60 * 60 * 24));
 
     if (daysRemaining < minimumDays) {
       throw new BusinessRuleViolation(
@@ -273,7 +275,7 @@ export class InventoryBusinessRules {
   static async validateBatchExpirySequence(
     pool: Pool | PoolClient,
     productId: string,
-    newExpiryDate: Date | null
+    newExpiryDate: string | null
   ): Promise<void> {
     if (!newExpiryDate) return;
 
@@ -287,13 +289,13 @@ export class InventoryBusinessRules {
     );
 
     if (result.rows.length > 0 && result.rows[0].latest_expiry) {
-      const latestExpiry = new Date(result.rows[0].latest_expiry);
+      const latestExpiry = String(result.rows[0].latest_expiry).slice(0, 10);
 
       if (newExpiryDate < latestExpiry) {
         logger.warn('BR-INV-010: New batch expires before existing stock', {
           productId,
-          newExpiryDate: newExpiryDate.toISOString().split('T')[0],
-          latestExpiry: latestExpiry.toISOString().split('T')[0],
+          newExpiryDate,
+          latestExpiry,
         });
 
         // Warning only - valid business case (older stock might be received later)
@@ -309,7 +311,7 @@ export class InventoryBusinessRules {
     receivedQuantity: number;
     unitCost: number;
     batchNumber?: string | null;
-    expiryDate?: Date | null;
+    expiryDate?: string | null;
   }): void {
     if (!item.productId || item.productId.trim().length === 0) {
       throw new BusinessRuleViolation(
@@ -489,7 +491,7 @@ export class SalesBusinessRules {
 
     if (result.rows.length > 0 && result.rows[0].max_discount_percentage) {
       const maxDiscount = parseFloat(result.rows[0].max_discount_percentage);
-      const actualDiscount = ((originalPrice - sellingPrice) / originalPrice) * 100;
+      const actualDiscount = new Decimal(originalPrice).minus(sellingPrice).dividedBy(originalPrice).times(100).toNumber();
 
       if (actualDiscount > maxDiscount) {
         throw new BusinessRuleViolation(
@@ -614,10 +616,9 @@ export class PurchaseOrderBusinessRules {
   /**
    * BR-PO-005: Expected delivery date must be in future (for new POs)
    */
-  static validateExpectedDate(expectedDate: Date | null): void {
+  static validateExpectedDate(expectedDate: string | null): void {
     if (expectedDate) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const today = new Date().toLocaleDateString('en-CA');
 
       if (expectedDate < today) {
         logger.warn('Expected delivery date is in the past', { expectedDate });
@@ -797,8 +798,8 @@ export class PurchaseOrderBusinessRules {
   static async validateLeadTime(
     pool: Pool | PoolClient,
     supplierId: string,
-    orderDate: Date,
-    expectedDate: Date | null
+    orderDate: string,
+    expectedDate: string | null
   ): Promise<void> {
     // Validation disabled until lead_time_days column exists
     // Uncomment after running migration 010
@@ -823,9 +824,9 @@ export class PurchaseOrderBusinessRules {
           supplierId,
           supplierName: name,
           leadTimeDays: lead_time_days,
-          orderDate: orderDate.toISOString().split('T')[0],
-          expectedDate: expectedDate.toISOString().split('T')[0],
-          minExpectedDate: minExpectedDate.toISOString().split('T')[0],
+          orderDate: orderDate.toLocaleDateString('en-CA'),
+          expectedDate: expectedDate.toLocaleDateString('en-CA'),
+          minExpectedDate: minExpectedDate.toLocaleDateString('en-CA'),
         });
         // Warning only - allow expedited orders
       }

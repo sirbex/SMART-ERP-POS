@@ -343,7 +343,7 @@ export const cashRegisterService = {
         variance: Decimal,
         userId: string
     ): Promise<void> {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toLocaleDateString('en-CA');
         const idempotencyKey = `CASH_VAR_${session.id}`;
         const absVariance = variance.abs().toNumber();
 
@@ -496,7 +496,7 @@ export const cashRegisterService = {
         session: CashRegisterSession,
         userId: string
     ): Promise<void> {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toLocaleDateString('en-CA');
         const idempotencyKey = `CASH_MOV_${movement.id}`;
         const amount = new Decimal(movement.amount).toNumber();
 

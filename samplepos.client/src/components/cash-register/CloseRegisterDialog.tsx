@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import {
     Dialog,
     DialogContent,
@@ -65,7 +66,7 @@ export function CloseRegisterDialog({
     // Calculate variance if actual closing is entered
     const actualAmount = parseFloat(actualClosing) || 0;
     const expectedAmount = summary?.summary?.expectedClosing || 0;
-    const variance = actualAmount - expectedAmount;
+    const variance = new Decimal(actualAmount).minus(expectedAmount).toNumber();
     const hasVariance = Math.abs(variance) > 0.01;
 
     const handleSubmit = async (e: React.FormEvent) => {

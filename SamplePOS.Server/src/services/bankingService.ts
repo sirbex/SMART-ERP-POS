@@ -258,7 +258,7 @@ export class BankingService {
         bankGlCode: string,
         userId: string
     ): Promise<void> {
-        const entryDate = new Date().toISOString().split('T')[0];
+        const entryDate = new Date().toLocaleDateString('en-CA');
 
         // Get or create Opening Balance Equity account (3900)
         let equityAccount = await client.query(`
@@ -803,7 +803,7 @@ export class BankingService {
             // Reverse the GL entry
             await AccountingCore.reverseTransaction({
                 originalTransactionId: origTxn.gl_transaction_id,
-                reversalDate: new Date().toISOString().split('T')[0],
+                reversalDate: new Date().toLocaleDateString('en-CA'),
                 reason: dto.reason,
                 userId,
                 idempotencyKey: `REV-${dto.transactionId}`
@@ -830,7 +830,7 @@ export class BankingService {
                 revTxnId,
                 revTxnNum,
                 origTxn.bank_account_id,
-                new Date().toISOString().split('T')[0],
+                new Date().toLocaleDateString('en-CA'),
                 reversalType,
                 origTxn.category_id,
                 `REVERSAL: ${dto.reason}`,
@@ -1569,7 +1569,7 @@ export class BankingService {
                 break;
         }
 
-        return nextDate.toISOString().split('T')[0];
+        return nextDate.toLocaleDateString('en-CA');
     }
 
     // ---------------------------------------------------------------------------
@@ -1811,7 +1811,7 @@ export class BankingService {
      */
     static async getCashPositionReport(asOfDate?: string, dbPool?: pg.Pool): Promise<CashPositionReport> {
         const pool = dbPool || globalPool;
-        const date = asOfDate || new Date().toISOString().split('T')[0];
+        const date = asOfDate || new Date().toLocaleDateString('en-CA');
 
         const result = await pool.query(`
       SELECT 
@@ -2308,7 +2308,7 @@ export class BankingService {
             try {
                 txn = await this.createTransaction({
                     bankAccountId: line.bank_account_id as string,
-                    transactionDate: (line.transaction_date as string) || new Date().toISOString().split('T')[0],
+                    transactionDate: (line.transaction_date as string) || new Date().toLocaleDateString('en-CA'),
                     type: txnType,
                     categoryId: (options.categoryId || line.suggested_category_id) as string | undefined,
                     description: (line.description as string) || 'Imported transaction',
@@ -2565,7 +2565,7 @@ export class BankingService {
             // Fallback: try native Date parsing
             const date = new Date(value);
             if (!isNaN(date.getTime())) {
-                return date.toISOString().split('T')[0];
+                return date.toLocaleDateString('en-CA');
             }
         } catch {
             // Ignore parsing errors

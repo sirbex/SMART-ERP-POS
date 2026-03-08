@@ -138,24 +138,24 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
     const amountPaid = Money.parseDb(sale.amountPaid ?? sale.totalAmount); // Default to full payment if not specified
     const unpaidAmount = Money.subtract(totalAmount, amountPaid);
 
-    // NEW: Calculate revenue and cost split by product type
-    let grossInventoryRevenue = 0;
-    let grossServiceRevenue = 0;
-    let inventoryCost = 0;
+    // NEW: Calculate revenue and cost split by product type using Decimal-safe Money utility
+    let grossInventoryRevenue = Money.zero();
+    let grossServiceRevenue = Money.zero();
+    let inventoryCost = Money.zero();
     // Net revenue after discount allocation (initialized, will be set in either branch)
-    let inventoryRevenue = 0;
-    let serviceRevenue = 0;
+    let inventoryRevenue = Money.zero();
+    let serviceRevenue = Money.zero();
 
     if (sale.saleItems && sale.saleItems.length > 0) {
       // Use sale items for accurate revenue/cost classification
       for (const item of sale.saleItems) {
         if (item.productType === 'service') {
-          grossServiceRevenue += item.totalPrice;
+          grossServiceRevenue = Money.add(grossServiceRevenue, item.totalPrice);
           // Service items have no cost (no COGS entry)
         } else {
           // Inventory and consumable items
-          grossInventoryRevenue += item.totalPrice;
-          inventoryCost += item.unitCost * item.quantity;
+          grossInventoryRevenue = Money.add(grossInventoryRevenue, item.totalPrice);
+          inventoryCost = Money.add(inventoryCost, Money.lineTotal(item.quantity, item.unitCost));
         }
       }
 
@@ -166,32 +166,32 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
       // Fix: Calculate discount and allocate proportionally to revenue accounts
       // This ensures DR = CR (balanced GL entry)
       // ============================================================
-      const grossTotal = grossInventoryRevenue + grossServiceRevenue;
-      const discountAmount = grossTotal - sale.totalAmount;
+      const grossTotal = Money.add(grossInventoryRevenue, grossServiceRevenue);
+      const discountAmount = Money.subtract(grossTotal, sale.totalAmount);
 
       // Net revenue after proportional discount allocation
       inventoryRevenue = grossInventoryRevenue;
       serviceRevenue = grossServiceRevenue;
 
-      if (discountAmount > 0.01 && grossTotal > 0) {
+      if (discountAmount.greaterThan(0.01) && grossTotal.greaterThan(0)) {
         // Proportionally allocate discount to each revenue type
-        const discountRatio = discountAmount / grossTotal;
-        const inventoryDiscount = grossInventoryRevenue * discountRatio;
-        const serviceDiscount = grossServiceRevenue * discountRatio;
+        const discountRatio = Money.divide(discountAmount, grossTotal);
+        const inventoryDiscount = Money.multiply(grossInventoryRevenue, discountRatio);
+        const serviceDiscount = Money.multiply(grossServiceRevenue, discountRatio);
 
-        inventoryRevenue = Math.round((grossInventoryRevenue - inventoryDiscount) * 100) / 100;
-        serviceRevenue = Math.round((grossServiceRevenue - serviceDiscount) * 100) / 100;
+        inventoryRevenue = Money.round(Money.subtract(grossInventoryRevenue, inventoryDiscount));
+        serviceRevenue = Money.round(Money.subtract(grossServiceRevenue, serviceDiscount));
 
         logger.info('Discount allocated to revenue accounts', {
           saleNumber: sale.saleNumber,
           grossTotal,
           discountAmount,
-          discountRatio: discountRatio.toFixed(6),
+          discountRatio,
           grossInventoryRevenue,
           grossServiceRevenue,
           netInventoryRevenue: inventoryRevenue,
           netServiceRevenue: serviceRevenue,
-          netTotal: inventoryRevenue + serviceRevenue,
+          netTotal: Money.add(inventoryRevenue, serviceRevenue),
           expectedTotal: sale.totalAmount,
         });
       }
@@ -201,20 +201,25 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
         inventoryRevenue,
         serviceRevenue,
         inventoryCost,
-        totalRevenue: inventoryRevenue + serviceRevenue
+        totalRevenue: Money.add(inventoryRevenue, serviceRevenue)
       });
     } else {
       // Fallback: No item-level data, treat all as inventory revenue
       // (backward compatible with existing sales)
-      inventoryRevenue = sale.totalAmount;
-      serviceRevenue = 0;
-      inventoryCost = sale.costAmount;
+      inventoryRevenue = Money.parseDb(sale.totalAmount);
+      serviceRevenue = Money.zero();
+      inventoryCost = Money.parseDb(sale.costAmount);
 
       logger.warn('Sale without item-level data - treating all as inventory', {
         saleNumber: sale.saleNumber,
         totalAmount: sale.totalAmount
       });
     }
+
+    // Convert Decimal values to numbers at the boundary for JournalLine interface
+    const invRevenueNum = inventoryRevenue.toNumber();
+    const svcRevenueNum = serviceRevenue.toNumber();
+    const invCostNum = inventoryCost.toNumber();
 
     // Create ledger entries for revenue recognition and COGS
     const ledgerLines: JournalLine[] = [];
@@ -236,21 +241,21 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
       });
 
       // Credit Revenue - split by product type
-      if (inventoryRevenue > 0) {
+      if (invRevenueNum > 0) {
         ledgerLines.push({
           accountCode: AccountCodes.SALES_REVENUE,
           description: `Inventory sales revenue for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: inventoryRevenue
+          creditAmount: invRevenueNum
         });
       }
 
-      if (serviceRevenue > 0) {
+      if (svcRevenueNum > 0) {
         ledgerLines.push({
           accountCode: AccountCodes.SERVICE_REVENUE,
           description: `Service revenue for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: serviceRevenue
+          creditAmount: svcRevenueNum
         });
       }
     } else if (sale.paymentMethod === 'CREDIT') {
@@ -280,21 +285,21 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
       }
 
       // Credit Revenue - split by product type
-      if (inventoryRevenue > 0) {
+      if (invRevenueNum > 0) {
         ledgerLines.push({
           accountCode: AccountCodes.SALES_REVENUE,
           description: `Inventory sales revenue for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: inventoryRevenue
+          creditAmount: invRevenueNum
         });
       }
 
-      if (serviceRevenue > 0) {
+      if (svcRevenueNum > 0) {
         ledgerLines.push({
           accountCode: AccountCodes.SERVICE_REVENUE,
           description: `Service revenue for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: serviceRevenue
+          creditAmount: svcRevenueNum
         });
       }
 
@@ -338,21 +343,21 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
       });
 
       // Credit Revenue - split by product type
-      if (inventoryRevenue > 0) {
+      if (invRevenueNum > 0) {
         ledgerLines.push({
           accountCode: AccountCodes.SALES_REVENUE,
           description: `Inventory sales revenue for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: inventoryRevenue
+          creditAmount: invRevenueNum
         });
       }
 
-      if (serviceRevenue > 0) {
+      if (svcRevenueNum > 0) {
         ledgerLines.push({
           accountCode: AccountCodes.SERVICE_REVENUE,
           description: `Service revenue for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: serviceRevenue
+          creditAmount: svcRevenueNum
         });
       }
     }
@@ -370,25 +375,25 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
     }
 
     // Record inventory cost (excludes service items)
-    if (inventoryCost > 0) {
+    if (invCostNum > 0) {
       ledgerLines.push(
         {
           accountCode: AccountCodes.COGS,
           description: `Cost of goods sold for ${sale.saleNumber}`,
-          debitAmount: inventoryCost,
+          debitAmount: invCostNum,
           creditAmount: 0
         },
         {
           accountCode: AccountCodes.INVENTORY,
           description: `Inventory reduction for ${sale.saleNumber}`,
           debitAmount: 0,
-          creditAmount: inventoryCost
+          creditAmount: invCostNum
         }
       );
 
       logger.info('COGS entry created (service items excluded)', {
         saleNumber: sale.saleNumber,
-        inventoryCost,
+        inventoryCost: invCostNum,
         originalCostAmount: sale.costAmount
       });
     }

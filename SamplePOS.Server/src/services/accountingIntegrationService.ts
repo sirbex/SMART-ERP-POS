@@ -55,7 +55,7 @@ export class AccountingIntegrationService {
     try {
       // Redirect to AccountingCore
       await AccountingCore.createJournalEntry({
-        entryDate: new Date().toISOString().split('T')[0],
+        entryDate: new Date().toLocaleDateString('en-CA'),
         description: `Invoice created: ${data.invoiceNumber}`,
         referenceType: 'INVOICE',
         referenceId: data.invoiceId,
@@ -100,7 +100,7 @@ export class AccountingIntegrationService {
       await glEntryService.recordCustomerPaymentToGL({
         paymentId: data.paymentId,
         paymentNumber: data.reference,
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toLocaleDateString('en-CA'),
         amount: data.amount,
         paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
         customerId: data.customerId,
@@ -127,7 +127,7 @@ export class AccountingIntegrationService {
       await glEntryService.recordSaleToGL({
         saleId: data.saleId,
         saleNumber: `SALE-${data.saleId.substring(0, 8)}`,
-        saleDate: new Date().toISOString().split('T')[0],
+        saleDate: new Date().toLocaleDateString('en-CA'),
         totalAmount: data.totalAmount,
         costAmount: data.cogsAmount,
         paymentMethod: 'CASH',
@@ -153,7 +153,7 @@ export class AccountingIntegrationService {
       await glEntryService.recordGoodsReceiptToGL({
         grId: data.grId,
         grNumber: data.grNumber,
-        grDate: new Date().toISOString().split('T')[0],
+        grDate: new Date().toLocaleDateString('en-CA'),
         totalAmount: data.totalAmount,
         supplierId: data.supplierId,
         supplierName: 'Supplier'
@@ -178,7 +178,7 @@ export class AccountingIntegrationService {
       await glEntryService.recordSupplierPaymentToGL({
         paymentId: data.paymentId,
         paymentNumber: `PAY-${data.paymentId.substring(0, 8)}`,
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toLocaleDateString('en-CA'),
         amount: data.amount,
         paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK',
         supplierId: data.supplierId,

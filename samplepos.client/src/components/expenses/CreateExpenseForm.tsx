@@ -38,7 +38,7 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({
   } = useForm<CreateExpenseData>({
     resolver: zodResolver(CreateExpenseSchema),
     defaultValues: {
-      expenseDate: new Date().toISOString().split('T')[0],
+      expenseDate: new Date().toLocaleDateString('en-CA'),
       receiptRequired: false,
       documentIds: [],
       paymentStatus: 'UNPAID',

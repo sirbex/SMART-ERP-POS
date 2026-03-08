@@ -26,7 +26,7 @@ export const adminService = {
   }> {
     try {
       const timestamp = new Date();
-      const dateStr = timestamp.toISOString().split('T')[0].replace(/-/g, '_');
+      const dateStr = timestamp.toLocaleDateString('en-CA').replace(/-/g, '_');
       const timeStr = timestamp.toTimeString().split(' ')[0].replace(/:/g, '_');
       const fileName = `company_backup_${dateStr}_${timeStr}.dump`;
       const backupDir = path.join(process.cwd(), 'backups');
@@ -279,7 +279,7 @@ export const adminService = {
     try {
       const data = await adminRepository.exportMasterDataToJSON(pool);
 
-      const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '_');
+      const timestamp = new Date().toLocaleDateString('en-CA').replace(/-/g, '_');
       const fileName = `master_data_${timestamp}.json`;
       const backupDir = path.join(process.cwd(), 'backups');
       const filePath = path.join(backupDir, fileName);

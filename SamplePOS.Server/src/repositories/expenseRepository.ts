@@ -277,13 +277,22 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
 export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?: pg.Pool | pg.PoolClient): Promise<Expense | null> => {
   const pool = dbPool || globalPool;
   try {
+    // Whitelist of allowed column names to prevent SQL injection
+    const ALLOWED_UPDATE_FIELDS = new Set([
+      'title', 'description', 'amount', 'expense_date', 'category_id',
+      'supplier_id', 'vendor', 'payment_method', 'receipt_number',
+      'reference_number', 'notes', 'tags', 'status', 'approved_by',
+      'approved_at', 'rejected_by', 'rejected_at', 'rejection_reason',
+      'paid_by', 'paid_at', 'payment_status', 'payment_account_id'
+    ]);
+
     const fields = [];
     const values = [];
     let paramIndex = 1;
 
-    // Build dynamic update query
+    // Build dynamic update query with whitelisted fields only
     for (const [key, value] of Object.entries(data)) {
-      if (value !== undefined) {
+      if (value !== undefined && ALLOWED_UPDATE_FIELDS.has(key)) {
         fields.push(`${key} = $${paramIndex}`);
         values.push(value);
         paramIndex++;

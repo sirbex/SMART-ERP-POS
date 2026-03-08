@@ -393,7 +393,7 @@ export default function StockMovementsPage() {
       // Trigger download
       const link = document.createElement('a');
       link.href = url;
-      link.download = `stock-movements-${new Date().toISOString().split('T')[0]}.csv`;
+      link.download = `stock-movements-${new Date().toLocaleDateString('en-CA')}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

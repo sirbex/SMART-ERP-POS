@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import Decimal from 'decimal.js';
 import { CheckCircle2, Circle, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,7 +30,7 @@ import { formatCurrency } from '../../utils/currency';
 export const ReconciliationTab: React.FC = () => {
     const [selectedAccountId, setSelectedAccountId] = useState<string>('');
     const [statementBalance, setStatementBalance] = useState<string>('');
-    const [statementDate, setStatementDate] = useState(new Date().toISOString().split('T')[0]);
+    const [statementDate, setStatementDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
     const [showReconciled, setShowReconciled] = useState(false);
     const [reconcileResult, setReconcileResult] = useState<{ reconciledCount: number; newBalance: number } | null>(null);
@@ -52,27 +53,27 @@ export const ReconciliationTab: React.FC = () => {
 
         const selectedDeposits = selected
             .filter(t => ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(t.type))
-            .reduce((sum, t) => sum + t.amount, 0);
+            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
 
         const selectedWithdrawals = selected
             .filter(t => ['WITHDRAWAL', 'TRANSFER_OUT', 'FEE'].includes(t.type))
-            .reduce((sum, t) => sum + t.amount, 0);
+            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
 
         const unselectedDeposits = unselected
             .filter(t => ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(t.type))
-            .reduce((sum, t) => sum + t.amount, 0);
+            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
 
         const unselectedWithdrawals = unselected
             .filter(t => ['WITHDRAWAL', 'TRANSFER_OUT', 'FEE'].includes(t.type))
-            .reduce((sum, t) => sum + t.amount, 0);
+            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
 
         return {
             selectedDeposits,
             selectedWithdrawals,
-            selectedNet: selectedDeposits - selectedWithdrawals,
+            selectedNet: new Decimal(selectedDeposits).minus(selectedWithdrawals).toNumber(),
             unselectedDeposits,
             unselectedWithdrawals,
-            unselectedNet: unselectedDeposits - unselectedWithdrawals,
+            unselectedNet: new Decimal(unselectedDeposits).minus(unselectedWithdrawals).toNumber(),
             selectedCount: selected.length,
             unselectedCount: unselected.length
         };

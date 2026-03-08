@@ -56,7 +56,7 @@ export default function DiscountDialog({
   const discountPercentage =
     discountType === 'PERCENTAGE'
       ? parseFloat(discountValue || '0')
-      : (discountAmount / originalAmount) * 100;
+      : new Decimal(discountAmount).dividedBy(originalAmount).times(100).toNumber();
 
   const requiresApproval = discountPercentage > userLimit;
 

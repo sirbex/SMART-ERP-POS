@@ -2,24 +2,26 @@
 
 import { Router } from 'express';
 import * as customerController from './customerController.js';
-import { authenticate, optionalAuth } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 
 const router = Router();
 
-// TEMPORARY FIX: Use optional auth for GET routes to fix auth issues
-router.get('/', optionalAuth, customerController.getCustomers);
-router.get('/search', optionalAuth, customerController.searchCustomers);
-router.get('/by-number/:customerNumber', optionalAuth, customerController.getCustomerByNumber);
-router.get('/:id', optionalAuth, customerController.getCustomer);
+// All customer routes require authentication
+router.use(authenticate);
 
-// Customer transaction endpoints - TEMPORARY: Use optional auth
-router.get('/:id/sales', optionalAuth, customerController.getCustomerSales);
-router.get('/:id/transactions', optionalAuth, customerController.getCustomerTransactions);
-router.get('/:id/summary', optionalAuth, customerController.getCustomerSummary);
-router.get('/:id/statement', optionalAuth, customerController.getCustomerStatement);
-router.get('/:id/statement/export.csv', optionalAuth, customerController.exportCustomerStatementCsv);
-router.get('/:id/statement/export.pdf', optionalAuth, customerController.exportCustomerStatementPdf);
+router.get('/', customerController.getCustomers);
+router.get('/search', customerController.searchCustomers);
+router.get('/by-number/:customerNumber', customerController.getCustomerByNumber);
+router.get('/:id', customerController.getCustomer);
+
+// Customer transaction endpoints
+router.get('/:id/sales', customerController.getCustomerSales);
+router.get('/:id/transactions', customerController.getCustomerTransactions);
+router.get('/:id/summary', customerController.getCustomerSummary);
+router.get('/:id/statement', customerController.getCustomerStatement);
+router.get('/:id/statement/export.csv', customerController.exportCustomerStatementCsv);
+router.get('/:id/statement/export.pdf', customerController.exportCustomerStatementPdf);
 
 // Create/Update/Delete - requires customer permissions
 router.post('/', authenticate, requirePermission('customers.create'), customerController.createCustomer);

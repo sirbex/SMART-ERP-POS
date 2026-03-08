@@ -13,6 +13,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
 import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -141,14 +142,14 @@ const SupplierPaymentsPage: React.FC = () => {
         amount: '',
         paymentMethod: 'BANK_TRANSFER',
         reference: '',
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toLocaleDateString('en-CA'),
         notes: ''
     });
 
     const [billFormData, setBillFormData] = useState<CreateSupplierInvoiceRequest>({
         supplierId: '',
         supplierInvoiceNumber: '',
-        invoiceDate: new Date().toISOString().split('T')[0],
+        invoiceDate: new Date().toLocaleDateString('en-CA'),
         dueDate: '',
         notes: '',
         lineItems: [{
@@ -315,9 +316,9 @@ const SupplierPaymentsPage: React.FC = () => {
         sum + safeParseFloat(s.outstandingBalance), 0
     );
     const suppliersWithBalance = suppliers.filter(s => safeParseFloat(s.outstandingBalance) > 0).length;
-    const totalAllocatedAmount = payments.reduce((sum, p) => sum + safeParseFloat(p.allocatedAmount), 0);
-    const totalUnallocatedCredit = payments.reduce((sum, p) => sum + safeParseFloat(p.unallocatedAmount), 0);
-    const totalBillsAmount = bills.reduce((sum, b) => sum + safeParseFloat(b.totalAmount), 0);
+    const totalAllocatedAmount = payments.reduce((sum, p) => new Decimal(sum).plus(safeParseFloat(p.allocatedAmount)).toNumber(), 0);
+    const totalUnallocatedCredit = payments.reduce((sum, p) => new Decimal(sum).plus(safeParseFloat(p.unallocatedAmount)).toNumber(), 0);
+    const totalBillsAmount = bills.reduce((sum, b) => new Decimal(sum).plus(safeParseFloat(b.totalAmount)).toNumber(), 0);
 
     const handleCreatePayment = async () => {
         try {
@@ -822,7 +823,7 @@ const SupplierPaymentsPage: React.FC = () => {
         try {
             setAllocatingPayment(true);
 
-            const totalAllocation = allocations.reduce((sum, alloc) => sum + alloc.allocationAmount, 0);
+            const totalAllocation = allocations.reduce((sum, alloc) => new Decimal(sum).plus(alloc.allocationAmount).toNumber(), 0);
             const unallocatedAmount = safeParseFloat(selectedPayment.unallocatedAmount);
 
             if (totalAllocation > unallocatedAmount) {
@@ -898,7 +899,7 @@ const SupplierPaymentsPage: React.FC = () => {
             amount: '',
             paymentMethod: 'BANK_TRANSFER',
             reference: '',
-            paymentDate: new Date().toISOString().split('T')[0],
+            paymentDate: new Date().toLocaleDateString('en-CA'),
             notes: ''
         });
         setSupplierSearchFilter('');
@@ -909,7 +910,7 @@ const SupplierPaymentsPage: React.FC = () => {
         setBillFormData({
             supplierId: '',
             supplierInvoiceNumber: '',
-            invoiceDate: new Date().toISOString().split('T')[0],
+            invoiceDate: new Date().toLocaleDateString('en-CA'),
             dueDate: '',
             notes: '',
             lineItems: [{

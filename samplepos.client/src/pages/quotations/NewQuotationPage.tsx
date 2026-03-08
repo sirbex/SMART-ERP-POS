@@ -58,7 +58,7 @@ export default function NewQuotationPage() {
   // Quote details
   const [reference, setReference] = useState('');
   const [validUntil, setValidUntil] = useState(
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA')
   );
   const [items, setItems] = useState<QuoteItem[]>([]);
 
@@ -215,7 +215,7 @@ export default function NewQuotationPage() {
       customerName: customerName || selectedCustomer?.name,
       customerPhone: (customerPhone || selectedCustomer?.phone) || undefined,
       customerEmail: (customerEmail || selectedCustomer?.email) || undefined,
-      validFrom: new Date().toISOString().split('T')[0],
+      validFrom: new Date().toLocaleDateString('en-CA'),
       validUntil,
       notes: internalNotes || undefined,
       items: items.map((item) => ({

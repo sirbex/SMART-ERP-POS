@@ -335,7 +335,7 @@ export const Calendar: React.FC<{
 }> = ({ selected, onSelect, className = '' }) => (
   <input
     type="date"
-    value={selected ? selected.toISOString().split('T')[0] : ''}
+    value={selected ? selected.toLocaleDateString('en-CA') : ''}
     onChange={(e) => onSelect(e.target.value ? new Date(e.target.value) : undefined)}
     className={`block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${className}`}
     aria-label="Select date"

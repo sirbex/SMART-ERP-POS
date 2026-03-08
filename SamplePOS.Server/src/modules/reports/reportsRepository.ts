@@ -1386,10 +1386,10 @@ export const reportsRepository = {
   ): Promise<DailyCashFlowRow[]> {
     // Convert dates to YYYY-MM-DD strings to avoid timezone issues
     const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toISOString().split('T')[0]
+      ? options.startDate.toLocaleDateString('en-CA')
       : options.startDate;
     const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toISOString().split('T')[0]
+      ? options.endDate.toLocaleDateString('en-CA')
       : options.endDate;
 
     try {
@@ -1690,7 +1690,7 @@ export const reportsRepository = {
   ): Promise<CustomerAgingRow[]> {
     const asOfDate = options.asOfDate || new Date();
     const asOfDateStr = asOfDate instanceof Date
-      ? asOfDate.toISOString().split('T')[0]
+      ? asOfDate.toLocaleDateString('en-CA')
       : asOfDate;
 
     const query = `
@@ -2194,10 +2194,10 @@ export const reportsRepository = {
     }
   ): Promise<SalesByCategoryRow[]> {
     const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toISOString().split('T')[0]
+      ? options.startDate.toLocaleDateString('en-CA')
       : options.startDate;
     const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toISOString().split('T')[0]
+      ? options.endDate.toLocaleDateString('en-CA')
       : options.endDate;
 
     const params: unknown[] = [startDateStr, endDateStr];
@@ -2255,10 +2255,10 @@ export const reportsRepository = {
     }
   ): Promise<SalesByPaymentMethodRow[]> {
     const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toISOString().split('T')[0]
+      ? options.startDate.toLocaleDateString('en-CA')
       : options.startDate;
     const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toISOString().split('T')[0]
+      ? options.endDate.toLocaleDateString('en-CA')
       : options.endDate;
 
     const params: unknown[] = [startDateStr, endDateStr];
@@ -2312,10 +2312,10 @@ export const reportsRepository = {
     }
   ): Promise<HourlySalesAnalysisRow[]> {
     const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toISOString().split('T')[0]
+      ? options.startDate.toLocaleDateString('en-CA')
       : options.startDate;
     const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toISOString().split('T')[0]
+      ? options.endDate.toLocaleDateString('en-CA')
       : options.endDate;
 
     const params: unknown[] = [startDateStr, endDateStr];
@@ -2360,16 +2360,16 @@ export const reportsRepository = {
     }
   ): Promise<SalesComparisonRow[]> {
     const currentStartStr = options.currentStartDate instanceof Date
-      ? options.currentStartDate.toISOString().split('T')[0]
+      ? options.currentStartDate.toLocaleDateString('en-CA')
       : options.currentStartDate;
     const currentEndStr = options.currentEndDate instanceof Date
-      ? options.currentEndDate.toISOString().split('T')[0]
+      ? options.currentEndDate.toLocaleDateString('en-CA')
       : options.currentEndDate;
     const previousStartStr = options.previousStartDate instanceof Date
-      ? options.previousStartDate.toISOString().split('T')[0]
+      ? options.previousStartDate.toLocaleDateString('en-CA')
       : options.previousStartDate;
     const previousEndStr = options.previousEndDate instanceof Date
-      ? options.previousEndDate.toISOString().split('T')[0]
+      ? options.previousEndDate.toLocaleDateString('en-CA')
       : options.previousEndDate;
 
     const params: unknown[] = [currentStartStr, currentEndStr, previousStartStr, previousEndStr];
@@ -2455,10 +2455,10 @@ export const reportsRepository = {
     }
   ): Promise<CustomerPurchaseHistoryRow[]> {
     const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toISOString().split('T')[0]
+      ? options.startDate.toLocaleDateString('en-CA')
       : options.startDate;
     const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toISOString().split('T')[0]
+      ? options.endDate.toLocaleDateString('en-CA')
       : options.endDate;
 
     // Determine if input is UUID or customer_number
@@ -2530,7 +2530,7 @@ export const reportsRepository = {
     }
   ): Promise<BusinessPositionData> {
     const reportDateStr = options.reportDate instanceof Date
-      ? options.reportDate.toISOString().split('T')[0]
+      ? options.reportDate.toLocaleDateString('en-CA')
       : options.reportDate;
 
     // Complex multi-CTE query for comprehensive business metrics
@@ -3028,7 +3028,7 @@ export const reportsRepository = {
           const netFlow = cashIn.plus(row.sales || 0).minus(cashOut).minus(row.refunds || 0);
 
           return {
-            date: row.date?.toISOString().split('T')[0],
+            date: row.date?.toLocaleDateString('en-CA'),
             cashInFloat: new Decimal(row.cash_in_float || 0).toDecimalPlaces(2).toNumber(),
             cashInPayment: new Decimal(row.cash_in_payment || 0).toDecimalPlaces(2).toNumber(),
             cashInOther: new Decimal(row.cash_in_other || 0).toDecimalPlaces(2).toNumber(),

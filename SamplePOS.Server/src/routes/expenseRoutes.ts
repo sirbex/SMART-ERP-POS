@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
+import { requirePermission, requireAnyPermission } from '../rbac/middleware.js';
 import * as expenseController from '../controllers/expenseController.js';
 
 const router = Router();
@@ -113,19 +114,19 @@ router.post('/:id/submit', expenseController.submitExpense);
  * @route POST /api/expenses/:id/approve
  * @desc Approve expense
  */
-router.post('/:id/approve', expenseController.approveExpense);
+router.post('/:id/approve', requireAnyPermission(['accounting.approve', 'admin.update']), expenseController.approveExpense);
 
 /**
  * @route POST /api/expenses/:id/reject
  * @desc Reject expense
  */
-router.post('/:id/reject', expenseController.rejectExpense);
+router.post('/:id/reject', requireAnyPermission(['accounting.approve', 'admin.update']), expenseController.rejectExpense);
 
 /**
  * @route POST /api/expenses/:id/mark-paid
  * @desc Mark expense as paid
  */
-router.post('/:id/mark-paid', expenseController.markExpensePaid);
+router.post('/:id/mark-paid', requireAnyPermission(['accounting.post', 'admin.update']), expenseController.markExpensePaid);
 
 /**
  * @route GET /api/expenses/:id/documents

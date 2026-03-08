@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
 import { useSuppliers, useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../hooks/useSuppliers';
 import { supplierInvoiceService } from '../services/comprehensive-accounting';
@@ -281,7 +282,7 @@ export default function SuppliersPage() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `suppliers-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `suppliers-${new Date().toLocaleDateString('en-CA')}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1360,13 +1361,13 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <div className="bg-green-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-green-600 mb-1">Total Amount</div>
                       <div className="text-lg font-bold text-green-900">
-                        {formatCurrency(invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => sum + Number(inv.totalAmount || 0), 0))}
+                        {formatCurrency(invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => new Decimal(sum).plus(Number(inv.totalAmount || 0)).toNumber(), 0))}
                       </div>
                     </div>
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-red-600 mb-1">Outstanding</div>
                       <div className="text-lg font-bold text-red-900">
-                        {formatCurrency(Math.max(0, invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => sum + Number(inv.outstandingBalance || 0), 0)))}
+                        {formatCurrency(Math.max(0, invoices.reduce((sum: number, inv: SupplierInvoiceSummary) => new Decimal(sum).plus(Number(inv.outstandingBalance || 0)).toNumber(), 0)))}
                       </div>
                     </div>
                   </div>

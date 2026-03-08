@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { Plus, Search, CreditCard, DollarSign, Users, Loader } from 'lucide-react';
 import {
     Button,
@@ -170,7 +171,7 @@ const CustomerFinancialPage = () => {
         customerId: '',
         customerName: '',
         amount: 0,
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA'), // 30 days from now
         description: '',
         invoiceNumber: ''
     });
@@ -249,8 +250,8 @@ const CustomerFinancialPage = () => {
                 customerName: customer.name,
                 outstandingBalance: customer.balance || 0,
                 creditLimit: customer.creditLimit || 0,
-                totalDepositBalance: deposits.reduce((sum, d) => sum + d.amount, 0),
-                totalCreditBalance: credits.reduce((sum, c) => sum + c.amount, 0),
+                totalDepositBalance: deposits.reduce((sum, d) => new Decimal(sum).plus(d.amount).toNumber(), 0),
+                totalCreditBalance: credits.reduce((sum, c) => new Decimal(sum).plus(c.amount).toNumber(), 0),
                 availableDepositBalance: depositBalance,
                 availableCreditBalance: creditBalance,
                 accountsReceivable: [],

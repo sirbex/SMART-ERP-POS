@@ -2,23 +2,24 @@
 
 import { Router } from 'express';
 import * as discountController from './discountController';
+import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 
 const router = Router();
 
-// Public routes (authenticated users)
+// Read routes - any authenticated user (authenticate applied at mount in server.ts)
 router.get('/', discountController.listDiscounts);
 router.get('/pending', discountController.getPendingAuthorizations);
 router.get('/:id', discountController.getDiscount);
 
-// Apply discount to sale
-router.post('/apply', discountController.applyDiscount);
+// Apply discount to sale - cashier can apply
+router.post('/apply', requireAnyPermission(['pos.create', 'sales.create']), discountController.applyDiscount);
 
 // Approve discount (MANAGER/ADMIN)
-router.post('/approve', discountController.approveDiscount);
+router.post('/approve', requirePermission('sales.approve'), discountController.approveDiscount);
 
 // ADMIN only routes
-router.post('/', discountController.createDiscount);
-router.put('/:id', discountController.updateDiscount);
-router.delete('/:id', discountController.deleteDiscount);
+router.post('/', requirePermission('admin.create'), discountController.createDiscount);
+router.put('/:id', requirePermission('admin.update'), discountController.updateDiscount);
+router.delete('/:id', requirePermission('admin.delete'), discountController.deleteDiscount);
 
 export const discountRoutes = router;

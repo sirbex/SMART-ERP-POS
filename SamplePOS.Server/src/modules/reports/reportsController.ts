@@ -162,7 +162,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="inventory-valuation-${date}.pdf"`);
       doc.pipe(res);
@@ -237,7 +237,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="sales-report-${date}.pdf"`);
       doc.pipe(res);
@@ -305,7 +305,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="expiring-items-${date}.pdf"`);
       doc.pipe(res);
@@ -372,7 +372,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="low-stock-${date}.pdf"`);
       doc.pipe(res);
@@ -438,7 +438,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="best-selling-${date}.pdf"`);
       doc.pipe(res);
@@ -508,7 +508,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="supplier-cost-analysis-${date}.pdf"`);
       doc.pipe(res);
@@ -577,7 +577,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="goods-received-${date}.pdf"`);
       doc.pipe(res);
@@ -650,7 +650,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="payment-report-${date}.pdf"`);
       doc.pipe(res);
@@ -718,7 +718,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="customer-payments-${date}.pdf"`);
       doc.pipe(res);
@@ -786,7 +786,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="profit-loss-${date}.pdf"`);
       doc.pipe(res);
@@ -852,7 +852,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="deleted-items-${date}.pdf"`);
       doc.pipe(res);
@@ -917,7 +917,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="inventory-adjustments-${date}.pdf"`);
       doc.pipe(res);
@@ -987,7 +987,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="purchase-orders-${date}.pdf"`);
       doc.pipe(res);
@@ -1054,7 +1054,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="stock-movements-${date}.pdf"`);
       doc.pipe(res);
@@ -1135,7 +1135,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="customer-statement-${params.customer_number}-${date}.pdf"`);
       doc.pipe(res);
@@ -1205,7 +1205,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="profit-margin-${date}.pdf"`);
       doc.pipe(res);
@@ -1270,7 +1270,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="daily-cash-flow-${date}.pdf"`);
       doc.pipe(res);
@@ -1336,7 +1336,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="supplier-payment-status-${date}.pdf"`);
       doc.pipe(res);
@@ -1399,7 +1399,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="top-customers-${date}.pdf"`);
       doc.pipe(res);
@@ -1464,7 +1464,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="customer-aging-${date}.pdf"`);
       doc.pipe(res);
@@ -1527,7 +1527,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="stock-aging-${date}.pdf"`);
       doc.pipe(res);
@@ -1591,7 +1591,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="waste-damage-${date}.pdf"`);
       doc.pipe(res);
@@ -1657,7 +1657,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="reorder-recommendations-${date}.pdf"`);
       doc.pipe(res);
@@ -1888,7 +1888,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="sales-by-category-${date}.pdf"`);
       doc.pipe(res);
@@ -1957,7 +1957,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="sales-by-payment-method-${date}.pdf"`);
       doc.pipe(res);
@@ -2021,7 +2021,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="hourly-sales-${date}.pdf"`);
       doc.pipe(res);
@@ -2088,7 +2088,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="sales-comparison-${date}.pdf"`);
       doc.pipe(res);
@@ -2153,7 +2153,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="customer-history-${date}.pdf"`);
       doc.pipe(res);
@@ -2239,7 +2239,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="sales-summary-${groupBy}-${date}.pdf"`);
       doc.pipe(res);
@@ -2429,7 +2429,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="sales-by-cashier-${date}.pdf"`);
       doc.pipe(res);
@@ -2862,7 +2862,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = reportDate.toISOString().split('T')[0];
+      const date = reportDate.toLocaleDateString('en-CA');
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="business-position-${date}.pdf"`);
       doc.pipe(res);
@@ -2961,7 +2961,7 @@ export const reportsController = {
     logger.info('Business position report generated', {
       userId,
       businessHealthScore: report.data.businessHealthScore,
-      reportDate: reportDate.toISOString().split('T')[0],
+      reportDate: reportDate.toLocaleDateString('en-CA'),
     });
 
     res.json({ success: true, data: report });

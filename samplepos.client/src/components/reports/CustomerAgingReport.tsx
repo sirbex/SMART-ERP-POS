@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { comprehensiveInvoiceService } from '../../services/comprehensive-accounting';
 import type { CustomerAgingReport as AgingReportType } from '../../types/comprehensive-accounting';
@@ -42,13 +43,13 @@ const CustomerAgingReport: React.FC<CustomerAgingReportProps> = ({ className = '
     // Calculate totals
     const totals = agingData.reduce(
         (acc, row) => ({
-            current: acc.current + toNumber(row.current),
-            days30: acc.days30 + toNumber(row.days30),
-            days60: acc.days60 + toNumber(row.days60),
-            days90: acc.days90 + toNumber(row.days90),
-            over90: acc.over90 + toNumber(row.over90),
-            totalOutstanding: acc.totalOutstanding + toNumber(row.totalOutstanding),
-            overdueAmount: acc.overdueAmount + toNumber(row.overdueAmount),
+            current: new Decimal(acc.current).plus(toNumber(row.current)).toNumber(),
+            days30: new Decimal(acc.days30).plus(toNumber(row.days30)).toNumber(),
+            days60: new Decimal(acc.days60).plus(toNumber(row.days60)).toNumber(),
+            days90: new Decimal(acc.days90).plus(toNumber(row.days90)).toNumber(),
+            over90: new Decimal(acc.over90).plus(toNumber(row.over90)).toNumber(),
+            totalOutstanding: new Decimal(acc.totalOutstanding).plus(toNumber(row.totalOutstanding)).toNumber(),
+            overdueAmount: new Decimal(acc.overdueAmount).plus(toNumber(row.overdueAmount)).toNumber(),
         }),
         { current: 0, days30: 0, days60: 0, days90: 0, over90: 0, totalOutstanding: 0, overdueAmount: 0 }
     );
@@ -94,7 +95,7 @@ const CustomerAgingReport: React.FC<CustomerAgingReportProps> = ({ className = '
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `customer-aging-report-${new Date().toISOString().split('T')[0]}.csv`;
+        a.download = `customer-aging-report-${new Date().toLocaleDateString('en-CA')}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

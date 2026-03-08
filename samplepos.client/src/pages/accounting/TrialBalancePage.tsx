@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { BarChart3, FileText, Download, AlertTriangle, TrendingUp } from 'lucide-react';
 import { Button } from '../../components/ui/temp-ui-components';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/temp-ui-components';
@@ -400,17 +401,17 @@ const TrialBalancePage = () => {
                             </td>
                             <td className="py-3 text-right font-mono text-red-600">
                               {formatCurrency(
-                                groupedEntries[accountType].reduce((sum, entry) => sum + entry.debitBalance, 0)
+                                groupedEntries[accountType].reduce((sum, entry) => new Decimal(sum).plus(entry.debitBalance).toNumber(), 0)
                               )}
                             </td>
                             <td className="py-3 text-right font-mono text-green-600">
                               {formatCurrency(
-                                groupedEntries[accountType].reduce((sum, entry) => sum + entry.creditBalance, 0)
+                                groupedEntries[accountType].reduce((sum, entry) => new Decimal(sum).plus(entry.creditBalance).toNumber(), 0)
                               )}
                             </td>
                             <td className="py-3 text-right font-mono">
                               {(() => {
-                                const subtotalNet = groupedEntries[accountType].reduce((sum, entry) => sum + entry.netBalance, 0);
+                                const subtotalNet = groupedEntries[accountType].reduce((sum, entry) => new Decimal(sum).plus(entry.netBalance).toNumber(), 0);
                                 return (
                                   <span className={subtotalNet < 0 ? 'text-red-600' : ''}>
                                     {formatNetBalance(subtotalNet)}

@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import Decimal from 'decimal.js';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import quotationApi from '../../api/quotations';
@@ -61,8 +62,8 @@ export default function QuotationsPage() {
     open: openQuotations.length,
     converted: allQuotations.filter(q => normalizeStatus(q.status) === 'CONVERTED').length,
     cancelled: allQuotations.filter(q => normalizeStatus(q.status) === 'CANCELLED').length,
-    totalValue: allQuotations.reduce((sum, q) => sum + q.totalAmount, 0),
-    openValue: openQuotations.reduce((sum, q) => sum + q.totalAmount, 0),
+    totalValue: allQuotations.reduce((sum, q) => new Decimal(sum).plus(q.totalAmount).toNumber(), 0),
+    openValue: openQuotations.reduce((sum, q) => new Decimal(sum).plus(q.totalAmount).toNumber(), 0),
   };
 
   const getStatusColor = (status: QuotationStatus): string => {

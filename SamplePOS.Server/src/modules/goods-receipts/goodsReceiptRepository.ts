@@ -43,7 +43,7 @@ export interface GoodsReceiptItem {
 
 export interface CreateGRData {
   purchaseOrderId?: string | null;
-  receiptDate: Date;
+  receiptDate: string;
   notes: string | null;
   receivedBy: string;
   source?: 'PURCHASE_ORDER' | 'MANUAL';
@@ -58,7 +58,7 @@ export interface CreateGRItemData {
   receivedQuantity: number;
   unitCost: number;
   batchNumber: string | null;
-  expiryDate: Date | null;
+  expiryDate: string | null;
 }
 
 export interface UpdateGRItemData {
@@ -66,7 +66,7 @@ export interface UpdateGRItemData {
   unitCost?: number;
   batchNumber?: string | null;
   isBonus?: boolean;
-  expiryDate?: Date | null;
+  expiryDate?: string | null;
 }
 
 export const goodsReceiptRepository = {

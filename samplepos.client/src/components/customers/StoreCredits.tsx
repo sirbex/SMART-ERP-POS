@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
 import { DatePicker } from '../ui/date-picker';
@@ -162,7 +163,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                 }
 
                 const newUsedAmount = credit.usedAmount + amountToUse;
-                const newAvailableAmount = credit.amount - newUsedAmount;
+                const newAvailableAmount = new Decimal(credit.amount).minus(newUsedAmount).toNumber();
 
                 if (newAvailableAmount < 0) {
                     alert('Cannot use more than available credit amount');
@@ -218,12 +219,12 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
             c.status === 'ACTIVE' &&
             (!c.expiresAt || new Date(c.expiresAt) > new Date())
         );
-        return customerCredits.reduce((sum, c) => sum + c.availableAmount, 0);
+        return customerCredits.reduce((sum, c) => new Decimal(sum).plus(c.availableAmount).toNumber(), 0);
     };
 
-    const totalCredits = credits.reduce((sum, c) => sum + c.amount, 0);
-    const totalAvailable = credits.reduce((sum, c) => sum + (c.status === 'ACTIVE' ? c.availableAmount : 0), 0);
-    const totalUsed = credits.reduce((sum, c) => sum + c.usedAmount, 0);
+    const totalCredits = credits.reduce((sum, c) => new Decimal(sum).plus(c.amount).toNumber(), 0);
+    const totalAvailable = credits.reduce((sum, c) => new Decimal(sum).plus(c.status === 'ACTIVE' ? c.availableAmount : 0).toNumber(), 0);
+    const totalUsed = credits.reduce((sum, c) => new Decimal(sum).plus(c.usedAmount).toNumber(), 0);
     const expiringSoon = credits.filter(c =>
         c.status === 'ACTIVE' &&
         c.expiresAt &&

@@ -6,9 +6,13 @@
 
 import express from 'express';
 import { AuditController } from './auditController.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 const router = express.Router();
 const auditController = new AuditController();
+
+// All audit routes require system.audit_read permission (ADMIN/MANAGER only)
+router.use(requirePermission('system.audit_read'));
 
 // =====================================================
 // AUDIT LOG ROUTES

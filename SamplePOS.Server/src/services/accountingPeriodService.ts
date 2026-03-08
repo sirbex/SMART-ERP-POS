@@ -374,7 +374,7 @@ export class AccountingPeriodService {
             JOIN ledger_transactions lt ON le."LedgerTransactionId" = lt."Id"
             WHERE lt."TransactionDate"::DATE >= $1
               AND lt."TransactionDate"::DATE <= $2
-        `, [periodStart.toISOString().split('T')[0], periodEnd.toISOString().split('T')[0]]);
+        `, [periodStart.toLocaleDateString('en-CA'), periodEnd.toLocaleDateString('en-CA')]);
 
         const debits = new Decimal(balanceCheck.rows[0]?.total_debits || '0');
         const credits = new Decimal(balanceCheck.rows[0]?.total_credits || '0');
@@ -393,7 +393,7 @@ export class AccountingPeriodService {
             WHERE sale_date >= $1
               AND sale_date <= $2
               AND status = 'PENDING'
-        `, [periodStart.toISOString().split('T')[0], periodEnd.toISOString().split('T')[0]]);
+        `, [periodStart.toLocaleDateString('en-CA'), periodEnd.toLocaleDateString('en-CA')]);
 
         if (parseInt(pendingSales.rows[0]?.count || '0') > 0) {
             return {

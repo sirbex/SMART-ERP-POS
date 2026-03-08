@@ -1254,7 +1254,7 @@ export const salesService = {
             sale.saleNumber,
             payment.amount,
             payment.paymentMethod,
-            sale.saleDate || new Date().toISOString().split('T')[0]
+            sale.saleDate || new Date().toLocaleDateString('en-CA')
           );
           logger.info('Bank transaction created for sale payment', {
             saleId: sale.id,
@@ -1271,7 +1271,7 @@ export const salesService = {
             sale.saleNumber,
             actualTotalAmount,
             effectivePaymentMethod,
-            sale.saleDate || new Date().toISOString().split('T')[0]
+            sale.saleDate || new Date().toLocaleDateString('en-CA')
           );
           logger.info('Bank transaction created for sale', {
             saleId: sale.id,

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { Eye, Search, Download, ArrowUpDown } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { DatePicker } from '../../components/ui/date-picker';
@@ -217,7 +218,7 @@ const GeneralLedgerPage = () => {
       transactionDate: baseEntry.transactionDate,
       description: `Transaction ${baseEntry.reference || transactionId}`,
       reference: baseEntry.reference,
-      totalAmount: relatedEntries.reduce((sum, entry) => sum + Math.abs(entry.debitAmount || entry.creditAmount), 0),
+      totalAmount: relatedEntries.reduce((sum, entry) => new Decimal(sum).plus(Math.abs(entry.debitAmount || entry.creditAmount)).toNumber(), 0),
       entries: relatedEntries,
       createdAt: baseEntry.createdAt,
       createdBy: baseEntry.createdBy || 'System'
@@ -720,10 +721,10 @@ const GeneralLedgerPage = () => {
                         <tr>
                           <td className="px-3 py-2 font-medium">Total</td>
                           <td className="px-3 py-2 text-right font-mono font-medium text-red-600">
-                            {formatCurrency(selectedTransaction.entries.reduce((sum, e) => sum + e.debitAmount, 0))}
+                            {formatCurrency(selectedTransaction.entries.reduce((sum, e) => new Decimal(sum).plus(e.debitAmount).toNumber(), 0))}
                           </td>
                           <td className="px-3 py-2 text-right font-mono font-medium text-green-600">
-                            {formatCurrency(selectedTransaction.entries.reduce((sum, e) => sum + e.creditAmount, 0))}
+                            {formatCurrency(selectedTransaction.entries.reduce((sum, e) => new Decimal(sum).plus(e.creditAmount).toNumber(), 0))}
                           </td>
                         </tr>
                       </tfoot>

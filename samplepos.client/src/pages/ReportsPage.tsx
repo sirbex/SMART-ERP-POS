@@ -945,7 +945,7 @@ export default function ReportsPage() {
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `${selectedReport.toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`;
+      a.download = `${selectedReport.toLowerCase()}-${new Date().toLocaleDateString('en-CA')}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -980,7 +980,7 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${selectedReport}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `${selectedReport}_${new Date().toLocaleDateString('en-CA')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };

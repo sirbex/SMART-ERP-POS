@@ -388,8 +388,8 @@ export default function SalesPage() {
     const totalSales = Number(summaryObj.totalAmount || summaryObj.total_amount || 0);
     const totalProfit = Number(summaryObj.totalProfit || summaryObj.total_profit || 0);
     const salesCount = Number(summaryObj.totalSales || summaryObj.total_sales || 0);
-    const avgSale = salesCount > 0 ? totalSales / salesCount : 0;
-    const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
+    const avgSale = salesCount > 0 ? new Decimal(totalSales).dividedBy(salesCount).toNumber() : 0;
+    const profitMargin = totalSales > 0 ? new Decimal(totalProfit).dividedBy(totalSales).times(100).toNumber() : 0;
 
     // Normalize payment methods data
     const paymentMethodsRaw = summaryObj.byPaymentMethod || summaryObj.by_payment_method || [];
@@ -753,7 +753,7 @@ export default function SalesPage() {
                                 {formatCurrency(pm.totalAmount)}
                               </div>
                               <div className="text-sm text-gray-600 mt-1">
-                                Avg: {formatCurrency(pm.count > 0 ? pm.totalAmount / pm.count : 0)}
+                                Avg: {formatCurrency(pm.count > 0 ? new Decimal(pm.totalAmount).dividedBy(pm.count).toNumber() : 0)}
                               </div>
                             </div>
                           ))}
@@ -788,7 +788,7 @@ export default function SalesPage() {
                                   <td className="py-2 text-right font-medium">{formatCurrency(day.totalAmount)}</td>
                                   <td className="py-2 text-right text-green-600">{formatCurrency(day.totalProfit)}</td>
                                   <td className="py-2 text-right">
-                                    {day.totalAmount > 0 ? ((day.totalProfit / day.totalAmount) * 100).toFixed(1) : '0.0'}%
+                                    {day.totalAmount > 0 ? new Decimal(day.totalProfit).dividedBy(day.totalAmount).times(100).toFixed(1) : '0.0'}%
                                   </td>
                                 </tr>
                               ))}
@@ -1560,7 +1560,7 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                     {(() => {
                       const totalAmount = sale.totalAmount || 0;
                       const amountPaid = sale.paymentReceived || sale.amountPaid || 0;
-                      const balance = totalAmount - amountPaid;
+                      const balance = new Decimal(totalAmount).minus(amountPaid).toNumber();
 
                       if (balance > 0) {
                         return (

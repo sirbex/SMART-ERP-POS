@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
 import IdDisplay from '../components/IdDisplay';
 import { useCustomers, useCustomerStatement } from '../hooks/useApi';
@@ -105,7 +106,7 @@ export default function CustomersPage() {
   // Calculate summary statistics
   const totalCustomers = pagination?.total || 0;
   const activeCustomers = customers.filter((c: Customer) => c.isActive).length;
-  const totalBalance = customers.reduce((sum: number, c: Customer) => sum + toNumber(c.balance), 0);
+  const totalBalance = customers.reduce((sum: number, c: Customer) => new Decimal(sum).plus(toNumber(c.balance)).toNumber(), 0);
   const customersWithDebt = customers.filter((c: Customer) => toNumber(c.balance) > 0).length; // Balance > 0 = customer owes money
 
   return (

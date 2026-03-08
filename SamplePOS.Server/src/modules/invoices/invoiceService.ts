@@ -384,7 +384,7 @@ export const invoiceService = {
                 deliveryAddress: customer.address,
                 items: deliveryItems,
                 totalAmount: new Decimal(fresh.total_amount.toString()).toNumber(),
-                deliveryDate: new Date().toISOString().split('T')[0], // Today
+                deliveryDate: new Date().toLocaleDateString('en-CA'), // Today
                 priority: 'NORMAL' as const,
                 notes: `Auto-generated from invoice ${fresh.invoice_number}`
               };

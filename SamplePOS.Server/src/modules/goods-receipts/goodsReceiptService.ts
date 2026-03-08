@@ -98,7 +98,7 @@ export const goodsReceiptService = {
         receivedQuantity: number;
         unitCost: number;
         batchNumber?: string | null;
-        expiryDate?: Date | null;
+        expiryDate?: string | null;
       }>;
     }
   ): Promise<CreateGRResult> {
@@ -237,7 +237,7 @@ export const goodsReceiptService = {
         if (expiry) {
           InventoryBusinessRules.validateExpiryDate(expiry, false);
           logger.info('BR-INV-003: Expiry date validation passed', {
-            expiryDate: expiry.toISOString().split('T')[0],
+            expiryDate: expiry,
           });
 
           // BR-INV-008: Reject short expiry items
@@ -249,7 +249,7 @@ export const goodsReceiptService = {
           if (expiryWarning) {
             logger.warn('BR-INV-007: Item expiring within 30 days', {
               productName: it.productName,
-              expiryDate: expiry.toISOString().split('T')[0],
+              expiryDate: expiry,
             });
           }
 
@@ -359,13 +359,13 @@ export const goodsReceiptService = {
         const productName: string = item.productName ?? 'Unknown product';
         const receivedQty: number = Number(item.receivedQuantity ?? 0);
         const unitCost: number = Number(item.unitCost ?? 0);
-        const expiryDate: Date | null = item.expiryDate ? new Date(item.expiryDate) : null;
+        const expiryDate: string | null = item.expiryDate || null;
 
         if (receivedQty <= 0)
           preValidationErrors.push(`${productName}: received quantity must be greater than 0`);
         if (!Number.isFinite(unitCost) || unitCost < 0)
           preValidationErrors.push(`${productName}: unit cost cannot be negative`);
-        if (expiryDate && expiryDate < new Date())
+        if (expiryDate && expiryDate < new Date().toLocaleDateString('en-CA'))
           preValidationErrors.push(`${productName}: expiry date cannot be in the past`);
       }
 
@@ -425,7 +425,7 @@ export const goodsReceiptService = {
           batchNumber = `${prefix}${seqNum}`;
         }
 
-        const expiryDate: Date | null = item.expiryDate ? new Date(item.expiryDate) : null;
+        const expiryDate: string | null = item.expiryDate || null;
 
         if (receivedQty <= 0) continue;
 

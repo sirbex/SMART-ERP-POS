@@ -61,7 +61,7 @@ const CustomerPaymentsPage: React.FC = () => {
         amount: '',
         paymentMethod: 'CASH',
         reference: '',
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toLocaleDateString('en-CA'),
         notes: ''
     });
 
@@ -252,7 +252,7 @@ const CustomerPaymentsPage: React.FC = () => {
             amount: '',
             paymentMethod: 'CASH',
             reference: '',
-            paymentDate: new Date().toISOString().split('T')[0],
+            paymentDate: new Date().toLocaleDateString('en-CA'),
             notes: ''
         });
     };

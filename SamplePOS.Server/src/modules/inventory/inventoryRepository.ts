@@ -269,7 +269,7 @@ export const inventoryRepository = {
       productId: string;
       batchNumber: string;
       quantity: number;
-      expiryDate: Date | null;
+      expiryDate: string | null;
       costPrice: number;
       goodsReceiptId?: string | null;
       goodsReceiptItemId?: string | null;

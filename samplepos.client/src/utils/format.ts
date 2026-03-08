@@ -14,34 +14,59 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
 }
 
 /**
+ * Check if a string is a date-only format (YYYY-MM-DD)
+ */
+function isDateOnly(dateString: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateString);
+}
+
+/**
+ * Parse a date string safely.
+ * For date-only strings (YYYY-MM-DD), parse as local date to avoid timezone shift.
+ * For timestamps (ISO 8601), use standard Date parsing.
+ */
+function safeParseDate(dateString: string): Date {
+  if (isDateOnly(dateString)) {
+    // Parse YYYY-MM-DD as local midnight (not UTC) to avoid timezone shift
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  return new Date(dateString);
+}
+
+/**
  * Format date and time for display
  */
 export function formatDateTime(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleString();
+  if (isDateOnly(dateString)) {
+    // Date-only strings should display as date only, not with time
+    return safeParseDate(dateString).toLocaleDateString();
+  }
+  return new Date(dateString).toLocaleString();
 }
 
 /**
  * Format date only
  */
 export function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleDateString();
+  return safeParseDate(dateString).toLocaleDateString();
 }
 
 /**
  * Format time only
  */
 export function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString();
+  if (isDateOnly(dateString)) {
+    return ''; // No time component for date-only strings
+  }
+  return new Date(dateString).toLocaleTimeString();
 }
 
 /**
  * Format relative time (e.g., "2 hours ago")
  */
 export function formatRelativeTime(dateString: string): string {
-  const date = new Date(dateString);
+  const date = safeParseDate(dateString);
   const now = new Date();
   const diffInMs = now.getTime() - date.getTime();
   const diffInMinutes = Math.floor(diffInMs / (1000 * 60));

@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { quotationController } from './quotationController';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';
 
 const router = Router();
@@ -22,9 +23,9 @@ router.get('/quotations', authenticate, quotationController.listQuotations);
 router.get('/quotations/:id', authenticate, quotationController.getQuotation);
 router.get('/quotations/number/:quoteNumber', authenticate, quotationController.getQuotationByNumber);
 router.put('/quotations/:id', authenticate, quotationController.updateQuotation);
-router.put('/quotations/:id/status', authenticate, quotationController.updateQuotationStatus);
-router.post('/quotations/:id/convert', authenticate, quotationController.convertQuotation);
-router.delete('/quotations/:id', authenticate, quotationController.deleteQuotation);
+router.put('/quotations/:id/status', authenticate, requirePermission('sales.update'), quotationController.updateQuotationStatus);
+router.post('/quotations/:id/convert', authenticate, requirePermission('sales.create'), quotationController.convertQuotation);
+router.delete('/quotations/:id', authenticate, requirePermission('sales.delete'), quotationController.deleteQuotation);
 
 // POS quick quote endpoints
 router.post('/pos/quote', authenticate, quotationController.createQuickQuote);

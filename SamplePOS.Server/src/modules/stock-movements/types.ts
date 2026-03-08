@@ -80,8 +80,8 @@ export interface StockMovementWithDetails extends StockMovement {
  */
 export interface MovementFilters {
   movementType?: MovementType;
-  startDate?: Date;
-  endDate?: Date;
+  startDate?: string;
+  endDate?: string;
 }
 
 /**

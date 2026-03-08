@@ -7,14 +7,14 @@ export interface PurchaseOrder {
   id: string;
   poNumber: string;
   supplierId: string;
-  orderDate: Date;
-  expectedDate: Date | null;
+  orderDate: string;
+  expectedDate: string | null;
   status: 'DRAFT' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
   totalAmount: number;
   notes: string | null;
   createdBy: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PurchaseOrderItem {
@@ -32,8 +32,8 @@ export interface PurchaseOrderItem {
 
 export interface CreatePOData {
   supplierId: string;
-  orderDate: Date;
-  expectedDate: Date | null;
+  orderDate: string;
+  expectedDate: string | null;
   notes: string | null;
   createdBy: string;
 }

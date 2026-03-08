@@ -230,7 +230,7 @@ const ChartOfAccountsPage = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `chart-of-accounts-${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `chart-of-accounts-${new Date().toLocaleDateString('en-CA')}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };

@@ -5,8 +5,8 @@ import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 
 export interface HistoryFilters {
-  startDate?: Date;
-  endDate?: Date;
+  startDate?: string;
+  endDate?: string;
   type?: string; // optional filter by type
 }
 

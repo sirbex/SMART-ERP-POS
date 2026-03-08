@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -219,7 +220,7 @@ export default function Dashboard() {
 
   // Today profit margin
   const todayMargin = todayData?.totalAmount
-    ? ((todayData.totalProfit ?? 0) / todayData.totalAmount) * 100
+    ? new Decimal(todayData.totalProfit ?? 0).dividedBy(todayData.totalAmount).times(100).toNumber()
     : 0;
 
   const isLoading = todayLoading || weekLoading;
@@ -313,26 +314,26 @@ export default function Dashboard() {
 
           {/* Today's Profit — hidden for cashiers */}
           {!isCashier && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Today&apos;s Profit</p>
-              <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-green-600" />
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-gray-500">Today&apos;s Profit</p>
+                <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-green-600" />
+                </div>
               </div>
+              {isLoading ? (
+                <div className="h-8 bg-gray-100 rounded animate-pulse" />
+              ) : (
+                <>
+                  <p
+                    className={`text-2xl font-bold ${(todayData?.totalProfit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                  >
+                    {formatCurrency(todayData?.totalProfit || 0, true, 0)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">{todayMargin.toFixed(1)}% margin</p>
+                </>
+              )}
             </div>
-            {isLoading ? (
-              <div className="h-8 bg-gray-100 rounded animate-pulse" />
-            ) : (
-              <>
-                <p
-                  className={`text-2xl font-bold ${(todayData?.totalProfit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}
-                >
-                  {formatCurrency(todayData?.totalProfit || 0, true, 0)}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">{todayMargin.toFixed(1)}% margin</p>
-              </>
-            )}
-          </div>
           )}
 
           {/* This Week */}
@@ -526,7 +527,7 @@ export default function Dashboard() {
               <div className="space-y-3">
                 {todayData!.byPaymentMethod!.map((pm: PaymentMethodBreakdown) => {
                   const total = todayData!.totalAmount || 1;
-                  const pct = ((pm.totalAmount || 0) / total) * 100;
+                  const pct = new Decimal(pm.totalAmount || 0).dividedBy(total).times(100).toNumber();
                   return (
                     <div key={pm.paymentMethod} className="flex items-center gap-3">
                       <PaymentMethodIcon method={pm.paymentMethod} />
@@ -594,15 +595,15 @@ export default function Dashboard() {
                           )}
                         </td>
                         {!isCashier && (
-                        <td
-                          className={`py-2 text-right font-medium ${safeNum(day.total_profit ?? day.totalProfit) >= 0 ? 'text-green-600' : 'text-red-600'}`}
-                        >
-                          {formatCurrency(
-                            safeNum(day.total_profit ?? day.totalProfit),
-                            true,
-                            0
-                          )}
-                        </td>
+                          <td
+                            className={`py-2 text-right font-medium ${safeNum(day.total_profit ?? day.totalProfit) >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                          >
+                            {formatCurrency(
+                              safeNum(day.total_profit ?? day.totalProfit),
+                              true,
+                              0
+                            )}
+                          </td>
                         )}
                         <td className="py-2 text-right text-gray-500 hidden sm:table-cell">
                           {formatCurrency(
@@ -645,25 +646,25 @@ export default function Dashboard() {
                 </p>
               </div>
               {!isCashier && (
-              <>
-              <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Total Profit</p>
-                <p
-                  className={`text-lg font-bold ${(allTimeData?.totalProfit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}
-                >
-                  {formatCurrency(allTimeData?.totalProfit || 0, true, 0)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Margin</p>
-                <p className="text-lg font-bold text-gray-900">
-                  {allTimeData?.totalAmount
-                    ? ((allTimeData.totalProfit ?? 0) / allTimeData.totalAmount * 100).toFixed(1)
-                    : '0.0'}
-                  %
-                </p>
-              </div>
-              </>
+                <>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Total Profit</p>
+                    <p
+                      className={`text-lg font-bold ${(allTimeData?.totalProfit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                    >
+                      {formatCurrency(allTimeData?.totalProfit || 0, true, 0)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Margin</p>
+                    <p className="text-lg font-bold text-gray-900">
+                      {allTimeData?.totalAmount
+                        ? new Decimal(allTimeData.totalProfit ?? 0).dividedBy(allTimeData.totalAmount).times(100).toFixed(1)
+                        : '0.0'}
+                      %
+                    </p>
+                  </div>
+                </>
               )}
             </div>
           </div>

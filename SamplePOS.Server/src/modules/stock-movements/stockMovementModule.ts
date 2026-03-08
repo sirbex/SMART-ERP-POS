@@ -174,8 +174,8 @@ export const stockMovementRepository = {
     limit: number = 100,
     filters?: {
       movementType?: MovementType;
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
     }
   ): Promise<{ movements: StockMovement[]; total: number }> {
     const offset = (page - 1) * limit;
@@ -333,7 +333,7 @@ export const stockMovementService = {
     pool: Pool,
     page: number = 1,
     limit: number = 100,
-    filters?: { movementType?: MovementType; startDate?: Date; endDate?: Date }
+    filters?: { movementType?: MovementType; startDate?: string; endDate?: string }
   ) {
     return stockMovementRepository.getAllMovements(pool, page, limit, filters);
   },
@@ -375,12 +375,10 @@ const ListMovementsQuerySchema = z.object({
     .optional(),
   startDate: z
     .string()
-    .optional()
-    .transform((val) => (val ? new Date(val) : undefined)),
+    .optional(),
   endDate: z
     .string()
-    .optional()
-    .transform((val) => (val ? new Date(val) : undefined)),
+    .optional(),
 });
 
 // Controller

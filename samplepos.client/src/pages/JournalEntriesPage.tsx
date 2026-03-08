@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, CheckCircle, X } from 'lucide-react';
@@ -283,8 +284,8 @@ export default function JournalEntriesPage() {
         }));
     };
 
-    const totalDebits = form.lines.reduce((sum, line) => sum + (line.debitAmount || 0), 0);
-    const totalCredits = form.lines.reduce((sum, line) => sum + (line.creditAmount || 0), 0);
+    const totalDebits = form.lines.reduce((sum, line) => new Decimal(sum).plus(line.debitAmount || 0).toNumber(), 0);
+    const totalCredits = form.lines.reduce((sum, line) => new Decimal(sum).plus(line.creditAmount || 0).toNumber(), 0);
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
     const handleSubmit = () => {

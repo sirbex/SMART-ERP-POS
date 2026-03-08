@@ -17,11 +17,12 @@ const POItemSchema = z.object({
 const CreatePOSchema = z
   .object({
     supplierId: z.string().uuid(),
-    orderDate: z.string().transform((val) => new Date(val)),
+    orderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
     expectedDate: z
       .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
       .optional()
-      .transform((val) => (val ? new Date(val) : null)),
+      .nullable(),
     notes: z.string().optional().nullable(),
     createdBy: z.string().uuid().optional(), // Optional - will use req.user if not provided
     items: z.array(POItemSchema).min(1, 'Purchase order must have at least one item'),

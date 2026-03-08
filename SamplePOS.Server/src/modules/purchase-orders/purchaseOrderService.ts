@@ -16,8 +16,8 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export interface CreatePOInput {
   supplierId: string;
-  orderDate: Date;
-  expectedDate?: Date | null;
+  orderDate: string;
+  expectedDate?: string | null;
   notes?: string | null;
   createdBy: string;
   items: {

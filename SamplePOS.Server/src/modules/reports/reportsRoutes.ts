@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { Pool } from 'pg';
 import { reportsController } from './reportsController.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { demandForecastService } from './demandForecastService.js';
 import { demandForecastRepository } from './demandForecastRepository.js';
@@ -31,7 +32,7 @@ export function createReportsRouter(pool: Pool) {
   // Sales Reports
   router.get('/sales', asyncHandler(async (req, res) => reportsController.getSalesReport(req, res, pool)));
   router.get('/best-selling', asyncHandler(async (req, res) => reportsController.getBestSelling(req, res, pool)));
-  router.get('/profit-loss', asyncHandler(async (req, res) => reportsController.getProfitLoss(req, res, pool)));
+  router.get('/profit-loss', requirePermission('reports.read'), asyncHandler(async (req, res) => reportsController.getProfitLoss(req, res, pool)));
 
   // Supplier Reports
   router.get('/supplier-cost', asyncHandler(async (req, res) => reportsController.getSupplierCostAnalysis(req, res, pool)));
@@ -48,15 +49,15 @@ export function createReportsRouter(pool: Pool) {
   router.get('/purchase-order-summary', asyncHandler(async (req, res) => reportsController.getPurchaseOrderSummary(req, res, pool)));
   router.get('/stock-movement-analysis', asyncHandler(async (req, res) => reportsController.getStockMovementAnalysis(req, res, pool)));
   router.get('/customer-account-statement', asyncHandler(async (req, res) => reportsController.getCustomerAccountStatement(req, res, pool)));
-  router.get('/profit-margin', asyncHandler(async (req, res) => reportsController.getProfitMarginByProduct(req, res, pool)));
-  router.get('/daily-cash-flow', asyncHandler(async (req, res) => reportsController.getDailyCashFlow(req, res, pool)));
+  router.get('/profit-margin', requirePermission('reports.read'), asyncHandler(async (req, res) => reportsController.getProfitMarginByProduct(req, res, pool)));
+  router.get('/daily-cash-flow', requirePermission('reports.read'), asyncHandler(async (req, res) => reportsController.getDailyCashFlow(req, res, pool)));
   router.get('/supplier-payment-status', asyncHandler(async (req, res) => reportsController.getSupplierPaymentStatus(req, res, pool)));
   router.get('/top-customers', asyncHandler(async (req, res) => reportsController.getTopCustomers(req, res, pool)));
   router.get('/customer-aging', asyncHandler(async (req, res) => reportsController.getCustomerAging(req, res, pool)));
   router.get('/stock-aging', asyncHandler(async (req, res) => reportsController.getStockAging(req, res, pool)));
   router.get('/waste-damage', asyncHandler(async (req, res) => reportsController.getWasteDamage(req, res, pool)));
   router.get('/reorder-recommendations', asyncHandler(async (req, res) => reportsController.getReorderRecommendations(req, res, pool)));
-  router.get('/business-position', asyncHandler(async (req, res) => reportsController.getBusinessPositionReport(req, res, pool)));
+  router.get('/business-position', requirePermission('reports.read'), asyncHandler(async (req, res) => reportsController.getBusinessPositionReport(req, res, pool)));
 
   // Sales Analysis Reports
   router.get('/sales-by-category', asyncHandler(async (req, res) => reportsController.getSalesByCategory(req, res, pool)));
@@ -68,7 +69,7 @@ export function createReportsRouter(pool: Pool) {
   // Additional Sales Reports
   router.get('/sales-summary-by-date', asyncHandler(async (req, res) => reportsController.getSalesSummaryByDateReport(req, res, pool)));
   router.get('/sales-details', asyncHandler(async (req, res) => reportsController.getSalesDetailsReport(req, res, pool)));
-  router.get('/sales-by-cashier', asyncHandler(async (req, res) => reportsController.getSalesByCashierReport(req, res, pool)));
+  router.get('/sales-by-cashier', requirePermission('reports.read'), asyncHandler(async (req, res) => reportsController.getSalesByCashierReport(req, res, pool)));
 
   // Cash Register Session Reports
   router.get('/cash-register/session/:sessionId', asyncHandler(async (req, res) => reportsController.getCashRegisterSessionSummary(req, res, pool)));
@@ -76,14 +77,14 @@ export function createReportsRouter(pool: Pool) {
   router.get('/cash-register/session-history', asyncHandler(async (req, res) => reportsController.getCashRegisterSessionHistory(req, res, pool)));
 
   // ── Demand Forecasting (Self-Learning Engine) ────────
-  // Manual trigger: run daily demand stats refresh now
-  router.post('/demand-forecast/refresh-daily', asyncHandler(async (req, res) => {
+  // Manual trigger: run daily demand stats refresh now (admin/manager only)
+  router.post('/demand-forecast/refresh-daily', requirePermission('admin.update'), asyncHandler(async (req, res) => {
     const result = await demandForecastService.runDailyUpdate(pool);
     res.json({ success: true, data: result });
   }));
 
-  // Manual trigger: run monthly seasonality refresh now
-  router.post('/demand-forecast/refresh-monthly', asyncHandler(async (req, res) => {
+  // Manual trigger: run monthly seasonality refresh now (admin/manager only)
+  router.post('/demand-forecast/refresh-monthly', requirePermission('admin.update'), asyncHandler(async (req, res) => {
     const result = await demandForecastService.runMonthlyUpdate(pool);
     res.json({ success: true, data: result });
   }));

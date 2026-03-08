@@ -1007,7 +1007,7 @@ function DriverAssignModal({ order, onClose, onSuccess }: { order: DeliveryOrder
 function CreateDeliveryModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({
     customerId: '',
-    deliveryDate: new Date().toISOString().split('T')[0],
+    deliveryDate: new Date().toLocaleDateString('en-CA'),
     deliveryAddress: '',
     deliveryContactName: undefined as string | undefined,
     deliveryContactPhone: undefined as string | undefined,
@@ -1241,7 +1241,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
   const [selectedSale, setSelectedSale] = useState<DeliverableSale | null>(null);
   const [form, setForm] = useState({
     deliveryAddress: '',
-    deliveryDate: new Date().toISOString().split('T')[0],
+    deliveryDate: new Date().toLocaleDateString('en-CA'),
     deliveryContactName: '',
     deliveryContactPhone: '',
     deliveryFee: 0,
@@ -1288,7 +1288,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
     setSelectedSale(null);
     setForm({
       deliveryAddress: '',
-      deliveryDate: new Date().toISOString().split('T')[0],
+      deliveryDate: new Date().toLocaleDateString('en-CA'),
       deliveryContactName: '',
       deliveryContactPhone: '',
       deliveryFee: 0,
@@ -1610,7 +1610,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
 
 function CreateRouteModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [routeName, setRouteName] = useState('');
-  const [routeDate, setRouteDate] = useState(new Date().toISOString().split('T')[0]);
+  const [routeDate, setRouteDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [vehiclePlateNumber, setVehiclePlateNumber] = useState('');
 
   // Fetch pending delivery orders to add to route

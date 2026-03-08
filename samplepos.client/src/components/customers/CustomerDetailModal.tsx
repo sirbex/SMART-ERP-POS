@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Decimal from 'decimal.js';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
 import { formatCurrency } from '../../utils/currency';
@@ -419,7 +420,7 @@ export default function CustomerDetailModal({
                                                             {invoices.map((inv: InvoiceRow) => {
                                                                 const total = Number(inv.totalAmount || inv.total_amount || 0);
                                                                 const paid = Number(inv.amountPaid || inv.amount_paid || 0);
-                                                                const outstanding = total - paid;
+                                                                const outstanding = new Decimal(total).minus(paid).toNumber();
                                                                 const status = (inv.status || '').toUpperCase();
                                                                 const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
                                                                 const statusColor = status === 'PAID' ? 'bg-green-100 text-green-800' : (status.includes('PARTIAL') ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');

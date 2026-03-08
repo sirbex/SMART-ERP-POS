@@ -95,7 +95,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
         amount: '',
         paymentMethod: 'CASH',
         reference: '',
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toLocaleDateString('en-CA'),
         notes: '',
         allocations: []
     });
@@ -267,7 +267,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             amount: invoice.outstandingBalance.toString(),
             paymentMethod: 'CASH',
             reference: '',
-            paymentDate: new Date().toISOString().split('T')[0],
+            paymentDate: new Date().toLocaleDateString('en-CA'),
             notes: `Payment for ${invoice.invoiceNumber}`,
             allocations: [{
                 invoiceId: invoice.id,
@@ -353,7 +353,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             amount: '',
             paymentMethod: 'CASH',
             reference: '',
-            paymentDate: new Date().toISOString().split('T')[0],
+            paymentDate: new Date().toLocaleDateString('en-CA'),
             notes: '',
             allocations: []
         });

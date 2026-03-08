@@ -38,8 +38,12 @@ export const quotationController = {
       customerPhone: validatedData.customerPhone || null,
       customerEmail: validatedData.customerEmail || null,
       description: validatedData.notes || null,
-      validFrom: validatedData.validFrom || new Date().toISOString().split('T')[0],
-      validUntil: validatedData.validUntil || new Date(Date.now() + (validatedData.validityDays || 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      validFrom: validatedData.validFrom || new Date().toLocaleDateString('en-CA'),
+      validUntil: validatedData.validUntil || (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + (validatedData.validityDays || 30));
+        return d.toLocaleDateString('en-CA');
+      })(),
       createdById: userId,
       items: validatedData.items,
     });
@@ -59,9 +63,11 @@ export const quotationController = {
     const userId: string = req.user!.id;
     const validatedData = CreateQuickQuoteInputSchema.parse(req.body);
 
-    const validFrom = new Date().toISOString().split('T')[0];
+    const validFrom = new Date().toLocaleDateString('en-CA');
     const validityDays = validatedData.validityDays || 30;
-    const validUntil = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const validUntilDate = new Date();
+    validUntilDate.setDate(validUntilDate.getDate() + validityDays);
+    const validUntil = validUntilDate.toLocaleDateString('en-CA');
 
     const result = await quotationService.createQuotation(pool, {
       quoteType: 'quick',

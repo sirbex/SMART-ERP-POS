@@ -60,7 +60,7 @@ const DateRangeQuerySchema = z.object({
 const router = express.Router();
 
 // =============================================================================
-// HEALTH CHECK
+// HEALTH CHECK (public)
 // =============================================================================
 
 router.get('/test', (_req, res) => {
@@ -77,6 +77,9 @@ router.get('/health', (_req, res) => {
     }
   });
 });
+
+// All routes below require authentication
+router.use(authenticate);
 
 // =============================================================================
 // CHART OF ACCOUNTS
@@ -292,7 +295,7 @@ router.get('/general-ledger/export', asyncHandler(async (req, res) => {
   ].join('\n');
 
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', `attachment; filename="general-ledger-${new Date().toISOString().split('T')[0]}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="general-ledger-${new Date().toLocaleDateString('en-CA')}.csv"`);
   res.send(csvContent);
 }));
 
@@ -402,7 +405,7 @@ router.get('/transactions/:transactionId', asyncHandler(async (req, res) => {
  */
 router.get('/trial-balance', asyncHandler(async (req, res) => {
   const query = TrialBalanceQuerySchema.parse(req.query);
-  const asOfDate = query.asOfDate || new Date().toISOString().split('T')[0];
+  const asOfDate = query.asOfDate || new Date().toLocaleDateString('en-CA');
   const includeZeroBalances = query.includeZeroBalances === 'true';
 
   const trialBalance = await accountingRepository.getTrialBalance(
@@ -427,7 +430,7 @@ router.get('/trial-balance', asyncHandler(async (req, res) => {
 router.get('/balance-sheet', asyncHandler(async (req, res) => {
   const pool = (await import('../../db/pool.js')).default;
   const query = DateQuerySchema.parse(req.query);
-  const asOfDate = query.asOfDate || new Date().toISOString().split('T')[0];
+  const asOfDate = query.asOfDate || new Date().toLocaleDateString('en-CA');
 
   const balanceSheet = await accountingRepository.getBalanceSheet(asOfDate);
 
@@ -455,8 +458,8 @@ router.get('/income-statement', asyncHandler(async (req, res) => {
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const query = DateRangeQuerySchema.parse(req.query);
-  const startDate = query.startDate || firstDayOfMonth.toISOString().split('T')[0];
-  const endDate = query.endDate || now.toISOString().split('T')[0];
+  const startDate = query.startDate || firstDayOfMonth.toLocaleDateString('en-CA');
+  const endDate = query.endDate || now.toLocaleDateString('en-CA');
 
   const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate);
 
@@ -487,8 +490,8 @@ router.get('/cash-flow', asyncHandler(async (req, res) => {
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const query = DateRangeQuerySchema.parse(req.query);
-  const startDate = query.startDate || firstDayOfMonth.toISOString().split('T')[0];
-  const endDate = query.endDate || now.toISOString().split('T')[0];
+  const startDate = query.startDate || firstDayOfMonth.toLocaleDateString('en-CA');
+  const endDate = query.endDate || now.toLocaleDateString('en-CA');
 
   // Get income statement for net income
   const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate);
@@ -742,7 +745,7 @@ router.get('/dashboard-summary', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      asOfDate: new Date().toISOString().split('T')[0],
+      asOfDate: new Date().toLocaleDateString('en-CA'),
       chartOfAccounts: {
         total: totalAccounts,
         byType: accountsByType

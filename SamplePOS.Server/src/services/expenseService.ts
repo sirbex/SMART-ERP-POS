@@ -285,7 +285,7 @@ export const markExpensePaid = async (
           existingExpense.expenseNumber,
           existingExpense.amount,
           existingExpense.paymentMethod || 'BANK_TRANSFER',
-          updateData.paid_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+          updateData.paid_at?.split('T')[0] || new Date().toLocaleDateString('en-CA'),
           existingExpense.categoryId || undefined
         );
         if (bankTxn) {

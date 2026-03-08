@@ -68,10 +68,10 @@ export default function SplitPaymentDialog({
     if (remaining < 0) {
       // Only cash overpayment generates change
       const cashPayments = payments.filter(p => p.method === 'CASH');
-      const totalCash = cashPayments.reduce((sum, p) => sum + p.amount, 0);
+      const totalCash = cashPayments.reduce((sum, p) => new Decimal(sum).plus(p.amount).toNumber(), 0);
       const nonCash = payments.filter(p => p.method !== 'CASH')
-        .reduce((sum, p) => sum + p.amount, 0);
-      const remainingAfterNonCash = totalAmount - nonCash;
+        .reduce((sum, p) => new Decimal(sum).plus(p.amount).toNumber(), 0);
+      const remainingAfterNonCash = new Decimal(totalAmount).minus(nonCash).toNumber();
 
       if (totalCash > remainingAfterNonCash) {
         return new Decimal(totalCash).minus(remainingAfterNonCash).toNumber();

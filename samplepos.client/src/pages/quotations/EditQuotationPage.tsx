@@ -60,9 +60,9 @@ export default function EditQuotationPage() {
   const [customerEmail, setCustomerEmail] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
-  const [validFrom, setValidFrom] = useState(new Date().toISOString().split('T')[0]);
+  const [validFrom, setValidFrom] = useState(new Date().toLocaleDateString('en-CA'));
   const [validUntil, setValidUntil] = useState(
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA')
   );
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [termsAndConditions, setTermsAndConditions] = useState('');

@@ -8,30 +8,19 @@ import { requirePermission } from '../../rbac/middleware.js';
 export function createUserRoutes(): Router {
   const router = Router();
 
-  // All user routes require authentication and user-management permissions
+  // All user routes require authentication
   router.use(authenticate);
-  router.use(requirePermission('system.users_read'));
 
-  // GET /api/users - Get all users
-  router.get('/', userController.getAllUsers);
+  // Read operations
+  router.get('/', requirePermission('system.users_read'), userController.getAllUsers);
+  router.get('/stats', requirePermission('system.users_read'), userController.getUserStats);
+  router.get('/:id', requirePermission('system.users_read'), userController.getUserById);
 
-  // GET /api/users/stats - Get user statistics
-  router.get('/stats', userController.getUserStats);
-
-  // GET /api/users/:id - Get user by ID
-  router.get('/:id', userController.getUserById);
-
-  // POST /api/users - Create new user
-  router.post('/', userController.createUser);
-
-  // PUT /api/users/:id - Update user
-  router.put('/:id', userController.updateUser);
-
-  // POST /api/users/:id/change-password - Change user password
-  router.post('/:id/change-password', userController.changePassword);
-
-  // DELETE /api/users/:id - Delete user
-  router.delete('/:id', userController.deleteUser);
+  // Write operations require specific permissions
+  router.post('/', requirePermission('system.users_create'), userController.createUser);
+  router.put('/:id', requirePermission('system.users_update'), userController.updateUser);
+  router.post('/:id/change-password', requirePermission('system.users_update'), userController.changePassword);
+  router.delete('/:id', requirePermission('system.users_delete'), userController.deleteUser);
 
   return router;
 }

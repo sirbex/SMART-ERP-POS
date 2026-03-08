@@ -539,6 +539,6 @@ export const exportExpenses = asyncHandler(async (req, res) => {
   const csv = csvRows.join('\n');
 
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', `attachment; filename="expenses_${new Date().toISOString().split('T')[0]}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="expenses_${new Date().toLocaleDateString('en-CA')}.csv"`);
   res.send(csv);
 });

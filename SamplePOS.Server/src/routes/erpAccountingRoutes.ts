@@ -20,8 +20,12 @@ import { ProfitLossReportService, getProfitLossReportService } from '../services
 import { ReconciliationService, getReconciliationService } from '../services/reconciliationService.js';
 import logger from '../utils/logger.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
+
+// All ERP accounting routes require authentication
+router.use(authenticate);
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -84,9 +88,9 @@ function withServices(req: Request) {
     };
 }
 
-// Get user ID from auth (placeholder - implement based on your auth system)
+// Get user ID from auth middleware
 function getUserId(req: Request): string {
-    return req.user?.id || 'system';
+    return req.user!.id;
 }
 
 // =============================================================================
@@ -148,7 +152,7 @@ router.post('/journal-entries/:id/reverse', asyncHandler(async (req, res) => {
 
     const result = await journalService.reverseJournalEntry({
         journalEntryId: id,
-        reversalDate: new Date().toISOString().split('T')[0], // Today's date
+        reversalDate: new Date().toLocaleDateString('en-CA'), // Today's date
         reason,
         reversedBy: userId
     });
@@ -432,7 +436,7 @@ router.get('/reports/profit-loss', asyncHandler(async (req, res) => {
 
     const today = new Date();
     const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toISOString().split('T')[0];
+    const defaultTo = today.toLocaleDateString('en-CA');
 
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
@@ -494,7 +498,7 @@ router.get('/reports/profit-loss/by-customer', asyncHandler(async (req, res) => 
 
     const today = new Date();
     const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toISOString().split('T')[0];
+    const defaultTo = today.toLocaleDateString('en-CA');
 
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
@@ -537,7 +541,7 @@ router.get('/reports/profit-loss/by-product', asyncHandler(async (req, res) => {
 
     const today = new Date();
     const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toISOString().split('T')[0];
+    const defaultTo = today.toLocaleDateString('en-CA');
 
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
@@ -582,7 +586,7 @@ router.get('/reports/profit-loss/verify', asyncHandler(async (req, res) => {
 
     const today = new Date();
     const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toISOString().split('T')[0];
+    const defaultTo = today.toLocaleDateString('en-CA');
 
     const { plService } = withServices(req);
 

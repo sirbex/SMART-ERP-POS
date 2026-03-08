@@ -9,8 +9,8 @@ import type {
 } from '../../../../shared/zod/product-history.js';
 
 export interface HistoryServiceFilters {
-  startDate?: Date;
-  endDate?: Date;
+  startDate?: string;
+  endDate?: string;
   type?: string;
   page?: number;
   limit?: number;

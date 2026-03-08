@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import Decimal from 'decimal.js';
 import POSSearchBar from '../../components/pos/POSSearchBar';
 import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
@@ -113,7 +114,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
   const transformCachedToSearchResult = (cached: CachedProduct): ProductSearchResult => {
     const defaultUom = cached.uoms.find(u => u.isDefault) || cached.uoms[0];
     const marginPct = cached.sellingPrice > 0
-      ? ((cached.sellingPrice - cached.costPrice) / cached.sellingPrice * 100)
+      ? new Decimal(cached.sellingPrice).minus(cached.costPrice).dividedBy(cached.sellingPrice).times(100).toNumber()
       : 0;
     return {
       id: cached.id,
@@ -162,7 +163,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
         const sellingPrice = parseFloat(String(item.selling_price || 0));
         const averageCost = parseFloat(String(item.average_cost || 0));
         const marginPct = sellingPrice > 0
-          ? ((sellingPrice - averageCost) / sellingPrice * 100)
+          ? new Decimal(sellingPrice).minus(averageCost).dividedBy(sellingPrice).times(100).toNumber()
           : 0;
 
         // Parse UoMs from backend (already in correct format)

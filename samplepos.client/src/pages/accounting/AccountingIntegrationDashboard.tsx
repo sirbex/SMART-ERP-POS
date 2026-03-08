@@ -95,7 +95,7 @@ const AccountingIntegrationDashboard: React.FC = () => {
 
       // Set empty default data on error
       setData({
-        asOfDate: new Date().toISOString().split('T')[0],
+        asOfDate: new Date().toLocaleDateString('en-CA'),
         chartOfAccounts: { total: 0, byType: {} },
         trialBalance: { totalDebits: 0, totalCredits: 0, difference: 0, isBalanced: true },
         sales: { periodDays: 30, totalSales: 0, totalRevenue: 0, totalCOGS: 0, totalProfit: 0, profitMargin: 0 },

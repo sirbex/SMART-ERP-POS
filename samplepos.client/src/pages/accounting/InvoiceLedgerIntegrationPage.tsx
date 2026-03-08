@@ -120,7 +120,7 @@ const InvoiceLedgerIntegrationPage = () => {
         customerId: '',
         paymentAmount: 0,
         paymentMethod: 'CASH',
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: new Date().toLocaleDateString('en-CA'),
         reference: '',
         description: ''
     });

@@ -6,6 +6,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import Decimal from 'decimal.js';
 
 // =============================================================================
 // INTERFACES
@@ -552,7 +553,7 @@ export const cashRegisterRepository = {
   ): Promise<CashRegisterSession> {
     // Calculate expected closing
     const expectedClosing = await this.calculateExpectedClosing(pool, data.sessionId);
-    const variance = data.actualClosing - expectedClosing;
+    const variance = new Decimal(data.actualClosing).minus(expectedClosing).toNumber();
 
     // Calculate payment summary from movements
     const paymentSummary = await this.calculatePaymentSummary(pool, data.sessionId);
@@ -900,11 +901,12 @@ export const cashRegisterRepository = {
     `, [sessionId]);
 
     const s = summaryResult.rows[0];
-    const expectedClosing = parseFloat(s.opening_float) +
-      parseFloat(s.total_cash_in) +
-      parseFloat(s.total_sales) -
-      parseFloat(s.total_cash_out) -
-      parseFloat(s.total_refunds);
+    const expectedClosing = new Decimal(s.opening_float)
+      .plus(s.total_cash_in)
+      .plus(s.total_sales)
+      .minus(s.total_cash_out)
+      .minus(s.total_refunds)
+      .toNumber();
 
     return {
       session,

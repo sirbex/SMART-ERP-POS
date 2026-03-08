@@ -169,7 +169,7 @@ export const salesRepository = {
       [
         saleNumber,
         data.customerId,
-        data.saleDate || new Date().toISOString().split('T')[0], // Use YYYY-MM-DD string format, no Date object conversion
+        data.saleDate || new Date().toLocaleDateString('en-CA'), // Use YYYY-MM-DD string format, no Date object conversion
         parseFloat(subtotal.toFixed(2)),           // $4
         parseFloat(taxAmount.toFixed(2)),          // $5
         parseFloat(discountAmount.toFixed(2)),     // $6
@@ -574,7 +574,7 @@ export const salesRepository = {
       return {
         ...row,
         profit_margin_pct: totalRevenue > 0
-          ? ((totalProfit / totalRevenue) * 100).toFixed(2)
+          ? new Decimal(totalProfit).dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toString()
           : '0.00',
       };
     });

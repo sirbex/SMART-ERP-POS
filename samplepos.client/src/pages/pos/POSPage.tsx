@@ -813,7 +813,7 @@ export default function POSPage() {
         quantity: 1,
         unitPrice: uom.price,
         costPrice: uom.cost,
-        marginPct: uom.price > 0 ? ((uom.price - uom.cost) / uom.price) * 100 : 0,
+        marginPct: uom.price > 0 ? new Decimal(uom.price).minus(uom.cost).dividedBy(uom.price).times(100).toNumber() : 0,
         subtotal: uom.price,
         isTaxable: product.isTaxable ?? false,
         taxRate: product.taxRate || 0,
@@ -848,7 +848,7 @@ export default function POSPage() {
       quantity: 1,
       unitPrice: row.sellingPrice,
       costPrice: row.unitCost,
-      marginPct: row.unitCost > 0 ? ((row.sellingPrice - row.unitCost) / row.sellingPrice) * 100 : 0,
+      marginPct: row.unitCost > 0 ? new Decimal(row.sellingPrice).minus(row.unitCost).dividedBy(row.sellingPrice).times(100).toNumber() : 0,
       subtotal: row.sellingPrice,
       isTaxable: product.isTaxable ?? false,
       taxRate: product.taxRate || 0,
@@ -919,7 +919,7 @@ export default function POSPage() {
       // Update item with new UoM pricing
       const newUnitPrice = newUom.price;
       const newCostPrice = newUom.cost;
-      const newMarginPct = newUnitPrice > 0 ? ((newUnitPrice - newCostPrice) / newUnitPrice) * 100 : 0;
+      const newMarginPct = newUnitPrice > 0 ? new Decimal(newUnitPrice).minus(newCostPrice).dividedBy(newUnitPrice).times(100).toNumber() : 0;
 
       updated[itemIndex] = {
         ...item,
@@ -985,10 +985,10 @@ export default function POSPage() {
     }
 
     const discountAmount = discount.type === 'PERCENTAGE'
-      ? (originalAmount * discount.value) / 100
+      ? new Decimal(originalAmount).times(discount.value).dividedBy(100).toNumber()
       : discount.value;
 
-    const discountPercentage = (discountAmount / originalAmount) * 100;
+    const discountPercentage = new Decimal(discountAmount).dividedBy(originalAmount).times(100).toNumber();
 
     // Check if requires manager approval
     if (discountPercentage > userLimit) {
@@ -1044,7 +1044,7 @@ export default function POSPage() {
             amount: discountAmount,
             reason: discount.reason,
           },
-          subtotal: item.subtotal - discountAmount,
+          subtotal: new Decimal(item.subtotal).minus(discountAmount).toNumber(),
         };
         return updated;
       });
@@ -1188,7 +1188,7 @@ export default function POSPage() {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           costPrice: item.costPrice,
-          marginPct: item.unitPrice > 0 ? ((item.unitPrice - item.costPrice) / item.unitPrice) * 100 : 0,
+          marginPct: item.unitPrice > 0 ? new Decimal(item.unitPrice).minus(item.costPrice).dividedBy(item.unitPrice).times(100).toNumber() : 0,
           subtotal: item.subtotal,
           isTaxable: item.isTaxable,
           taxRate: item.taxRate,
@@ -1517,7 +1517,7 @@ export default function POSPage() {
   }, 0);
 
   const grandTotal = new Decimal(subtotalAfterDiscount).plus(tax).toNumber();
-  const avgMargin = items.length ? items.reduce((sum, i) => sum + i.marginPct, 0) / items.length : 0;
+  const avgMargin = items.length ? items.reduce((sum, i) => new Decimal(sum).plus(i.marginPct).toNumber(), 0) / items.length : 0;
 
   // Handler to add a service/non-inventory item to the cart
   const handleAddServiceItem = useCallback((serviceItem: LineItem) => {
@@ -1534,16 +1534,16 @@ export default function POSPage() {
     if (serviceItemsCount === 0) return 0;
     return items
       .filter(item => item.productType === 'service')
-      .reduce((sum, item) => sum + item.subtotal, 0);
+      .reduce((sum, item) => new Decimal(sum).plus(item.subtotal).toNumber(), 0);
   }, [items, serviceItemsCount]);
 
   // Split payment calculations
   const totalPaid = useMemo(() => {
-    return paymentLines.reduce((sum, line) => sum + line.amount, 0);
+    return paymentLines.reduce((sum, line) => new Decimal(sum).plus(line.amount).toNumber(), 0);
   }, [paymentLines]);
 
   const remainingBalance = useMemo(() => {
-    return grandTotal - totalPaid;
+    return new Decimal(grandTotal).minus(totalPaid).toNumber();
   }, [grandTotal, totalPaid]);
 
   // Calculate change for cash overpayment
@@ -1658,8 +1658,8 @@ export default function POSPage() {
       // Calculate already applied deposits in this transaction
       const appliedDeposits = paymentLines
         .filter(line => line.paymentMethod === 'DEPOSIT')
-        .reduce((sum, line) => sum + line.amount, 0);
-      const availableDeposit = customerDepositBalance - appliedDeposits;
+        .reduce((sum, line) => new Decimal(sum).plus(line.amount).toNumber(), 0);
+      const availableDeposit = new Decimal(customerDepositBalance).minus(appliedDeposits).toNumber();
 
       if (amount > availableDeposit + 0.01) {
         alert(`⚠️ Insufficient Deposit Balance\n\nRequested: ${formatCurrency(amount)}\nAvailable: ${formatCurrency(availableDeposit)}\n\n💡 Tip: Enter ${formatCurrency(Math.min(availableDeposit, remainingBalance))} to use maximum available deposit.`);
@@ -2003,7 +2003,7 @@ export default function POSPage() {
         const hasCreditForInvoice = finalPaymentLines.some(line => line.paymentMethod === 'CREDIT');
 
         // Prepare receipt data with payment lines (use finalPaymentLines which includes auto-credit)
-        const itemDiscountTotal = items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0);
+        const itemDiscountTotal = items.reduce((sum, item) => new Decimal(sum).plus(item.discount?.amount || 0).toNumber(), 0);
         setReceiptData({
           saleNumber: sale.saleNumber || sale.sale_number || '',
           saleDate: sale.saleDate || sale.sale_date || new Date().toISOString(),
@@ -2722,10 +2722,10 @@ export default function POSPage() {
                         }, 50);
                       }}
                       className="py-3 sm:py-4 px-2 sm:px-3 bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-bold text-base sm:text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
-                      title={`Pay ${formatCurrency(amount)} (change: ${formatCurrency(amount - grandTotal)})`}
+                      title={`Pay ${formatCurrency(amount)} (change: ${formatCurrency(new Decimal(amount).minus(grandTotal).toNumber())})`}
                     >
                       <span className="block">{amount >= 1000 ? `${(amount / 1000).toFixed(0)}k` : amount}</span>
-                      <span className="text-xs font-normal hidden sm:block">-{formatCurrency(amount - grandTotal)}</span>
+                      <span className="text-xs font-normal hidden sm:block">-{formatCurrency(new Decimal(amount).minus(grandTotal).toNumber())}</span>
                     </button>
                   ))}
                 </div>

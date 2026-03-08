@@ -38,10 +38,10 @@ export const BankReportsTab: React.FC = () => {
     const [periodStart, setPeriodStart] = useState(() => {
         const date = new Date();
         date.setMonth(date.getMonth() - 1);
-        return date.toISOString().split('T')[0];
+        return date.toLocaleDateString('en-CA');
     });
-    const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().split('T')[0]);
-    const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [periodEnd, setPeriodEnd] = useState(() => new Date().toLocaleDateString('en-CA'));
+    const [asOfDate, setAsOfDate] = useState(() => new Date().toLocaleDateString('en-CA'));
 
     const { data: accounts = [] } = useBankAccounts();
     const { data: summaries = [], isLoading: loadingSummaries, refetch: refetchSummaries } = useAccountSummaries();

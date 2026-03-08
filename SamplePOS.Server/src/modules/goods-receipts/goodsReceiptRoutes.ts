@@ -19,8 +19,7 @@ const GRItemSchema = z.object({
   expiryDate: z
     .string()
     .optional()
-    .nullable()
-    .transform((val) => (val ? new Date(val) : null)),
+    .nullable(),
 });
 
 const CreateGRSchema = z
@@ -31,7 +30,7 @@ const CreateGRSchema = z
       .optional()
       .nullable(),
     supplierId: z.string().uuid('Supplier ID must be a valid UUID').optional().nullable(),
-    receiptDate: z.string().transform((val) => new Date(val)),
+    receiptDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
     notes: z.string().optional().nullable(),
     receivedBy: z.string().uuid('Received By (user ID) must be a valid UUID'),
     source: z.enum(['PURCHASE_ORDER', 'MANUAL']).optional(),
@@ -71,8 +70,7 @@ const UpdateGRItemSchema = z
     expiryDate: z
       .string()
       .nullable()
-      .optional()
-      .transform((val) => (val ? new Date(val) : null)),
+      .optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided to update',

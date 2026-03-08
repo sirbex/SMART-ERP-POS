@@ -47,7 +47,7 @@ type TransferFormData = {
 
 const emptyTransactionForm: TransactionFormData = {
     bankAccountId: '',
-    transactionDate: new Date().toISOString().split('T')[0],
+    transactionDate: new Date().toLocaleDateString('en-CA'),
     type: 'DEPOSIT',
     categoryId: '',
     description: '',
@@ -58,7 +58,7 @@ const emptyTransactionForm: TransactionFormData = {
 const emptyTransferForm: TransferFormData = {
     fromAccountId: '',
     toAccountId: '',
-    transactionDate: new Date().toISOString().split('T')[0],
+    transactionDate: new Date().toLocaleDateString('en-CA'),
     amount: 0,
     description: '',
     reference: ''

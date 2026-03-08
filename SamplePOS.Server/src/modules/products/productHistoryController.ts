@@ -17,12 +17,10 @@ const QuerySchema = z
       .transform((v) => (v ? Math.min(parseInt(v, 10), 200) : 100)),
     startDate: z
       .string()
-      .optional()
-      .transform((v) => (v ? new Date(v) : undefined)),
+      .optional(),
     endDate: z
       .string()
-      .optional()
-      .transform((v) => (v ? new Date(v) : undefined)),
+      .optional(),
     type: z
       .enum([
         'GOODS_RECEIPT',

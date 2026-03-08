@@ -66,7 +66,7 @@ export const StatementImportTab: React.FC = () => {
     const [importState, setImportState] = useState<ImportState>('idle');
     const [selectedAccountId, setSelectedAccountId] = useState('');
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
-    const [statementDate, setStatementDate] = useState(new Date().toISOString().split('T')[0]);
+    const [statementDate, setStatementDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [csvContent, setCsvContent] = useState('');
     const [fileName, setFileName] = useState('');
     const [previewLines, setPreviewLines] = useState<string[]>([]);

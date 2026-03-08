@@ -95,7 +95,7 @@ export async function validateDiscountApplication(
   // Calculate discount percentage if fixed amount
   let discountPercentage = discountData.value;
   if (discountData.type === 'FIXED_AMOUNT') {
-    discountPercentage = (discountData.value / originalAmount) * 100;
+    discountPercentage = new Decimal(discountData.value).dividedBy(originalAmount).times(100).toNumber();
   }
 
   // Check role limits
@@ -168,7 +168,7 @@ export async function applyDiscount(
   const finalAmount = new Decimal(originalAmount).minus(discountAmount).toNumber();
 
   // Calculate percentage for audit
-  const discountPercentage = (discountAmount / originalAmount) * 100;
+  const discountPercentage = new Decimal(discountAmount).dividedBy(originalAmount).times(100).toNumber();
 
   // Create authorization record
   const auth = await discountRepo.createDiscountAuthorization(pool, {

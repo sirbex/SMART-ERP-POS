@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import Decimal from 'decimal.js';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -93,7 +94,7 @@ export default function QuoteConversionPage() {
   const badge = getQuoteStatusBadge(quotation.status);
   const totalAmount = quotation.totalAmount;
   const depositAmountNum = parseFloat(depositAmount) || 0;
-  const remainingBalance = totalAmount - depositAmountNum;
+  const remainingBalance = new Decimal(totalAmount).minus(depositAmountNum).toNumber();
 
   // Check if quotation can be converted
   const canConvert = isQuoteConvertible(quotation.status, quotation.validUntil, quotation.convertedToSaleId);

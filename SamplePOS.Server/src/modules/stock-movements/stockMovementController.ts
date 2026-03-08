@@ -48,12 +48,10 @@ const ListMovementsQuerySchema = z.object({
     .optional(),
   startDate: z
     .string()
-    .optional()
-    .transform((val) => (val ? new Date(val) : undefined)),
+    .optional(),
   endDate: z
     .string()
-    .optional()
-    .transform((val) => (val ? new Date(val) : undefined)),
+    .optional(),
 });
 
 /**

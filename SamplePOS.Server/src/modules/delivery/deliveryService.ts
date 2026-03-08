@@ -734,7 +734,7 @@ export async function createDeliveryFromSale(
       }
 
       // 4. Build delivery order request
-      const deliveryDate = input.deliveryDate || new Date().toISOString().split('T')[0];
+      const deliveryDate = input.deliveryDate || new Date().toLocaleDateString('en-CA');
       const deliveryAddress = input.deliveryAddress || sale.customer_address || '';
 
       if (!deliveryAddress.trim()) {
