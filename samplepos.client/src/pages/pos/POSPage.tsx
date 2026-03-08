@@ -2325,6 +2325,13 @@ export default function POSPage() {
           userMessage += `💰 Overpayment Not Allowed\n\n${errorMsg}\n\n💡 For credit sales, payment cannot exceed the total. Reduce the payment amount.`;
         } else if (errorCode?.startsWith('ERR_SALE_') || errorCode?.startsWith('ERR_PAYMENT_')) {
           userMessage += `⚠️ Sale Error [${errorCode}]\n\n${errorMsg}`;
+        } else if (
+          errorCode === 'ERR_VALIDATION' ||
+          errorCode === 'ERR_BUSINESS' ||
+          errorCode === 'ERR_CONSTRAINT' ||
+          errorCode === 'ERR_NOT_FOUND'
+        ) {
+          userMessage += `⚠️ ${errorMsg}\n\n💡 Check:\n• All payment amounts are valid\n• Products have correct prices\n• Customer information is complete`;
         } else {
           // Fallback for other 400 errors without a known error_code
           userMessage += `🔍 Invalid Data\n${errorMsg}\n\n💡 Check:\n• All payment amounts are valid\n• Products have correct prices\n• Customer information is complete`;

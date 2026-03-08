@@ -263,6 +263,17 @@ function formatByErrorCode(parsed: ParsedApiError): string {
   if (code.startsWith('ERR_COSTLAYER_')) return formatCostLayerError(parsed);
   if (code.startsWith('ERR_PRICING_')) return formatPricingError(parsed);
 
+  // Generic classified errors from middleware (catches all plain Error throws)
+  if (code === 'ERR_NOT_FOUND')
+    return `Not found: ${(parsed.details?.reason as string) || parsed.message}`;
+  if (code === 'ERR_AUTH') return parsed.message;
+  if (code === 'ERR_FORBIDDEN') return `Access denied: ${parsed.message}`;
+  if (code === 'ERR_VALIDATION') return parsed.message;
+  if (code === 'ERR_BUSINESS') return parsed.message;
+  if (code === 'ERR_CONSTRAINT')
+    return 'A data constraint was violated. Please check your input values.';
+  if (code === 'ERR_INTERNAL') return parsed.message;
+
   // Unknown structured error — still better than the raw message alone
   return parsed.message;
 }
