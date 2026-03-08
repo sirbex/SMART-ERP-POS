@@ -113,12 +113,6 @@ interface PODetailData {
   [key: string]: unknown;
 }
 
-/** Extract an error message from an unknown catch value */
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return 'Unknown error';
-}
-
 /** PO line item — supports both snake_case and camelCase fields */
 interface POItemRow {
   id?: string;
@@ -390,9 +384,14 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
     setIsSubmitting(true);
 
     try {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+
       const poData = {
         supplierId,
-        orderDate: new Date().toISOString(),
+        orderDate: `${yyyy}-${mm}-${dd}`,
         expectedDate: expectedDelivery || undefined,
         notes: notes || undefined,
         createdBy: user.id,

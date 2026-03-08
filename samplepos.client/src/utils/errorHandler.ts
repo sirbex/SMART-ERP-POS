@@ -19,11 +19,17 @@ import { formatCurrency } from './currency';
 
 // ── Types ──────────────────────────────────────────────────────────
 
+export interface ValidationDetail {
+  path: string;
+  message: string;
+  field?: string;
+}
+
 export interface StructuredErrorResponse {
   success: false;
   error: string;
   error_code?: string;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | ValidationDetail[];
 }
 
 export interface HandleApiErrorOptions {
@@ -40,6 +46,8 @@ export interface ParsedApiError {
   errorCode?: string;
   /** The raw details object from backend, if any */
   details?: Record<string, unknown>;
+  /** Validation field errors (from Zod), if any */
+  validationErrors?: ValidationDetail[];
   /** HTTP status code, if available */
   status?: number;
 }
@@ -59,10 +67,19 @@ export function parseApiError(
     const status = axErr.response?.status;
 
     if (data && typeof data === 'object') {
+      // Detect Zod validation arrays: details is [{path, message}, ...]
+      const rawDetails = data.details;
+      const isValidationArray =
+        Array.isArray(rawDetails) &&
+        rawDetails.length > 0 &&
+        typeof rawDetails[0] === 'object' &&
+        ('message' in rawDetails[0] || 'path' in rawDetails[0]);
+
       return {
         message: data.error || fallback,
         errorCode: data.error_code,
-        details: data.details,
+        details: isValidationArray ? undefined : (rawDetails as Record<string, unknown>),
+        validationErrors: isValidationArray ? (rawDetails as ValidationDetail[]) : undefined,
         status,
       };
     }
@@ -249,7 +266,37 @@ function formatSaleError(parsed: ParsedApiError): string {
 
 // ── Map error_code prefix → formatter ──────────────────────────────
 
+function formatValidationErrors(parsed: ParsedApiError): string {
+  const errors = parsed.validationErrors;
+  if (!errors || errors.length === 0) return parsed.message;
+
+  const bullets = errors
+    .map((e) => {
+      const field = e.field || e.path;
+      const label = field ? humanizeField(field) : '';
+      return label ? `• ${label}: ${e.message}` : `• ${e.message}`;
+    })
+    .join('\n');
+
+  return `Please fix the following:\n\n${bullets}`;
+}
+
+/** Convert snake_case / camelCase field paths to readable labels */
+function humanizeField(field: string): string {
+  // Take the last segment (e.g. "items.0.quantity" → "quantity")
+  const last = field.split('.').pop() || field;
+  return last
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function formatByErrorCode(parsed: ParsedApiError): string {
+  // Validation field-level errors always take priority
+  if (parsed.validationErrors && parsed.validationErrors.length > 0) {
+    return formatValidationErrors(parsed);
+  }
+
   const code = parsed.errorCode;
   if (!code) return parsed.message;
 

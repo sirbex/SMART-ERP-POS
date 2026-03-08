@@ -56,9 +56,6 @@ interface RawApiAccount extends Account {
   currentBalance?: number;
 }
 
-const getErrorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
 const ACCOUNT_TYPES = [
   { value: 'ASSET', label: 'Assets', color: 'bg-blue-100 text-blue-800' },
   { value: 'LIABILITY', label: 'Liabilities', color: 'bg-red-100 text-red-800' },

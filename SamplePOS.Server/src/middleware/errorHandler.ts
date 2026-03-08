@@ -132,6 +132,7 @@ export function errorHandler(
     res.status(400).json({
       success: false,
       error: 'Validation failed',
+      error_code: 'ERR_VALIDATION_FIELDS',
       details: formattedErrors,
       requestId: req.requestId,
     });

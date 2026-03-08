@@ -613,10 +613,10 @@ export const salesService = {
           : 0,
         taxAmount: parseFloat(taxAmount.toFixed(2)),
         paymentMethod: effectivePaymentMethod,
-        // amount_paid = net amount applied to the sale, NOT cash tendered
-        // Fully-paid: amount_paid = total_amount (excess returned as change)
-        // Partial/credit: amount_paid = what was actually received
-        paymentReceived: hasOutstandingBalance ? actualAmountPaid : actualTotalAmount,
+        // Store the actual amount received from the customer (cash tendered)
+        // For fully-paid sales: this is the real tendered amount (may exceed totalAmount for cash change)
+        // For credit/partial: this is what was actually received
+        paymentReceived: actualAmountPaid,
         changeAmount: hasOutstandingBalance
           ? 0 // No change for credit/partial payment sales
           : parseFloat(changeAmount.toFixed(2)),
