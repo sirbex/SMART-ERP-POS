@@ -6,7 +6,7 @@ import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 const mockGetBatchesByProduct = jest.fn<MockFn>();
 const mockGetAllActiveBatches = jest.fn<MockFn>();
@@ -35,7 +35,7 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 }));
 
 jest.unstable_mockModule('./stockMovementHandler.js', () => ({
-  StockMovementHandler: jest.fn<MockFn>().mockImplementation(() => ({
+  StockMovementHandler: jest.fn(() => ({
     processMovement: mockProcessMovement,
   })),
 }));

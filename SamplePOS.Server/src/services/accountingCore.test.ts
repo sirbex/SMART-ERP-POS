@@ -5,7 +5,7 @@
 import { jest } from '@jest/globals';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 const mockQuery = jest.fn<MockFn>();
 const mockClient = {
@@ -33,7 +33,7 @@ jest.unstable_mockModule('../db/unitOfWork.js', () => ({
 }));
 
 jest.unstable_mockModule('uuid', () => ({
-  v4: jest.fn<MockFn>().mockReturnValue('test-uuid-1234'),
+  v4: jest.fn(() => 'test-uuid-1234'),
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({

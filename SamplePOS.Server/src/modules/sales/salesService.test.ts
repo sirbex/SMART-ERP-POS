@@ -6,7 +6,7 @@ import { jest } from '@jest/globals';
 import type { Pool, PoolClient } from 'pg';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 const mockSalesRepo = {
   createSale: jest.fn<MockFn>(),
@@ -38,7 +38,7 @@ jest.unstable_mockModule('../../services/costLayerService.js', () => ({
 }));
 
 jest.unstable_mockModule('../../services/bankingService.js', () => ({
-  BankingService: jest.fn<MockFn>().mockImplementation(() => ({
+  BankingService: jest.fn(() => ({
     recordCashSale: jest.fn<MockFn>().mockResolvedValue(undefined),
   })),
 }));

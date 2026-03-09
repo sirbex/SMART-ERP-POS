@@ -5,7 +5,7 @@
 import { jest } from '@jest/globals';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 const mockExpenseRepo = {
   getExpenses: jest.fn<MockFn>(),
@@ -66,7 +66,7 @@ jest.unstable_mockModule('./glEntryService.js', () => ({
 }));
 
 jest.unstable_mockModule('./bankingService.js', () => ({
-  BankingService: jest.fn<MockFn>().mockImplementation(() => ({
+  BankingService: jest.fn(() => ({
     recordExpensePayment: jest.fn<MockFn>().mockResolvedValue(undefined),
   })),
 }));

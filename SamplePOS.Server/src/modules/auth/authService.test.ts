@@ -3,22 +3,24 @@
  * Tests authentication, registration, and profile retrieval logic.
  */
 import { jest } from '@jest/globals';
+import type { Pool } from 'pg';
 
-/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+/** Flexible mock fn type — avoids `any` while satisfying mockResolvedValue */
+type MockFn = (...args: unknown[]) => Promise<unknown>;
+type SyncMockFn = (...args: unknown[]) => unknown;
 
 // Mock dependencies before importing the module under test
 const mockFindUserByEmail = jest.fn<MockFn>();
 const mockFindUserById = jest.fn<MockFn>();
 const mockCreateUser = jest.fn<MockFn>();
-const mockGenerateToken = jest.fn<MockFn>();
+const mockGenerateToken = jest.fn<SyncMockFn>();
 const mockBcryptCompare = jest.fn<MockFn>();
 const mockBcryptHash = jest.fn<MockFn>();
 const mockCheckAccountLockout = jest.fn<MockFn>();
 const mockRecordFailedLoginAttempt = jest.fn<MockFn>();
 const mockResetFailedLoginAttempts = jest.fn<MockFn>();
 const mockGetPasswordExpiryStatus = jest.fn<MockFn>();
-const mockValidatePassword = jest.fn<MockFn>();
+const mockValidatePassword = jest.fn<SyncMockFn>();
 
 jest.unstable_mockModule('./authRepository.js', () => ({
   findUserByEmail: mockFindUserByEmail,
@@ -46,12 +48,12 @@ jest.unstable_mockModule('./passwordPolicyService.js', () => ({
   isPasswordInHistory: jest.fn<MockFn>().mockResolvedValue(false),
   addPasswordToHistory: jest.fn<MockFn>().mockResolvedValue(undefined),
   updatePasswordWithPolicy: jest.fn<MockFn>(),
-  getPasswordPolicyConfig: jest.fn<MockFn>().mockReturnValue({}),
+  getPasswordPolicyConfig: jest.fn(() => ({})),
 }));
 
 const { authenticateUser, registerUser, getUserProfile } = await import('./authService.js');
 
-const mockPool = {} as unknown;
+const mockPool = {} as Pool;
 
 describe('authService', () => {
   beforeEach(() => {

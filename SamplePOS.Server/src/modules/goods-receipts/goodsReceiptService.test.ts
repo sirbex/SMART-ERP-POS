@@ -6,7 +6,7 @@ import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 const mockGRRepo = {
   createGR: jest.fn<MockFn>(),

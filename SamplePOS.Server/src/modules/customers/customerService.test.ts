@@ -5,7 +5,7 @@
 import { jest } from '@jest/globals';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
-type MockFn = (...args: unknown[]) => unknown;
+type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 // Mock functions matching actual customerRepository exports
 const mockFindAllCustomers = jest.fn<MockFn>();
@@ -94,7 +94,8 @@ describe('customerService', () => {
       const customer = await customerService.createCustomer({
         name: 'Beta',
         email: 'beta@x.com',
-      } as Record<string, unknown>);
+        creditLimit: 0,
+      });
       expect(customer.id).toBe('c2');
       expect(mockCreateCustomer).toHaveBeenCalled();
     });
@@ -105,14 +106,14 @@ describe('customerService', () => {
       mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Old', email: 'old@x.com' });
       mockUpdateCustomer.mockResolvedValue({ id: 'c1', name: 'Updated' });
 
-      const customer = await customerService.updateCustomer('c1', { name: 'Updated' } as Record<string, unknown>);
+      const customer = await customerService.updateCustomer('c1', { name: 'Updated' });
       expect(customer.name).toBe('Updated');
     });
 
     it('should throw when customer not found', async () => {
       mockFindCustomerById.mockResolvedValue(null);
 
-      await expect(customerService.updateCustomer('ghost', { name: 'X' } as Record<string, unknown>)).rejects.toThrow();
+      await expect(customerService.updateCustomer('ghost', { name: 'X' })).rejects.toThrow();
     });
   });
 

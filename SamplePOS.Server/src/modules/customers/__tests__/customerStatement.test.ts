@@ -2,7 +2,7 @@ import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 import Decimal from 'decimal.js';
 import type { Customer } from '../../../../../shared/zod/customer.js';
 
-type AnyMock = jest.Mock<(...args: unknown[]) => unknown>;
+type AnyMock = jest.Mock<(...args: unknown[]) => Promise<unknown>>;
 
 // ESM-compatible module mock — must come before dynamic import
 jest.unstable_mockModule('../customerRepository.js', () => ({
