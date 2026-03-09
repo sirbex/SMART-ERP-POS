@@ -6,10 +6,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import dotenv from 'dotenv';
+import * as Sentry from '@sentry/node';
 import { testConnection } from './db/pool.js';
 import logger from './utils/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { businessRuleErrorHandler } from './middleware/businessRules.js';
+import { globalRateLimit, authRateLimit } from './middleware/security.js';
 import { productRoutes } from './modules/products/productRoutes.js';
 import { customerRoutes } from './modules/customers/customerRoutes.js';
 import { supplierRoutes } from './modules/suppliers/supplierRoutes.js';
@@ -65,6 +67,18 @@ const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // ============================================================
+// SENTRY ERROR MONITORING (must init before other middleware)
+// ============================================================
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  });
+  logger.info('Sentry error monitoring initialized');
+}
+
+// ============================================================
 // MIDDLEWARE
 // ============================================================
 
@@ -76,6 +90,10 @@ initializeRbacMiddleware(pool);
 
 // Security headers
 app.use(helmet());
+
+// Rate limiting (must be early to block floods before heavy middleware)
+app.use(globalRateLimit);
+app.use('/api/auth', authRateLimit);
 
 // Correlation ID for request tracing
 app.use(correlationId);
