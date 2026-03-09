@@ -6,13 +6,13 @@ import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
 const mockPORepo = {
-  createPO: jest.fn(),
-  createPOItem: jest.fn(),
-  getPOById: jest.fn(),
-  listPOs: jest.fn(),
-  updatePOStatus: jest.fn(),
-  deletePO: jest.fn(),
-  updatePOTotal: jest.fn(),
+  createPO: jest.fn<any>(),
+  createPOItem: jest.fn<any>(),
+  getPOById: jest.fn<any>(),
+  listPOs: jest.fn<any>(),
+  updatePOStatus: jest.fn<any>(),
+  deletePO: jest.fn<any>(),
+  updatePOTotal: jest.fn<any>(),
 };
 
 jest.unstable_mockModule('./purchaseOrderRepository.js', () => ({
@@ -30,8 +30,8 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
-      const mockClient = { query: jest.fn().mockResolvedValue({ rows: [] }) };
+    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
+      const mockClient = { query: jest.fn<any>().mockResolvedValue({ rows: [] }) };
       return fn(mockClient);
     }),
   },
@@ -39,7 +39,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
 
 const { purchaseOrderService } = await import('./purchaseOrderService.js');
 
-const mockPool = { query: jest.fn(), connect: jest.fn() } as unknown as Pool;
+const mockPool = { query: jest.fn<any>(), connect: jest.fn<any>() } as unknown as Pool;
 
 describe('purchaseOrderService', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -47,13 +47,13 @@ describe('purchaseOrderService', () => {
   describe('getPOById', () => {
     it('should return PO with items', async () => {
       mockPORepo.getPOById.mockResolvedValue({
-        po: { id: 'po1', orderNumber: 'PO-2025-0001', status: 'DRAFT' },
+        po: { id: 'po1', poNumber: 'PO-2025-0001', status: 'DRAFT' },
         items: [{ id: 'pi1', productName: 'Widget', quantity: 10, unitPrice: 100 }],
       });
 
       const result = await purchaseOrderService.getPOById(mockPool, 'po1');
 
-      expect(result.po.orderNumber).toBe('PO-2025-0001');
+      expect(result.po.poNumber).toBe('PO-2025-0001');
       expect(result.items).toHaveLength(1);
     });
 
@@ -67,7 +67,7 @@ describe('purchaseOrderService', () => {
   describe('listPOs', () => {
     it('should return paginated POs', async () => {
       mockPORepo.listPOs.mockResolvedValue({
-        pos: [{ id: 'po1', orderNumber: 'PO-2025-0001' }],
+        pos: [{ id: 'po1', poNumber: 'PO-2025-0001' }],
         total: 1,
       });
 

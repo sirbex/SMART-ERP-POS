@@ -6,19 +6,19 @@ import { jest } from '@jest/globals';
 import type { Pool, PoolClient } from 'pg';
 
 const mockInvoiceRepo = {
-  createInvoice: jest.fn(),
-  getInvoiceById: jest.fn(),
-  listInvoices: jest.fn(),
-  countInvoices: jest.fn(),
-  addPayment: jest.fn(),
-  listPayments: jest.fn(),
-  updateInvoiceStatus: jest.fn(),
-  getInvoiceLineItems: jest.fn(),
+  createInvoice: jest.fn<any>(),
+  getInvoiceById: jest.fn<any>(),
+  listInvoices: jest.fn<any>(),
+  countInvoices: jest.fn<any>(),
+  addPayment: jest.fn<any>(),
+  listPayments: jest.fn<any>(),
+  updateInvoiceStatus: jest.fn<any>(),
+  getInvoiceLineItems: jest.fn<any>(),
 };
 
 const mockSalesRepo = {
-  getSaleById: jest.fn(),
-  getSaleItems: jest.fn(),
+  getSaleById: jest.fn<any>(),
+  getSaleItems: jest.fn<any>(),
 };
 
 jest.unstable_mockModule('./invoiceRepository.js', () => ({
@@ -33,38 +33,38 @@ jest.unstable_mockModule('../sales/salesRepository.js', () => ({
 
 jest.unstable_mockModule('../../services/accountingIntegrationService.js', () => ({
   accountingIntegrationService: {
-    createInvoiceJournalEntry: jest.fn().mockResolvedValue(undefined),
-    createPaymentJournalEntry: jest.fn().mockResolvedValue(undefined),
+    createInvoiceJournalEntry: jest.fn<any>().mockResolvedValue(undefined),
+    createPaymentJournalEntry: jest.fn<any>().mockResolvedValue(undefined),
   },
 }));
 
 jest.unstable_mockModule('../../services/accountingApiClient.js', () => ({
   accountingApiClient: {
-    postJournalEntry: jest.fn().mockResolvedValue(undefined),
+    postJournalEntry: jest.fn<any>().mockResolvedValue(undefined),
   },
 }));
 
 jest.unstable_mockModule('../deposits/depositsService.js', () => ({
-  getCustomerDepositBalance: jest.fn().mockResolvedValue(0),
-  applyDeposit: jest.fn().mockResolvedValue(undefined),
+  getCustomerDepositBalance: jest.fn<any>().mockResolvedValue(0),
+  applyDeposit: jest.fn<any>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) =>
+    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) =>
       fn(mockClient)
     ),
   },
 }));
 
 const mockClient = {
-  query: jest.fn().mockResolvedValue({ rows: [] }),
-  release: jest.fn(),
+  query: jest.fn<any>().mockResolvedValue({ rows: [] }),
+  release: jest.fn<any>(),
 } as unknown as PoolClient;
 
 const mockPool = {
-  query: jest.fn(),
-  connect: jest.fn().mockResolvedValue(mockClient),
+  query: jest.fn<any>(),
+  connect: jest.fn<any>().mockResolvedValue(mockClient),
 } as unknown as Pool;
 
 const { invoiceService } = await import('./invoiceService.js');

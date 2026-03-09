@@ -4,37 +4,42 @@
  */
 import { jest } from '@jest/globals';
 
-const mockQuery = jest.fn();
+const mockQuery = jest.fn<any>();
 const mockClient = {
   query: mockQuery,
-  release: jest.fn(),
+  release: jest.fn<any>(),
 };
 
 jest.unstable_mockModule('../db/pool.js', () => ({
   pool: {
     query: mockQuery,
-    connect: jest.fn().mockResolvedValue(mockClient),
+    connect: jest.fn<any>().mockResolvedValue(mockClient),
   },
   default: {
     query: mockQuery,
-    connect: jest.fn().mockResolvedValue(mockClient),
+    connect: jest.fn<any>().mockResolvedValue(mockClient),
   },
 }));
 
 jest.unstable_mockModule('../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) =>
+    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) =>
       fn(mockClient)
     ),
   },
 }));
 
 jest.unstable_mockModule('uuid', () => ({
-  v4: jest.fn().mockReturnValue('test-uuid-1234'),
+  v4: jest.fn<any>().mockReturnValue('test-uuid-1234'),
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
-  default: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+  default: {
+    info: jest.fn<any>(),
+    error: jest.fn<any>(),
+    warn: jest.fn<any>(),
+    debug: jest.fn<any>(),
+  },
 }));
 
 const accountingCore = await import('./accountingCore.js');
@@ -68,13 +73,16 @@ describe('accountingCore', () => {
       await expect(
         accountingCore.createJournalEntry({
           description: 'Test entry',
-          date: '2025-01-01',
+          entryDate: '2025-01-01',
+          referenceType: 'TEST',
+          referenceId: 'test-1',
+          referenceNumber: 'TEST-001',
           lines: [
-            { accountCode: '1000', debit: 100, credit: 0, description: 'Debit' },
-            { accountCode: '2000', debit: 0, credit: 50, description: 'Credit' },
+            { accountCode: '1000', debitAmount: 100, creditAmount: 0, description: 'Debit' },
+            { accountCode: '2000', debitAmount: 0, creditAmount: 50, description: 'Credit' },
           ],
-          createdBy: 'user1',
-          sourceModule: 'TEST',
+          userId: 'user1',
+          idempotencyKey: 'idem-1',
         })
       ).rejects.toThrow();
     });
@@ -83,10 +91,13 @@ describe('accountingCore', () => {
       await expect(
         accountingCore.createJournalEntry({
           description: 'Empty entry',
-          date: '2025-01-01',
+          entryDate: '2025-01-01',
+          referenceType: 'TEST',
+          referenceId: 'test-2',
+          referenceNumber: 'TEST-002',
           lines: [],
-          createdBy: 'user1',
-          sourceModule: 'TEST',
+          userId: 'user1',
+          idempotencyKey: 'idem-2',
         })
       ).rejects.toThrow();
     });
@@ -95,10 +106,15 @@ describe('accountingCore', () => {
       await expect(
         accountingCore.createJournalEntry({
           description: 'Both sides',
-          date: '2025-01-01',
-          lines: [{ accountCode: '1000', debit: 100, credit: 100, description: 'Both' }],
-          createdBy: 'user1',
-          sourceModule: 'TEST',
+          entryDate: '2025-01-01',
+          referenceType: 'TEST',
+          referenceId: 'test-3',
+          referenceNumber: 'TEST-003',
+          lines: [
+            { accountCode: '1000', debitAmount: 100, creditAmount: 100, description: 'Both' },
+          ],
+          userId: 'user1',
+          idempotencyKey: 'idem-3',
         })
       ).rejects.toThrow();
     });

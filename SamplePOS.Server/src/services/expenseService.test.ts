@@ -5,20 +5,20 @@
 import { jest } from '@jest/globals';
 
 const mockExpenseRepo = {
-  getExpenses: jest.fn(),
-  getExpenseById: jest.fn(),
-  createExpense: jest.fn(),
-  updateExpense: jest.fn(),
-  deleteExpense: jest.fn(),
-  getExpenseCategories: jest.fn(),
-  createExpenseCategory: jest.fn(),
-  getExpenseCategoryByCode: jest.fn(),
-  getExpenseDocuments: jest.fn(),
-  deleteExpenseDocument: jest.fn(),
-  createApprovalRecord: jest.fn(),
-  updateApprovalRecord: jest.fn(),
-  getExpenseCountByCategory: jest.fn(),
-  getPaymentAccounts: jest.fn(),
+  getExpenses: jest.fn<any>(),
+  getExpenseById: jest.fn<any>(),
+  createExpense: jest.fn<any>(),
+  updateExpense: jest.fn<any>(),
+  deleteExpense: jest.fn<any>(),
+  getExpenseCategories: jest.fn<any>(),
+  createExpenseCategory: jest.fn<any>(),
+  getExpenseCategoryByCode: jest.fn<any>(),
+  getExpenseDocuments: jest.fn<any>(),
+  deleteExpenseDocument: jest.fn<any>(),
+  createApprovalRecord: jest.fn<any>(),
+  updateApprovalRecord: jest.fn<any>(),
+  getExpenseCountByCategory: jest.fn<any>(),
+  getPaymentAccounts: jest.fn<any>(),
 };
 
 jest.unstable_mockModule('../repositories/expenseRepository', () => ({
@@ -27,14 +27,14 @@ jest.unstable_mockModule('../repositories/expenseRepository', () => ({
 }));
 
 jest.unstable_mockModule('../db/pool.js', () => ({
-  pool: { query: jest.fn(), connect: jest.fn() },
-  default: { query: jest.fn(), connect: jest.fn() },
+  pool: { query: jest.fn<any>(), connect: jest.fn<any>() },
+  default: { query: jest.fn<any>(), connect: jest.fn<any>() },
 }));
 
 jest.unstable_mockModule('../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
-      const mockClient = { query: jest.fn().mockResolvedValue({ rows: [] }) };
+    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
+      const mockClient = { query: jest.fn<any>().mockResolvedValue({ rows: [] }) };
       return fn(mockClient);
     }),
   },
@@ -58,18 +58,23 @@ jest.unstable_mockModule('../middleware/errorHandler.js', () => ({
 }));
 
 jest.unstable_mockModule('./glEntryService.js', () => ({
-  createExpenseGLEntries: jest.fn().mockResolvedValue(undefined),
-  reverseExpenseGLEntries: jest.fn().mockResolvedValue(undefined),
+  createExpenseGLEntries: jest.fn<any>().mockResolvedValue(undefined),
+  reverseExpenseGLEntries: jest.fn<any>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('./bankingService.js', () => ({
-  BankingService: jest.fn().mockImplementation(() => ({
-    recordExpensePayment: jest.fn().mockResolvedValue(undefined),
+  BankingService: jest.fn<any>().mockImplementation(() => ({
+    recordExpensePayment: jest.fn<any>().mockResolvedValue(undefined),
   })),
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
-  default: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+  default: {
+    info: jest.fn<any>(),
+    error: jest.fn<any>(),
+    warn: jest.fn<any>(),
+    debug: jest.fn<any>(),
+  },
 }));
 
 const expenseService = await import('./expenseService.js');
@@ -87,7 +92,7 @@ describe('expenseService', () => {
       });
 
       const expense = await expenseService.getExpenseById('e1');
-      expect(expense.title).toBe('Office Supplies');
+      expect(expense!.title).toBe('Office Supplies');
     });
 
     it('should return null for non-existent expense', async () => {

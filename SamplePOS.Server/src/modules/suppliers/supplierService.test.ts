@@ -6,15 +6,15 @@ import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
 // Mock functions matching actual supplierRepository exports
-const mockFindAll = jest.fn();
-const mockCountAll = jest.fn();
-const mockFindById = jest.fn();
-const mockFindBySupplierNumber = jest.fn();
-const mockSearchSuppliers = jest.fn();
-const mockCreate = jest.fn();
-const mockUpdate = jest.fn();
-const mockHasActivePurchaseOrders = jest.fn();
-const mockSoftDeleteSupplier = jest.fn();
+const mockFindAll = jest.fn<any>();
+const mockCountAll = jest.fn<any>();
+const mockFindById = jest.fn<any>();
+const mockFindBySupplierNumber = jest.fn<any>();
+const mockSearchSuppliers = jest.fn<any>();
+const mockCreate = jest.fn<any>();
+const mockUpdate = jest.fn<any>();
+const mockHasActivePurchaseOrders = jest.fn<any>();
+const mockSoftDeleteSupplier = jest.fn<any>();
 
 jest.unstable_mockModule('./supplierRepository.js', () => ({
   findAll: mockFindAll,
@@ -30,7 +30,7 @@ jest.unstable_mockModule('./supplierRepository.js', () => ({
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => fn({})),
+    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => fn({})),
   },
 }));
 
@@ -84,7 +84,7 @@ describe('supplierService', () => {
       mockUpdate.mockResolvedValue({ id: 's1', name: 'Updated' });
 
       const supplier = await supplierService.updateSupplier(mockPool, 's1', { name: 'Updated' });
-      expect(supplier.name).toBe('Updated');
+      expect(supplier!.name).toBe('Updated');
     });
 
     it('should throw when supplier not found', async () => {

@@ -5,17 +5,17 @@
 import { jest } from '@jest/globals';
 
 // Mock dependencies before importing the module under test
-const mockFindUserByEmail = jest.fn();
-const mockFindUserById = jest.fn();
-const mockCreateUser = jest.fn();
-const mockGenerateToken = jest.fn();
-const mockBcryptCompare = jest.fn();
-const mockBcryptHash = jest.fn();
-const mockCheckAccountLockout = jest.fn();
-const mockRecordFailedLoginAttempt = jest.fn();
-const mockResetFailedLoginAttempts = jest.fn();
-const mockGetPasswordExpiryStatus = jest.fn();
-const mockValidatePassword = jest.fn();
+const mockFindUserByEmail = jest.fn<any>();
+const mockFindUserById = jest.fn<any>();
+const mockCreateUser = jest.fn<any>();
+const mockGenerateToken = jest.fn<any>();
+const mockBcryptCompare = jest.fn<any>();
+const mockBcryptHash = jest.fn<any>();
+const mockCheckAccountLockout = jest.fn<any>();
+const mockRecordFailedLoginAttempt = jest.fn<any>();
+const mockResetFailedLoginAttempts = jest.fn<any>();
+const mockGetPasswordExpiryStatus = jest.fn<any>();
+const mockValidatePassword = jest.fn<any>();
 
 jest.unstable_mockModule('./authRepository.js', () => ({
   findUserByEmail: mockFindUserByEmail,
@@ -40,10 +40,10 @@ jest.unstable_mockModule('./passwordPolicyService.js', () => ({
   recordFailedLoginAttempt: mockRecordFailedLoginAttempt,
   resetFailedLoginAttempts: mockResetFailedLoginAttempts,
   getPasswordExpiryStatus: mockGetPasswordExpiryStatus,
-  isPasswordInHistory: jest.fn().mockResolvedValue(false),
-  addPasswordToHistory: jest.fn().mockResolvedValue(undefined),
-  updatePasswordWithPolicy: jest.fn(),
-  getPasswordPolicyConfig: jest.fn().mockReturnValue({}),
+  isPasswordInHistory: jest.fn<any>().mockResolvedValue(false),
+  addPasswordToHistory: jest.fn<any>().mockResolvedValue(undefined),
+  updatePasswordWithPolicy: jest.fn<any>(),
+  getPasswordPolicyConfig: jest.fn<any>().mockReturnValue({}),
 }));
 
 const { authenticateUser, registerUser, getUserProfile } = await import('./authService.js');

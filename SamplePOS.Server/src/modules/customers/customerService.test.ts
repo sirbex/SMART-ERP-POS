@@ -5,19 +5,19 @@
 import { jest } from '@jest/globals';
 
 // Mock functions matching actual customerRepository exports
-const mockFindAllCustomers = jest.fn();
-const mockCountCustomers = jest.fn();
-const mockFindCustomerById = jest.fn();
-const mockFindCustomerByNumber = jest.fn();
-const mockFindCustomerByEmail = jest.fn();
-const mockSearchCustomers = jest.fn();
-const mockCreateCustomer = jest.fn();
-const mockUpdateCustomer = jest.fn();
-const mockDeleteCustomer = jest.fn();
-const mockToggleCustomerActive = jest.fn();
-const mockUpdateCustomerBalance = jest.fn();
-const mockFindCustomerSales = jest.fn();
-const mockCountCustomerSales = jest.fn();
+const mockFindAllCustomers = jest.fn<any>();
+const mockCountCustomers = jest.fn<any>();
+const mockFindCustomerById = jest.fn<any>();
+const mockFindCustomerByNumber = jest.fn<any>();
+const mockFindCustomerByEmail = jest.fn<any>();
+const mockSearchCustomers = jest.fn<any>();
+const mockCreateCustomer = jest.fn<any>();
+const mockUpdateCustomer = jest.fn<any>();
+const mockDeleteCustomer = jest.fn<any>();
+const mockToggleCustomerActive = jest.fn<any>();
+const mockUpdateCustomerBalance = jest.fn<any>();
+const mockFindCustomerSales = jest.fn<any>();
+const mockCountCustomerSales = jest.fn<any>();
 
 jest.unstable_mockModule('./customerRepository.js', () => ({
   findAllCustomers: mockFindAllCustomers,
@@ -33,13 +33,13 @@ jest.unstable_mockModule('./customerRepository.js', () => ({
   updateCustomerBalance: mockUpdateCustomerBalance,
   findCustomerSales: mockFindCustomerSales,
   countCustomerSales: mockCountCustomerSales,
-  findCustomerTransactions: jest.fn().mockResolvedValue([]),
-  countCustomerTransactions: jest.fn().mockResolvedValue(0),
-  getCustomerSummary: jest.fn().mockResolvedValue({}),
-  getOpeningBalance: jest.fn().mockResolvedValue(0),
-  getStatementEntries: jest.fn().mockResolvedValue([]),
-  getDepositEntries: jest.fn().mockResolvedValue([]),
-  getCustomerDepositSummary: jest.fn().mockResolvedValue(null),
+  findCustomerTransactions: jest.fn<any>().mockResolvedValue([]),
+  countCustomerTransactions: jest.fn<any>().mockResolvedValue(0),
+  getCustomerSummary: jest.fn<any>().mockResolvedValue({}),
+  getOpeningBalance: jest.fn<any>().mockResolvedValue(0),
+  getStatementEntries: jest.fn<any>().mockResolvedValue([]),
+  getDepositEntries: jest.fn<any>().mockResolvedValue([]),
+  getCustomerDepositSummary: jest.fn<any>().mockResolvedValue(null),
 }));
 
 jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
@@ -47,7 +47,7 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 }));
 
 jest.unstable_mockModule('../../../../shared/zod/customerStatement.js', () => ({
-  CustomerStatementSchema: { parse: jest.fn((v: unknown) => v) },
+  CustomerStatementSchema: { parse: jest.fn<any>((v: unknown) => v) },
 }));
 
 const customerService = await import('./customerService.js');
