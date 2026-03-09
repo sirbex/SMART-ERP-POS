@@ -123,7 +123,7 @@ const deliveryApi = {
   },
 
   getDeliveryNotePdfUrl(identifier: string): string {
-    return `/api/delivery/orders/${encodeURIComponent(identifier)}/pdf`;
+    return `/delivery/orders/${encodeURIComponent(identifier)}/pdf`;
   },
 
   async createOrderFromSale(saleId: string, data: {
