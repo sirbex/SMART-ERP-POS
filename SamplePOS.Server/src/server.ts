@@ -145,26 +145,30 @@ app.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       services: {
         database: 'healthy',
-        server: 'healthy'
-      }
+        server: 'healthy',
+      },
     });
   } catch (error: unknown) {
     res.status(500).json({
       success: false,
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
-      error: (error instanceof Error ? error.message : String(error)),
+      error: error instanceof Error ? error.message : String(error),
       services: {
-        database: 'unhealthy'
-      }
+        database: 'unhealthy',
+      },
     });
   }
 });
 
 // API Documentation (Swagger UI)
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customSiteTitle: 'SMART-ERP-POS API Docs',
-}));
+app.use(
+  '/api/docs',
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec, {
+    customSiteTitle: 'SMART-ERP-POS API Docs',
+  })
+);
 app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 
 // API routes
@@ -176,13 +180,13 @@ app.use('/api/platform', platformRoutes);
 app.use('/api/sync', syncRoutes);
 
 app.use('/api/auth', authRoutes);
-app.use('/api/accounting', accountingRoutes);  // Move accounting routes early to avoid interference
-app.use('/api/accounting/comprehensive', comprehensiveAccountingRoutes);  // Comprehensive accounting features
-app.use('/api/accounting/integrity', authenticate, integrityRoutes);  // Accounting integrity checks
-app.use('/api/erp-accounting', erpAccountingRoutes);  // ERP-grade financial reporting and controls
-app.use('/api/banking', bankingRoutes);  // Banking module - accounts, transactions, reconciliation
-app.use('/api/documents', documentRoutes);  // Document management for file uploads
-app.use('/api/expenses', expenseRoutes);  // Expense management system
+app.use('/api/accounting', accountingRoutes); // Move accounting routes early to avoid interference
+app.use('/api/accounting/comprehensive', comprehensiveAccountingRoutes); // Comprehensive accounting features
+app.use('/api/accounting/integrity', authenticate, integrityRoutes); // Accounting integrity checks
+app.use('/api/erp-accounting', erpAccountingRoutes); // ERP-grade financial reporting and controls
+app.use('/api/banking', bankingRoutes); // Banking module - accounts, transactions, reconciliation
+app.use('/api/documents', documentRoutes); // Document management for file uploads
+app.use('/api/expenses', expenseRoutes); // Expense management system
 app.use('/api/products', productRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -197,20 +201,19 @@ app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/reports', createReportsRouter(pool));
 app.use('/api/users', createUserRoutes());
 app.use('/api/admin', adminRoutes);
-app.use('/api/system', systemManagementRoutes);  // ERP-grade backup, reset, restore
+app.use('/api/system', systemManagementRoutes); // ERP-grade backup, reset, restore
 app.use('/api/discounts', authenticate, discountRoutes);
 app.use('/api/payments', createPaymentsRoutes());
 app.use('/api/audit', authenticate, auditRoutes);
-app.use('/api/deposits', depositsRoutes);  // Customer deposits management
+app.use('/api/deposits', depositsRoutes); // Customer deposits management
 app.use('/api/pos/hold', createHoldRoutes(pool));
-app.use('/api/pos/sync-offline-sales', createOfflineSyncRoutes(pool));  // Offline sales sync
-app.use('/api/supplier-payments', createSupplierPaymentRoutes(pool));  // Supplier payments and bills
-app.use('/api/cash-registers', cashRegisterRoutes);  // Cash register management
-app.use('/api/rbac', createRbacRoutes(pool));  // Role-based access control
+app.use('/api/pos/sync-offline-sales', createOfflineSyncRoutes(pool)); // Offline sales sync
+app.use('/api/supplier-payments', createSupplierPaymentRoutes(pool)); // Supplier payments and bills
+app.use('/api/cash-registers', cashRegisterRoutes); // Cash register management
+app.use('/api/rbac', createRbacRoutes(pool)); // Role-based access control
 app.use('/api', quotationRoutes);
 app.use('/api/delivery', deliveryRoutes);
 // Accounting routes moved above for better priority
-
 
 // ============================================================
 // ERROR HANDLERS
@@ -224,6 +227,11 @@ app.use(businessRuleErrorHandler);
 
 // Global error handler (must be last)
 app.use(errorHandler);
+
+// Sentry error handler (captures unhandled errors after our handler)
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ============================================================
 // START SERVER
@@ -284,7 +292,9 @@ async function startServer() {
       try {
         initDemandForecastJobs(pool);
       } catch (err) {
-        logger.warn('Demand forecast jobs not started (Redis may be offline)', { error: err instanceof Error ? err.message : String(err) });
+        logger.warn('Demand forecast jobs not started (Redis may be offline)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     });
 
@@ -313,7 +323,6 @@ async function startServer() {
     };
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
-
   } catch (error) {
     logger.error('Failed to start server', { error });
     process.exit(1);

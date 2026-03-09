@@ -23,7 +23,7 @@ RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 UPLOAD_S3="${1:-}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql.gz"
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.dump"
 
 # Ensure backup directory exists
 mkdir -p "$BACKUP_DIR"
@@ -36,11 +36,12 @@ echo "Output:   $BACKUP_FILE"
 echo "Retention: $RETENTION_DAYS days"
 echo ""
 
-# Create compressed backup
+# Create compressed backup (--format=custom includes built-in compression)
+# Restore with: pg_restore -h HOST -p PORT -U USER -d DB_NAME backup.dump
 echo "📦 Creating backup..."
 pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
   --format=custom --compress=9 --no-owner --no-privileges \
-  | gzip > "$BACKUP_FILE"
+  -f "$BACKUP_FILE"
 
 BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
 echo "✅ Backup created: $BACKUP_FILE ($BACKUP_SIZE)"
@@ -55,7 +56,7 @@ fi
 
 # Clean up old backups
 echo "🧹 Removing backups older than $RETENTION_DAYS days..."
-DELETED=$(find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime +"$RETENTION_DAYS" -delete -print | wc -l)
+DELETED=$(find "$BACKUP_DIR" -name "${DB_NAME}_*.dump" -mtime +"$RETENTION_DAYS" -delete -print | wc -l)
 echo "   Removed $DELETED old backup(s)"
 
 echo ""
