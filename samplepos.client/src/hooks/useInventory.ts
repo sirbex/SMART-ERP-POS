@@ -110,9 +110,10 @@ export function useAdjustInventory() {
       return response.data;
     },
     onSuccess: () => {
-      // Invalidate all inventory-related queries
+      // Invalidate all inventory-related queries (both standard and offline-aware)
       queryClient.invalidateQueries({ queryKey: inventoryKeys.all });
       queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
+      queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
     },
     onError: (error) => {
       console.error('Failed to adjust inventory:', getErrorMessage(error));

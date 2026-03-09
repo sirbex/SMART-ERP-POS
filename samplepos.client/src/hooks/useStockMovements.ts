@@ -111,6 +111,7 @@ export function useRecordStockMovement() {
       queryClient.invalidateQueries({ queryKey: stockMovementKeys.all });
       // Also invalidate inventory queries since stock levels changed
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
     },
     onError: (error) => {
       console.error('Failed to record stock movement:', getErrorMessage(error));

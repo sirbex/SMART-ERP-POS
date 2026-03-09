@@ -141,6 +141,7 @@ export function useCreateProduct() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'products'] });
       },
     }
   );
@@ -155,6 +156,7 @@ export function useUpdateProduct() {
       onSuccess: (_, variables) => {
         queryClient.invalidateQueries({ queryKey: queryKeys.products.detail(variables.id) });
         queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'products'] });
       },
     }
   );
@@ -168,6 +170,7 @@ export function useDeleteProduct() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'products'] });
       },
     }
   );
@@ -203,6 +206,7 @@ export function useCreateCustomer() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'customers'] });
       },
     }
   );
@@ -216,6 +220,7 @@ export function useUpdateCustomer() {
       onSuccess: (_resp, variables) => {
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.detail(variables.id) });
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'customers'] });
       },
     }
   );
@@ -230,6 +235,7 @@ export function useToggleCustomerActive() {
       onSuccess: (_resp, variables) => {
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.detail(variables.id) });
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'customers'] });
       },
     }
   );
@@ -242,6 +248,7 @@ export function useDeleteCustomer() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'customers'] });
       },
     }
   );
@@ -313,6 +320,9 @@ export function useCreateSale() {
         queryClient.invalidateQueries({ queryKey: queryKeys.sales.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.inventory.stockLevels });
         queryClient.invalidateQueries({ queryKey: queryKeys.customers.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'products'] });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'customers'] });
       },
     }
   );
@@ -472,6 +482,8 @@ export function useFinalizeGoodsReceipt() {
         queryClient.invalidateQueries({ queryKey: queryKeys.goodsReceipts.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.inventory.stockLevels });
         queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
+        queryClient.invalidateQueries({ queryKey: ['offline', 'products'] });
       },
     }
   );

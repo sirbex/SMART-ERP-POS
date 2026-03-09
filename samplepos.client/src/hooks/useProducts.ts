@@ -16,6 +16,7 @@ export const productKeys = {
   list: (filters: Record<string, unknown>) => [...productKeys.lists(), filters] as const,
   details: () => [...productKeys.all, 'detail'] as const,
   detail: (id: string) => [...productKeys.details(), id] as const,
+  offline: () => ['offline', 'products'] as const,
 };
 
 /**
@@ -60,8 +61,9 @@ export function useCreateProduct() {
       return response.data;
     },
     onSuccess: () => {
-      // Invalidate and refetch products list
+      // Invalidate and refetch products list (both standard and offline-aware queries)
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: productKeys.offline() });
     },
     onError: (error) => {
       console.error('Failed to create product:', getErrorMessage(error));
@@ -81,9 +83,10 @@ export function useUpdateProduct() {
       return response.data;
     },
     onSuccess: (_, variables) => {
-      // Invalidate specific product and lists
+      // Invalidate specific product and lists (both standard and offline-aware queries)
       queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: productKeys.offline() });
     },
     onError: (error) => {
       console.error('Failed to update product:', getErrorMessage(error));
@@ -103,8 +106,9 @@ export function useDeleteProduct() {
       return response.data;
     },
     onSuccess: () => {
-      // Invalidate products list
+      // Invalidate products list (both standard and offline-aware queries)
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: productKeys.offline() });
     },
     onError: (error) => {
       console.error('Failed to delete product:', getErrorMessage(error));
