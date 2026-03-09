@@ -1,8 +1,17 @@
 import { Request } from 'express';
 import * as expenseService from '../services/expenseService';
 import logger from '../utils/logger.js';
-import type { ExpenseDbRow } from '../types/expense';
+import type { ExpenseDbRow, UpdateExpenseData } from '../types/expense';
 import { asyncHandler, AppError, NotFoundError, ValidationError, UnauthorizedError } from '../middleware/errorHandler.js';
+import {
+  CreateExpenseSchema,
+  UpdateExpenseSchema,
+  CreateExpenseCategorySchema,
+  UpdateExpenseCategorySchema,
+  ApproveExpenseSchema,
+  RejectExpenseSchema,
+  MarkExpensePaidSchema,
+} from '../../../shared/zod/expense.js';
 
 // Extend Express Request type to include user property
 interface AuthenticatedUser {
@@ -69,32 +78,20 @@ export const createExpense = asyncHandler(async (req, res) => {
   const user = getUser(req);
   if (!user.id) throw new UnauthorizedError('Authentication required to create expenses');
 
-  const {
-    title,
-    description,
-    amount,
-    expenseDate,
-    category,
-    categoryId,
-    vendor,
-    paymentMethod,
-    notes,
-    receiptRequired,
-    submitForApproval
-  } = req.body;
+  const validated = CreateExpenseSchema.parse(req.body);
 
   const expenseData = {
-    title,
-    description,
-    amount,
-    expense_date: expenseDate,
-    category: category || 'GENERAL',
-    category_id: categoryId,
-    vendor,
-    payment_method: paymentMethod,
-    notes,
-    receipt_required: receiptRequired,
-    submit_for_approval: submitForApproval,
+    title: validated.title,
+    description: validated.description,
+    amount: validated.amount,
+    expense_date: validated.expenseDate,
+    category: validated.category,
+    category_id: validated.categoryId,
+    vendor: validated.vendor,
+    payment_method: validated.paymentMethod,
+    notes: validated.notes,
+    receipt_required: validated.receiptRequired,
+    submit_for_approval: undefined as boolean | undefined,
     created_by: user.id
   };
 
@@ -123,7 +120,19 @@ export const updateExpense = asyncHandler(async (req, res) => {
 
   let expense;
   try {
-    expense = await expenseService.updateExpense(id, req.body, user.id!);
+    const validated = UpdateExpenseSchema.parse(req.body);
+    const updateData: UpdateExpenseData = {
+      title: validated.title,
+      description: validated.description,
+      amount: validated.amount,
+      expense_date: validated.expenseDate,
+      vendor: validated.vendor,
+      payment_method: validated.paymentMethod,
+      status: validated.status,
+      receipt_number: undefined,
+      notes: validated.notes,
+    };
+    expense = await expenseService.updateExpense(id, updateData, user.id!);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message === 'Cannot modify expense in current status') {
@@ -201,7 +210,7 @@ export const submitExpense = asyncHandler(async (req, res) => {
  */
 export const approveExpense = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { comments } = req.body;
+  const { comments } = ApproveExpenseSchema.parse(req.body);
   const user = getUser(req);
 
   let expense;
@@ -230,12 +239,12 @@ export const approveExpense = asyncHandler(async (req, res) => {
  */
 export const rejectExpense = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { reason } = req.body;
+  const { reason } = RejectExpenseSchema.parse(req.body);
   const user = getUser(req);
 
   let expense;
   try {
-    expense = await expenseService.rejectExpense(id, user.id!, reason);
+    expense = await expenseService.rejectExpense(id, user.id!, reason ?? '');
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message.includes('Cannot reject expense')) {
@@ -259,7 +268,7 @@ export const rejectExpense = asyncHandler(async (req, res) => {
  */
 export const markExpensePaid = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { payment_date, payment_reference, notes, payment_account_id } = req.body;
+  const { payment_date, payment_reference, notes, payment_account_id } = MarkExpensePaidSchema.parse(req.body);
   const user = getUser(req);
 
   let expense;
@@ -268,7 +277,7 @@ export const markExpensePaid = asyncHandler(async (req, res) => {
       paymentDate: payment_date,
       paymentReference: payment_reference,
       notes,
-      paymentAccountId: payment_account_id
+      paymentAccountId: payment_account_id ?? undefined
     });
   } catch (error) {
     if (error instanceof AppError) throw error;
@@ -367,7 +376,7 @@ export const getPaymentAccounts = asyncHandler(async (_req, res) => {
  * Create expense category
  */
 export const createExpenseCategory = asyncHandler(async (req, res) => {
-  const categoryData = req.body;
+  const categoryData = CreateExpenseCategorySchema.parse(req.body);
   const category = await expenseService.createExpenseCategory(categoryData);
   const user = getUser(req);
 
@@ -388,7 +397,8 @@ export const createExpenseCategory = asyncHandler(async (req, res) => {
 export const updateExpenseCategory = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const user = getUser(req);
-  const category = await expenseService.updateExpenseCategory(id, req.body, user.userId!);
+  const validated = UpdateExpenseCategorySchema.parse(req.body);
+  const category = await expenseService.updateExpenseCategory(id, validated, user.userId!);
   if (!category) throw new NotFoundError('Expense category');
 
   res.json({

@@ -12,11 +12,16 @@ import { billingService } from './billingService.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler, ValidationError, NotFoundError, ConflictError, UnauthorizedError, ForbiddenError, AppError } from '../../middleware/errorHandler.js';
 
-const PLATFORM_JWT_SECRET = process.env.PLATFORM_JWT_SECRET || process.env.JWT_SECRET || 'platform-secret-change-me';
+const PLATFORM_JWT_SECRET = process.env.PLATFORM_JWT_SECRET || process.env.JWT_SECRET;
 
-if (PLATFORM_JWT_SECRET === 'platform-secret-change-me') {
-  logger.warn('⚠️  PLATFORM_JWT_SECRET is using the default fallback — set PLATFORM_JWT_SECRET in .env for production!');
+if (!PLATFORM_JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('FATAL: PLATFORM_JWT_SECRET (or JWT_SECRET) is required in production');
+    process.exit(1);
+  }
+  logger.warn('⚠️  PLATFORM_JWT_SECRET is not set — using insecure default for development only.');
 }
+const platformJwtSecret = PLATFORM_JWT_SECRET || 'dev-only-platform-secret-32chrs';
 
 /** Scrub internal error details — never expose stack traces or SQL errors to clients */
 function safeErrorMessage(error: unknown, fallback: string): string {
@@ -56,7 +61,7 @@ function getSuperAdmin(req: Request): { id: string; email: string } | null {
 
   try {
     const token = authHeader.substring(7);
-    const payload = jwt.verify(token, PLATFORM_JWT_SECRET) as { adminId: string; email: string; scope: string };
+    const payload = jwt.verify(token, platformJwtSecret) as { adminId: string; email: string; scope: string };
     if (payload.scope !== 'platform') return null;
     return { id: payload.adminId, email: payload.email };
   } catch {
@@ -115,7 +120,7 @@ export const platformController = {
 
     const token = jwt.sign(
       { adminId: admin.id, email: admin.email, scope: 'platform' },
-      PLATFORM_JWT_SECRET,
+      platformJwtSecret,
       { expiresIn: '8h' }
     );
 

@@ -3,6 +3,7 @@
 
 import pg from 'pg';
 import dotenv from 'dotenv';
+import logger from '../utils/logger.js';
 
 dotenv.config();
 
@@ -43,8 +44,8 @@ pool.on('connect', (client) => {
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Unexpected database error:', err);
-  process.exit(-1);
+  console.error('❌ Unexpected database pool error:', err.message);
+  logger.error('Database pool error (connection will be retried)', { error: err.message });
 });
 
 export async function testConnection(): Promise<boolean> {

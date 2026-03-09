@@ -76,11 +76,19 @@ class ConnectionManager {
    */
   getMasterPool(): pg.Pool {
     if (!this.masterPool) {
-      const connectionString = process.env.DATABASE_URL ||
-        `postgresql://${this.dbUser}:${this.dbPassword}@localhost:5432/pos_system`;
+      // Use individual params to avoid password appearing in connection string errors
+      const poolConfig = process.env.DATABASE_URL
+        ? { connectionString: process.env.DATABASE_URL }
+        : {
+            host: 'localhost',
+            port: 5432,
+            database: 'pos_system',
+            user: this.dbUser,
+            password: this.dbPassword,
+          };
 
       this.masterPool = new Pool({
-        connectionString,
+        ...poolConfig,
         max: 20,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 2000,
@@ -117,12 +125,13 @@ class ConnectionManager {
       this.evictLeastRecentlyUsed();
     }
 
-    // Create new pool for this tenant
-    const connectionString =
-      `postgresql://${this.dbUser}:${this.dbPassword}@${config.databaseHost}:${config.databasePort}/${config.databaseName}`;
-
+    // Create new pool for this tenant — use discrete params to keep password out of logs
     const pool = new Pool({
-      connectionString,
+      host: config.databaseHost,
+      port: config.databasePort,
+      database: config.databaseName,
+      user: this.dbUser,
+      password: this.dbPassword,
       max: this.defaultMaxConnections,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,

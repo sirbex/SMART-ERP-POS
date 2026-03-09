@@ -61,6 +61,8 @@ export const CreateExpenseSchema = z.object({
 
   category: ExpenseCategorySchema,
 
+  categoryId: z.string().uuid('Invalid category ID').optional(),
+
   vendor: z.string()
     .max(255, 'Vendor name cannot exceed 255 characters')
     .trim()
@@ -104,8 +106,7 @@ export const UpdateExpenseSchema = z.object({
   description: z.string()
     .max(1000, 'Description cannot exceed 1000 characters')
     .trim()
-    .optional()
-    .nullable(),
+    .optional(),
 
   amount: z.number()
     .positive('Amount must be greater than zero')
@@ -121,8 +122,7 @@ export const UpdateExpenseSchema = z.object({
   vendor: z.string()
     .max(255, 'Vendor name cannot exceed 255 characters')
     .trim()
-    .optional()
-    .nullable(),
+    .optional(),
 
   paymentMethod: PaymentMethodSchema.optional(),
 
@@ -134,7 +134,6 @@ export const UpdateExpenseSchema = z.object({
     .max(1000, 'Notes cannot exceed 1000 characters')
     .trim()
     .optional()
-    .nullable()
 }).strict();
 
 // Expense Filter Schema
@@ -220,3 +219,37 @@ export type ExpenseFilter = z.infer<typeof ExpenseFilterSchema>;
 export type ExpenseStatus = z.infer<typeof ExpenseStatusSchema>;
 export type ExpenseCategory = z.infer<typeof ExpenseCategorySchema>;
 export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
+
+// ── Expense Category CRUD ──
+
+export const CreateExpenseCategorySchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100).trim(),
+  code: z.string().min(1, 'Code is required').max(50).trim(),
+  description: z.string().max(500).trim().optional(),
+}).strict();
+
+export const UpdateExpenseCategorySchema = CreateExpenseCategorySchema.partial().strict();
+
+// ── Approval / Rejection / Payment ──
+
+export const ApproveExpenseSchema = z.object({
+  comments: z.string().max(1000, 'Comments cannot exceed 1000 characters').trim().optional(),
+}).strict();
+
+export const RejectExpenseSchema = z.object({
+  reason: z.string().max(1000, 'Reason cannot exceed 1000 characters').trim().optional(),
+}).strict();
+
+export const MarkExpensePaidSchema = z.object({
+  payment_date: z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}/, 'Payment date must start with YYYY-MM-DD')
+    .optional(),
+  payment_reference: z.string().max(255).trim().optional(),
+  notes: z.string().max(1000).trim().optional(),
+  payment_account_id: z.string().uuid('Invalid payment account ID').optional(),
+}).strict();
+
+export type CreateExpenseCategoryData = z.infer<typeof CreateExpenseCategorySchema>;
+export type ApproveExpenseData = z.infer<typeof ApproveExpenseSchema>;
+export type RejectExpenseData = z.infer<typeof RejectExpenseSchema>;
+export type MarkExpensePaidData = z.infer<typeof MarkExpensePaidSchema>;

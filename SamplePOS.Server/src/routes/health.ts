@@ -5,6 +5,23 @@ import Redis from 'ioredis';
 
 const router = Router();
 
+// Lazy Redis connection for health checks (reused across requests)
+let healthRedis: Redis | null = null;
+function getHealthRedis(): Redis {
+  if (!healthRedis) {
+    healthRedis = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+      connectTimeout: 3000,
+    });
+    healthRedis.on('error', () => { /* handled per-check */ });
+  }
+  return healthRedis;
+}
+
 interface HealthCheckResult {
   service: string;
   status: 'healthy' | 'unhealthy';
@@ -59,6 +76,13 @@ router.get('/', async (req: Request, res: Response) => {
     checks.push(memoryCheck);
     if (memoryCheck.status === 'unhealthy') {
       overallStatus = 'unhealthy';
+    }
+
+    // Redis health check
+    const redisCheck = await checkRedis();
+    checks.push(redisCheck);
+    if (redisCheck.status === 'unhealthy') {
+      overallStatus = overallStatus === 'unhealthy' ? 'unhealthy' : 'degraded';
     }
 
     // Database schema validation check
@@ -295,6 +319,39 @@ async function checkDatabase(dbPool: Pool): Promise<HealthCheckResult> {
       status: 'unhealthy',
       details: {
         error: error instanceof Error ? error.message : 'Database connection failed',
+        responseTime: `${Date.now() - startTime}ms`
+      },
+      timestamp: new Date().toISOString(),
+      responseTime: Date.now() - startTime
+    };
+  }
+}
+
+// Redis health check function
+async function checkRedis(): Promise<HealthCheckResult> {
+  const startTime = Date.now();
+
+  try {
+    const redis = getHealthRedis();
+    if (redis.status !== 'ready') {
+      await redis.connect();
+    }
+    const pong = await redis.ping();
+    const responseTime = Date.now() - startTime;
+
+    return {
+      service: 'redis',
+      status: pong === 'PONG' ? 'healthy' : 'unhealthy',
+      details: { responseTime: `${responseTime}ms` },
+      timestamp: new Date().toISOString(),
+      responseTime
+    };
+  } catch (error) {
+    return {
+      service: 'redis',
+      status: 'unhealthy',
+      details: {
+        error: error instanceof Error ? error.message : 'Redis connection failed',
         responseTime: `${Date.now() - startTime}ms`
       },
       timestamp: new Date().toISOString(),

@@ -278,10 +278,10 @@ export const invoiceRepository = {
     return res.rows[0];
   },
 
-  async listPayments(pool: Pool | PoolClient, invoiceId: string): Promise<InvoicePaymentRecord[]> {
+  async listPayments(pool: Pool | PoolClient, invoiceId: string, limit = 200): Promise<InvoicePaymentRecord[]> {
     const res = await pool.query(
-      'SELECT * FROM invoice_payments WHERE invoice_id = $1 ORDER BY created_at ASC',
-      [invoiceId]
+      'SELECT * FROM invoice_payments WHERE invoice_id = $1 ORDER BY created_at ASC LIMIT $2',
+      [invoiceId, limit]
     );
     return res.rows;
   },

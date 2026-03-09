@@ -34,7 +34,15 @@ if (!JWT_SECRET) {
   }
   console.warn(`⚠️  ${msg} Using insecure default for development only.`);
 }
-const jwtSecret = JWT_SECRET || 'dev-only-insecure-key-do-not-use-in-production';
+if (JWT_SECRET && JWT_SECRET.length < 32) {
+  const msg = `FATAL: JWT_SECRET must be at least 32 characters (got ${JWT_SECRET.length}).`;
+  if (process.env.NODE_ENV === 'production') {
+    console.error(msg);
+    process.exit(1);
+  }
+  console.warn(`⚠️  ${msg}`);
+}
+const jwtSecret = JWT_SECRET || 'dev-only-insecure-key-change-me-32ch';
 
 // Extend Express Request interface to include enhanced user
 declare global {

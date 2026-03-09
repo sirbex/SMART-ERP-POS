@@ -51,6 +51,7 @@ import { createRbacRoutes, initializeRbacMiddleware } from './rbac/index.js';
 import { platformRoutes } from './modules/platform/platformRoutes.js';
 import { syncRoutes } from './modules/platform/syncRoutes.js';
 import { tenantMiddleware } from './middleware/tenantMiddleware.js';
+import { jobQueue } from './services/jobQueue.js';
 import { connectionManager } from './db/connectionManager.js';
 import { authenticate } from './middleware/auth.js';
 import { correlationId } from './middleware/correlationId.js';
@@ -117,9 +118,17 @@ app.use(express.urlencoded({ extended: true }));
 // Compression
 app.use(compression());
 
-// Request logging
+// Request logging with response timing
 app.use((req, res, next) => {
-  logger.http(`${req.method} ${req.path}`, { requestId: req.requestId });
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.http(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`, {
+      requestId: req.requestId,
+      status: res.statusCode,
+      duration,
+    });
+  });
   next();
 });
 
@@ -314,10 +323,27 @@ async function startServer() {
     });
 
     // Graceful shutdown
+    const SHUTDOWN_TIMEOUT_MS = 30_000;
     const shutdown = async (signal: string) => {
       logger.info(`Received ${signal}, shutting down gracefully...`);
+
+      // Force exit if shutdown hangs
+      const forceExit = setTimeout(() => {
+        logger.error('Shutdown timed out, forcing exit');
+        process.exit(1);
+      }, SHUTDOWN_TIMEOUT_MS);
+      forceExit.unref();
+
       server.close(async () => {
-        await connectionManager.shutdown();
+        try {
+          await jobQueue.closeAll().catch((err: unknown) => {
+            logger.warn('Job queue close error', { error: err instanceof Error ? err.message : String(err) });
+          });
+          await connectionManager.shutdown();
+        } catch (err) {
+          logger.error('Shutdown cleanup error', { error: err instanceof Error ? err.message : String(err) });
+        }
+        clearTimeout(forceExit);
         process.exit(0);
       });
     };
