@@ -75,8 +75,14 @@ if (process.env.SENTRY_DSN) {
     dsn: process.env.SENTRY_DSN,
     environment: process.env.NODE_ENV || 'development',
     tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    integrations: [
+      Sentry.httpIntegration(),
+      Sentry.expressIntegration(),
+      Sentry.postgresIntegration(),
+    ],
   });
-  logger.info('Sentry error monitoring initialized');
+  logger.info('Sentry error monitoring + performance tracing initialized');
 }
 
 // ============================================================
@@ -337,11 +343,15 @@ async function startServer() {
       server.close(async () => {
         try {
           await jobQueue.closeAll().catch((err: unknown) => {
-            logger.warn('Job queue close error', { error: err instanceof Error ? err.message : String(err) });
+            logger.warn('Job queue close error', {
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
           await connectionManager.shutdown();
         } catch (err) {
-          logger.error('Shutdown cleanup error', { error: err instanceof Error ? err.message : String(err) });
+          logger.error('Shutdown cleanup error', {
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
         clearTimeout(forceExit);
         process.exit(0);
