@@ -5,16 +5,19 @@
 import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
 // Mock functions matching actual supplierRepository exports
-const mockFindAll = jest.fn<any>();
-const mockCountAll = jest.fn<any>();
-const mockFindById = jest.fn<any>();
-const mockFindBySupplierNumber = jest.fn<any>();
-const mockSearchSuppliers = jest.fn<any>();
-const mockCreate = jest.fn<any>();
-const mockUpdate = jest.fn<any>();
-const mockHasActivePurchaseOrders = jest.fn<any>();
-const mockSoftDeleteSupplier = jest.fn<any>();
+const mockFindAll = jest.fn<MockFn>();
+const mockCountAll = jest.fn<MockFn>();
+const mockFindById = jest.fn<MockFn>();
+const mockFindBySupplierNumber = jest.fn<MockFn>();
+const mockSearchSuppliers = jest.fn<MockFn>();
+const mockCreate = jest.fn<MockFn>();
+const mockUpdate = jest.fn<MockFn>();
+const mockHasActivePurchaseOrders = jest.fn<MockFn>();
+const mockSoftDeleteSupplier = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./supplierRepository.js', () => ({
   findAll: mockFindAll,
@@ -30,7 +33,7 @@ jest.unstable_mockModule('./supplierRepository.js', () => ({
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => fn({})),
+    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => fn({})),
   },
 }));
 

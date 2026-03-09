@@ -5,14 +5,17 @@
 import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
 const mockPORepo = {
-  createPO: jest.fn<any>(),
-  createPOItem: jest.fn<any>(),
-  getPOById: jest.fn<any>(),
-  listPOs: jest.fn<any>(),
-  updatePOStatus: jest.fn<any>(),
-  deletePO: jest.fn<any>(),
-  updatePOTotal: jest.fn<any>(),
+  createPO: jest.fn<MockFn>(),
+  createPOItem: jest.fn<MockFn>(),
+  getPOById: jest.fn<MockFn>(),
+  listPOs: jest.fn<MockFn>(),
+  updatePOStatus: jest.fn<MockFn>(),
+  deletePO: jest.fn<MockFn>(),
+  updatePOTotal: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('./purchaseOrderRepository.js', () => ({
@@ -30,8 +33,8 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
-      const mockClient = { query: jest.fn<any>().mockResolvedValue({ rows: [] }) };
+    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
+      const mockClient = { query: jest.fn<MockFn>().mockResolvedValue({ rows: [] }) };
       return fn(mockClient);
     }),
   },
@@ -39,7 +42,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
 
 const { purchaseOrderService } = await import('./purchaseOrderService.js');
 
-const mockPool = { query: jest.fn<any>(), connect: jest.fn<any>() } as unknown as Pool;
+const mockPool = { query: jest.fn<MockFn>(), connect: jest.fn<MockFn>() } as unknown as Pool;
 
 describe('purchaseOrderService', () => {
   beforeEach(() => jest.clearAllMocks());

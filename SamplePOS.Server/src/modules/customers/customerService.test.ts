@@ -4,20 +4,23 @@
  */
 import { jest } from '@jest/globals';
 
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
 // Mock functions matching actual customerRepository exports
-const mockFindAllCustomers = jest.fn<any>();
-const mockCountCustomers = jest.fn<any>();
-const mockFindCustomerById = jest.fn<any>();
-const mockFindCustomerByNumber = jest.fn<any>();
-const mockFindCustomerByEmail = jest.fn<any>();
-const mockSearchCustomers = jest.fn<any>();
-const mockCreateCustomer = jest.fn<any>();
-const mockUpdateCustomer = jest.fn<any>();
-const mockDeleteCustomer = jest.fn<any>();
-const mockToggleCustomerActive = jest.fn<any>();
-const mockUpdateCustomerBalance = jest.fn<any>();
-const mockFindCustomerSales = jest.fn<any>();
-const mockCountCustomerSales = jest.fn<any>();
+const mockFindAllCustomers = jest.fn<MockFn>();
+const mockCountCustomers = jest.fn<MockFn>();
+const mockFindCustomerById = jest.fn<MockFn>();
+const mockFindCustomerByNumber = jest.fn<MockFn>();
+const mockFindCustomerByEmail = jest.fn<MockFn>();
+const mockSearchCustomers = jest.fn<MockFn>();
+const mockCreateCustomer = jest.fn<MockFn>();
+const mockUpdateCustomer = jest.fn<MockFn>();
+const mockDeleteCustomer = jest.fn<MockFn>();
+const mockToggleCustomerActive = jest.fn<MockFn>();
+const mockUpdateCustomerBalance = jest.fn<MockFn>();
+const mockFindCustomerSales = jest.fn<MockFn>();
+const mockCountCustomerSales = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./customerRepository.js', () => ({
   findAllCustomers: mockFindAllCustomers,
@@ -33,13 +36,13 @@ jest.unstable_mockModule('./customerRepository.js', () => ({
   updateCustomerBalance: mockUpdateCustomerBalance,
   findCustomerSales: mockFindCustomerSales,
   countCustomerSales: mockCountCustomerSales,
-  findCustomerTransactions: jest.fn<any>().mockResolvedValue([]),
-  countCustomerTransactions: jest.fn<any>().mockResolvedValue(0),
-  getCustomerSummary: jest.fn<any>().mockResolvedValue({}),
-  getOpeningBalance: jest.fn<any>().mockResolvedValue(0),
-  getStatementEntries: jest.fn<any>().mockResolvedValue([]),
-  getDepositEntries: jest.fn<any>().mockResolvedValue([]),
-  getCustomerDepositSummary: jest.fn<any>().mockResolvedValue(null),
+  findCustomerTransactions: jest.fn<MockFn>().mockResolvedValue([]),
+  countCustomerTransactions: jest.fn<MockFn>().mockResolvedValue(0),
+  getCustomerSummary: jest.fn<MockFn>().mockResolvedValue({}),
+  getOpeningBalance: jest.fn<MockFn>().mockResolvedValue(0),
+  getStatementEntries: jest.fn<MockFn>().mockResolvedValue([]),
+  getDepositEntries: jest.fn<MockFn>().mockResolvedValue([]),
+  getCustomerDepositSummary: jest.fn<MockFn>().mockResolvedValue(null),
 }));
 
 jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
@@ -47,7 +50,7 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 }));
 
 jest.unstable_mockModule('../../../../shared/zod/customerStatement.js', () => ({
-  CustomerStatementSchema: { parse: jest.fn<any>((v: unknown) => v) },
+  CustomerStatementSchema: { parse: jest.fn((v: unknown) => v) },
 }));
 
 const customerService = await import('./customerService.js');
@@ -91,7 +94,7 @@ describe('customerService', () => {
       const customer = await customerService.createCustomer({
         name: 'Beta',
         email: 'beta@x.com',
-      } as any);
+      } as Record<string, unknown>);
       expect(customer.id).toBe('c2');
       expect(mockCreateCustomer).toHaveBeenCalled();
     });
@@ -102,14 +105,14 @@ describe('customerService', () => {
       mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Old', email: 'old@x.com' });
       mockUpdateCustomer.mockResolvedValue({ id: 'c1', name: 'Updated' });
 
-      const customer = await customerService.updateCustomer('c1', { name: 'Updated' } as any);
+      const customer = await customerService.updateCustomer('c1', { name: 'Updated' } as Record<string, unknown>);
       expect(customer.name).toBe('Updated');
     });
 
     it('should throw when customer not found', async () => {
       mockFindCustomerById.mockResolvedValue(null);
 
-      await expect(customerService.updateCustomer('ghost', { name: 'X' } as any)).rejects.toThrow();
+      await expect(customerService.updateCustomer('ghost', { name: 'X' } as Record<string, unknown>)).rejects.toThrow();
     });
   });
 

@@ -5,13 +5,16 @@
 import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
-const mockGetBatchesByProduct = jest.fn<any>();
-const mockGetAllActiveBatches = jest.fn<any>();
-const mockGetStockLevels = jest.fn<any>();
-const mockGetStockLevelByProduct = jest.fn<any>();
-const mockGetBatchesExpiringSoon = jest.fn<any>();
-const mockSelectFEFOBatches = jest.fn<any>();
-const mockProcessMovement = jest.fn<any>();
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
+const mockGetBatchesByProduct = jest.fn<MockFn>();
+const mockGetAllActiveBatches = jest.fn<MockFn>();
+const mockGetStockLevels = jest.fn<MockFn>();
+const mockGetStockLevelByProduct = jest.fn<MockFn>();
+const mockGetBatchesExpiringSoon = jest.fn<MockFn>();
+const mockSelectFEFOBatches = jest.fn<MockFn>();
+const mockProcessMovement = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./inventoryRepository.js', () => ({
   inventoryRepository: {
@@ -32,7 +35,7 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 }));
 
 jest.unstable_mockModule('./stockMovementHandler.js', () => ({
-  StockMovementHandler: jest.fn<any>().mockImplementation(() => ({
+  StockMovementHandler: jest.fn<MockFn>().mockImplementation(() => ({
     processMovement: mockProcessMovement,
   })),
 }));
@@ -40,7 +43,7 @@ jest.unstable_mockModule('./stockMovementHandler.js', () => ({
 const { inventoryService } = await import('./inventoryService.js');
 
 const mockPool = {
-  query: jest.fn<any>(),
+  query: jest.fn<MockFn>(),
 } as unknown as Pool;
 
 describe('inventoryService', () => {
@@ -129,7 +132,7 @@ describe('inventoryService', () => {
 
   describe('getInventoryValue', () => {
     it('should return total inventory value', async () => {
-      (mockPool.query as jest.Mock<any>).mockResolvedValue({
+      (mockPool.query as jest.Mock<MockFn>).mockResolvedValue({
         rows: [
           {
             product_id: 'p1',

@@ -4,41 +4,44 @@
  */
 import { jest } from '@jest/globals';
 
-const mockQuery = jest.fn<any>();
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
+const mockQuery = jest.fn<MockFn>();
 const mockClient = {
   query: mockQuery,
-  release: jest.fn<any>(),
+  release: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('../db/pool.js', () => ({
   pool: {
     query: mockQuery,
-    connect: jest.fn<any>().mockResolvedValue(mockClient),
+    connect: jest.fn<MockFn>().mockResolvedValue(mockClient),
   },
   default: {
     query: mockQuery,
-    connect: jest.fn<any>().mockResolvedValue(mockClient),
+    connect: jest.fn<MockFn>().mockResolvedValue(mockClient),
   },
 }));
 
 jest.unstable_mockModule('../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) =>
+    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) =>
       fn(mockClient)
     ),
   },
 }));
 
 jest.unstable_mockModule('uuid', () => ({
-  v4: jest.fn<any>().mockReturnValue('test-uuid-1234'),
+  v4: jest.fn<MockFn>().mockReturnValue('test-uuid-1234'),
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
   default: {
-    info: jest.fn<any>(),
-    error: jest.fn<any>(),
-    warn: jest.fn<any>(),
-    debug: jest.fn<any>(),
+    info: jest.fn<MockFn>(),
+    error: jest.fn<MockFn>(),
+    warn: jest.fn<MockFn>(),
+    debug: jest.fn<MockFn>(),
   },
 }));
 

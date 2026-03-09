@@ -4,21 +4,24 @@
  */
 import { jest } from '@jest/globals';
 
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
 const mockExpenseRepo = {
-  getExpenses: jest.fn<any>(),
-  getExpenseById: jest.fn<any>(),
-  createExpense: jest.fn<any>(),
-  updateExpense: jest.fn<any>(),
-  deleteExpense: jest.fn<any>(),
-  getExpenseCategories: jest.fn<any>(),
-  createExpenseCategory: jest.fn<any>(),
-  getExpenseCategoryByCode: jest.fn<any>(),
-  getExpenseDocuments: jest.fn<any>(),
-  deleteExpenseDocument: jest.fn<any>(),
-  createApprovalRecord: jest.fn<any>(),
-  updateApprovalRecord: jest.fn<any>(),
-  getExpenseCountByCategory: jest.fn<any>(),
-  getPaymentAccounts: jest.fn<any>(),
+  getExpenses: jest.fn<MockFn>(),
+  getExpenseById: jest.fn<MockFn>(),
+  createExpense: jest.fn<MockFn>(),
+  updateExpense: jest.fn<MockFn>(),
+  deleteExpense: jest.fn<MockFn>(),
+  getExpenseCategories: jest.fn<MockFn>(),
+  createExpenseCategory: jest.fn<MockFn>(),
+  getExpenseCategoryByCode: jest.fn<MockFn>(),
+  getExpenseDocuments: jest.fn<MockFn>(),
+  deleteExpenseDocument: jest.fn<MockFn>(),
+  createApprovalRecord: jest.fn<MockFn>(),
+  updateApprovalRecord: jest.fn<MockFn>(),
+  getExpenseCountByCategory: jest.fn<MockFn>(),
+  getPaymentAccounts: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('../repositories/expenseRepository', () => ({
@@ -27,14 +30,14 @@ jest.unstable_mockModule('../repositories/expenseRepository', () => ({
 }));
 
 jest.unstable_mockModule('../db/pool.js', () => ({
-  pool: { query: jest.fn<any>(), connect: jest.fn<any>() },
-  default: { query: jest.fn<any>(), connect: jest.fn<any>() },
+  pool: { query: jest.fn<MockFn>(), connect: jest.fn<MockFn>() },
+  default: { query: jest.fn<MockFn>(), connect: jest.fn<MockFn>() },
 }));
 
 jest.unstable_mockModule('../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
-      const mockClient = { query: jest.fn<any>().mockResolvedValue({ rows: [] }) };
+    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
+      const mockClient = { query: jest.fn<MockFn>().mockResolvedValue({ rows: [] }) };
       return fn(mockClient);
     }),
   },
@@ -58,22 +61,22 @@ jest.unstable_mockModule('../middleware/errorHandler.js', () => ({
 }));
 
 jest.unstable_mockModule('./glEntryService.js', () => ({
-  createExpenseGLEntries: jest.fn<any>().mockResolvedValue(undefined),
-  reverseExpenseGLEntries: jest.fn<any>().mockResolvedValue(undefined),
+  createExpenseGLEntries: jest.fn<MockFn>().mockResolvedValue(undefined),
+  reverseExpenseGLEntries: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('./bankingService.js', () => ({
-  BankingService: jest.fn<any>().mockImplementation(() => ({
-    recordExpensePayment: jest.fn<any>().mockResolvedValue(undefined),
+  BankingService: jest.fn<MockFn>().mockImplementation(() => ({
+    recordExpensePayment: jest.fn<MockFn>().mockResolvedValue(undefined),
   })),
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
   default: {
-    info: jest.fn<any>(),
-    error: jest.fn<any>(),
-    warn: jest.fn<any>(),
-    debug: jest.fn<any>(),
+    info: jest.fn<MockFn>(),
+    error: jest.fn<MockFn>(),
+    warn: jest.fn<MockFn>(),
+    debug: jest.fn<MockFn>(),
   },
 }));
 

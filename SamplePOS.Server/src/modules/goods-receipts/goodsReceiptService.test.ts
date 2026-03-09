@@ -5,15 +5,18 @@
 import { jest } from '@jest/globals';
 import type { Pool } from 'pg';
 
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
 const mockGRRepo = {
-  createGR: jest.fn<any>(),
-  createGRItem: jest.fn<any>(),
-  getGRById: jest.fn<any>(),
-  listGRs: jest.fn<any>(),
-  updateGRStatus: jest.fn<any>(),
-  updateGRItem: jest.fn<any>(),
-  getGRItemWithParent: jest.fn<any>(),
-  finalizeGR: jest.fn<any>(),
+  createGR: jest.fn<MockFn>(),
+  createGRItem: jest.fn<MockFn>(),
+  getGRById: jest.fn<MockFn>(),
+  listGRs: jest.fn<MockFn>(),
+  updateGRStatus: jest.fn<MockFn>(),
+  updateGRItem: jest.fn<MockFn>(),
+  getGRItemWithParent: jest.fn<MockFn>(),
+  finalizeGR: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('./goodsReceiptRepository.js', () => ({
@@ -23,42 +26,42 @@ jest.unstable_mockModule('./goodsReceiptRepository.js', () => ({
 
 jest.unstable_mockModule('../purchase-orders/purchaseOrderRepository.js', () => ({
   purchaseOrderRepository: {
-    getPOById: jest.fn<any>(),
-    updatePOStatus: jest.fn<any>(),
-    createManualPO: jest.fn<any>(),
+    getPOById: jest.fn<MockFn>(),
+    updatePOStatus: jest.fn<MockFn>(),
+    createManualPO: jest.fn<MockFn>(),
   },
 }));
 
 jest.unstable_mockModule('../inventory/inventoryRepository.js', () => ({
   inventoryRepository: {
-    createBatch: jest.fn<any>().mockResolvedValue({ id: 'batch1' }),
-    updateProductInventory: jest.fn<any>().mockResolvedValue(undefined),
+    createBatch: jest.fn<MockFn>().mockResolvedValue({ id: 'batch1' }),
+    updateProductInventory: jest.fn<MockFn>().mockResolvedValue(undefined),
   },
 }));
 
 jest.unstable_mockModule('../supplier-payments/supplierPaymentRepository.js', () => ({
-  createSupplierLiability: jest.fn<any>().mockResolvedValue(undefined),
+  createSupplierLiability: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('../../services/costLayerService.js', () => ({
-  addCostLayer: jest.fn<any>().mockResolvedValue(undefined),
+  addCostLayer: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('../../services/pricingService.js', () => ({
-  updateProductCostPrice: jest.fn<any>().mockResolvedValue(undefined),
-  checkCostPriceChange: jest.fn<any>().mockResolvedValue(null),
+  updateProductCostPrice: jest.fn<MockFn>().mockResolvedValue(undefined),
+  checkCostPriceChange: jest.fn<MockFn>().mockResolvedValue(null),
 }));
 
 jest.unstable_mockModule('../../services/glEntryService.js', () => ({
-  createGoodsReceiptGLEntries: jest.fn<any>().mockResolvedValue(undefined),
+  createGoodsReceiptGLEntries: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('../suppliers/supplierProductPriceRepository.js', () => ({
-  upsertSupplierProductPrice: jest.fn<any>().mockResolvedValue(undefined),
+  upsertSupplierProductPrice: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('../../db/batchFetch.js', () => ({
-  batchFetchProducts: jest.fn<any>().mockResolvedValue(new Map()),
+  batchFetchProducts: jest.fn<MockFn>().mockResolvedValue(new Map()),
 }));
 
 jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
@@ -68,8 +71,8 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
-    run: jest.fn<any>(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
-      const mockClient = { query: jest.fn<any>().mockResolvedValue({ rows: [] }) };
+    run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => {
+      const mockClient = { query: jest.fn<MockFn>().mockResolvedValue({ rows: [] }) };
       return fn(mockClient);
     }),
   },
@@ -77,7 +80,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
 
 const { goodsReceiptService } = await import('./goodsReceiptService.js');
 
-const mockPool = { query: jest.fn<any>() } as unknown as Pool;
+const mockPool = { query: jest.fn<MockFn>() } as unknown as Pool;
 
 describe('goodsReceiptService', () => {
   beforeEach(() => jest.clearAllMocks());

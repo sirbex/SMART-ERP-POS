@@ -4,18 +4,21 @@
  */
 import { jest } from '@jest/globals';
 
+/** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
+type MockFn = (...args: unknown[]) => unknown;
+
 // Mock dependencies before importing the module under test
-const mockFindUserByEmail = jest.fn<any>();
-const mockFindUserById = jest.fn<any>();
-const mockCreateUser = jest.fn<any>();
-const mockGenerateToken = jest.fn<any>();
-const mockBcryptCompare = jest.fn<any>();
-const mockBcryptHash = jest.fn<any>();
-const mockCheckAccountLockout = jest.fn<any>();
-const mockRecordFailedLoginAttempt = jest.fn<any>();
-const mockResetFailedLoginAttempts = jest.fn<any>();
-const mockGetPasswordExpiryStatus = jest.fn<any>();
-const mockValidatePassword = jest.fn<any>();
+const mockFindUserByEmail = jest.fn<MockFn>();
+const mockFindUserById = jest.fn<MockFn>();
+const mockCreateUser = jest.fn<MockFn>();
+const mockGenerateToken = jest.fn<MockFn>();
+const mockBcryptCompare = jest.fn<MockFn>();
+const mockBcryptHash = jest.fn<MockFn>();
+const mockCheckAccountLockout = jest.fn<MockFn>();
+const mockRecordFailedLoginAttempt = jest.fn<MockFn>();
+const mockResetFailedLoginAttempts = jest.fn<MockFn>();
+const mockGetPasswordExpiryStatus = jest.fn<MockFn>();
+const mockValidatePassword = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./authRepository.js', () => ({
   findUserByEmail: mockFindUserByEmail,
@@ -40,15 +43,15 @@ jest.unstable_mockModule('./passwordPolicyService.js', () => ({
   recordFailedLoginAttempt: mockRecordFailedLoginAttempt,
   resetFailedLoginAttempts: mockResetFailedLoginAttempts,
   getPasswordExpiryStatus: mockGetPasswordExpiryStatus,
-  isPasswordInHistory: jest.fn<any>().mockResolvedValue(false),
-  addPasswordToHistory: jest.fn<any>().mockResolvedValue(undefined),
-  updatePasswordWithPolicy: jest.fn<any>(),
-  getPasswordPolicyConfig: jest.fn<any>().mockReturnValue({}),
+  isPasswordInHistory: jest.fn<MockFn>().mockResolvedValue(false),
+  addPasswordToHistory: jest.fn<MockFn>().mockResolvedValue(undefined),
+  updatePasswordWithPolicy: jest.fn<MockFn>(),
+  getPasswordPolicyConfig: jest.fn<MockFn>().mockReturnValue({}),
 }));
 
 const { authenticateUser, registerUser, getUserProfile } = await import('./authService.js');
 
-const mockPool = {} as any;
+const mockPool = {} as unknown;
 
 describe('authService', () => {
   beforeEach(() => {
