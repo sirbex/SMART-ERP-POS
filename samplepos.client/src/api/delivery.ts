@@ -122,6 +122,10 @@ const deliveryApi = {
     return response.data.data || [];
   },
 
+  getDeliveryNotePdfUrl(identifier: string): string {
+    return `/api/delivery/orders/${encodeURIComponent(identifier)}/pdf`;
+  },
+
   async createOrderFromSale(saleId: string, data: {
     deliveryAddress: string;
     deliveryContactName?: string;

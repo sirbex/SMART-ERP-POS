@@ -8,7 +8,10 @@
 
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import PDFDocument from 'pdfkit';
 import logger from '../../utils/logger.js';
+import { pool as globalPool } from '../../db/pool.js';
+import { getSettings } from '../settings/invoiceSettingsService.js';
 import * as deliveryService from './deliveryService.js';
 import {
   validateCreateDeliveryOrder,
@@ -378,4 +381,204 @@ export const getDeliverableSales = asyncHandler(async (req: Request, res: Respon
       error: result.error || 'Failed to get deliverable sales'
     });
   }
+});
+
+// ====================================================
+// DELIVERY NOTE PDF EXPORT
+// ====================================================
+
+/**
+ * GET /api/delivery/orders/:identifier/pdf
+ * Generate and download a delivery note PDF (no prices — logistics document only)
+ */
+export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Response) => {
+  const { identifier } = IdentifierParamSchema.parse(req.params);
+  const result = await deliveryService.getDeliveryOrder(identifier);
+
+  if (!result.success || !result.data) {
+    res.status(404).json({ success: false, error: result.error || 'Delivery order not found' });
+    return;
+  }
+
+  const order = result.data;
+  const pool = req.tenantPool || globalPool;
+  const settings = await getSettings(pool);
+
+  // Look up sale number if order is linked to a sale
+  let saleNumber: string | undefined;
+  if (order.saleId) {
+    const saleResult = await pool.query('SELECT sale_number FROM sales WHERE id = $1', [order.saleId]);
+    if (saleResult.rows.length > 0) {
+      saleNumber = saleResult.rows[0].sale_number;
+    }
+  }
+
+  // Company details from settings
+  const company = {
+    name: settings.companyName || 'SamplePOS',
+    address: settings.companyAddress || 'Kampala, Uganda',
+    phone: settings.companyPhone || '+256 700 000 000',
+    email: settings.companyEmail || 'info@samplepos.com',
+    tin: settings.companyTin || '',
+  };
+
+  const primaryColor = settings.primaryColor || '#2563eb';
+
+  // Create PDF
+  const doc = new PDFDocument({ margin: 50, size: 'A4' });
+  const margin = 50;
+  const contentWidth = doc.page.width - 2 * margin;
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=delivery-note-${order.deliveryNumber}.pdf`);
+  doc.pipe(res);
+
+  // ── Header ──────────────────────────────────────────────
+  doc.rect(0, 0, doc.page.width, 100).fill(primaryColor);
+
+  doc.fillColor('#ffffff')
+    .fontSize(24).font('Helvetica-Bold')
+    .text(company.name, margin, 20, { align: 'left' });
+
+  doc.fontSize(20).font('Helvetica-Bold')
+    .text('DELIVERY NOTE', margin, 20, { align: 'right', width: contentWidth });
+
+  doc.fontSize(8).font('Helvetica')
+    .text(company.address, margin, 48, { align: 'left' })
+    .text(company.phone, margin, 58, { align: 'left' })
+    .text(company.email, margin, 68, { align: 'left' });
+  if (company.tin) {
+    doc.text(company.tin, margin, 78, { align: 'left' });
+  }
+
+  doc.fontSize(11).font('Helvetica-Bold')
+    .text(order.deliveryNumber, margin, 52, { align: 'right', width: contentWidth });
+
+  doc.fontSize(8).font('Helvetica')
+    .text(`Date: ${order.deliveryDate}`, margin, 68, { align: 'right', width: contentWidth });
+  if (order.trackingNumber) {
+    doc.text(`Tracking: ${order.trackingNumber}`, margin, 78, { align: 'right', width: contentWidth });
+  }
+
+  // ── Deliver To card ─────────────────────────────────────
+  const cardY = 115;
+  doc.roundedRect(margin, cardY, contentWidth / 2 - 10, 90, 5)
+    .fillAndStroke('#f9fafb', '#e5e7eb');
+
+  doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold')
+    .text('DELIVER TO', margin + 10, cardY + 10);
+
+  doc.fillColor('#1f2937').fontSize(9).font('Helvetica');
+  let cy = cardY + 28;
+  if (order.customerName) { doc.text(order.customerName, margin + 10, cy); cy += 13; }
+  if (order.deliveryAddress) { doc.text(order.deliveryAddress, margin + 10, cy, { width: contentWidth / 2 - 30 }); cy += 13; }
+  if (order.deliveryContactName) { doc.text(`Contact: ${order.deliveryContactName}`, margin + 10, cy); cy += 13; }
+  if (order.deliveryContactPhone) { doc.text(`Phone: ${order.deliveryContactPhone}`, margin + 10, cy); }
+
+  // ── Order Info card ─────────────────────────────────────
+  const rightX = margin + contentWidth / 2 + 10;
+  doc.roundedRect(rightX, cardY, contentWidth / 2 - 10, 90, 5)
+    .fillAndStroke('#f9fafb', '#e5e7eb');
+
+  doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold')
+    .text('ORDER INFO', rightX + 10, cardY + 10);
+
+  doc.fillColor('#1f2937').fontSize(9).font('Helvetica');
+  cy = cardY + 28;
+  doc.text(`Status: ${order.status.replace('_', ' ')}`, rightX + 10, cy); cy += 13;
+  if (order.assignedDriverName) { doc.text(`Driver: ${order.assignedDriverName}`, rightX + 10, cy); cy += 13; }
+  if (saleNumber) { doc.text(`Sale Ref: ${saleNumber}`, rightX + 10, cy); cy += 13; }
+  if (order.specialInstructions) { doc.text(`Notes: ${order.specialInstructions}`, rightX + 10, cy, { width: contentWidth / 2 - 30 }); }
+
+  // ── Items Table ─────────────────────────────────────────
+  const tableTop = cardY + 105;
+  const items = order.items || [];
+  const colWidths = [0.05, 0.35, 0.15, 0.15, 0.15, 0.15].map(p => contentWidth * p);
+  const headers = ['#', 'Product', 'Code', 'Requested', 'Delivered', 'Condition'];
+  const rowH = 22;
+
+  // Table header
+  doc.rect(margin, tableTop, contentWidth, rowH).fill(primaryColor);
+  let x = margin + 5;
+  doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+  headers.forEach((h, i) => {
+    doc.text(h, x, tableTop + 7, { width: colWidths[i] - 10, lineBreak: false });
+    x += colWidths[i];
+  });
+
+  let rowY = tableTop + rowH;
+  items.forEach((item, idx) => {
+    // Page break check
+    if (rowY + rowH > doc.page.height - 120) {
+      doc.addPage();
+      rowY = margin;
+      // Redraw header
+      doc.rect(margin, rowY, contentWidth, rowH).fill(primaryColor);
+      x = margin + 5;
+      doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+      headers.forEach((h, i) => {
+        doc.text(h, x, rowY + 7, { width: colWidths[i] - 10, lineBreak: false });
+        x += colWidths[i];
+      });
+      rowY += rowH;
+    }
+
+    if (idx % 2 === 1) {
+      doc.rect(margin, rowY, contentWidth, rowH).fill('#f9fafb');
+    }
+
+    x = margin + 5;
+    doc.fillColor('#1f2937').fontSize(8).font('Helvetica');
+    const rowData = [
+      String(idx + 1),
+      item.productName || '',
+      item.productCode || '—',
+      `${item.quantityRequested}${item.unitOfMeasure ? ' ' + item.unitOfMeasure : ''}`,
+      String(item.quantityDelivered ?? '—'),
+      item.conditionOnDelivery || 'GOOD',
+    ];
+    rowData.forEach((val, i) => {
+      doc.text(val, x, rowY + 7, { width: colWidths[i] - 10, lineBreak: false });
+      x += colWidths[i];
+    });
+    rowY += rowH;
+  });
+
+  if (items.length === 0) {
+    doc.rect(margin, rowY, contentWidth, 30).fillAndStroke('#f9fafb', '#e5e7eb');
+    doc.fillColor('#6b7280').fontSize(9).font('Helvetica-Oblique')
+      .text('No items', margin, rowY + 10, { width: contentWidth, align: 'center' });
+    rowY += 30;
+  }
+
+  // ── Signature area ─────────────────────────────────────
+  const sigY = rowY + 30;
+  if (sigY < doc.page.height - 160) {
+    doc.fillColor('#1f2937').fontSize(10).font('Helvetica-Bold')
+      .text('Received by:', margin, sigY);
+
+    const lineY = sigY + 40;
+    doc.moveTo(margin, lineY).lineTo(margin + 200, lineY).stroke('#1f2937');
+    doc.fontSize(8).font('Helvetica').text('Name / Signature', margin, lineY + 5);
+
+    doc.moveTo(margin + 260, lineY).lineTo(margin + 400, lineY).stroke('#1f2937');
+    doc.text('Date', margin + 260, lineY + 5);
+  }
+
+  // ── Footer ─────────────────────────────────────────────
+  const footerY = doc.page.height - 40;
+  doc.moveTo(margin, footerY - 10)
+    .lineTo(doc.page.width - margin, footerY - 10)
+    .stroke('#e5e7eb');
+
+  doc.fillColor('#6b7280').fontSize(7).font('Helvetica')
+    .text(`Generated by ${company.name} — This is a delivery note, not an invoice.`,
+      margin, footerY, { width: contentWidth, align: 'center' });
+
+  doc.end();
+
+  logger.info('Delivery note PDF generated', {
+    deliveryNumber: order.deliveryNumber,
+    itemCount: items.length
+  });
 });

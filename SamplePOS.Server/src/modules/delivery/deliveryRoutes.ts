@@ -52,6 +52,7 @@ router.get('/deliverable-sales', authenticate, deliveryController.getDeliverable
  * Params: identifier (UUID or DEL-YYYY-NNNN)
  * Response: { success: boolean, data?: DeliveryOrderWithDetails, error?: string }
  */
+router.get('/orders/:identifier/pdf', authenticate, deliveryController.exportDeliveryNotePdf);
 router.get('/orders/:identifier', authenticate, deliveryController.getDeliveryOrder);
 
 /**

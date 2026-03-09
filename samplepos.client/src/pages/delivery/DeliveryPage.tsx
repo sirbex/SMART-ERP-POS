@@ -758,6 +758,8 @@ function DeliveryTimeline({ status }: { status: DeliveryStatus }) {
 // ═══════════════════════════════════════════════════════════════
 
 function DeliveryDetailModal({ order: initialOrder, onClose }: { order: DeliveryOrder; onClose: () => void }) {
+  const [downloading, setDownloading] = useState(false);
+
   // Fetch full order details (includes items and status history)
   const { data: fullOrder } = useQuery({
     queryKey: ['delivery-order-detail', initialOrder.deliveryNumber],
@@ -766,6 +768,30 @@ function DeliveryDetailModal({ order: initialOrder, onClose }: { order: Delivery
   });
 
   const order = fullOrder || initialOrder;
+
+  const handlePrintPdf = async () => {
+    setDownloading(true);
+    try {
+      const response = await apiClient.get(
+        deliveryApi.getDeliveryNotePdfUrl(order.deliveryNumber),
+        { responseType: 'blob' }
+      );
+      const blob: Blob = response.data as Blob;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `delivery-note-${order.deliveryNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Delivery note downloaded');
+    } catch {
+      toast.error('Failed to download delivery note');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -874,7 +900,14 @@ function DeliveryDetailModal({ order: initialOrder, onClose }: { order: Delivery
           </div>
         )}
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-6 flex justify-between">
+          <button
+            onClick={handlePrintPdf}
+            disabled={downloading}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium flex items-center gap-2"
+          >
+            {downloading ? '⏳ Generating...' : '🖨️ Print Delivery Note'}
+          </button>
           <button onClick={onClose} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium">Close</button>
         </div>
       </div>
