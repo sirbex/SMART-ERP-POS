@@ -424,6 +424,10 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
 
   const primaryColor = settings.primaryColor || '#2563eb';
 
+  // Determine if this is a dispatch (pre-delivery) or receipt (post-delivery) document
+  const isDelivered = ['DELIVERED', 'COMPLETED'].includes(order.status);
+  const isDispatching = ['PENDING', 'ASSIGNED', 'IN_TRANSIT'].includes(order.status);
+
   // Create PDF
   const doc = new PDFDocument({ margin: 50, size: 'A4' });
   const margin = 50;
@@ -437,10 +441,10 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
   doc.rect(0, 0, doc.page.width, 100).fill(primaryColor);
 
   doc.fillColor('#ffffff')
-    .fontSize(24).font('Helvetica-Bold')
-    .text(company.name, margin, 20, { align: 'left' });
+    .fontSize(22).font('Helvetica-Bold')
+    .text(company.name, margin, 20, { width: contentWidth * 0.55 });
 
-  doc.fontSize(20).font('Helvetica-Bold')
+  doc.fontSize(18).font('Helvetica-Bold')
     .text('DELIVERY NOTE', margin, 20, { align: 'right', width: contentWidth });
 
   doc.fontSize(8).font('Helvetica')
@@ -448,16 +452,19 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
     .text(company.phone, margin, 58, { align: 'left' })
     .text(company.email, margin, 68, { align: 'left' });
   if (company.tin) {
-    doc.text(company.tin, margin, 78, { align: 'left' });
+    doc.text(`TIN: ${company.tin}`, margin, 78, { align: 'left' });
   }
 
   doc.fontSize(11).font('Helvetica-Bold')
-    .text(order.deliveryNumber, margin, 52, { align: 'right', width: contentWidth });
+    .text(order.deliveryNumber, margin, 48, { align: 'right', width: contentWidth });
 
   doc.fontSize(8).font('Helvetica')
-    .text(`Date: ${order.deliveryDate}`, margin, 68, { align: 'right', width: contentWidth });
+    .text(`Date: ${order.deliveryDate}`, margin, 63, { align: 'right', width: contentWidth });
   if (order.trackingNumber) {
-    doc.text(`Tracking: ${order.trackingNumber}`, margin, 78, { align: 'right', width: contentWidth });
+    doc.text(`Tracking: ${order.trackingNumber}`, margin, 74, { align: 'right', width: contentWidth });
+  }
+  if (saleNumber) {
+    doc.text(`Sale Ref: ${saleNumber}`, margin, 85, { align: 'right', width: contentWidth });
   }
 
   // ── Deliver To card ─────────────────────────────────────
@@ -485,41 +492,52 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
 
   doc.fillColor('#1f2937').fontSize(9).font('Helvetica');
   cy = cardY + 28;
-  doc.text(`Status: ${order.status.replace('_', ' ')}`, rightX + 10, cy); cy += 13;
+  doc.text(`Status: ${order.status.replace(/_/g, ' ')}`, rightX + 10, cy); cy += 13;
   if (order.assignedDriverName) { doc.text(`Driver: ${order.assignedDriverName}`, rightX + 10, cy); cy += 13; }
-  if (saleNumber) { doc.text(`Sale Ref: ${saleNumber}`, rightX + 10, cy); cy += 13; }
+  if (order.deliveryFee > 0) { doc.text(`Delivery Fee: ${Number(order.deliveryFee).toLocaleString()}`, rightX + 10, cy); cy += 13; }
   if (order.specialInstructions) { doc.text(`Notes: ${order.specialInstructions}`, rightX + 10, cy, { width: contentWidth / 2 - 30 }); }
 
   // ── Items Table ─────────────────────────────────────────
   const tableTop = cardY + 105;
   const items = order.items || [];
-  const colWidths = [0.05, 0.35, 0.15, 0.15, 0.15, 0.15].map(p => contentWidth * p);
-  const headers = ['#', 'Product', 'Code', 'Requested', 'Delivered', 'Condition'];
   const rowH = 22;
 
-  // Table header
-  doc.rect(margin, tableTop, contentWidth, rowH).fill(primaryColor);
-  let x = margin + 5;
-  doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
-  headers.forEach((h, i) => {
-    doc.text(h, x, tableTop + 7, { width: colWidths[i] - 10, lineBreak: false });
-    x += colWidths[i];
-  });
+  // Status-aware columns: dispatch = simpler (receiver fills in by hand), receipt = full detail
+  let colWidths: number[];
+  let headers: string[];
+  if (isDelivered) {
+    // Post-delivery receipt: show what was actually delivered
+    colWidths = [0.05, 0.30, 0.15, 0.15, 0.15, 0.20].map(p => contentWidth * p);
+    headers = ['#', 'Product', 'Code', 'Requested', 'Delivered', 'Condition'];
+  } else {
+    // Dispatch document: qty to deliver + blank columns for receiver to fill by hand
+    colWidths = [0.05, 0.35, 0.15, 0.15, 0.15, 0.15].map(p => contentWidth * p);
+    headers = ['#', 'Product', 'Code', 'Qty', 'Received', 'Notes'];
+  }
+
+  // Helper to draw table header row
+  const drawTableHeader = (y: number) => {
+    doc.rect(margin, y, contentWidth, rowH).fill(primaryColor);
+    let hx = margin + 5;
+    doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+    headers.forEach((h, i) => {
+      doc.text(h, hx, y + 7, { width: colWidths[i] - 10, lineBreak: false });
+      hx += colWidths[i];
+    });
+  };
+
+  drawTableHeader(tableTop);
+
+  let totalQtyRequested = 0;
+  let totalQtyDelivered = 0;
 
   let rowY = tableTop + rowH;
   items.forEach((item, idx) => {
     // Page break check
-    if (rowY + rowH > doc.page.height - 120) {
+    if (rowY + rowH > doc.page.height - 150) {
       doc.addPage();
       rowY = margin;
-      // Redraw header
-      doc.rect(margin, rowY, contentWidth, rowH).fill(primaryColor);
-      x = margin + 5;
-      doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
-      headers.forEach((h, i) => {
-        doc.text(h, x, rowY + 7, { width: colWidths[i] - 10, lineBreak: false });
-        x += colWidths[i];
-      });
+      drawTableHeader(rowY);
       rowY += rowH;
     }
 
@@ -527,16 +545,36 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
       doc.rect(margin, rowY, contentWidth, rowH).fill('#f9fafb');
     }
 
-    x = margin + 5;
+    const qtyReq = item.quantityRequested;
+    const qtyDel = item.quantityDelivered;
+    totalQtyRequested += qtyReq;
+    totalQtyDelivered += qtyDel;
+    const uom = item.unitOfMeasure ? ` ${item.unitOfMeasure}` : '';
+
+    let rowData: string[];
+    if (isDelivered) {
+      rowData = [
+        String(idx + 1),
+        item.productName || '',
+        item.productCode || '—',
+        `${qtyReq}${uom}`,
+        `${qtyDel}${uom}`,
+        qtyDel > 0 ? (item.conditionOnDelivery || 'GOOD') : '—',
+      ];
+    } else {
+      // Dispatch: "Received" and "Notes" are blank — filled by hand on the physical copy
+      rowData = [
+        String(idx + 1),
+        item.productName || '',
+        item.productCode || '—',
+        `${qtyReq}${uom}`,
+        '', // Blank for receiver to fill
+        '', // Blank for notes
+      ];
+    }
+
+    let x = margin + 5;
     doc.fillColor('#1f2937').fontSize(8).font('Helvetica');
-    const rowData = [
-      String(idx + 1),
-      item.productName || '',
-      item.productCode || '—',
-      `${item.quantityRequested}${item.unitOfMeasure ? ' ' + item.unitOfMeasure : ''}`,
-      String(item.quantityDelivered ?? '—'),
-      item.conditionOnDelivery || 'GOOD',
-    ];
     rowData.forEach((val, i) => {
       doc.text(val, x, rowY + 7, { width: colWidths[i] - 10, lineBreak: false });
       x += colWidths[i];
@@ -551,18 +589,52 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
     rowY += 30;
   }
 
+  // ── Summary row ────────────────────────────────────────
+  if (items.length > 0) {
+    doc.rect(margin, rowY, contentWidth, rowH).fill('#f3f4f6');
+    doc.moveTo(margin, rowY).lineTo(margin + contentWidth, rowY).stroke('#d1d5db');
+
+    doc.fillColor('#1f2937').fontSize(8).font('Helvetica-Bold');
+    doc.text(`Total: ${items.length} item${items.length !== 1 ? 's' : ''}`, margin + 5, rowY + 7, { width: colWidths[0] + colWidths[1] + colWidths[2] - 10 });
+
+    if (isDelivered) {
+      const uom0 = items[0]?.unitOfMeasure ? ` ${items[0].unitOfMeasure}` : '';
+      doc.text(String(totalQtyRequested) + uom0, margin + 5 + colWidths[0] + colWidths[1] + colWidths[2], rowY + 7, { width: colWidths[3] - 10 });
+      doc.text(String(totalQtyDelivered) + uom0, margin + 5 + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], rowY + 7, { width: colWidths[4] - 10 });
+    } else {
+      const uom0 = items[0]?.unitOfMeasure ? ` ${items[0].unitOfMeasure}` : '';
+      doc.text(String(totalQtyRequested) + uom0, margin + 5 + colWidths[0] + colWidths[1] + colWidths[2], rowY + 7, { width: colWidths[3] - 10 });
+    }
+    rowY += rowH;
+  }
+
   // ── Signature area ─────────────────────────────────────
   const sigY = rowY + 30;
-  if (sigY < doc.page.height - 160) {
+  if (sigY < doc.page.height - 180) {
+    // Dispatched by (driver/warehouse)
     doc.fillColor('#1f2937').fontSize(10).font('Helvetica-Bold')
-      .text('Received by:', margin, sigY);
+      .text('Dispatched by:', margin, sigY);
 
-    const lineY = sigY + 40;
-    doc.moveTo(margin, lineY).lineTo(margin + 200, lineY).stroke('#1f2937');
-    doc.fontSize(8).font('Helvetica').text('Name / Signature', margin, lineY + 5);
+    const dispLineY = sigY + 35;
+    doc.moveTo(margin, dispLineY).lineTo(margin + 200, dispLineY).stroke('#1f2937');
+    doc.fontSize(8).font('Helvetica').fillColor('#6b7280')
+      .text('Name / Signature', margin, dispLineY + 4);
 
-    doc.moveTo(margin + 260, lineY).lineTo(margin + 400, lineY).stroke('#1f2937');
-    doc.text('Date', margin + 260, lineY + 5);
+    doc.moveTo(margin + 260, dispLineY).lineTo(margin + 400, dispLineY).stroke('#1f2937');
+    doc.text('Date', margin + 260, dispLineY + 4);
+
+    // Received by (customer)
+    const recvY = dispLineY + 30;
+    doc.fillColor('#1f2937').fontSize(10).font('Helvetica-Bold')
+      .text('Received by:', margin, recvY);
+
+    const recvLineY = recvY + 35;
+    doc.moveTo(margin, recvLineY).lineTo(margin + 200, recvLineY).stroke('#1f2937');
+    doc.fontSize(8).font('Helvetica').fillColor('#6b7280')
+      .text('Name / Signature', margin, recvLineY + 4);
+
+    doc.moveTo(margin + 260, recvLineY).lineTo(margin + 400, recvLineY).stroke('#1f2937');
+    doc.text('Date', margin + 260, recvLineY + 4);
   }
 
   // ── Footer ─────────────────────────────────────────────
@@ -572,7 +644,7 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
     .stroke('#e5e7eb');
 
   doc.fillColor('#6b7280').fontSize(7).font('Helvetica')
-    .text(`Generated by ${company.name} — This is a delivery note, not an invoice.`,
+    .text('This is a delivery note, not a tax invoice. Goods remain property of the seller until full payment is received.',
       margin, footerY, { width: contentWidth, align: 'center' });
 
   doc.end();
