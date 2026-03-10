@@ -432,34 +432,48 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
   const margin = 40;
   const contentWidth = doc.page.width - 2 * margin;
+  const pageH = doc.page.height; // 841.89 for A4
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename=delivery-note-${order.deliveryNumber}.pdf`);
   doc.pipe(res);
+
+  // ── Footer (drawn FIRST so it's always on page 1) ─────
+  // IMPORTANT: Do NOT use { width } option near page bottom — it triggers
+  // PDFKit's paragraph layout which auto-adds pages regardless of lineBreak.
+  const footerY = pageH - 28;
+  const footerText = 'This is a delivery note, not a tax invoice. Goods remain property of the seller until full payment is received.';
+  doc.moveTo(margin, footerY - 5)
+    .lineTo(doc.page.width - margin, footerY - 5)
+    .stroke('#e5e7eb');
+  doc.fontSize(6).font('Helvetica').fillColor('#9ca3af');
+  const footerW = doc.widthOfString(footerText);
+  const footerX = margin + (contentWidth - footerW) / 2;
+  doc.text(footerText, footerX, footerY, { lineBreak: false });
 
   // ── Header (compact) ───────────────────────────────────
   doc.rect(0, 0, doc.page.width, 70).fill(primaryColor);
 
   doc.fillColor('#ffffff')
     .fontSize(16).font('Helvetica-Bold')
-    .text(company.name, margin, 10, { width: contentWidth * 0.55 });
+    .text(company.name, margin, 10, { width: contentWidth * 0.55, lineBreak: false });
 
   doc.fontSize(14).font('Helvetica-Bold')
-    .text('DELIVERY NOTE', margin, 10, { align: 'right', width: contentWidth });
+    .text('DELIVERY NOTE', margin, 10, { align: 'right', width: contentWidth, lineBreak: false });
 
   doc.fontSize(7).font('Helvetica');
   let hy = 30;
-  doc.text(company.address, margin, hy); hy += 9;
-  doc.text(`${company.phone}  |  ${company.email}`, margin, hy); hy += 9;
-  if (company.tin) { doc.text(`TIN: ${company.tin}`, margin, hy); }
+  doc.text(company.address, margin, hy, { lineBreak: false }); hy += 9;
+  doc.text(`${company.phone}  |  ${company.email}`, margin, hy, { lineBreak: false }); hy += 9;
+  if (company.tin) { doc.text(`TIN: ${company.tin}`, margin, hy, { lineBreak: false }); }
 
   doc.fontSize(10).font('Helvetica-Bold')
-    .text(order.deliveryNumber, margin, 30, { align: 'right', width: contentWidth });
+    .text(order.deliveryNumber, margin, 30, { align: 'right', width: contentWidth, lineBreak: false });
   doc.fontSize(7).font('Helvetica');
   let rhy = 43;
-  doc.text(`Date: ${order.deliveryDate}`, margin, rhy, { align: 'right', width: contentWidth }); rhy += 9;
-  if (order.trackingNumber) { doc.text(`Tracking: ${order.trackingNumber}`, margin, rhy, { align: 'right', width: contentWidth }); rhy += 9; }
-  if (saleNumber) { doc.text(`Sale Ref: ${saleNumber}`, margin, rhy, { align: 'right', width: contentWidth }); }
+  doc.text(`Date: ${order.deliveryDate}`, margin, rhy, { align: 'right', width: contentWidth, lineBreak: false }); rhy += 9;
+  if (order.trackingNumber) { doc.text(`Tracking: ${order.trackingNumber}`, margin, rhy, { align: 'right', width: contentWidth, lineBreak: false }); rhy += 9; }
+  if (saleNumber) { doc.text(`Sale Ref: ${saleNumber}`, margin, rhy, { align: 'right', width: contentWidth, lineBreak: false }); }
 
   // ── Deliver To + Order Info (side-by-side, compact) ────
   const cardY = 80;
@@ -468,24 +482,24 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
 
   doc.roundedRect(margin, cardY, halfW, cardH, 3).fillAndStroke('#f9fafb', '#e5e7eb');
   doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold')
-    .text('DELIVER TO', margin + 8, cardY + 6);
+    .text('DELIVER TO', margin + 8, cardY + 6, { lineBreak: false });
   doc.fillColor('#1f2937').fontSize(8).font('Helvetica');
   let cy = cardY + 18;
-  if (order.customerName) { doc.text(order.customerName, margin + 8, cy, { width: halfW - 16 }); cy += 11; }
-  if (order.deliveryAddress) { doc.text(order.deliveryAddress, margin + 8, cy, { width: halfW - 16 }); cy += 11; }
-  if (order.deliveryContactName) { doc.text(`Contact: ${order.deliveryContactName}`, margin + 8, cy, { width: halfW - 16 }); cy += 11; }
-  if (order.deliveryContactPhone) { doc.text(`Phone: ${order.deliveryContactPhone}`, margin + 8, cy, { width: halfW - 16 }); }
+  if (order.customerName) { doc.text(order.customerName, margin + 8, cy, { width: halfW - 16, lineBreak: false }); cy += 11; }
+  if (order.deliveryAddress) { doc.text(order.deliveryAddress, margin + 8, cy, { width: halfW - 16, lineBreak: false }); cy += 11; }
+  if (order.deliveryContactName) { doc.text(`Contact: ${order.deliveryContactName}`, margin + 8, cy, { width: halfW - 16, lineBreak: false }); cy += 11; }
+  if (order.deliveryContactPhone) { doc.text(`Phone: ${order.deliveryContactPhone}`, margin + 8, cy, { width: halfW - 16, lineBreak: false }); }
 
   const rightX = margin + halfW + 10;
   doc.roundedRect(rightX, cardY, halfW, cardH, 3).fillAndStroke('#f9fafb', '#e5e7eb');
   doc.fillColor(primaryColor).fontSize(8).font('Helvetica-Bold')
-    .text('ORDER INFO', rightX + 8, cardY + 6);
+    .text('ORDER INFO', rightX + 8, cardY + 6, { lineBreak: false });
   doc.fillColor('#1f2937').fontSize(8).font('Helvetica');
   cy = cardY + 18;
-  doc.text(`Status: ${order.status.replace(/_/g, ' ')}`, rightX + 8, cy); cy += 11;
-  if (order.assignedDriverName) { doc.text(`Driver: ${order.assignedDriverName}`, rightX + 8, cy); cy += 11; }
-  if (order.deliveryFee > 0) { doc.text(`Delivery Fee: ${Number(order.deliveryFee).toLocaleString()}`, rightX + 8, cy); cy += 11; }
-  if (order.specialInstructions) { doc.text(`Notes: ${order.specialInstructions}`, rightX + 8, cy, { width: halfW - 16 }); }
+  doc.text(`Status: ${order.status.replace(/_/g, ' ')}`, rightX + 8, cy, { lineBreak: false }); cy += 11;
+  if (order.assignedDriverName) { doc.text(`Driver: ${order.assignedDriverName}`, rightX + 8, cy, { lineBreak: false }); cy += 11; }
+  if (order.deliveryFee > 0) { doc.text(`Delivery Fee: ${Number(order.deliveryFee).toLocaleString()}`, rightX + 8, cy, { lineBreak: false }); cy += 11; }
+  if (order.specialInstructions) { doc.text(`Notes: ${order.specialInstructions}`, rightX + 8, cy, { width: halfW - 16, lineBreak: false }); }
 
   // ── Items Table ─────────────────────────────────────────
   const tableTop = cardY + cardH + 10;
@@ -569,7 +583,7 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
   if (items.length === 0) {
     doc.rect(margin, rowY, contentWidth, 24).fillAndStroke('#f9fafb', '#e5e7eb');
     doc.fillColor('#6b7280').fontSize(8).font('Helvetica-Oblique')
-      .text('No items', margin, rowY + 8, { width: contentWidth, align: 'center' });
+      .text('No items', margin, rowY + 8, { width: contentWidth, align: 'center', lineBreak: false });
     rowY += 24;
   }
 
@@ -578,48 +592,40 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
     doc.rect(margin, rowY, contentWidth, rowH).fill('#f3f4f6');
     doc.moveTo(margin, rowY).lineTo(margin + contentWidth, rowY).stroke('#d1d5db');
     doc.fillColor('#1f2937').fontSize(7).font('Helvetica-Bold');
-    doc.text(`Total: ${items.length} item${items.length !== 1 ? 's' : ''}`, margin + 4, rowY + 5, { width: colWidths[0] + colWidths[1] + colWidths[2] - 8 });
+    doc.text(`Total: ${items.length} item${items.length !== 1 ? 's' : ''}`, margin + 4, rowY + 5, { width: colWidths[0] + colWidths[1] + colWidths[2] - 8, lineBreak: false });
 
     const uom0 = items[0]?.unitOfMeasure ? ` ${items[0].unitOfMeasure}` : '';
     const qtyX = margin + 4 + colWidths[0] + colWidths[1] + colWidths[2];
-    doc.text(String(totalQtyRequested) + uom0, qtyX, rowY + 5, { width: colWidths[3] - 8 });
+    doc.text(String(totalQtyRequested) + uom0, qtyX, rowY + 5, { width: colWidths[3] - 8, lineBreak: false });
     if (isDelivered) {
-      doc.text(String(totalQtyDelivered) + uom0, qtyX + colWidths[3], rowY + 5, { width: colWidths[4] - 8 });
+      doc.text(String(totalQtyDelivered) + uom0, qtyX + colWidths[3], rowY + 5, { width: colWidths[4] - 8, lineBreak: false });
     }
     rowY += rowH;
   }
 
   // ── Signature area (side-by-side, compact) ─────────────
   const sigY = rowY + 20;
-  if (sigY < doc.page.height - 100) {
+  if (sigY < pageH - 80) {
     const sigW = contentWidth / 2 - 10;
 
     // Dispatched by (left)
     doc.fillColor('#1f2937').fontSize(8).font('Helvetica-Bold')
-      .text('Dispatched by:', margin, sigY);
+      .text('Dispatched by:', margin, sigY, { lineBreak: false });
     const sigLineY = sigY + 25;
     doc.moveTo(margin, sigLineY).lineTo(margin + sigW, sigLineY).stroke('#1f2937');
     doc.fontSize(7).font('Helvetica').fillColor('#6b7280')
-      .text('Name / Signature                                                Date', margin, sigLineY + 3);
+      .text('Name / Signature                        Date', margin, sigLineY + 3, { lineBreak: false });
 
     // Received by (right)
     const rSigX = margin + sigW + 20;
     doc.fillColor('#1f2937').fontSize(8).font('Helvetica-Bold')
-      .text('Received by:', rSigX, sigY);
+      .text('Received by:', rSigX, sigY, { lineBreak: false });
     doc.moveTo(rSigX, sigLineY).lineTo(rSigX + sigW, sigLineY).stroke('#1f2937');
     doc.fontSize(7).font('Helvetica').fillColor('#6b7280')
-      .text('Name / Signature                                                Date', rSigX, sigLineY + 3);
+      .text('Name / Signature                        Date', rSigX, sigLineY + 3, { lineBreak: false });
   }
 
-  // ── Footer ─────────────────────────────────────────────
-  const footerY = doc.page.height - 30;
-  doc.moveTo(margin, footerY - 5)
-    .lineTo(doc.page.width - margin, footerY - 5)
-    .stroke('#e5e7eb');
-
-  doc.fillColor('#9ca3af').fontSize(6).font('Helvetica')
-    .text('This is a delivery note, not a tax invoice. Goods remain property of the seller until full payment is received.',
-      margin, footerY, { width: contentWidth, align: 'center' });
+  // Footer was already drawn at top of PDF generation (guaranteed page 1)
 
   doc.end();
 
