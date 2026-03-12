@@ -14,6 +14,7 @@
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 
 export type StockMovementType =
@@ -302,24 +303,11 @@ export class StockMovementHandler {
     productId: string
   ): Promise<void> {
     if (newQuantity.lessThan(0)) {
-      // Check system config for ALLOW_NEGATIVE_STOCK
-      const config = await client.query(
-        `SELECT value FROM system_settings WHERE key = 'ALLOW_NEGATIVE_STOCK'`
+      // Negative stock is not allowed — system_settings is a flat single-row table
+      // with no key/value pairs. Default to rejecting negative stock.
+      throw new ValidationError(
+        `Insufficient stock for product ${productId}. Resulting quantity would be ${newQuantity.toString()}`
       );
-
-      const allowNegative =
-        config.rows.length > 0 && config.rows[0].value?.toLowerCase() === 'true';
-
-      if (!allowNegative) {
-        throw new Error(
-          `Insufficient stock for product ${productId}. Resulting quantity would be ${newQuantity.toString()}`
-        );
-      }
-
-      logger.warn('Negative stock allowed by system configuration', {
-        productId,
-        resultingQuantity: newQuantity.toString(),
-      });
     }
 
     // BR-INV-002: Log positive quantity validation

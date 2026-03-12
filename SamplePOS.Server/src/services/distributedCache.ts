@@ -22,7 +22,8 @@ export class DistributedCacheService {
                 const delay = Math.min(times * 50, 2000);
                 return delay;
             },
-            maxRetriesPerRequest: 3,
+            maxRetriesPerRequest: 1, // Fail fast: 2s max instead of 6s
+            enableOfflineQueue: false, // Don't queue commands when disconnected
         });
 
         this.redis.on('error', (err) => {

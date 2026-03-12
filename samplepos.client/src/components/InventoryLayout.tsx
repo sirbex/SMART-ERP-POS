@@ -17,16 +17,16 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
     { id: 'products', label: 'Products', path: '/inventory/products', icon: '🏷️' },
     { id: 'batches', label: 'Batch Management', path: '/inventory/batches', icon: '🔢' },
     {
-      id: 'stock-movements',
-      label: 'Stock Movements',
-      path: '/inventory/stock-movements',
-      icon: '📊',
-    },
-    {
       id: 'adjustments',
-      label: 'Adjustments & Damages',
+      label: 'Adjustments & Stock Count',
       path: '/inventory/adjustments',
       icon: '⚖️',
+    },
+    {
+      id: 'stock-movements',
+      label: 'Movement History',
+      path: '/inventory/stock-movements',
+      icon: '📊',
     },
     {
       id: 'purchase-orders',
@@ -81,11 +81,10 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
               <button
                 key={tab.id}
                 onClick={() => navigate(tab.path)}
-                className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
-                  isActiveTab(tab.path)
+                className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${isActiveTab(tab.path)
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                  }`}
               >
                 <span>{tab.icon}</span>
                 <span>{tab.label}</span>

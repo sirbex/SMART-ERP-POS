@@ -123,6 +123,15 @@ const formatFieldValue = (key: string, value: unknown): string => {
       return `×${value.toFixed(2)}`;
     }
 
+    // Quantity/count fields (quantity, count, units, items)
+    // Check BEFORE currency — totalQuantity, totalUnitsSold etc. contain 'total' but are NOT currency
+    if (
+      lowerKey.includes('quantity') ||
+      lowerKey.includes('units')
+    ) {
+      return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+    }
+
     // Currency fields (amount, value, cost, price, revenue, profit, discount, sales, payment, balance)
     if (
       lowerKey.includes('amount') ||
@@ -149,16 +158,6 @@ const formatFieldValue = (key: string, value: unknown): string => {
       lowerKey.includes('change')
     ) {
       return `${value.toFixed(2)}%`;
-    }
-
-    // Quantity/count fields (quantity, count, units, items)
-    if (
-      lowerKey.includes('quantity') ||
-      lowerKey.includes('count') ||
-      lowerKey.includes('units') ||
-      lowerKey.includes('items')
-    ) {
-      return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 });
     }
 
     // Default number formatting

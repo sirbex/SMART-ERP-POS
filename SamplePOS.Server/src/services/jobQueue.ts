@@ -75,6 +75,30 @@ class JobQueueService {
                 removeOnFail: 500,
             },
         });
+
+        // CSV import queue (long-running, generous timeout)
+        this.createQueue('imports', {
+            defaultJobOptions: {
+                attempts: 1,           // No auto-retry — import is not idempotent
+                timeout: 1800000,      // 30 minutes for very large files
+                removeOnComplete: 100,
+                removeOnFail: 500,
+            },
+        });
+
+        // Banking queue — retry failed bank transaction creation
+        // Critical for reconciliation: sale committed but bank_transactions missing
+        this.createQueue('banking', {
+            defaultJobOptions: {
+                attempts: 5,
+                backoff: {
+                    type: 'exponential',
+                    delay: 5000, // 5s → 10s → 20s → 40s → 80s
+                },
+                removeOnComplete: 500,
+                removeOnFail: 1000,  // Keep failures for audit
+            },
+        });
     }
 
     private createQueue(name: string, options: Bull.QueueOptions = {}) {
@@ -250,4 +274,7 @@ export const JobTypes = {
     // Calculations
     RECALC_PRICING: 'recalc-pricing',
     RECALC_COST_LAYERS: 'recalc-cost-layers',
+
+    // Banking
+    CREATE_BANK_TRANSACTION: 'create-bank-transaction',
 };

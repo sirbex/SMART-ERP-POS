@@ -79,8 +79,8 @@ export default function DeliveryPage() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${activeTab === tab.id
-                    ? 'bg-white text-blue-700 border border-gray-200 border-b-white -mb-px'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  ? 'bg-white text-blue-700 border border-gray-200 border-b-white -mb-px'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                   }`}
                 aria-selected={activeTab === tab.id}
                 role="tab"
@@ -726,10 +726,10 @@ function DeliveryTimeline({ status }: { status: DeliveryStatus }) {
               )}
               <div
                 className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${isFailed || isCancelled
-                    ? 'bg-gray-100 text-gray-400'
-                    : isComplete
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-400'
+                  ? 'bg-gray-100 text-gray-400'
+                  : isComplete
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-gray-100 text-gray-400'
                   } ${isCurrent ? 'ring-2 ring-green-400 ring-offset-2' : ''}`}
               >
                 {step.icon}

@@ -48,6 +48,7 @@
     "bull": "^4.16.5",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
     "date-fns": "^4.1.0",
     "decimal.js": "^10.6.0",
     "dotenv": "^17.2.3",
@@ -71,6 +72,7 @@
     "tsconfig-paths": "^4.2.0",
     "vm2": "^3.10.0",
     "winston": "^3.18.3",
+    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

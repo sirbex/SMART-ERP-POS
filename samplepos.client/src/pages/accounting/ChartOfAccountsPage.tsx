@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Plus, Edit2, Trash2, Search, Download } from 'lucide-react';
 import {
   Button,
@@ -64,12 +64,15 @@ const ACCOUNT_TYPES = [
   { value: 'EXPENSE', label: 'Expenses', color: 'bg-orange-100 text-orange-800' },
 ];
 
+const ITEMS_PER_PAGE = 50;
+
 const ChartOfAccountsPage = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('ALL');
   const [filterActive, setFilterActive] = useState<string>('ALL');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
@@ -208,6 +211,16 @@ const ChartOfAccountsPage = () => {
 
     return matchesSearch && matchesType && matchesActive;
   });
+
+  // Pagination for accounts
+  const totalPages = Math.max(1, Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE));
+  const paginatedAccounts = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredAccounts.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredAccounts, currentPage]);
+
+  // Reset page on filter changes
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterType, filterActive]);
 
   const getAccountTypeColor = (type: string) => {
     const typeConfig = ACCOUNT_TYPES.find((t) => t.value === type);
@@ -455,7 +468,7 @@ const ChartOfAccountsPage = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filteredAccounts.map((account) => (
+                    {paginatedAccounts.map((account) => (
                       <tr key={account.id} className="hover:bg-gray-50">
                         <td className="py-3 font-mono">{account.accountNumber}</td>
                         <td className="py-3">
@@ -504,6 +517,34 @@ const ChartOfAccountsPage = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Pagination */}
+            {filteredAccounts.length > ITEMS_PER_PAGE && (
+              <div className="mt-4 flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredAccounts.length)} of {filteredAccounts.length} accounts
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ← Previous
+                  </button>
+                  <span className="px-3 py-2 text-sm text-gray-700">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next →
+                  </button>
+                </div>
               </div>
             )}
           </CardContent>

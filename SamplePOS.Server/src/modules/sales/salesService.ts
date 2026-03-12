@@ -8,10 +8,13 @@ import {
 } from './salesRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import { BankingService } from '../../services/bankingService.js';
+import { jobQueue } from '../../services/jobQueue.js';
+import { incrementMetric } from '../../routes/health.js';
 import { cashRegisterService } from '../cash-register/index.js';
 import { ValidationError, BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
@@ -86,12 +89,12 @@ export const salesService = {
       throw new BusinessError(
         `Insufficient inventory for product ${productId}. Short by ${remainingQty.toFixed(4)} units`,
         'ERR_STOCK_001',
-        { productId, requested: quantity, shortBy: parseFloat(remainingQty.toFixed(4)) }
+        { productId, requested: quantity, shortBy: Money.toNumber(remainingQty) }
       );
     }
 
     // Return average cost per unit with bank precision
-    return parseFloat(totalCost.dividedBy(quantity).toFixed(2));
+    return Money.toNumber(Money.round(totalCost.dividedBy(quantity), 2));
   },
 
   /**
@@ -221,10 +224,10 @@ export const salesService = {
             productName: item.productName,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            lineTotal: parseFloat(lineTotalAfterDiscount.toFixed(2)),
+            lineTotal: Money.toNumber(lineTotalAfterDiscount),
             costPrice: 0, // Custom items have no cost tracking
-            profit: parseFloat(lineTotalAfterDiscount.toFixed(2)), // Full amount is profit
-            discountAmount: parseFloat(customItemDiscount.toFixed(2)),
+            profit: Money.toNumber(lineTotalAfterDiscount), // Full amount is profit
+            discountAmount: Money.toNumber(customItemDiscount),
             uomId: undefined,
           });
 
@@ -297,7 +300,7 @@ export const salesService = {
           | 'FIFO'
           | 'AVCO'
           | 'STANDARD';
-        const originalPrice = parseFloat(productData.selling_price || String(item.unitPrice));
+        const originalPrice = Money.toNumber(Money.parse(productData.selling_price || String(item.unitPrice)));
 
         // BR-SAL-004: Validate minimum price
         await SalesBusinessRules.validateMinimumPrice(client, item.productId, item.unitPrice);
@@ -329,7 +332,7 @@ export const salesService = {
             undefined, // dbPool
             client // txClient: reuse sale transaction to prevent deadlock
           );
-          unitCost = parseFloat(costResult.averageCost.toFixed(2));
+          unitCost = Money.toNumber(Money.round(costResult.averageCost, 2));
 
           logger.info(`Cost calculated for product ${item.productId}`, {
             method: costingMethod,
@@ -338,8 +341,11 @@ export const salesService = {
             totalCost: costResult.totalCost.toNumber(),
           });
         } catch (error: unknown) {
-          // Fallback: use pre-fetched average_cost (normal for products not received via GR)
-          unitCost = parseFloat(productData.average_cost || '0');
+          // Fallback: use pre-fetched average_cost, then cost_price (imported products
+          // have cost_price set but average_cost may still be 0)
+          const avgCost = Money.parseDb(productData.average_cost);
+          const costPriceDec = Money.parseDb(productData.cost_price);
+          unitCost = Money.toNumber(avgCost.greaterThan(0) ? avgCost : costPriceDec);
 
           logger.debug(`Using average cost fallback for product ${item.productId}`, {
             productId: item.productId,
@@ -365,8 +371,8 @@ export const salesService = {
         // When selling 1 Box (12 pieces) at base cost 6,000/piece, costPrice = 72,000/box.
         // The DB trigger fn_post_sale_to_ledger computes COGS as SUM(unit_cost * quantity),
         // so storing base-unit cost with selling-UoM quantity understates COGS.
-        const costPerSellingUnit = parseFloat(
-          itemCost.dividedBy(new Decimal(item.quantity)).toFixed(2)
+        const costPerSellingUnit = Money.toNumber(
+          Money.round(itemCost.dividedBy(new Decimal(item.quantity)), 2)
         );
 
         // Look up the actual uom_id from product_uoms if provided
@@ -384,10 +390,10 @@ export const salesService = {
           productName: item.productName,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          lineTotal: parseFloat(lineTotalAfterDiscount.toFixed(2)),
+          lineTotal: Money.toNumber(lineTotalAfterDiscount),
           costPrice: costPerSellingUnit,
-          profit: parseFloat(profit.toFixed(2)),
-          discountAmount: parseFloat(itemDiscountAmount.toFixed(2)),
+          profit: Money.toNumber(profit),
+          discountAmount: Money.toNumber(itemDiscountAmount),
           uomId: actualUomId, // Use the actual uom_id from uoms table
         });
       }
@@ -441,16 +447,16 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-            ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+          ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-            ?.filter((line) => line.paymentMethod === 'CREDIT')
-            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+          ?.filter((line) => line.paymentMethod === 'CREDIT')
+          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(0);
 
@@ -478,7 +484,7 @@ export const salesService = {
         // Credit sales: Allow 0 to full payment (partial payments allowed)
         if (paymentReceived.lessThan(0)) {
           throw new BusinessError('Payment amount cannot be negative', 'ERR_PAYMENT_002', {
-            amountReceived: parseFloat(paymentReceived.toFixed(2)),
+            amountReceived: Money.toNumber(paymentReceived),
           });
         }
         // Allow underpayment or exact payment for credit
@@ -487,8 +493,8 @@ export const salesService = {
             `Overpayment not allowed for credit sales. Total: ${finalTotalAmount.toFixed(2)}, Received: ${paymentReceived.toFixed(2)}`,
             'ERR_PAYMENT_003',
             {
-              totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
-              amountReceived: parseFloat(paymentReceived.toFixed(2)),
+              totalAmount: Money.toNumber(finalTotalAmount),
+              amountReceived: Money.toNumber(paymentReceived),
             }
           );
         }
@@ -503,8 +509,8 @@ export const salesService = {
         // Legacy single payment method validation
         // CASH, CARD, MOBILE_MONEY: Require full payment or more (for change)
         SalesBusinessRules.validatePaymentAmount(
-          parseFloat(finalTotalAmount.toFixed(2)),
-          parseFloat(paymentReceived.toFixed(2)),
+          Money.toNumber(finalTotalAmount),
+          Money.toNumber(paymentReceived),
           input.paymentMethod
         );
 
@@ -513,9 +519,9 @@ export const salesService = {
             `Insufficient payment. Total: ${finalTotalAmount.toFixed(2)}, Received: ${paymentReceived.toFixed(2)}`,
             'ERR_PAYMENT_001',
             {
-              totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
-              amountReceived: parseFloat(paymentReceived.toFixed(2)),
-              shortfall: parseFloat(changeAmount.abs().toFixed(2)),
+              totalAmount: Money.toNumber(finalTotalAmount),
+              amountReceived: Money.toNumber(paymentReceived),
+              shortfall: Money.toNumber(changeAmount.abs()),
             }
           );
         }
@@ -530,9 +536,9 @@ export const salesService = {
       // - Full payment (amount_paid >= total): Use actual payment method (CASH, CARD, etc.)
       // - Partial/No payment (amount_paid < total): Always CREDIT
       // ============================================================
-      const actualAmountPaid = parseFloat(paymentReceived.toFixed(2));
-      const actualTotalAmount = parseFloat(finalTotalAmount.toFixed(2));
-      const hasOutstandingBalance = actualAmountPaid < actualTotalAmount;
+      const actualAmountPaid = Money.round(paymentReceived, 2);
+      const actualTotalAmount = Money.round(finalTotalAmount, 2);
+      const hasOutstandingBalance = actualAmountPaid.lessThan(actualTotalAmount);
 
       // Determine the effective payment method
       // CREDIT if there's any outstanding balance, otherwise use the provided method
@@ -544,13 +550,14 @@ export const salesService = {
       // Any sale with outstanding balance REQUIRES a customer for invoice tracking
       // This is the SINGLE SOURCE OF TRUTH enforcement point
       if (hasOutstandingBalance && !input.customerId) {
+        const outstandingDec = actualTotalAmount.minus(actualAmountPaid);
         throw new BusinessError(
-          `Customer required: Cannot create sale with outstanding balance of ${(actualTotalAmount - actualAmountPaid).toFixed(2)} without customer linkage. An invoice must be created to track receivables.`,
+          `Customer required: Cannot create sale with outstanding balance of ${outstandingDec.toFixed(2)} without customer linkage. An invoice must be created to track receivables.`,
           'ERR_SALE_003',
           {
-            outstandingBalance: parseFloat((actualTotalAmount - actualAmountPaid).toFixed(2)),
-            totalAmount: actualTotalAmount,
-            amountPaid: actualAmountPaid,
+            outstandingBalance: Money.toNumber(outstandingDec),
+            totalAmount: Money.toNumber(actualTotalAmount),
+            amountPaid: Money.toNumber(actualAmountPaid),
           }
         );
       }
@@ -567,21 +574,21 @@ export const salesService = {
         }
 
         const customer = customerCheck.rows[0];
-        const outstandingAmount = new Decimal(actualTotalAmount).minus(actualAmountPaid).toNumber();
+        const outstandingAmount = actualTotalAmount.minus(actualAmountPaid);
 
         // Check credit limit for sales with outstanding balance
         if (hasOutstandingBalance && customer.credit_limit) {
-          const newBalance = new Decimal(customer.balance || 0).plus(outstandingAmount).toNumber();
-          const creditLimit = new Decimal(customer.credit_limit || 0).toNumber();
+          const newBalance = Money.add(customer.balance || 0, outstandingAmount);
+          const creditLimit = Money.parse(customer.credit_limit || 0);
 
-          if (newBalance > creditLimit) {
+          if (newBalance.greaterThan(creditLimit)) {
             logger.warn('Customer exceeding credit limit', {
               customerId: input.customerId,
               customerName: customer.name,
               currentBalance: customer.balance,
-              newBalance,
-              creditLimit,
-              outstandingAmount,
+              newBalance: Money.toNumber(newBalance),
+              creditLimit: Money.toNumber(creditLimit),
+              outstandingAmount: Money.toNumber(outstandingAmount),
             });
 
             // Option: throw error to prevent exceeding credit limit
@@ -597,29 +604,29 @@ export const salesService = {
           customerId: input.customerId,
           customerName: customer.name,
           hasOutstandingBalance,
-          outstandingAmount: hasOutstandingBalance ? outstandingAmount.toFixed(2) : 0,
+          outstandingAmount: hasOutstandingBalance ? outstandingAmount.toFixed(2) : '0',
         });
       }
 
       const saleData: CreateSaleData = {
         customerId: input.customerId || null,
         subtotal: input.subtotal
-          ? parseFloat(new Decimal(input.subtotal).toFixed(2))
-          : parseFloat(subtotal.toFixed(2)),
-        totalAmount: actualTotalAmount,
-        totalCost: parseFloat(totalCost.toFixed(2)),
+          ? Money.toNumber(Money.round(new Decimal(input.subtotal), 2))
+          : Money.toNumber(subtotal),
+        totalAmount: Money.toNumber(actualTotalAmount),
+        totalCost: Money.toNumber(totalCost),
         discountAmount: input.discountAmount
-          ? parseFloat(new Decimal(input.discountAmount).toFixed(2))
+          ? Money.toNumber(Money.round(new Decimal(input.discountAmount), 2))
           : 0,
-        taxAmount: parseFloat(taxAmount.toFixed(2)),
+        taxAmount: Money.toNumber(taxAmount),
         paymentMethod: effectivePaymentMethod,
         // Store the actual amount received from the customer (cash tendered)
         // For fully-paid sales: this is the real tendered amount (may exceed totalAmount for cash change)
         // For credit/partial: this is what was actually received
-        paymentReceived: actualAmountPaid,
+        paymentReceived: Money.toNumber(actualAmountPaid),
         changeAmount: hasOutstandingBalance
           ? 0 // No change for credit/partial payment sales
-          : parseFloat(changeAmount.toFixed(2)),
+          : Money.toNumber(changeAmount),
         soldBy: input.soldBy,
         saleDate: input.saleDate, // Pass through backdated sale date if provided
         quoteId: input.quoteId || null, // Link to quotation for auto-conversion
@@ -670,14 +677,14 @@ export const salesService = {
           const originalProfit = new Decimal(item.profit);
           const adjustedProfit = originalProfit.minus(itemDiscountShare);
 
-          item.profit = parseFloat(adjustedProfit.toFixed(2));
+          item.profit = Money.toNumber(adjustedProfit);
 
           // Distribute cart discount to each item's discount_amount.
           // This is the correct SAP-style approach: application layer calculates
           // all totals, and DB only validates (trg_validate_sale_totals).
           // Cart discount is stored at item level for accurate per-item reporting.
           const existingItemDiscount = new Decimal(item.discountAmount || 0);
-          item.discountAmount = parseFloat(existingItemDiscount.plus(itemDiscountShare).toFixed(2));
+          item.discountAmount = Money.toNumber(existingItemDiscount.plus(itemDiscountShare));
 
           totalDiscountAllocated = totalDiscountAllocated.plus(itemDiscountShare);
 
@@ -828,7 +835,7 @@ export const salesService = {
 
           const batchQty = new Decimal(batch.remaining_quantity || 0);
           const qtyToDeduct = Decimal.min(remainingQty, batchQty);
-          const qtyToDeductNum = parseFloat(qtyToDeduct.toFixed(4)); // Bank precision
+          const qtyToDeductStr = qtyToDeduct.toFixed(4); // String for PostgreSQL NUMERIC
 
           // Update batch quantity
           await client.query(
@@ -840,7 +847,7 @@ export const salesService = {
                  END,
                  updated_at = NOW()
              WHERE id = $2`,
-            [qtyToDeductNum, batch.id]
+            [qtyToDeductStr, batch.id]
           );
 
           // Use pre-generated movement number and increment
@@ -848,9 +855,7 @@ export const salesService = {
           movementSeq++;
 
           // Determine unit cost from batch with bank precision
-          const unitCost = parseFloat(
-            new Decimal(batch.cost_price ?? batch.costPrice ?? 0).toFixed(2)
-          );
+          const batchUnitCost = new Decimal(batch.cost_price ?? batch.costPrice ?? 0).toFixed(2);
 
           // Record stock movement with batch reference and unit cost
           await client.query(
@@ -863,8 +868,8 @@ export const salesService = {
               item.productId,
               batch.id,
               'SALE',
-              parseFloat(qtyToDeduct.abs().toFixed(4)), // store absolute with bank precision
-              unitCost,
+              qtyToDeduct.abs().toFixed(4), // string for PostgreSQL NUMERIC — bank-grade precision
+              batchUnitCost,
               'SALE',
               sale.id,
               `Sale ${sale.saleNumber} - FEFO batch deduction`,
@@ -886,9 +891,9 @@ export const salesService = {
           const nearestExpiry =
             batchesResult.rows.length > 0 ? batchesResult.rows[0].expiry_date : null;
           const totalAvailable = batchesResult.rows.reduce(
-            (sum: number, b: { remaining_quantity: string | number }) =>
-              sum + parseFloat(String(b.remaining_quantity)),
-            0
+            (sum: Decimal, b: { remaining_quantity: string | number }) =>
+              sum.plus(new Decimal(String(b.remaining_quantity || 0))),
+            new Decimal(0)
           );
           const isExpiryBlock = minDaysBeforeExpiry > 0 && nearestExpiry;
           const errorCode =
@@ -900,15 +905,15 @@ export const salesService = {
 
           throw new BusinessError(
             `Not enough stock for "${item.productName}". ` +
-              `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
-              `Short by: ${remainingQty.toFixed(2)}.`,
+            `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+            `Short by: ${remainingQty.toFixed(2)}.`,
             errorCode,
             {
               product: item.productName,
               productId: item.productId,
-              requested: parseFloat(baseQty.toFixed(2)),
-              available: parseFloat(totalAvailable.toFixed(2)),
-              shortBy: parseFloat(remainingQty.toFixed(2)),
+              requested: Money.toNumber(baseQty),
+              available: Money.toNumber(totalAvailable),
+              shortBy: Money.toNumber(remainingQty),
               expiryDate: nearestExpiry,
               minDaysBeforeExpiry: minDaysBeforeExpiry > 0 ? minDaysBeforeExpiry : undefined,
               batchCount: batchesResult.rows.length,
@@ -940,7 +945,7 @@ export const salesService = {
 
       // creditAmount is already calculated above (from payment lines or as Decimal)
       // Convert to number for use below
-      const creditAmountNum = parseFloat(creditAmount.toFixed(2));
+      const creditAmountNum = Money.toNumber(creditAmount);
 
       // NOTE: Customer balance is now managed by the invoice system (SINGLE SOURCE OF TRUTH)
       // When an invoice is created/updated, the database trigger `trg_sync_customer_balance_on_invoice`
@@ -967,7 +972,7 @@ export const salesService = {
           paymentLinesValues.push(
             sale.id,
             line.paymentMethod,
-            parseFloat(new Decimal(line.amount).toFixed(2)),
+            new Decimal(line.amount).toFixed(2), // String for PostgreSQL NUMERIC
             line.reference || null
           );
         });
@@ -1096,9 +1101,9 @@ export const salesService = {
               customerName: customerName,
               quoteId: input.quoteId,
               dueDate: dueDate,
-              subtotal: parseFloat((input.subtotal || 0).toFixed(2)),
-              taxAmount: parseFloat((input.taxAmount || 0).toFixed(2)),
-              totalAmount: parseFloat((input.totalAmount || 0).toFixed(2)),
+              subtotal: Money.toNumber(Money.parse(input.subtotal || 0)),
+              taxAmount: Money.toNumber(Money.parse(input.taxAmount || 0)),
+              totalAmount: Money.toNumber(Money.parse(input.totalAmount || 0)),
               createdById: input.soldBy,
             });
             invoiceId = invoiceResult?.id;
@@ -1129,7 +1134,7 @@ export const salesService = {
                 if (paymentLine.paymentMethod !== 'CREDIT' && paymentLine.amount > 0) {
                   await invoiceRepository.addPayment(client, {
                     invoiceId,
-                    amount: parseFloat(paymentLine.amount.toFixed(2)),
+                    amount: Money.toNumber(Money.parse(paymentLine.amount)),
                     paymentMethod: paymentLine.paymentMethod as
                       | 'CASH'
                       | 'CARD'
@@ -1248,7 +1253,7 @@ export const salesService = {
             customerId: input.customerId,
             customerName,
             creditAmount: creditAmount.toFixed(2),
-            totalAmount: parseFloat(finalTotalAmount.toFixed(2)),
+            totalAmount: Money.toNumber(finalTotalAmount),
             hasPaymentLines: !!(input.paymentLines && input.paymentLines.length > 0),
           });
 
@@ -1263,9 +1268,9 @@ export const salesService = {
             customerId: input.customerId,
             customerName: customerName,
             dueDate: dueDate,
-            subtotal: parseFloat((input.subtotal || subtotal.toNumber()).toFixed(2)),
-            taxAmount: parseFloat((input.taxAmount || taxAmount.toNumber()).toFixed(2)),
-            totalAmount: parseFloat(finalTotalAmount.toFixed(2)), // Full sale amount
+            subtotal: Money.toNumber(Money.parse(input.subtotal || subtotal.toNumber())),
+            taxAmount: Money.toNumber(Money.parse(input.taxAmount || taxAmount.toNumber())),
+            totalAmount: Money.toNumber(finalTotalAmount), // Full sale amount
             createdById: input.soldBy,
           });
           const invoiceId = invoiceResult?.id;
@@ -1277,7 +1282,7 @@ export const salesService = {
               if (paymentLine.paymentMethod !== 'CREDIT' && paymentLine.amount > 0) {
                 await invoiceRepository.addPayment(client, {
                   invoiceId,
-                  amount: parseFloat(paymentLine.amount.toFixed(2)),
+                  amount: Money.toNumber(Money.parse(paymentLine.amount)),
                   paymentMethod: paymentLine.paymentMethod as
                     | 'CASH'
                     | 'CARD'
@@ -1392,68 +1397,98 @@ export const salesService = {
       // ============================================================
       // BANKING INTEGRATION: Create bank transactions for non-CASH payments
       // CRITICAL: Must succeed for bank reconciliation accuracy
-      // Runs synchronously to ensure failure is caught and logged
+      // Processes each payment individually so partial failures only
+      // retry the payments that actually failed (not already-committed ones).
       // ============================================================
-      try {
-        // Process payment lines for bank transactions
+      {
+        const saleDateStr = sale.saleDate || new Date().toLocaleDateString('en-CA');
+
+        // Build the full list of non-cash payments that need bank transactions
         const paymentLinesToProcess = input.paymentLines || [];
-        const nonCashPayments = paymentLinesToProcess.filter(
-          (line) =>
-            line.paymentMethod !== 'CASH' &&
-            line.paymentMethod !== 'CREDIT' &&
-            line.paymentMethod !== 'DEPOSIT'
-        );
+        const pendingBankPayments: Array<{ amount: number; paymentMethod: string }> =
+          paymentLinesToProcess
+            .filter(
+              (line) =>
+                line.paymentMethod !== 'CASH' &&
+                line.paymentMethod !== 'CREDIT' &&
+                line.paymentMethod !== 'DEPOSIT'
+            )
+            .map((line) => ({ amount: line.amount, paymentMethod: line.paymentMethod }));
 
-        for (const payment of nonCashPayments) {
-          await BankingService.createFromSale(
-            sale.id,
-            sale.saleNumber,
-            payment.amount,
-            payment.paymentMethod,
-            sale.saleDate || new Date().toLocaleDateString('en-CA')
-          );
-          logger.info('Bank transaction created for sale payment', {
-            saleId: sale.id,
-            saleNumber: sale.saleNumber,
-            paymentMethod: payment.paymentMethod,
-            amount: payment.amount,
-          });
-        }
-
-        // Also handle single payment method if no payment lines
+        // Single-payment fallback (no payment lines, non-cash)
         if (
           paymentLinesToProcess.length === 0 &&
           effectivePaymentMethod !== 'CASH' &&
           effectivePaymentMethod !== 'CREDIT'
         ) {
-          await BankingService.createFromSale(
-            sale.id,
-            sale.saleNumber,
-            actualTotalAmount,
-            effectivePaymentMethod,
-            sale.saleDate || new Date().toLocaleDateString('en-CA')
-          );
-          logger.info('Bank transaction created for sale', {
+          pendingBankPayments.push({ amount: Money.toNumber(actualTotalAmount), paymentMethod: effectivePaymentMethod });
+        }
+
+        // Process each payment individually — track failures separately
+        const failedPayments: Array<{ amount: number; paymentMethod: string }> = [];
+        let lastError = '';
+
+        for (const payment of pendingBankPayments) {
+          try {
+            await BankingService.createFromSale(
+              sale.id,
+              sale.saleNumber,
+              payment.amount,
+              payment.paymentMethod,
+              saleDateStr
+            );
+            logger.info('Bank transaction created for sale payment', {
+              saleId: sale.id,
+              saleNumber: sale.saleNumber,
+              paymentMethod: payment.paymentMethod,
+              amount: payment.amount,
+            });
+          } catch (error: unknown) {
+            lastError = error instanceof Error ? error.message : String(error);
+            failedPayments.push(payment);
+            logger.error('Bank transaction failed for payment', {
+              saleId: sale.id,
+              saleNumber: sale.saleNumber,
+              paymentMethod: payment.paymentMethod,
+              amount: payment.amount,
+              error: lastError,
+            });
+          }
+        }
+
+        // Queue ONLY the payments that actually failed
+        if (failedPayments.length > 0) {
+          const bankingPayload = {
             saleId: sale.id,
             saleNumber: sale.saleNumber,
-            paymentMethod: effectivePaymentMethod,
-            amount: actualTotalAmount,
-          });
+            saleDate: saleDateStr,
+            payments: failedPayments,
+            failedAt: new Date().toISOString(),
+            originalError: lastError,
+          };
+
+          try {
+            await jobQueue.addJob('banking', 'create-bank-transaction', bankingPayload);
+            incrementMetric('bankingRetriesTotal');
+            logger.info('Banking retry job queued', {
+              saleId: sale.id,
+              saleNumber: sale.saleNumber,
+              failedCount: failedPayments.length,
+            });
+          } catch (queueErr: unknown) {
+            // Queue itself failed (Redis down?) — fall back to error log for manual remediation
+            logger.error('CRITICAL: Banking queue also failed — manual remediation required', {
+              saleId: sale.id,
+              saleNumber: sale.saleNumber,
+              queueError: queueErr instanceof Error ? queueErr.message : String(queueErr),
+              bankingPayload,
+            });
+          }
+
+          warnings.push(
+            `Banking integration failed for ${failedPayments.length} payment(s) on sale ${sale.saleNumber}. Queued for automatic retry.`
+          );
         }
-      } catch (error: unknown) {
-        // CRITICAL: Banking integration failed - sale exists but bank transaction missing
-        // This MUST be remediated manually or via background job
-        logger.error('CRITICAL: Banking integration failed - REQUIRES MANUAL REMEDIATION', {
-          saleId: sale.id,
-          saleNumber: sale.saleNumber,
-          error: error instanceof Error ? error.message : String(error),
-          remediation: 'Create bank transaction manually via Banking module',
-        });
-        warnings.push(
-          `Banking integration failed for sale ${sale.saleNumber}: ${error instanceof Error ? error.message : String(error)}. Manual remediation required.`
-        );
-        // Note: Not throwing here because sale is already committed
-        // The GL entry exists (via trigger), only bank_transactions record is missing
       }
 
       // ============================================================
@@ -1545,6 +1580,7 @@ export const salesService = {
       // See: deliveryService.createDeliveryFromSale()
       // ============================================================
 
+      incrementMetric('salesCreatedTotal');
       return result;
     } catch (error) {
       await client.query('ROLLBACK');

@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
 // Enums
-export const UnitOfMeasureEnum = z.enum(['PIECE', 'BOX', 'CARTON', 'KG', 'LITER', 'METER']);
+export const UnitOfMeasureEnum = z.enum([
+  'PIECE', 'BOX', 'CARTON', 'KG', 'LITER', 'METER',
+  'EACH', 'BOTTLE', 'CRATE', 'DOZEN', 'PACKET', 'SACHET',
+  'SACK', 'STRIP', 'TABLET', 'TIN', 'PACK',
+]);
 export const CostingMethodEnum = z.enum(['FIFO', 'AVCO', 'STANDARD']);
 export type CostingMethod = z.infer<typeof CostingMethodEnum>;
 
@@ -22,10 +26,22 @@ export const ProductCoreObject = z.object({
   taxRate: z.number().min(0).max(100).default(0),
   pricingFormula: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   autoUpdatePrice: z.boolean().default(false),
+  quantityOnHand: z.number().min(0, 'Quantity on hand must be >= 0').finite().default(0),
   reorderLevel: z.number().min(0).finite().default(0),
   trackExpiry: z.boolean().default(false),
   minDaysBeforeExpirySale: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),
+  // Import-only passthrough fields — used to create inventory batches during CSV import.
+  // Not stored on the products table; the worker extracts them after validation.
+  batchNumber: z.string().max(100).optional(),
+  expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiry date must be YYYY-MM-DD').refine(
+    (val) => {
+      const [y, m, d] = val.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+    },
+    { message: 'Expiry date is not a valid calendar date' }
+  ).optional(),
 });
 
 // Refinement type matches both full and partial product shapes

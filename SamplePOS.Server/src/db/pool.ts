@@ -32,19 +32,19 @@ types.setTypeParser(DATATYPE_DATE, (val: string) => {
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
+  min: 5, // Keep warm connections to eliminate cold-start latency
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 5000, // 5s prevents false timeouts under burst load
 });
 
 // Set session timezone to UTC for all connections
-// This ensures all TIMESTAMP WITH TIMEZONE values are stored/retrieved in UTC
+// Also set statement_timeout to prevent runaway queries
 pool.on('connect', (client) => {
-  client.query('SET timezone = "UTC"');
-  console.log('✅ Database connected | Strategy: UTC everywhere | DATE parser: string');
+  client.query("SET timezone = 'UTC'; SET statement_timeout = '30s'");
+  logger.info('Database connected | Strategy: UTC everywhere | DATE parser: string');
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Unexpected database pool error:', err.message);
   logger.error('Database pool error (connection will be retried)', { error: err.message });
 });
 
@@ -53,13 +53,13 @@ export async function testConnection(): Promise<boolean> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const result = await pool.query('SELECT NOW()');
-      console.log('✅ Database connection test successful:', result.rows[0].now);
+      logger.info('Database connection test successful', { now: result.rows[0].now });
       return true;
     } catch (error) {
       const delay = Math.min(1000 * 2 ** (attempt - 1), 16000);
-      console.error(`❌ Database connection attempt ${attempt}/${maxRetries} failed. Retrying in ${delay}ms...`);
+      logger.error(`Database connection attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms`);
       if (attempt === maxRetries) {
-        console.error('❌ All database connection attempts exhausted:', error);
+        logger.error('All database connection attempts exhausted', { error });
         return false;
       }
       await new Promise(r => setTimeout(r, delay));

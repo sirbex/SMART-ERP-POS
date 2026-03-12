@@ -35,6 +35,7 @@ import { createHoldRoutes } from './modules/pos/holdRoutes.js';
 import { createOfflineSyncRoutes } from './modules/pos/offlineSyncRoutes.js';
 import quotationRoutes from './modules/quotations/quotationRoutes.js';
 import deliveryRoutes from './modules/delivery/deliveryRoutes.js';
+import { importRoutes } from './modules/import/importRoutes.js';
 import { accountingRoutes } from './modules/accounting/accountingRoutes.js';
 import depositsRoutes from './modules/deposits/depositsRoutes.js';
 import { comprehensiveAccountingRoutes } from './modules/accounting/comprehensiveAccountingRoutes.js';
@@ -56,12 +57,47 @@ import { connectionManager } from './db/connectionManager.js';
 import { authenticate } from './middleware/auth.js';
 import { correlationId } from './middleware/correlationId.js';
 import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
+import healthRoutes, { incrementMetric, closeHealthRedis } from './routes/health.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
 
 // All modules now use consistent named exports for maintainability
 
 dotenv.config();
+
+// ============================================================
+// PRODUCTION ENVIRONMENT VALIDATION
+// Fail fast if critical secrets are missing in production
+// ============================================================
+if (process.env.NODE_ENV === 'production') {
+  const required = ['JWT_SECRET', 'DATABASE_URL'];
+  const missing = required.filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    console.error(`FATAL: Missing required environment variables in production: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
+    console.error(`FATAL: JWT_SECRET must be at least 32 characters in production`);
+    process.exit(1);
+  }
+  // Warn about default/weak database credentials
+  if (process.env.DATABASE_URL?.includes('password@') || process.env.DATABASE_URL?.includes(':postgres@')) {
+    console.warn('WARNING: DATABASE_URL appears to use default credentials. Change for production!');
+  }
+  // Warn about missing APM — errors are invisible without it
+  if (!process.env.SENTRY_DSN) {
+    console.warn('WARNING: SENTRY_DSN not set. Production errors will only appear in logs, not in an APM dashboard.');
+  }
+  // Warn about missing Redis — queues/banking retries won't work
+  if (!process.env.REDIS_URL) {
+    console.warn('WARNING: REDIS_URL not set. Job queues (banking retries, imports) will fail silently.');
+  }
+  // Validate CORS_ORIGIN — block wildcard in production
+  if (process.env.CORS_ORIGIN === '*') {
+    console.error('FATAL: CORS_ORIGIN=* is not allowed in production (credentials mode requires explicit origins)');
+    process.exit(1);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -117,12 +153,23 @@ app.use(
   })
 );
 
-// Body parsing
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsing (limit prevents DoS via oversized payloads)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Compression
 app.use(compression());
+
+// Request counting for metrics
+app.use((_req, res, next) => {
+  incrementMetric('httpRequestsTotal');
+  res.on('finish', () => {
+    if (res.statusCode >= 500) {
+      incrementMetric('httpErrorsTotal');
+    }
+  });
+  next();
+});
 
 // Request logging with response timing
 app.use((req, res, next) => {
@@ -188,6 +235,10 @@ app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 
 // API routes
 
+// Health + Metrics (comprehensive — no auth required)
+// Routes: /api/health, /api/health/metrics, /api/health/ready, /api/health/live, /api/health/legacy
+app.use('/api/health', healthRoutes);
+
 // Platform routes (super admin — tenant management, no tenant middleware needed)
 app.use('/api/platform', platformRoutes);
 
@@ -228,6 +279,7 @@ app.use('/api/cash-registers', cashRegisterRoutes); // Cash register management
 app.use('/api/rbac', createRbacRoutes(pool)); // Role-based access control
 app.use('/api', quotationRoutes);
 app.use('/api/delivery', deliveryRoutes);
+app.use('/api/import', importRoutes);
 // Accounting routes moved above for better priority
 
 // ============================================================
@@ -237,16 +289,17 @@ app.use('/api/delivery', deliveryRoutes);
 // 404 handler for unknown routes (must be after all route definitions)
 app.use(notFoundHandler);
 
+// Sentry error handler — must be BEFORE our custom error handlers
+// so it captures errors and calls next() to let our handlers format the response
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
 // Business rule error handler (catches business logic violations)
 app.use(businessRuleErrorHandler);
 
 // Global error handler (must be last)
 app.use(errorHandler);
-
-// Sentry error handler (captures unhandled errors after our handler)
-if (process.env.SENTRY_DSN) {
-  Sentry.setupExpressErrorHandler(app);
-}
 
 // ============================================================
 // START SERVER
@@ -297,6 +350,7 @@ async function startServer() {
       console.log('   - Banking (/api/banking)');
       console.log('   - RBAC (/api/rbac)');
       console.log('   - Delivery (/api/delivery)');
+      console.log('   - Import (/api/import)');
       console.log('   - Platform (/api/platform)');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
@@ -311,21 +365,66 @@ async function startServer() {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+
+      // Register CSV import worker (requires Redis)
+      try {
+        import('./modules/import/importWorker.js').then(({ processImportJob }) => {
+          jobQueue.processQueue('imports', async (job) => {
+            await processImportJob(job.data.payload as Parameters<typeof processImportJob>[0]);
+          });
+          logger.info('CSV import worker registered');
+        }).catch((err) => {
+          logger.warn('CSV import worker not started', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      } catch (err) {
+        logger.warn('CSV import worker not started (Redis may be offline)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // Register banking retry worker (requires Redis)
+      try {
+        import('./services/bankingService.js').then(({ BankingService }) => {
+          jobQueue.processQueue('banking', async (job) => {
+            const payload = job.data.payload as {
+              saleId: string;
+              saleNumber: string;
+              saleDate: string;
+              payments: Array<{ amount: number; paymentMethod: string }>;
+            };
+            for (const payment of payload.payments) {
+              await BankingService.createFromSale(
+                payload.saleId,
+                payload.saleNumber,
+                payment.amount,
+                payment.paymentMethod,
+                payload.saleDate
+              );
+            }
+            logger.info('Banking retry succeeded', {
+              saleId: payload.saleId,
+              saleNumber: payload.saleNumber,
+              attempt: job.attemptsMade + 1,
+            });
+          });
+          logger.info('Banking retry worker registered');
+        }).catch((err) => {
+          logger.warn('Banking retry worker not started', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      } catch (err) {
+        logger.warn('Banking retry worker not started (Redis may be offline)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
 
     server.on('error', (error: Error) => {
       logger.error('Server error:', error);
       console.error('Server error:', error);
-    });
-
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught exception:', error);
-      console.error('Uncaught exception:', error);
-    });
-
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled rejection:', { reason, promise });
-      console.error('Unhandled rejection:', reason);
     });
 
     // Graceful shutdown
@@ -342,6 +441,11 @@ async function startServer() {
 
       server.close(async () => {
         try {
+          await closeHealthRedis().catch((err: unknown) => {
+            logger.warn('Health Redis close error', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
           await jobQueue.closeAll().catch((err: unknown) => {
             logger.warn('Job queue close error', {
               error: err instanceof Error ? err.message : String(err),
@@ -357,6 +461,19 @@ async function startServer() {
         process.exit(0);
       });
     };
+
+    process.on('uncaughtException', (error) => {
+      logger.error('Uncaught exception — initiating shutdown:', error);
+      console.error('Uncaught exception:', error);
+      // Process is in an unknown state; must exit to avoid data corruption
+      shutdown('uncaughtException').catch(() => process.exit(1));
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled rejection:', { reason, promise });
+      console.error('Unhandled rejection:', reason);
+    });
+
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
   } catch (error) {

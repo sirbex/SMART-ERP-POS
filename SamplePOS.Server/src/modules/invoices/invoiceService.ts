@@ -6,6 +6,7 @@ import { accountingIntegrationService } from '../../services/accountingIntegrati
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as depositsService from '../deposits/depositsService.js';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
@@ -156,9 +157,9 @@ export const invoiceService = {
       }
 
       // Get sale totals
-      const saleSubtotal = new Decimal(rawSale.subtotal || 0).toNumber();
-      const saleTaxAmount = new Decimal(rawSale.tax_amount || 0).toNumber();
-      const saleTotalAmount = new Decimal(rawSale.total_amount || 0).toNumber();
+      const saleSubtotal = Money.parseDb(rawSale.subtotal).toNumber();
+      const saleTaxAmount = Money.parseDb(rawSale.tax_amount).toNumber();
+      const saleTotalAmount = Money.parseDb(rawSale.total_amount).toNumber();
 
       // Calculate amount paid from payment_lines (EXCLUDING CREDIT payments)
       // Credit payments represent the invoice amount, not actual payments
@@ -172,15 +173,15 @@ export const invoiceService = {
 
       const amountPaid = nonCreditPaymentLines.reduce((sum: Decimal, line: PaymentLineRow) => {
         return sum.plus(new Decimal(line.amount || 0));
-      }, new Decimal(0)).toNumber();
+      }, new Decimal(0));
 
       const creditAmount = creditPaymentLines.reduce((sum: Decimal, line: PaymentLineRow) => {
         return sum.plus(new Decimal(line.amount || 0));
-      }, new Decimal(0)).toNumber();
+      }, new Decimal(0));
 
       // Hoist for use after invoice creation (auto-record split payments)
       nonCreditPaymentLinesForInvoice = nonCreditPaymentLines;
-      saleAmountPaid = amountPaid;
+      saleAmountPaid = Money.toNumber(amountPaid);
 
       logger.info('Invoice creation - Payment calculation', {
         saleId: input.saleId,
@@ -190,20 +191,20 @@ export const invoiceService = {
         totalPaymentLines: paymentLines.length,
         creditPaymentLines: creditPaymentLines.length,
         nonCreditPaymentLines: nonCreditPaymentLines.length,
-        amountPaid,
-        creditAmount,
+        amountPaid: Money.toNumber(amountPaid),
+        creditAmount: Money.toNumber(creditAmount),
       });
 
       // Check if this is a quote-linked sale (quote conversions should always create invoices)
       const isQuoteLinkedSale = input.quoteId || rawSale.quote_id;
 
       // Invoice should only be created if there's a CREDIT payment OR if it's a quote conversion
-      if (!isQuoteLinkedSale && creditAmount <= 0) {
+      if (!isQuoteLinkedSale && creditAmount.lessThanOrEqualTo(0)) {
         logger.warn('Invoice creation blocked - no credit payment found', {
           saleId: input.saleId,
           saleTotalAmount,
-          amountPaid,
-          creditAmount,
+          amountPaid: Money.toNumber(amountPaid),
+          creditAmount: Money.toNumber(creditAmount),
         });
         throw new Error('Cannot create invoice: no credit payment in sale');
       }
@@ -300,7 +301,7 @@ export const invoiceService = {
         // Auto-record non-credit payment lines from the linked sale
         // This ensures split payments (e.g. CASH 50,000 + CREDIT 50,800) are reflected on the invoice
         for (const payLine of nonCreditPaymentLinesForInvoice) {
-          const lineAmount = new Decimal(payLine.amount || 0).toNumber();
+          const lineAmount = Money.parseDb(payLine.amount).toNumber();
           if (lineAmount > 0) {
             const lineMethod = payLine.payment_method || payLine.paymentMethod || 'CASH';
             await invoiceRepository.addPayment(client, {
@@ -370,8 +371,8 @@ export const invoiceService = {
                 productId: item.product_id,
                 productName: item.product_name,
                 quantityRequested: item.quantity,
-                unitPrice: new Decimal(item.unit_price || 0).toNumber(),
-                lineTotal: new Decimal(item.line_total || 0).toNumber()
+                unitPrice: Money.parseDb(item.unit_price).toNumber(),
+                lineTotal: Money.parseDb(item.line_total).toNumber()
               }));
 
               const deliveryOrderData = {
@@ -383,7 +384,7 @@ export const invoiceService = {
                 customerEmail: customer.email || '',
                 deliveryAddress: customer.address,
                 items: deliveryItems,
-                totalAmount: new Decimal(fresh.total_amount.toString()).toNumber(),
+                totalAmount: Money.parseDb(fresh.total_amount).toNumber(),
                 deliveryDate: new Date().toLocaleDateString('en-CA'), // Today
                 priority: 'NORMAL' as const,
                 notes: `Auto-generated from invoice ${fresh.invoice_number}`
@@ -468,10 +469,10 @@ export const invoiceService = {
         items = (saleData.items as unknown as RawSaleItemRow[]).map((it) => ({
           id: it.id,
           productId: it.product_id ?? it.productId,
-          quantity: new Decimal(it.quantity ?? 0).toNumber(),
-          unitPrice: new Decimal(it.unit_price ?? it.unitPrice ?? 0).toNumber(),
-          lineTotal: new Decimal(it.total_price ?? it.lineTotal ?? 0).toNumber(),
-          unitCost: new Decimal(it.unit_cost ?? it.unitCost ?? 0).toNumber(),
+          quantity: Money.parseDb(it.quantity).toNumber(),
+          unitPrice: Money.parseDb(it.unit_price ?? it.unitPrice).toNumber(),
+          lineTotal: Money.parseDb(it.total_price ?? it.lineTotal).toNumber(),
+          unitCost: Money.parseDb(it.unit_cost ?? it.unitCost).toNumber(),
           productName: it.product_name ?? it.productName ?? it.name ?? null,
           productCode: it.product_code ?? it.productCode ?? null,
           sku: it.sku ?? null,
@@ -540,13 +541,14 @@ export const invoiceService = {
       }
 
       // BR-INV-001: Check if payment would exceed invoice total (SINGLE SOURCE OF TRUTH)
-      const newTotalPaid = new Decimal(inv.amount_paid || 0).plus(input.amount).toNumber();
-      if (newTotalPaid > new Decimal(inv.total_amount).toNumber()) {
+      const newTotalPaidDec = Money.parseDb(inv.amount_paid).plus(input.amount);
+      const invTotalDec = Money.parseDb(inv.total_amount);
+      if (newTotalPaidDec.greaterThan(invTotalDec)) {
         throw new Error(
           `OVERPAYMENT PREVENTION: Payment of ${input.amount.toFixed(2)} would exceed invoice total. ` +
-          `Invoice ${inv.invoice_number} total: ${new Decimal(inv.total_amount).toFixed(2)}, ` +
-          `Already paid: ${new Decimal(inv.amount_paid || 0).toFixed(2)}, ` +
-          `Maximum payment allowed: ${new Decimal(inv.total_amount).minus(new Decimal(inv.amount_paid || 0)).toFixed(2)}`
+          `Invoice ${inv.invoice_number} total: ${invTotalDec.toFixed(2)}, ` +
+          `Already paid: ${Money.parseDb(inv.amount_paid).toFixed(2)}, ` +
+          `Maximum payment allowed: ${invTotalDec.minus(Money.parseDb(inv.amount_paid)).toFixed(2)}`
         );
       }
 
@@ -584,7 +586,7 @@ export const invoiceService = {
           customerId: inv.customer_id,
           amount: input.amount,
           depositBalanceBefore: depositBalance.availableBalance,
-          depositBalanceAfter: new Decimal(depositBalance.availableBalance).minus(input.amount).toNumber(),
+          depositBalanceAfter: Money.toNumber(new Decimal(depositBalance.availableBalance).minus(input.amount)),
         });
       }
 
@@ -734,8 +736,8 @@ export const invoiceService = {
              WHERE lt."ReferenceType" = 'INVOICE_PAYMENT' AND lt."ReferenceId" = $1`,
             [payment.id]
           );
-          const totalDr = parseFloat(balanceCheck.rows[0].total_dr || '0');
-          const totalCr = parseFloat(balanceCheck.rows[0].total_cr || '0');
+          const totalDr = Money.parseDb(balanceCheck.rows[0].total_dr).toNumber();
+          const totalCr = Money.parseDb(balanceCheck.rows[0].total_cr).toNumber();
 
           if (Math.abs(totalDr - totalCr) > 0.01) {
             await client.query('ROLLBACK');

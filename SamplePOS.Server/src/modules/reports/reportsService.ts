@@ -134,10 +134,10 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalValue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalValue), new Decimal(0));
-    const totalQuantity = data.reduce((sum, item) => new Decimal(sum).plus(item.quantityOnHand), new Decimal(0));
-    const totalPotentialRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialRevenue), new Decimal(0));
-    const totalPotentialProfit = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialProfit), new Decimal(0));
+    const totalValue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalValue || 0), new Decimal(0));
+    const totalQuantity = data.reduce((sum, item) => new Decimal(sum).plus(item.quantityOnHand || 0), new Decimal(0));
+    const totalPotentialRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialRevenue || 0), new Decimal(0));
+    const totalPotentialProfit = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialProfit || 0), new Decimal(0));
 
     const executionTime = Date.now() - startTime;
 

@@ -37,8 +37,9 @@ self.addEventListener('install', (event) => {
 
   event.waitUntil(
     caches.open(APP_SHELL_CACHE).then((cache) => {
-      // Cache the offline fallback page
+      // Cache the app shell so the SPA loads offline
       return cache.addAll([
+        './',           // index.html (SPA entry point)
         './offline.html',
       ]);
     })
@@ -214,4 +215,88 @@ async function prewarmApiCache(routes) {
       // Silently skip routes that fail
     }
   }
+}
+
+// ── Background Sync ───────────────────────────────────────────
+// Fired by the browser when connectivity is restored, even if the
+// tab is closed. The app registers 'sync-offline-sales' tag via
+// navigator.serviceWorker.ready.sync.register(...)
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-offline-sales') {
+    event.waitUntil(syncPendingOfflineSales());
+  }
+});
+
+/**
+ * Background Sync handler: reads the offline sales queue from
+ * the Cache API (mirrored by the app) and POSTs each pending
+ * sale to the server.
+ *
+ * NOTE: Service Workers cannot access localStorage. The queue
+ * data is read by sending a message to any open client. If no
+ * client is open, Background Sync will retry on the next
+ * opportunity (the browser schedules retries automatically).
+ */
+async function syncPendingOfflineSales() {
+  // Ask an open client for the auth token and queue
+  const clients = await self.clients.matchAll({ type: 'window' });
+  if (clients.length === 0) {
+    // No open tabs — browser will retry Background Sync later
+    return;
+  }
+
+  // Request data from the first available client
+  const data = await requestDataFromClient(clients[0]);
+  if (!data || !data.queue || data.queue.length === 0) return;
+
+  const { queue, authToken, apiBase } = data;
+  const pending = queue.filter((s) => s.status === 'PENDING_SYNC');
+  if (pending.length === 0) return;
+
+  for (const sale of pending) {
+    try {
+      const response = await fetch(`${apiBase}/pos/sync-offline-sales`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          idempotencyKey: sale.idempotencyKey,
+          offlineId: sale.offlineId,
+          saleData: sale.data,
+          offlineTimestamp: sale.timestamp,
+        }),
+      });
+      if (response.ok) {
+        sale.status = 'SYNCED';
+      }
+    } catch {
+      // Network still flaky — Background Sync will retry
+      return;
+    }
+  }
+
+  // Tell the client to update its localStorage queue
+  for (const client of clients) {
+    client.postMessage({
+      type: 'BACKGROUND_SYNC_COMPLETE',
+      syncedKeys: pending.filter((s) => s.status === 'SYNCED').map((s) => s.idempotencyKey),
+    });
+  }
+}
+
+/**
+ * Send a message to a client and wait for a reply.
+ * The client listens for 'SW_REQUEST_SYNC_DATA' and responds
+ * with the queue, auth token, and API base URL.
+ */
+function requestDataFromClient(client) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = (event) => resolve(event.data);
+    // Time out after 3 seconds if client doesn't respond
+    setTimeout(() => resolve(null), 3000);
+    client.postMessage({ type: 'SW_REQUEST_SYNC_DATA' }, [channel.port2]);
+  });
 }

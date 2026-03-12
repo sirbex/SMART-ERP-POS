@@ -23,122 +23,122 @@ const mockFindCustomerSales = jest.fn<MockFn>();
 const mockCountCustomerSales = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./customerRepository.js', () => ({
-  findAllCustomers: mockFindAllCustomers,
-  countCustomers: mockCountCustomers,
-  findCustomerById: mockFindCustomerById,
-  findCustomerByNumber: mockFindCustomerByNumber,
-  findCustomerByEmail: mockFindCustomerByEmail,
-  searchCustomers: mockSearchCustomers,
-  createCustomer: mockCreateCustomer,
-  updateCustomer: mockUpdateCustomer,
-  deleteCustomer: mockDeleteCustomer,
-  toggleCustomerActive: mockToggleCustomerActive,
-  updateCustomerBalance: mockUpdateCustomerBalance,
-  findCustomerSales: mockFindCustomerSales,
-  countCustomerSales: mockCountCustomerSales,
-  findCustomerTransactions: jest.fn<MockFn>().mockResolvedValue([]),
-  countCustomerTransactions: jest.fn<MockFn>().mockResolvedValue(0),
-  getCustomerSummary: jest.fn<MockFn>().mockResolvedValue({}),
-  getOpeningBalance: jest.fn<MockFn>().mockResolvedValue(0),
-  getStatementEntries: jest.fn<MockFn>().mockResolvedValue([]),
-  getDepositEntries: jest.fn<MockFn>().mockResolvedValue([]),
-  getCustomerDepositSummary: jest.fn<MockFn>().mockResolvedValue(null),
+    findAllCustomers: mockFindAllCustomers,
+    countCustomers: mockCountCustomers,
+    findCustomerById: mockFindCustomerById,
+    findCustomerByNumber: mockFindCustomerByNumber,
+    findCustomerByEmail: mockFindCustomerByEmail,
+    searchCustomers: mockSearchCustomers,
+    createCustomer: mockCreateCustomer,
+    updateCustomer: mockUpdateCustomer,
+    deleteCustomer: mockDeleteCustomer,
+    toggleCustomerActive: mockToggleCustomerActive,
+    updateCustomerBalance: mockUpdateCustomerBalance,
+    findCustomerSales: mockFindCustomerSales,
+    countCustomerSales: mockCountCustomerSales,
+    findCustomerTransactions: jest.fn<MockFn>().mockResolvedValue([]),
+    countCustomerTransactions: jest.fn<MockFn>().mockResolvedValue(0),
+    getCustomerSummary: jest.fn<MockFn>().mockResolvedValue({}),
+    getOpeningBalance: jest.fn<MockFn>().mockResolvedValue(0),
+    getStatementEntries: jest.fn<MockFn>().mockResolvedValue([]),
+    getDepositEntries: jest.fn<MockFn>().mockResolvedValue([]),
+    getCustomerDepositSummary: jest.fn<MockFn>().mockResolvedValue(null),
 }));
 
 jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
-  SalesBusinessRules: { MAX_CREDIT_LIMIT: 5000000 },
+    SalesBusinessRules: { MAX_CREDIT_LIMIT: 5000000 },
 }));
 
 jest.unstable_mockModule('../../../../shared/zod/customerStatement.js', () => ({
-  CustomerStatementSchema: { parse: jest.fn((v: unknown) => v) },
+    CustomerStatementSchema: { parse: jest.fn((v: unknown) => v) },
 }));
 
 const customerService = await import('./customerService.js');
 
 describe('customerService', () => {
-  beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => jest.clearAllMocks());
 
-  describe('getAllCustomers', () => {
-    it('should return paginated customers', async () => {
-      mockFindAllCustomers.mockResolvedValue([{ id: 'c1', name: 'Alpha' }]);
-      mockCountCustomers.mockResolvedValue(1);
+    describe('getAllCustomers', () => {
+        it('should return paginated customers', async () => {
+            mockFindAllCustomers.mockResolvedValue([{ id: 'c1', name: 'Alpha' }]);
+            mockCountCustomers.mockResolvedValue(1);
 
-      const result = await customerService.getAllCustomers(1, 20);
+            const result = await customerService.getAllCustomers(1, 20);
 
-      expect(result.data).toHaveLength(1);
-      expect(mockFindAllCustomers).toHaveBeenCalled();
-      expect(mockCountCustomers).toHaveBeenCalled();
-    });
-  });
-
-  describe('getCustomerById', () => {
-    it('should return customer when found', async () => {
-      mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Alpha' });
-
-      const customer = await customerService.getCustomerById('c1');
-      expect(customer.name).toBe('Alpha');
+            expect(result.data).toHaveLength(1);
+            expect(mockFindAllCustomers).toHaveBeenCalled();
+            expect(mockCountCustomers).toHaveBeenCalled();
+        });
     });
 
-    it('should throw when not found', async () => {
-      mockFindCustomerById.mockResolvedValue(null);
+    describe('getCustomerById', () => {
+        it('should return customer when found', async () => {
+            mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Alpha' });
 
-      await expect(customerService.getCustomerById('ghost')).rejects.toThrow();
-    });
-  });
+            const customer = await customerService.getCustomerById('c1');
+            expect(customer.name).toBe('Alpha');
+        });
 
-  describe('createCustomer', () => {
-    it('should create and return new customer', async () => {
-      mockFindCustomerByEmail.mockResolvedValue(null);
-      mockCreateCustomer.mockResolvedValue({ id: 'c2', name: 'Beta', customerNumber: 'CUST-0001' });
+        it('should throw when not found', async () => {
+            mockFindCustomerById.mockResolvedValue(null);
 
-      const customer = await customerService.createCustomer({
-        name: 'Beta',
-        email: 'beta@x.com',
-        creditLimit: 0,
-      });
-      expect(customer.id).toBe('c2');
-      expect(mockCreateCustomer).toHaveBeenCalled();
-    });
-  });
-
-  describe('updateCustomer', () => {
-    it('should update and return customer', async () => {
-      mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Old', email: 'old@x.com' });
-      mockUpdateCustomer.mockResolvedValue({ id: 'c1', name: 'Updated' });
-
-      const customer = await customerService.updateCustomer('c1', { name: 'Updated' });
-      expect(customer.name).toBe('Updated');
+            await expect(customerService.getCustomerById('ghost')).rejects.toThrow();
+        });
     });
 
-    it('should throw when customer not found', async () => {
-      mockFindCustomerById.mockResolvedValue(null);
+    describe('createCustomer', () => {
+        it('should create and return new customer', async () => {
+            mockFindCustomerByEmail.mockResolvedValue(null);
+            mockCreateCustomer.mockResolvedValue({ id: 'c2', name: 'Beta', customerNumber: 'CUST-0001' });
 
-      await expect(customerService.updateCustomer('ghost', { name: 'X' })).rejects.toThrow();
-    });
-  });
-
-  describe('deleteCustomer', () => {
-    it('should delete customer', async () => {
-      mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Alpha', balance: 0 });
-      mockDeleteCustomer.mockResolvedValue(true);
-
-      await expect(customerService.deleteCustomer('c1')).resolves.not.toThrow();
-    });
-  });
-
-  describe('searchCustomers', () => {
-    it('should return matching customers', async () => {
-      mockSearchCustomers.mockResolvedValue([{ id: 'c1', name: 'Alpha' }]);
-
-      const results = await customerService.searchCustomers('Alpha');
-      expect(results).toHaveLength(1);
+            const customer = await customerService.createCustomer({
+                name: 'Beta',
+                email: 'beta@x.com',
+                creditLimit: 0,
+            });
+            expect(customer.id).toBe('c2');
+            expect(mockCreateCustomer).toHaveBeenCalled();
+        });
     });
 
-    it('should return empty for no matches', async () => {
-      mockSearchCustomers.mockResolvedValue([]);
+    describe('updateCustomer', () => {
+        it('should update and return customer', async () => {
+            mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Old', email: 'old@x.com' });
+            mockUpdateCustomer.mockResolvedValue({ id: 'c1', name: 'Updated' });
 
-      const results = await customerService.searchCustomers('ZZZ');
-      expect(results).toHaveLength(0);
+            const customer = await customerService.updateCustomer('c1', { name: 'Updated' });
+            expect(customer.name).toBe('Updated');
+        });
+
+        it('should throw when customer not found', async () => {
+            mockFindCustomerById.mockResolvedValue(null);
+
+            await expect(customerService.updateCustomer('ghost', { name: 'X' })).rejects.toThrow();
+        });
     });
-  });
+
+    describe('deleteCustomer', () => {
+        it('should delete customer', async () => {
+            mockFindCustomerById.mockResolvedValue({ id: 'c1', name: 'Alpha', balance: 0 });
+            mockDeleteCustomer.mockResolvedValue(true);
+
+            await expect(customerService.deleteCustomer('c1')).resolves.not.toThrow();
+        });
+    });
+
+    describe('searchCustomers', () => {
+        it('should return matching customers', async () => {
+            mockSearchCustomers.mockResolvedValue([{ id: 'c1', name: 'Alpha' }]);
+
+            const results = await customerService.searchCustomers('Alpha');
+            expect(results).toHaveLength(1);
+        });
+
+        it('should return empty for no matches', async () => {
+            mockSearchCustomers.mockResolvedValue([]);
+
+            const results = await customerService.searchCustomers('ZZZ');
+            expect(results).toHaveLength(0);
+        });
+    });
 });

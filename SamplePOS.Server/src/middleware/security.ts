@@ -77,7 +77,7 @@ export function resetAuthRateLimit(req: Request): void {
 
 export const apiRateLimit = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 100, // Limit each IP to 100 API requests per minute
+  max: 200, // 200 API requests per minute (POS workflows require high throughput)
   message: {
     success: false,
     error: 'API rate limit exceeded, please slow down'
@@ -99,9 +99,16 @@ export const strictRateLimit = rateLimit({
 });
 
 /**
- * XSS Protection Middleware
+ * XSS Protection Middleware — only runs on write methods (POST/PUT/PATCH)
+ * GET/DELETE/HEAD/OPTIONS skip sanitization for lower latency
  */
 export function xssProtection(req: Request, res: Response, next: NextFunction): void {
+  // Skip read-only methods — no body to sanitize
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'DELETE' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+
   // Sanitize request body
   if (req.body && typeof req.body === 'object') {
     req.body = sanitizeObject(req.body) as typeof req.body;

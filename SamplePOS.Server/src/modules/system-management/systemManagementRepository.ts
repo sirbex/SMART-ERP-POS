@@ -10,9 +10,9 @@ import logger from '../../utils/logger.js';
 /** Validates that a table name is a safe PostgreSQL identifier (defense-in-depth) */
 const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 function assertSafeTableName(name: string): void {
-  if (!SAFE_IDENTIFIER.test(name)) {
-    throw new Error(`Unsafe table name rejected: ${name}`);
-  }
+    if (!SAFE_IDENTIFIER.test(name)) {
+        throw new Error(`Unsafe table name rejected: ${name}`);
+    }
 }
 
 const execAsync = promisify(exec);
@@ -22,72 +22,72 @@ const execAsync = promisify(exec);
 // ============================================================================
 
 export interface BackupRecord {
-  id: string;
-  backupNumber: string;
-  fileName: string;
-  filePath: string;
-  fileSize: number;
-  checksum: string | null;
-  backupType: 'FULL' | 'INCREMENTAL' | 'MASTER_DATA_ONLY';
-  status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'VERIFIED';
-  reason: string | null;
-  createdBy: string | null;
-  createdByName: string | null;
-  createdAt: Date;
-  isVerified: boolean;
-  statsSnapshot: Record<string, unknown> | null;
+    id: string;
+    backupNumber: string;
+    fileName: string;
+    filePath: string;
+    fileSize: number;
+    checksum: string | null;
+    backupType: 'FULL' | 'INCREMENTAL' | 'MASTER_DATA_ONLY';
+    status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'VERIFIED';
+    reason: string | null;
+    createdBy: string | null;
+    createdByName: string | null;
+    createdAt: Date;
+    isVerified: boolean;
+    statsSnapshot: Record<string, unknown> | null;
 }
 
 interface BackupRecordDbRow {
-  id: string;
-  backup_number: string;
-  file_name: string;
-  file_path: string;
-  file_size: string;
-  checksum: string | null;
-  backup_type: string;
-  status: string;
-  reason: string | null;
-  created_by: string | null;
-  created_by_name: string | null;
-  created_at: string;
-  is_verified: boolean;
-  stats_snapshot: Record<string, unknown> | null;
+    id: string;
+    backup_number: string;
+    file_name: string;
+    file_path: string;
+    file_size: string;
+    checksum: string | null;
+    backup_type: string;
+    status: string;
+    reason: string | null;
+    created_by: string | null;
+    created_by_name: string | null;
+    created_at: string;
+    is_verified: boolean;
+    stats_snapshot: Record<string, unknown> | null;
 }
 
 export interface ResetResult {
-  success: boolean;
-  resetNumber: string;
-  backupNumber: string;
-  tablesCleared: Record<string, number>;
-  totalRecordsDeleted: number;
-  balancesReset: {
-    customers: number;
-    suppliers: number;
-    inventory: number;
-    accounts: number;
-  };
-  duration: number;
+    success: boolean;
+    resetNumber: string;
+    backupNumber: string;
+    tablesCleared: Record<string, number>;
+    totalRecordsDeleted: number;
+    balancesReset: {
+        customers: number;
+        suppliers: number;
+        inventory: number;
+        accounts: number;
+    };
+    duration: number;
 }
 
 export interface RestoreResult {
-  success: boolean;
-  backupNumber: string;
-  restoredAt: Date;
-  tablesRestored: number;
-  integrityCheck: {
-    valid: boolean;
-    issues: string[];
-  };
+    success: boolean;
+    backupNumber: string;
+    restoredAt: Date;
+    tablesRestored: number;
+    integrityCheck: {
+        valid: boolean;
+        issues: string[];
+    };
 }
 
 export interface DatabaseStats {
-  masterData: Record<string, number>;
-  transactionalData: Record<string, number>;
-  accountingData: Record<string, number>;
-  databaseSize: string;
-  lastBackup: BackupRecord | null;
-  lastReset: Date | null;
+    masterData: Record<string, number>;
+    transactionalData: Record<string, number>;
+    accountingData: Record<string, number>;
+    databaseSize: string;
+    lastBackup: BackupRecord | null;
+    lastReset: Date | null;
 }
 
 // ============================================================================
@@ -95,18 +95,18 @@ export interface DatabaseStats {
 // ============================================================================
 
 export const systemManagementRepository = {
-  // ==========================================================================
-  // MAINTENANCE MODE
-  // ==========================================================================
+    // ==========================================================================
+    // MAINTENANCE MODE
+    // ==========================================================================
 
-  async enableMaintenanceMode(
-    pool: Pool,
-    reason: string,
-    operationType: string,
-    userId: string
-  ): Promise<void> {
-    await pool.query(
-      `
+    async enableMaintenanceMode(
+        pool: Pool,
+        reason: string,
+        operationType: string,
+        userId: string
+    ): Promise<void> {
+        await pool.query(
+            `
       UPDATE system_maintenance_mode
       SET is_active = TRUE,
           reason = $1,
@@ -117,55 +117,55 @@ export const systemManagementRepository = {
           ended_by = NULL
       WHERE id = '00000000-0000-0000-0000-000000000001'
     `,
-      [reason, operationType, userId]
-    );
+            [reason, operationType, userId]
+        );
 
-    logger.warn('Maintenance mode ENABLED', { reason, operationType, userId });
-  },
+        logger.warn('Maintenance mode ENABLED', { reason, operationType, userId });
+    },
 
-  async disableMaintenanceMode(pool: Pool, userId: string): Promise<void> {
-    await pool.query(
-      `
+    async disableMaintenanceMode(pool: Pool, userId: string): Promise<void> {
+        await pool.query(
+            `
       UPDATE system_maintenance_mode
       SET is_active = FALSE,
           ended_at = NOW(),
           ended_by = $1
       WHERE id = '00000000-0000-0000-0000-000000000001'
     `,
-      [userId]
-    );
+            [userId]
+        );
 
-    logger.info('Maintenance mode DISABLED', { userId });
-  },
+        logger.info('Maintenance mode DISABLED', { userId });
+    },
 
-  async isMaintenanceMode(pool: Pool): Promise<boolean> {
-    const result = await pool.query(`
+    async isMaintenanceMode(pool: Pool): Promise<boolean> {
+        const result = await pool.query(`
       SELECT is_active FROM system_maintenance_mode
       WHERE id = '00000000-0000-0000-0000-000000000001'
     `);
-    return result.rows[0]?.is_active || false;
-  },
+        return result.rows[0]?.is_active || false;
+    },
 
-  // ==========================================================================
-  // BACKUP OPERATIONS
-  // ==========================================================================
+    // ==========================================================================
+    // BACKUP OPERATIONS
+    // ==========================================================================
 
-  async createBackupRecord(
-    pool: Pool,
-    data: {
-      fileName: string;
-      filePath: string;
-      fileSize: number;
-      checksum: string | null;
-      backupType: string;
-      reason: string;
-      userId: string;
-      userName: string;
-      statsSnapshot: Record<string, unknown>;
-    }
-  ): Promise<BackupRecord> {
-    const result = await pool.query(
-      `
+    async createBackupRecord(
+        pool: Pool,
+        data: {
+            fileName: string;
+            filePath: string;
+            fileSize: number;
+            checksum: string | null;
+            backupType: string;
+            reason: string;
+            userId: string;
+            userName: string;
+            statsSnapshot: Record<string, unknown>;
+        }
+    ): Promise<BackupRecord> {
+        const result = await pool.query(
+            `
       INSERT INTO system_backups (
         backup_number, file_name, file_path, file_size, checksum,
         backup_type, status, reason, created_by, created_by_name,
@@ -178,63 +178,63 @@ export const systemManagementRepository = {
       )
       RETURNING *
     `,
-      [
-        data.fileName,
-        data.filePath,
-        data.fileSize,
-        data.checksum,
-        data.backupType,
-        data.reason,
-        data.userId,
-        data.userName,
-        JSON.stringify(data.statsSnapshot),
-      ]
-    );
+            [
+                data.fileName,
+                data.filePath,
+                data.fileSize,
+                data.checksum,
+                data.backupType,
+                data.reason,
+                data.userId,
+                data.userName,
+                JSON.stringify(data.statsSnapshot),
+            ]
+        );
 
-    return this.mapBackupRow(result.rows[0]);
-  },
+        return this.mapBackupRow(result.rows[0]);
+    },
 
-  async getBackupById(pool: Pool, id: string): Promise<BackupRecord | null> {
-    // Use parameterized query without prepared statement name
-    const result = await pool.query(
-      'SELECT * FROM system_backups WHERE id = $1::uuid AND is_deleted = FALSE',
-      [id]
-    );
+    async getBackupById(pool: Pool, id: string): Promise<BackupRecord | null> {
+        // Use parameterized query without prepared statement name
+        const result = await pool.query(
+            'SELECT * FROM system_backups WHERE id = $1::uuid AND is_deleted = FALSE',
+            [id]
+        );
 
-    return result.rows[0] ? this.mapBackupRow(result.rows[0]) : null;
-  },
+        return result.rows[0] ? this.mapBackupRow(result.rows[0]) : null;
+    },
 
-  async getBackupByNumber(pool: Pool, backupNumber: string): Promise<BackupRecord | null> {
-    const result = await pool.query(
-      'SELECT * FROM system_backups WHERE backup_number = $1::text AND is_deleted = FALSE',
-      [backupNumber]
-    );
+    async getBackupByNumber(pool: Pool, backupNumber: string): Promise<BackupRecord | null> {
+        const result = await pool.query(
+            'SELECT * FROM system_backups WHERE backup_number = $1::text AND is_deleted = FALSE',
+            [backupNumber]
+        );
 
-    return result.rows[0] ? this.mapBackupRow(result.rows[0]) : null;
-  },
+        return result.rows[0] ? this.mapBackupRow(result.rows[0]) : null;
+    },
 
-  async listBackups(pool: Pool, limit: number = 50): Promise<BackupRecord[]> {
-    const result = await pool.query(
-      `
+    async listBackups(pool: Pool, limit: number = 50): Promise<BackupRecord[]> {
+        const result = await pool.query(
+            `
       SELECT * FROM system_backups
       WHERE is_deleted = FALSE
       ORDER BY created_at DESC
       LIMIT $1
     `,
-      [limit]
-    );
+            [limit]
+        );
 
-    return result.rows.map((row) => this.mapBackupRow(row));
-  },
+        return result.rows.map((row) => this.mapBackupRow(row));
+    },
 
-  async updateBackupStatus(
-    pool: Pool,
-    id: string,
-    status: string,
-    checksum?: string
-  ): Promise<void> {
-    await pool.query(
-      `
+    async updateBackupStatus(
+        pool: Pool,
+        id: string,
+        status: string,
+        checksum?: string
+    ): Promise<void> {
+        await pool.query(
+            `
       UPDATE system_backups
       SET status = $1::varchar,
           checksum = COALESCE($2::varchar, checksum),
@@ -242,75 +242,75 @@ export const systemManagementRepository = {
           is_verified = CASE WHEN $1::varchar = 'VERIFIED' THEN TRUE ELSE is_verified END
       WHERE id = $3::uuid
     `,
-      [status, checksum || null, id]
-    );
-  },
+            [status, checksum || null, id]
+        );
+    },
 
-  async incrementRestoreCount(pool: Pool, id: string, userId: string): Promise<void> {
-    await pool.query(
-      `
+    async incrementRestoreCount(pool: Pool, id: string, userId: string): Promise<void> {
+        await pool.query(
+            `
       UPDATE system_backups
       SET restore_count = restore_count + 1,
           last_restored_at = NOW(),
           last_restored_by = $1::uuid
       WHERE id = $2::uuid
     `,
-      [userId, id]
-    );
-  },
+            [userId, id]
+        );
+    },
 
-  async softDeleteBackup(pool: Pool, id: string, userId: string): Promise<void> {
-    await pool.query(
-      `
+    async softDeleteBackup(pool: Pool, id: string, userId: string): Promise<void> {
+        await pool.query(
+            `
       UPDATE system_backups
       SET is_deleted = TRUE,
           deleted_at = NOW(),
           deleted_by = $1::uuid
       WHERE id = $2::uuid
     `,
-      [userId, id]
-    );
-  },
+            [userId, id]
+        );
+    },
 
-  mapBackupRow(row: BackupRecordDbRow): BackupRecord {
-    return {
-      id: row.id,
-      backupNumber: row.backup_number,
-      fileName: row.file_name,
-      filePath: row.file_path,
-      fileSize: parseInt(row.file_size) || 0,
-      checksum: row.checksum,
-      backupType: row.backup_type as BackupRecord['backupType'],
-      status: row.status as BackupRecord['status'],
-      reason: row.reason,
-      createdBy: row.created_by,
-      createdByName: row.created_by_name,
-      createdAt: new Date(row.created_at),
-      isVerified: row.is_verified,
-      statsSnapshot: row.stats_snapshot,
-    };
-  },
+    mapBackupRow(row: BackupRecordDbRow): BackupRecord {
+        return {
+            id: row.id,
+            backupNumber: row.backup_number,
+            fileName: row.file_name,
+            filePath: row.file_path,
+            fileSize: parseInt(row.file_size) || 0,
+            checksum: row.checksum,
+            backupType: row.backup_type as BackupRecord['backupType'],
+            status: row.status as BackupRecord['status'],
+            reason: row.reason,
+            createdBy: row.created_by,
+            createdByName: row.created_by_name,
+            createdAt: new Date(row.created_at),
+            isVerified: row.is_verified,
+            statsSnapshot: row.stats_snapshot,
+        };
+    },
 
-  // ==========================================================================
-  // RESET LOG OPERATIONS
-  // ==========================================================================
+    // ==========================================================================
+    // RESET LOG OPERATIONS
+    // ==========================================================================
 
-  async createResetLog(
-    pool: Pool,
-    data: {
-      resetType: string;
-      backupId: string;
-      backupNumber: string;
-      userId: string;
-      userName: string;
-      confirmationPhrase: string;
-      reason: string;
-      ipAddress?: string;
-      userAgent?: string;
-    }
-  ): Promise<string> {
-    const result = await pool.query(
-      `
+    async createResetLog(
+        pool: Pool,
+        data: {
+            resetType: string;
+            backupId: string;
+            backupNumber: string;
+            userId: string;
+            userName: string;
+            confirmationPhrase: string;
+            reason: string;
+            ipAddress?: string;
+            userAgent?: string;
+        }
+    ): Promise<string> {
+        const result = await pool.query(
+            `
       INSERT INTO system_reset_log (
         reset_number, reset_type, backup_id, backup_number,
         authorized_by, authorized_by_name, confirmation_phrase,
@@ -323,32 +323,32 @@ export const systemManagementRepository = {
       )
       RETURNING id, reset_number
     `,
-      [
-        data.resetType,
-        data.backupId,
-        data.backupNumber,
-        data.userId,
-        data.userName,
-        data.confirmationPhrase,
-        data.reason,
-        data.ipAddress,
-        data.userAgent,
-      ]
-    );
+            [
+                data.resetType,
+                data.backupId,
+                data.backupNumber,
+                data.userId,
+                data.userName,
+                data.confirmationPhrase,
+                data.reason,
+                data.ipAddress,
+                data.userAgent,
+            ]
+        );
 
-    return result.rows[0].reset_number;
-  },
+        return result.rows[0].reset_number;
+    },
 
-  async completeResetLog(
-    pool: Pool,
-    resetNumber: string,
-    tablesCleared: Record<string, number>,
-    balancesReset: Record<string, number>
-  ): Promise<void> {
-    const recordsDeleted = Object.values(tablesCleared).reduce((a, b) => a + b, 0);
+    async completeResetLog(
+        pool: Pool,
+        resetNumber: string,
+        tablesCleared: Record<string, number>,
+        balancesReset: Record<string, number>
+    ): Promise<void> {
+        const recordsDeleted = Object.values(tablesCleared).reduce((a, b) => a + b, 0);
 
-    await pool.query(
-      `
+        await pool.query(
+            `
       UPDATE system_reset_log
       SET status = 'COMPLETED',
           completed_at = NOW(),
@@ -357,18 +357,18 @@ export const systemManagementRepository = {
           balances_reset = $3
       WHERE reset_number = $4
     `,
-      [JSON.stringify(tablesCleared), recordsDeleted, JSON.stringify(balancesReset), resetNumber]
-    );
-  },
+            [JSON.stringify(tablesCleared), recordsDeleted, JSON.stringify(balancesReset), resetNumber]
+        );
+    },
 
-  async failResetLog(
-    pool: Pool,
-    resetNumber: string,
-    errorMessage: string,
-    rollbackReason?: string
-  ): Promise<void> {
-    await pool.query(
-      `
+    async failResetLog(
+        pool: Pool,
+        resetNumber: string,
+        errorMessage: string,
+        rollbackReason?: string
+    ): Promise<void> {
+        await pool.query(
+            `
       UPDATE system_reset_log
       SET status = $1,
           completed_at = NOW(),
@@ -376,769 +376,769 @@ export const systemManagementRepository = {
           rollback_reason = $3
       WHERE reset_number = $4
     `,
-      [rollbackReason ? 'ROLLED_BACK' : 'FAILED', errorMessage, rollbackReason, resetNumber]
-    );
-  },
+            [rollbackReason ? 'ROLLED_BACK' : 'FAILED', errorMessage, rollbackReason, resetNumber]
+        );
+    },
 
-  // ==========================================================================
-  // DATABASE STATISTICS
-  // ==========================================================================
+    // ==========================================================================
+    // DATABASE STATISTICS
+    // ==========================================================================
 
-  async getDatabaseStats(pool: Pool): Promise<DatabaseStats> {
-    const masterData: Record<string, number> = {};
-    const transactionalData: Record<string, number> = {};
-    const accountingData: Record<string, number> = {};
+    async getDatabaseStats(pool: Pool): Promise<DatabaseStats> {
+        const masterData: Record<string, number> = {};
+        const transactionalData: Record<string, number> = {};
+        const accountingData: Record<string, number> = {};
 
-    // Master data tables (NEVER cleared)
-    const masterTables = [
-      'customers',
-      'suppliers',
-      'products',
-      'users',
-      'uoms',
-      'product_uoms',
-      'customer_groups',
-      'accounts',
-      'expense_categories',
-      'bank_accounts',
-      'bank_categories',
-      'bank_patterns',
-      'bank_recurring_rules',
-      'bank_templates',
-      'cash_registers',
-    ];
+        // Master data tables (NEVER cleared)
+        const masterTables = [
+            'customers',
+            'suppliers',
+            'products',
+            'users',
+            'uoms',
+            'product_uoms',
+            'customer_groups',
+            'accounts',
+            'expense_categories',
+            'bank_accounts',
+            'bank_categories',
+            'bank_patterns',
+            'bank_recurring_rules',
+            'bank_templates',
+            'cash_registers',
+        ];
 
-    // Transactional data tables (can be cleared)
-    const txnTables = [
-      'sales',
-      'sale_items',
-      'sale_discounts',
-      'pos_held_orders',
-      'pos_held_order_items',
-      'pos_customer_deposits',
-      'pos_deposit_applications',
-      'discount_authorizations',
-      'invoices',
-      'invoice_line_items',
-      'invoice_payments',
-      'customer_payments',
-      'customer_deposits',
-      'deposit_applications',
-      'credit_applications',
-      'customer_credits',
-      'customer_balance_adjustments',
-      'customer_accounts',
-      'payment_transactions',
-      'purchase_orders',
-      'purchase_order_items',
-      'goods_receipts',
-      'goods_receipt_items',
-      'inventory_batches',
-      'inventory_snapshots',
-      'stock_movements',
-      'cost_layers',
-      'stock_counts',
-      'stock_count_lines',
-      'supplier_invoices',
-      'supplier_invoice_line_items',
-      'supplier_payments',
-      'supplier_payment_allocations',
-      'quotations',
-      'quotation_items',
-      'quotation_attachments',
-      'quotation_emails',
-      'quotation_status_history',
-      'delivery_orders',
-      'delivery_items',
-      'delivery_routes',
-      'delivery_proof',
-      'delivery_status_history',
-      'route_deliveries',
-      'expenses',
-      'expense_approvals',
-      'expense_documents',
-      'bank_reconciliations',
-      'bank_reconciliation_items',
-      'cash_bank_transfers',
-      'cash_book_entries',
-      'bank_transactions',
-      'bank_statement_lines',
-      'bank_statements',
-      'bank_alerts',
-      'bank_transaction_patterns',
-      'financial_periods',
-      'report_runs',
-      'processed_events',
-      'failed_transactions',
-      'user_sessions',
-      'cash_register_sessions',
-      'cash_movements',
-    ];
+        // Transactional data tables (can be cleared)
+        const txnTables = [
+            'sales',
+            'sale_items',
+            'sale_discounts',
+            'pos_held_orders',
+            'pos_held_order_items',
+            'pos_customer_deposits',
+            'pos_deposit_applications',
+            'discount_authorizations',
+            'invoices',
+            'invoice_line_items',
+            'invoice_payments',
+            'customer_payments',
+            'customer_deposits',
+            'deposit_applications',
+            'credit_applications',
+            'customer_credits',
+            'customer_balance_adjustments',
+            'customer_accounts',
+            'payment_transactions',
+            'purchase_orders',
+            'purchase_order_items',
+            'goods_receipts',
+            'goods_receipt_items',
+            'inventory_batches',
+            'inventory_snapshots',
+            'stock_movements',
+            'cost_layers',
+            'stock_counts',
+            'stock_count_lines',
+            'supplier_invoices',
+            'supplier_invoice_line_items',
+            'supplier_payments',
+            'supplier_payment_allocations',
+            'quotations',
+            'quotation_items',
+            'quotation_attachments',
+            'quotation_emails',
+            'quotation_status_history',
+            'delivery_orders',
+            'delivery_items',
+            'delivery_routes',
+            'delivery_proof',
+            'delivery_status_history',
+            'route_deliveries',
+            'expenses',
+            'expense_approvals',
+            'expense_documents',
+            'bank_reconciliations',
+            'bank_reconciliation_items',
+            'cash_bank_transfers',
+            'cash_book_entries',
+            'bank_transactions',
+            'bank_statement_lines',
+            'bank_statements',
+            'bank_alerts',
+            'bank_transaction_patterns',
+            'financial_periods',
+            'report_runs',
+            'processed_events',
+            'failed_transactions',
+            'user_sessions',
+            'cash_register_sessions',
+            'cash_movements',
+        ];
 
-    // Accounting data tables
-    const acctTables = [
-      'ledger_transactions',
-      'ledger_entries',
-      'journal_entries',
-      'journal_entry_lines',
-      'manual_journal_entries',
-      'manual_journal_entry_lines',
-      'payment_allocations',
-      'payment_lines',
-      'accounting_periods',
-      'accounting_period_history',
-    ];
+        // Accounting data tables
+        const acctTables = [
+            'ledger_transactions',
+            'ledger_entries',
+            'journal_entries',
+            'journal_entry_lines',
+            'manual_journal_entries',
+            'manual_journal_entry_lines',
+            'payment_allocations',
+            'payment_lines',
+            'accounting_periods',
+            'accounting_period_history',
+        ];
 
-    // Fetch all table counts in a single query using pg_stat_user_tables
-    const allTables = [...masterTables, ...txnTables, ...acctTables];
-    const countsResult = await pool.query(
-      `
+        // Fetch all table counts in a single query using pg_stat_user_tables
+        const allTables = [...masterTables, ...txnTables, ...acctTables];
+        const countsResult = await pool.query(
+            `
             SELECT relname AS table_name, n_live_tup AS count
             FROM pg_stat_user_tables
             WHERE relname = ANY($1)
         `,
-      [allTables]
-    );
+            [allTables]
+        );
 
-    const countMap = new Map<string, number>();
-    for (const row of countsResult.rows) {
-      countMap.set(row.table_name, parseInt(row.count));
-    }
+        const countMap = new Map<string, number>();
+        for (const row of countsResult.rows) {
+            countMap.set(row.table_name, parseInt(row.count));
+        }
 
-    for (const t of masterTables) {
-      masterData[t] = countMap.get(t) ?? 0;
-    }
-    for (const t of txnTables) {
-      transactionalData[t] = countMap.get(t) ?? 0;
-    }
-    for (const t of acctTables) {
-      accountingData[t] = countMap.get(t) ?? 0;
-    }
+        for (const t of masterTables) {
+            masterData[t] = countMap.get(t) ?? 0;
+        }
+        for (const t of txnTables) {
+            transactionalData[t] = countMap.get(t) ?? 0;
+        }
+        for (const t of acctTables) {
+            accountingData[t] = countMap.get(t) ?? 0;
+        }
 
-    // Database size
-    const sizeResult = await pool.query(`
+        // Database size
+        const sizeResult = await pool.query(`
       SELECT pg_size_pretty(pg_database_size(current_database())) as size
     `);
 
-    // Last backup - include both COMPLETED and VERIFIED status
-    const lastBackupResult = await pool.query(`
+        // Last backup - include both COMPLETED and VERIFIED status
+        const lastBackupResult = await pool.query(`
       SELECT * FROM system_backups
       WHERE is_deleted = FALSE AND status IN ('COMPLETED', 'VERIFIED')
       ORDER BY created_at DESC LIMIT 1
     `);
 
-    // Last reset
-    const lastResetResult = await pool.query(`
+        // Last reset
+        const lastResetResult = await pool.query(`
       SELECT started_at FROM system_reset_log
       WHERE status = 'COMPLETED'
       ORDER BY started_at DESC LIMIT 1
     `);
 
-    return {
-      masterData,
-      transactionalData,
-      accountingData,
-      databaseSize: sizeResult.rows[0]?.size || 'Unknown',
-      lastBackup: lastBackupResult.rows[0] ? this.mapBackupRow(lastBackupResult.rows[0]) : null,
-      lastReset: lastResetResult.rows[0]?.started_at
-        ? new Date(lastResetResult.rows[0].started_at)
-        : null,
-    };
-  },
+        return {
+            masterData,
+            transactionalData,
+            accountingData,
+            databaseSize: sizeResult.rows[0]?.size || 'Unknown',
+            lastBackup: lastBackupResult.rows[0] ? this.mapBackupRow(lastBackupResult.rows[0]) : null,
+            lastReset: lastResetResult.rows[0]?.started_at
+                ? new Date(lastResetResult.rows[0].started_at)
+                : null,
+        };
+    },
 
-  // ==========================================================================
-  // TRANSACTIONAL DATA CLEARING (ERP RESET)
-  // ==========================================================================
+    // ==========================================================================
+    // TRANSACTIONAL DATA CLEARING (ERP RESET)
+    // ==========================================================================
 
-  async clearAllTransactionalData(
-    client: PoolClient
-  ): Promise<{ tablesCleared: Record<string, number>; balancesReset: Record<string, number> }> {
-    const tablesCleared: Record<string, number> = {};
-    const balancesReset: Record<string, number> = {};
+    async clearAllTransactionalData(
+        client: PoolClient
+    ): Promise<{ tablesCleared: Record<string, number>; balancesReset: Record<string, number> }> {
+        const tablesCleared: Record<string, number> = {};
+        const balancesReset: Record<string, number> = {};
 
-    // Helper function for safe deletion with savepoint
-    const safeDelete = async (tableName: string, stepNum: number): Promise<number> => {
-      assertSafeTableName(tableName);
-      try {
-        await client.query(`SAVEPOINT sp_delete_${stepNum}`);
-        const result = await client.query(`DELETE FROM ${tableName}`);
-        await client.query(`RELEASE SAVEPOINT sp_delete_${stepNum}`);
-        return result.rowCount || 0;
-      } catch (error: unknown) {
-        await client.query(`ROLLBACK TO SAVEPOINT sp_delete_${stepNum}`);
-        logger.warn(
-          `Table ${tableName} skip: ${error instanceof Error ? error.message : String(error)}`
-        );
-        return 0;
-      }
-    };
+        // Helper function for safe deletion with savepoint
+        const safeDelete = async (tableName: string, stepNum: number): Promise<number> => {
+            assertSafeTableName(tableName);
+            try {
+                await client.query(`SAVEPOINT sp_delete_${stepNum}`);
+                const result = await client.query(`DELETE FROM ${tableName}`);
+                await client.query(`RELEASE SAVEPOINT sp_delete_${stepNum}`);
+                return result.rowCount || 0;
+            } catch (error: unknown) {
+                await client.query(`ROLLBACK TO SAVEPOINT sp_delete_${stepNum}`);
+                logger.warn(
+                    `Table ${tableName} skip: ${error instanceof Error ? error.message : String(error)}`
+                );
+                return 0;
+            }
+        };
 
-    // Helper function for safe truncate (faster for large tables)
-    const safeTruncate = async (tableName: string, stepNum: number): Promise<number> => {
-      assertSafeTableName(tableName);
-      try {
-        await client.query(`SAVEPOINT sp_trunc_${stepNum}`);
-        // Get count first
-        const countResult = await client.query(`SELECT COUNT(*) as count FROM ${tableName}`);
-        const count = parseInt(countResult.rows[0].count) || 0;
-        // Truncate with cascade
-        await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
-        await client.query(`RELEASE SAVEPOINT sp_trunc_${stepNum}`);
-        return count;
-      } catch (error: unknown) {
-        await client.query(`ROLLBACK TO SAVEPOINT sp_trunc_${stepNum}`);
-        logger.warn(
-          `Table ${tableName} truncate skip: ${error instanceof Error ? error.message : String(error)}`
-        );
-        return 0;
-      }
-    };
+        // Helper function for safe truncate (faster for large tables)
+        const safeTruncate = async (tableName: string, stepNum: number): Promise<number> => {
+            assertSafeTableName(tableName);
+            try {
+                await client.query(`SAVEPOINT sp_trunc_${stepNum}`);
+                // Get count first
+                const countResult = await client.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+                const count = parseInt(countResult.rows[0].count) || 0;
+                // Truncate with cascade
+                await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
+                await client.query(`RELEASE SAVEPOINT sp_trunc_${stepNum}`);
+                return count;
+            } catch (error: unknown) {
+                await client.query(`ROLLBACK TO SAVEPOINT sp_trunc_${stepNum}`);
+                logger.warn(
+                    `Table ${tableName} truncate skip: ${error instanceof Error ? error.message : String(error)}`
+                );
+                return 0;
+            }
+        };
 
-    let step = 1;
+        let step = 1;
 
-    // =========================================================================
-    // PRE-PHASE: Clear FK references that would block accounting reset
-    // Several tables have FK to ledger_transactions, must clear before Phase 0
-    // =========================================================================
-    logger.info('Pre-Phase: Clearing cross-module FK references to ledger_transactions...');
+        // =========================================================================
+        // PRE-PHASE: Clear FK references that would block accounting reset
+        // Several tables have FK to ledger_transactions, must clear before Phase 0
+        // =========================================================================
+        logger.info('Pre-Phase: Clearing cross-module FK references to ledger_transactions...');
 
-    // Clear bank_transactions GL references
-    try {
-      await client.query(`SAVEPOINT sp_clear_bank_gl_refs`);
-      const bankGlClearResult = await client.query(`
+        // Clear bank_transactions GL references
+        try {
+            await client.query(`SAVEPOINT sp_clear_bank_gl_refs`);
+            const bankGlClearResult = await client.query(`
                 UPDATE bank_transactions 
                 SET gl_transaction_id = NULL
                 WHERE gl_transaction_id IS NOT NULL
             `);
-      tablesCleared['bank_transactions_gl_refs_cleared'] = bankGlClearResult.rowCount || 0;
-      await client.query(`RELEASE SAVEPOINT sp_clear_bank_gl_refs`);
-      logger.info(
-        `Cleared ${tablesCleared['bank_transactions_gl_refs_cleared']} GL refs from bank_transactions`
-      );
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_bank_gl_refs`);
-      logger.warn(
-        `Clear bank_transactions GL refs skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-      tablesCleared['bank_transactions_gl_refs_cleared'] = 0;
-    }
+            tablesCleared['bank_transactions_gl_refs_cleared'] = bankGlClearResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_clear_bank_gl_refs`);
+            logger.info(
+                `Cleared ${tablesCleared['bank_transactions_gl_refs_cleared']} GL refs from bank_transactions`
+            );
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_bank_gl_refs`);
+            logger.warn(
+                `Clear bank_transactions GL refs skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+            tablesCleared['bank_transactions_gl_refs_cleared'] = 0;
+        }
 
-    // Clear customer_credits LedgerTransactionId references
-    try {
-      await client.query(`SAVEPOINT sp_clear_credits_gl_refs`);
-      const creditsClearResult = await client.query(`
+        // Clear customer_credits LedgerTransactionId references
+        try {
+            await client.query(`SAVEPOINT sp_clear_credits_gl_refs`);
+            const creditsClearResult = await client.query(`
                 UPDATE customer_credits 
                 SET "LedgerTransactionId" = NULL
                 WHERE "LedgerTransactionId" IS NOT NULL
             `);
-      tablesCleared['customer_credits_gl_refs_cleared'] = creditsClearResult.rowCount || 0;
-      await client.query(`RELEASE SAVEPOINT sp_clear_credits_gl_refs`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_credits_gl_refs`);
-      tablesCleared['customer_credits_gl_refs_cleared'] = 0;
-    }
+            tablesCleared['customer_credits_gl_refs_cleared'] = creditsClearResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_clear_credits_gl_refs`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_credits_gl_refs`);
+            tablesCleared['customer_credits_gl_refs_cleared'] = 0;
+        }
 
-    // Clear customer_deposits LedgerTransactionId references
-    try {
-      await client.query(`SAVEPOINT sp_clear_deposits_gl_refs`);
-      const depositsClearResult = await client.query(`
+        // Clear customer_deposits LedgerTransactionId references
+        try {
+            await client.query(`SAVEPOINT sp_clear_deposits_gl_refs`);
+            const depositsClearResult = await client.query(`
                 UPDATE customer_deposits 
                 SET "LedgerTransactionId" = NULL
                 WHERE "LedgerTransactionId" IS NOT NULL
             `);
-      tablesCleared['customer_deposits_gl_refs_cleared'] = depositsClearResult.rowCount || 0;
-      await client.query(`RELEASE SAVEPOINT sp_clear_deposits_gl_refs`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_deposits_gl_refs`);
-      tablesCleared['customer_deposits_gl_refs_cleared'] = 0;
-    }
+            tablesCleared['customer_deposits_gl_refs_cleared'] = depositsClearResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_clear_deposits_gl_refs`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_deposits_gl_refs`);
+            tablesCleared['customer_deposits_gl_refs_cleared'] = 0;
+        }
 
-    // Clear credit_applications LedgerTransactionId references
-    try {
-      await client.query(`SAVEPOINT sp_clear_credit_apps_gl_refs`);
-      const creditAppsClearResult = await client.query(`
+        // Clear credit_applications LedgerTransactionId references
+        try {
+            await client.query(`SAVEPOINT sp_clear_credit_apps_gl_refs`);
+            const creditAppsClearResult = await client.query(`
                 UPDATE credit_applications 
                 SET "LedgerTransactionId" = NULL
                 WHERE "LedgerTransactionId" IS NOT NULL
             `);
-      tablesCleared['credit_applications_gl_refs_cleared'] = creditAppsClearResult.rowCount || 0;
-      await client.query(`RELEASE SAVEPOINT sp_clear_credit_apps_gl_refs`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_credit_apps_gl_refs`);
-      tablesCleared['credit_applications_gl_refs_cleared'] = 0;
-    }
+            tablesCleared['credit_applications_gl_refs_cleared'] = creditAppsClearResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_clear_credit_apps_gl_refs`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_credit_apps_gl_refs`);
+            tablesCleared['credit_applications_gl_refs_cleared'] = 0;
+        }
 
-    // Clear deposit_applications LedgerTransactionId references
-    try {
-      await client.query(`SAVEPOINT sp_clear_deposit_apps_gl_refs`);
-      const depositAppsClearResult = await client.query(`
+        // Clear deposit_applications LedgerTransactionId references
+        try {
+            await client.query(`SAVEPOINT sp_clear_deposit_apps_gl_refs`);
+            const depositAppsClearResult = await client.query(`
                 UPDATE deposit_applications 
                 SET "LedgerTransactionId" = NULL
                 WHERE "LedgerTransactionId" IS NOT NULL
             `);
-      tablesCleared['deposit_applications_gl_refs_cleared'] = depositAppsClearResult.rowCount || 0;
-      await client.query(`RELEASE SAVEPOINT sp_clear_deposit_apps_gl_refs`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_deposit_apps_gl_refs`);
-      tablesCleared['deposit_applications_gl_refs_cleared'] = 0;
-    }
+            tablesCleared['deposit_applications_gl_refs_cleared'] = depositAppsClearResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_clear_deposit_apps_gl_refs`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_deposit_apps_gl_refs`);
+            tablesCleared['deposit_applications_gl_refs_cleared'] = 0;
+        }
 
-    logger.info('Pre-Phase complete: All GL references cleared');
+        logger.info('Pre-Phase complete: All GL references cleared');
 
-    // =========================================================================
-    // PHASE 0: COMPLETE ACCOUNTING RESET FIRST
-    // This uses the dedicated fn_reset_accounting_complete() function which
-    // ensures ALL ledger entries, transactions, and account balances are
-    // properly cleared and reset to 0 BEFORE any other operations
-    // =========================================================================
-    logger.info('Phase 0: Complete accounting system reset...');
+        // =========================================================================
+        // PHASE 0: COMPLETE ACCOUNTING RESET FIRST
+        // This uses the dedicated fn_reset_accounting_complete() function which
+        // ensures ALL ledger entries, transactions, and account balances are
+        // properly cleared and reset to 0 BEFORE any other operations
+        // =========================================================================
+        logger.info('Phase 0: Complete accounting system reset...');
 
-    try {
-      await client.query(`SAVEPOINT sp_accounting_reset`);
-      const accountingResetResult = await client.query(`
+        try {
+            await client.query(`SAVEPOINT sp_accounting_reset`);
+            const accountingResetResult = await client.query(`
                 SELECT step_name, records_affected, status 
                 FROM fn_reset_accounting_complete()
             `);
-      await client.query(`RELEASE SAVEPOINT sp_accounting_reset`);
+            await client.query(`RELEASE SAVEPOINT sp_accounting_reset`);
 
-      for (const row of accountingResetResult.rows) {
-        if (row.step_name === 'accounts_balance_reset') {
-          balancesReset['accounts_complete_reset'] = row.records_affected;
+            for (const row of accountingResetResult.rows) {
+                if (row.step_name === 'accounts_balance_reset') {
+                    balancesReset['accounts_complete_reset'] = row.records_affected;
+                }
+                logger.info(
+                    `Accounting reset: ${row.step_name} - ${row.records_affected} records - ${row.status}`
+                );
+            }
+            tablesCleared['accounting_complete_reset'] = accountingResetResult.rowCount || 0;
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_accounting_reset`);
+            logger.warn(
+                `Complete accounting reset function failed: ${error instanceof Error ? error.message : String(error)}, falling back to manual reset`
+            );
+
+            // Fallback: Manual accounting reset
+            try {
+                await client.query(`DELETE FROM ledger_entries`);
+                await client.query(`DELETE FROM ledger_transactions`);
+                await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
+                tablesCleared['accounting_manual_reset'] = 1;
+                logger.info('Fallback accounting reset completed');
+            } catch (fallbackError: unknown) {
+                logger.error(
+                    `Fallback accounting reset also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+                );
+            }
         }
-        logger.info(
-          `Accounting reset: ${row.step_name} - ${row.records_affected} records - ${row.status}`
-        );
-      }
-      tablesCleared['accounting_complete_reset'] = accountingResetResult.rowCount || 0;
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_accounting_reset`);
-      logger.warn(
-        `Complete accounting reset function failed: ${error instanceof Error ? error.message : String(error)}, falling back to manual reset`
-      );
 
-      // Fallback: Manual accounting reset
-      try {
-        await client.query(`DELETE FROM ledger_entries`);
-        await client.query(`DELETE FROM ledger_transactions`);
-        await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
-        tablesCleared['accounting_manual_reset'] = 1;
-        logger.info('Fallback accounting reset completed');
-      } catch (fallbackError: unknown) {
-        logger.error(
-          `Fallback accounting reset also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
-        );
-      }
-    }
+        // =========================================================================
+        // PHASE 1: REMAINING ACCOUNTING/GL DATA (use safeDelete for remaining tables)
+        // =========================================================================
+        logger.info('Phase 1: Clearing remaining accounting data...');
 
-    // =========================================================================
-    // PHASE 1: REMAINING ACCOUNTING/GL DATA (use safeDelete for remaining tables)
-    // =========================================================================
-    logger.info('Phase 1: Clearing remaining accounting data...');
+        // ledger_entries, ledger_transactions, and account balances already cleared in Phase 0
+        tablesCleared['journal_entry_lines'] = await safeDelete('journal_entry_lines', step++);
+        tablesCleared['journal_entries'] = await safeDelete('journal_entries', step++);
 
-    // ledger_entries, ledger_transactions, and account balances already cleared in Phase 0
-    tablesCleared['journal_entry_lines'] = await safeDelete('journal_entry_lines', step++);
-    tablesCleared['journal_entries'] = await safeDelete('journal_entries', step++);
-
-    // Manual journal entries (clear self-referential FK first)
-    try {
-      await client.query(`SAVEPOINT sp_clear_manual_journal_refs`);
-      await client.query(`
+        // Manual journal entries (clear self-referential FK first)
+        try {
+            await client.query(`SAVEPOINT sp_clear_manual_journal_refs`);
+            await client.query(`
                 UPDATE manual_journal_entries 
                 SET reversed_by_entry_id = NULL
                 WHERE reversed_by_entry_id IS NOT NULL
             `);
-      await client.query(`RELEASE SAVEPOINT sp_clear_manual_journal_refs`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_manual_journal_refs`);
-      logger.warn(
-        `Clear manual_journal_entries self-refs skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    tablesCleared['manual_journal_entry_lines'] = await safeDelete(
-      'manual_journal_entry_lines',
-      step++
-    );
-    tablesCleared['manual_journal_entries'] = await safeDelete('manual_journal_entries', step++);
+            await client.query(`RELEASE SAVEPOINT sp_clear_manual_journal_refs`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_manual_journal_refs`);
+            logger.warn(
+                `Clear manual_journal_entries self-refs skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+        tablesCleared['manual_journal_entry_lines'] = await safeDelete(
+            'manual_journal_entry_lines',
+            step++
+        );
+        tablesCleared['manual_journal_entries'] = await safeDelete('manual_journal_entries', step++);
 
-    tablesCleared['payment_allocations'] = await safeDelete('payment_allocations', step++);
-    tablesCleared['payment_lines'] = await safeDelete('payment_lines', step++);
-    tablesCleared['payment_transactions'] = await safeDelete('payment_transactions', step++);
-    tablesCleared['financial_periods'] = await safeDelete('financial_periods', step++);
+        tablesCleared['payment_allocations'] = await safeDelete('payment_allocations', step++);
+        tablesCleared['payment_lines'] = await safeDelete('payment_lines', step++);
+        tablesCleared['payment_transactions'] = await safeDelete('payment_transactions', step++);
+        tablesCleared['financial_periods'] = await safeDelete('financial_periods', step++);
 
-    // Accounting periods (fiscal period tracking)
-    tablesCleared['accounting_period_history'] = await safeDelete(
-      'accounting_period_history',
-      step++
-    );
-    tablesCleared['accounting_periods'] = await safeDelete('accounting_periods', step++);
+        // Accounting periods (fiscal period tracking)
+        tablesCleared['accounting_period_history'] = await safeDelete(
+            'accounting_period_history',
+            step++
+        );
+        tablesCleared['accounting_periods'] = await safeDelete('accounting_periods', step++);
 
-    // =========================================================================
-    // PHASE 2: SALES & CUSTOMER DATA
-    // =========================================================================
-    logger.info('Phase 2: Clearing sales and customer transactions...');
+        // =========================================================================
+        // PHASE 2: SALES & CUSTOMER DATA
+        // =========================================================================
+        logger.info('Phase 2: Clearing sales and customer transactions...');
 
-    // Customer payments and deposits
-    tablesCleared['credit_applications'] = await safeDelete('credit_applications', step++);
-    tablesCleared['deposit_applications'] = await safeDelete('deposit_applications', step++);
-    tablesCleared['pos_deposit_applications'] = await safeDelete(
-      'pos_deposit_applications',
-      step++
-    );
-    tablesCleared['customer_deposits'] = await safeDelete('customer_deposits', step++);
-    tablesCleared['pos_customer_deposits'] = await safeDelete('pos_customer_deposits', step++);
-    tablesCleared['customer_payments'] = await safeDelete('customer_payments', step++);
-    tablesCleared['customer_credits'] = await safeDelete('customer_credits', step++);
-    tablesCleared['customer_balance_adjustments'] = await safeDelete(
-      'customer_balance_adjustments',
-      step++
-    );
-    tablesCleared['customer_accounts'] = await safeDelete('customer_accounts', step++);
+        // Customer payments and deposits
+        tablesCleared['credit_applications'] = await safeDelete('credit_applications', step++);
+        tablesCleared['deposit_applications'] = await safeDelete('deposit_applications', step++);
+        tablesCleared['pos_deposit_applications'] = await safeDelete(
+            'pos_deposit_applications',
+            step++
+        );
+        tablesCleared['customer_deposits'] = await safeDelete('customer_deposits', step++);
+        tablesCleared['pos_customer_deposits'] = await safeDelete('pos_customer_deposits', step++);
+        tablesCleared['customer_payments'] = await safeDelete('customer_payments', step++);
+        tablesCleared['customer_credits'] = await safeDelete('customer_credits', step++);
+        tablesCleared['customer_balance_adjustments'] = await safeDelete(
+            'customer_balance_adjustments',
+            step++
+        );
+        tablesCleared['customer_accounts'] = await safeDelete('customer_accounts', step++);
 
-    // Invoices
-    tablesCleared['invoice_payments'] = await safeDelete('invoice_payments', step++);
-    tablesCleared['invoice_line_items'] = await safeDelete('invoice_line_items', step++);
-    tablesCleared['invoices'] = await safeDelete('invoices', step++);
+        // Invoices
+        tablesCleared['invoice_payments'] = await safeDelete('invoice_payments', step++);
+        tablesCleared['invoice_line_items'] = await safeDelete('invoice_line_items', step++);
+        tablesCleared['invoices'] = await safeDelete('invoices', step++);
 
-    // Discounts
-    tablesCleared['discount_authorizations'] = await safeDelete('discount_authorizations', step++);
+        // Discounts
+        tablesCleared['discount_authorizations'] = await safeDelete('discount_authorizations', step++);
 
-    // Sales
-    tablesCleared['sale_discounts'] = await safeDelete('sale_discounts', step++);
-    tablesCleared['sale_items'] = await safeDelete('sale_items', step++);
-    tablesCleared['sales'] = await safeDelete('sales', step++);
+        // Sales
+        tablesCleared['sale_discounts'] = await safeDelete('sale_discounts', step++);
+        tablesCleared['sale_items'] = await safeDelete('sale_items', step++);
+        tablesCleared['sales'] = await safeDelete('sales', step++);
 
-    // Held orders
-    tablesCleared['pos_held_order_items'] = await safeDelete('pos_held_order_items', step++);
-    tablesCleared['pos_held_orders'] = await safeDelete('pos_held_orders', step++);
+        // Held orders
+        tablesCleared['pos_held_order_items'] = await safeDelete('pos_held_order_items', step++);
+        tablesCleared['pos_held_orders'] = await safeDelete('pos_held_orders', step++);
 
-    // =========================================================================
-    // PHASE 3: SUPPLIER & PURCHASE DATA (Use TRUNCATE CASCADE for reliability)
-    // =========================================================================
-    logger.info('Phase 3: Clearing supplier and purchase transactions...');
+        // =========================================================================
+        // PHASE 3: SUPPLIER & PURCHASE DATA (Use TRUNCATE CASCADE for reliability)
+        // =========================================================================
+        logger.info('Phase 3: Clearing supplier and purchase transactions...');
 
-    tablesCleared['supplier_payment_allocations'] = await safeTruncate(
-      'supplier_payment_allocations',
-      step++
-    );
-    tablesCleared['supplier_payments'] = await safeTruncate('supplier_payments', step++);
-    tablesCleared['supplier_invoice_line_items'] = await safeTruncate(
-      'supplier_invoice_line_items',
-      step++
-    );
-    tablesCleared['supplier_invoices'] = await safeTruncate('supplier_invoices', step++);
+        tablesCleared['supplier_payment_allocations'] = await safeTruncate(
+            'supplier_payment_allocations',
+            step++
+        );
+        tablesCleared['supplier_payments'] = await safeTruncate('supplier_payments', step++);
+        tablesCleared['supplier_invoice_line_items'] = await safeTruncate(
+            'supplier_invoice_line_items',
+            step++
+        );
+        tablesCleared['supplier_invoices'] = await safeTruncate('supplier_invoices', step++);
 
-    // Goods receipts - Use TRUNCATE CASCADE
-    tablesCleared['goods_receipt_items'] = await safeTruncate('goods_receipt_items', step++);
-    tablesCleared['goods_receipts'] = await safeTruncate('goods_receipts', step++);
+        // Goods receipts - Use TRUNCATE CASCADE
+        tablesCleared['goods_receipt_items'] = await safeTruncate('goods_receipt_items', step++);
+        tablesCleared['goods_receipts'] = await safeTruncate('goods_receipts', step++);
 
-    // Purchase orders - Use TRUNCATE CASCADE
-    tablesCleared['purchase_order_items'] = await safeTruncate('purchase_order_items', step++);
-    tablesCleared['purchase_orders'] = await safeTruncate('purchase_orders', step++);
+        // Purchase orders - Use TRUNCATE CASCADE
+        tablesCleared['purchase_order_items'] = await safeTruncate('purchase_order_items', step++);
+        tablesCleared['purchase_orders'] = await safeTruncate('purchase_orders', step++);
 
-    // =========================================================================
-    // PHASE 4: INVENTORY DATA (Use TRUNCATE CASCADE for reliable cleanup)
-    // =========================================================================
-    logger.info('Phase 4: Clearing inventory data...');
+        // =========================================================================
+        // PHASE 4: INVENTORY DATA (Use TRUNCATE CASCADE for reliable cleanup)
+        // =========================================================================
+        logger.info('Phase 4: Clearing inventory data...');
 
-    // Use TRUNCATE CASCADE to handle FK dependencies automatically
-    tablesCleared['stock_movements'] = await safeTruncate('stock_movements', step++);
-    tablesCleared['stock_count_lines'] = await safeTruncate('stock_count_lines', step++);
-    tablesCleared['stock_counts'] = await safeTruncate('stock_counts', step++);
-    tablesCleared['inventory_batches'] = await safeTruncate('inventory_batches', step++);
-    tablesCleared['cost_layers'] = await safeTruncate('cost_layers', step++);
-    tablesCleared['inventory_snapshots'] = await safeDelete('inventory_snapshots', step++);
+        // Use TRUNCATE CASCADE to handle FK dependencies automatically
+        tablesCleared['stock_movements'] = await safeTruncate('stock_movements', step++);
+        tablesCleared['stock_count_lines'] = await safeTruncate('stock_count_lines', step++);
+        tablesCleared['stock_counts'] = await safeTruncate('stock_counts', step++);
+        tablesCleared['inventory_batches'] = await safeTruncate('inventory_batches', step++);
+        tablesCleared['cost_layers'] = await safeTruncate('cost_layers', step++);
+        tablesCleared['inventory_snapshots'] = await safeDelete('inventory_snapshots', step++);
 
-    // =========================================================================
-    // PHASE 5: DELIVERY & QUOTATIONS
-    // =========================================================================
-    logger.info('Phase 5: Clearing delivery and quotation data...');
+        // =========================================================================
+        // PHASE 5: DELIVERY & QUOTATIONS
+        // =========================================================================
+        logger.info('Phase 5: Clearing delivery and quotation data...');
 
-    tablesCleared['delivery_proof'] = await safeDelete('delivery_proof', step++);
-    tablesCleared['delivery_status_history'] = await safeDelete('delivery_status_history', step++);
-    tablesCleared['delivery_items'] = await safeDelete('delivery_items', step++);
-    tablesCleared['route_deliveries'] = await safeDelete('route_deliveries', step++);
-    tablesCleared['delivery_orders'] = await safeDelete('delivery_orders', step++);
-    tablesCleared['delivery_routes'] = await safeDelete('delivery_routes', step++);
+        tablesCleared['delivery_proof'] = await safeDelete('delivery_proof', step++);
+        tablesCleared['delivery_status_history'] = await safeDelete('delivery_status_history', step++);
+        tablesCleared['delivery_items'] = await safeDelete('delivery_items', step++);
+        tablesCleared['route_deliveries'] = await safeDelete('route_deliveries', step++);
+        tablesCleared['delivery_orders'] = await safeDelete('delivery_orders', step++);
+        tablesCleared['delivery_routes'] = await safeDelete('delivery_routes', step++);
 
-    tablesCleared['quotation_emails'] = await safeDelete('quotation_emails', step++);
-    tablesCleared['quotation_attachments'] = await safeDelete('quotation_attachments', step++);
-    tablesCleared['quotation_status_history'] = await safeDelete(
-      'quotation_status_history',
-      step++
-    );
-    tablesCleared['quotation_items'] = await safeDelete('quotation_items', step++);
-    tablesCleared['quotations'] = await safeDelete('quotations', step++);
+        tablesCleared['quotation_emails'] = await safeDelete('quotation_emails', step++);
+        tablesCleared['quotation_attachments'] = await safeDelete('quotation_attachments', step++);
+        tablesCleared['quotation_status_history'] = await safeDelete(
+            'quotation_status_history',
+            step++
+        );
+        tablesCleared['quotation_items'] = await safeDelete('quotation_items', step++);
+        tablesCleared['quotations'] = await safeDelete('quotations', step++);
 
-    // =========================================================================
-    // PHASE 6: EXPENSES & BANKING
-    // =========================================================================
-    logger.info('Phase 6: Clearing expenses and banking data...');
+        // =========================================================================
+        // PHASE 6: EXPENSES & BANKING
+        // =========================================================================
+        logger.info('Phase 6: Clearing expenses and banking data...');
 
-    tablesCleared['expense_approvals'] = await safeDelete('expense_approvals', step++);
-    tablesCleared['expense_documents'] = await safeDelete('expense_documents', step++);
-    tablesCleared['expenses'] = await safeDelete('expenses', step++);
+        tablesCleared['expense_approvals'] = await safeDelete('expense_approvals', step++);
+        tablesCleared['expense_documents'] = await safeDelete('expense_documents', step++);
+        tablesCleared['expenses'] = await safeDelete('expenses', step++);
 
-    tablesCleared['bank_reconciliation_items'] = await safeDelete(
-      'bank_reconciliation_items',
-      step++
-    );
-    tablesCleared['bank_reconciliations'] = await safeDelete('bank_reconciliations', step++);
-    tablesCleared['cash_bank_transfers'] = await safeDelete('cash_bank_transfers', step++);
-    tablesCleared['cash_book_entries'] = await safeDelete('cash_book_entries', step++);
+        tablesCleared['bank_reconciliation_items'] = await safeDelete(
+            'bank_reconciliation_items',
+            step++
+        );
+        tablesCleared['bank_reconciliations'] = await safeDelete('bank_reconciliations', step++);
+        tablesCleared['cash_bank_transfers'] = await safeDelete('cash_bank_transfers', step++);
+        tablesCleared['cash_book_entries'] = await safeDelete('cash_book_entries', step++);
 
-    // New banking module tables (transactional data - cleared on reset)
-    // Note: bank_accounts, bank_categories, bank_patterns, bank_recurring_rules,
-    // bank_templates are MASTER DATA and should NOT be cleared
-    // Order is critical due to FK relationships:
-    // 1. bank_alerts → FK to bank_transactions, bank_statement_lines
-    // 2. bank_statement_lines → FK to bank_statements, bank_transactions
-    // 3. bank_statements → FK to bank_accounts (master)
-    // 4. bank_transactions → self-referential FKs (transfer_pair_id, reversal_transaction_id)
-    tablesCleared['bank_transaction_patterns'] = await safeDelete(
-      'bank_transaction_patterns',
-      step++
-    );
-    tablesCleared['bank_alerts'] = await safeDelete('bank_alerts', step++);
-    tablesCleared['bank_statement_lines'] = await safeDelete('bank_statement_lines', step++);
-    tablesCleared['bank_statements'] = await safeDelete('bank_statements', step++);
+        // New banking module tables (transactional data - cleared on reset)
+        // Note: bank_accounts, bank_categories, bank_patterns, bank_recurring_rules,
+        // bank_templates are MASTER DATA and should NOT be cleared
+        // Order is critical due to FK relationships:
+        // 1. bank_alerts → FK to bank_transactions, bank_statement_lines
+        // 2. bank_statement_lines → FK to bank_statements, bank_transactions
+        // 3. bank_statements → FK to bank_accounts (master)
+        // 4. bank_transactions → self-referential FKs (transfer_pair_id, reversal_transaction_id)
+        tablesCleared['bank_transaction_patterns'] = await safeDelete(
+            'bank_transaction_patterns',
+            step++
+        );
+        tablesCleared['bank_alerts'] = await safeDelete('bank_alerts', step++);
+        tablesCleared['bank_statement_lines'] = await safeDelete('bank_statement_lines', step++);
+        tablesCleared['bank_statements'] = await safeDelete('bank_statements', step++);
 
-    // Clear self-referential FKs on bank_transactions before deleting
-    try {
-      await client.query(`SAVEPOINT sp_clear_bank_txn_fks`);
-      await client.query(`
+        // Clear self-referential FKs on bank_transactions before deleting
+        try {
+            await client.query(`SAVEPOINT sp_clear_bank_txn_fks`);
+            await client.query(`
                 UPDATE bank_transactions 
                 SET transfer_pair_id = NULL, reversal_transaction_id = NULL
                 WHERE transfer_pair_id IS NOT NULL OR reversal_transaction_id IS NOT NULL
             `);
-      await client.query(`RELEASE SAVEPOINT sp_clear_bank_txn_fks`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_clear_bank_txn_fks`);
-      logger.warn(
-        `Clear bank_transactions self-refs skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    tablesCleared['bank_transactions'] = await safeDelete('bank_transactions', step++);
+            await client.query(`RELEASE SAVEPOINT sp_clear_bank_txn_fks`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_clear_bank_txn_fks`);
+            logger.warn(
+                `Clear bank_transactions self-refs skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+        tablesCleared['bank_transactions'] = await safeDelete('bank_transactions', step++);
 
-    // Reset bank account balances (keep accounts but reset current_balance to opening_balance)
-    try {
-      await client.query(`SAVEPOINT sp_reset_bank_balances`);
-      const bankResetResult = await client.query(`
+        // Reset bank account balances (keep accounts but reset current_balance to opening_balance)
+        try {
+            await client.query(`SAVEPOINT sp_reset_bank_balances`);
+            const bankResetResult = await client.query(`
                 UPDATE bank_accounts 
                 SET current_balance = COALESCE(opening_balance, 0),
                     updated_at = NOW()
                 WHERE current_balance != COALESCE(opening_balance, 0)
             `);
-      tablesCleared['bank_account_balances_reset'] = bankResetResult.rowCount || 0;
-      await client.query(`RELEASE SAVEPOINT sp_reset_bank_balances`);
-      logger.info(
-        `Reset ${tablesCleared['bank_account_balances_reset']} bank account balances to opening balance`
-      );
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_reset_bank_balances`);
-      logger.warn(
-        `Bank account balance reset skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-      tablesCleared['bank_account_balances_reset'] = 0;
-    }
+            tablesCleared['bank_account_balances_reset'] = bankResetResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_reset_bank_balances`);
+            logger.info(
+                `Reset ${tablesCleared['bank_account_balances_reset']} bank account balances to opening balance`
+            );
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_reset_bank_balances`);
+            logger.warn(
+                `Bank account balance reset skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+            tablesCleared['bank_account_balances_reset'] = 0;
+        }
 
-    // =========================================================================
-    // PHASE 7: LOGS & SESSIONS
-    // =========================================================================
-    logger.info('Phase 7: Clearing transaction logs and sessions...');
+        // =========================================================================
+        // PHASE 7: LOGS & SESSIONS
+        // =========================================================================
+        logger.info('Phase 7: Clearing transaction logs and sessions...');
 
-    tablesCleared['report_runs'] = await safeDelete('report_runs', step++);
-    tablesCleared['processed_events'] = await safeDelete('processed_events', step++);
-    tablesCleared['failed_transactions'] = await safeDelete('failed_transactions', step++);
-    tablesCleared['user_sessions'] = await safeDelete('user_sessions', step++);
-    // Note: audit_log, data_integrity_log, system_backups, system_reset_log are kept for compliance
+        tablesCleared['report_runs'] = await safeDelete('report_runs', step++);
+        tablesCleared['processed_events'] = await safeDelete('processed_events', step++);
+        tablesCleared['failed_transactions'] = await safeDelete('failed_transactions', step++);
+        tablesCleared['user_sessions'] = await safeDelete('user_sessions', step++);
+        // Note: audit_log, data_integrity_log, system_backups, system_reset_log are kept for compliance
 
-    // =========================================================================
-    // PHASE 7B: CASH REGISTER DATA (sessions and movements are transactional)
-    // =========================================================================
-    logger.info('Phase 7B: Clearing cash register sessions and movements...');
+        // =========================================================================
+        // PHASE 7B: CASH REGISTER DATA (sessions and movements are transactional)
+        // =========================================================================
+        logger.info('Phase 7B: Clearing cash register sessions and movements...');
 
-    // Cash movements must be deleted first (FK references sessions)
-    tablesCleared['cash_movements'] = await safeDelete('cash_movements', step++);
-    // Cash register sessions (transactional data)
-    tablesCleared['cash_register_sessions'] = await safeDelete('cash_register_sessions', step++);
-    // Note: cash_registers table is preserved (physical register configuration)
+        // Cash movements must be deleted first (FK references sessions)
+        tablesCleared['cash_movements'] = await safeDelete('cash_movements', step++);
+        // Cash register sessions (transactional data)
+        tablesCleared['cash_register_sessions'] = await safeDelete('cash_register_sessions', step++);
+        // Note: cash_registers table is preserved (physical register configuration)
 
-    // =========================================================================
-    // PHASE 8: RECALCULATE ALL BALANCES (Using Database Functions)
-    // =========================================================================
-    // ARCHITECTURE: Balances are NEVER set directly. Instead, we call the
-    // database recalculation functions which derive correct values from the
-    // source data (transactions, batches, ledger entries).
-    // After deleting all transactions, these functions will calculate 0.
-    // This ensures consistency with the single source of truth pattern.
-    // =========================================================================
-    logger.info('Phase 8: Recalculating all balances using database functions...');
+        // =========================================================================
+        // PHASE 8: RECALCULATE ALL BALANCES (Using Database Functions)
+        // =========================================================================
+        // ARCHITECTURE: Balances are NEVER set directly. Instead, we call the
+        // database recalculation functions which derive correct values from the
+        // source data (transactions, batches, ledger entries).
+        // After deleting all transactions, these functions will calculate 0.
+        // This ensures consistency with the single source of truth pattern.
+        // =========================================================================
+        logger.info('Phase 8: Recalculating all balances using database functions...');
 
-    // Recalculate customer balances (derives from sales + customer_payments)
-    try {
-      await client.query(`SAVEPOINT sp_recalc_customers`);
-      const custResult = await client.query(`
+        // Recalculate customer balances (derives from sales + customer_payments)
+        try {
+            await client.query(`SAVEPOINT sp_recalc_customers`);
+            const custResult = await client.query(`
                 SELECT COUNT(*) FILTER (WHERE status = 'UPDATED') as updated_count
                 FROM fn_recalculate_all_customer_balances()
             `);
-      balancesReset['customers'] = parseInt(custResult.rows[0]?.updated_count || '0');
-      await client.query(`RELEASE SAVEPOINT sp_recalc_customers`);
-      logger.info(`Recalculated ${balancesReset['customers']} customer balances`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_customers`);
-      logger.warn(
-        `Customer balance recalculation skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-      // Fallback: Direct reset if function doesn't exist
-      try {
-        await client.query(`SAVEPOINT sp_reset_customers_fallback`);
-        const fallbackResult = await client.query(`
+            balancesReset['customers'] = parseInt(custResult.rows[0]?.updated_count || '0');
+            await client.query(`RELEASE SAVEPOINT sp_recalc_customers`);
+            logger.info(`Recalculated ${balancesReset['customers']} customer balances`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_customers`);
+            logger.warn(
+                `Customer balance recalculation skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+            // Fallback: Direct reset if function doesn't exist
+            try {
+                await client.query(`SAVEPOINT sp_reset_customers_fallback`);
+                const fallbackResult = await client.query(`
                     UPDATE customers SET balance = 0, updated_at = NOW() WHERE balance != 0
                 `);
-        balancesReset['customers'] = fallbackResult.rowCount || 0;
-        await client.query(`RELEASE SAVEPOINT sp_reset_customers_fallback`);
-        logger.warn('Used fallback direct reset for customer balances');
-      } catch {
-        balancesReset['customers'] = 0;
-      }
-    }
+                balancesReset['customers'] = fallbackResult.rowCount || 0;
+                await client.query(`RELEASE SAVEPOINT sp_reset_customers_fallback`);
+                logger.warn('Used fallback direct reset for customer balances');
+            } catch {
+                balancesReset['customers'] = 0;
+            }
+        }
 
-    // Recalculate supplier balances (derives from goods_receipts + supplier_payments)
-    try {
-      await client.query(`SAVEPOINT sp_recalc_suppliers`);
-      const suppResult = await client.query(`
+        // Recalculate supplier balances (derives from goods_receipts + supplier_payments)
+        try {
+            await client.query(`SAVEPOINT sp_recalc_suppliers`);
+            const suppResult = await client.query(`
                 SELECT COUNT(*) FILTER (WHERE status = 'UPDATED') as updated_count
                 FROM fn_recalculate_all_supplier_balances()
             `);
-      balancesReset['suppliers'] = parseInt(suppResult.rows[0]?.updated_count || '0');
-      await client.query(`RELEASE SAVEPOINT sp_recalc_suppliers`);
-      logger.info(`Recalculated ${balancesReset['suppliers']} supplier balances`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_suppliers`);
-      logger.warn(
-        `Supplier balance recalculation skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-      // Fallback: Direct reset if function doesn't exist
-      try {
-        await client.query(`SAVEPOINT sp_reset_suppliers_fallback`);
-        const fallbackResult = await client.query(`
+            balancesReset['suppliers'] = parseInt(suppResult.rows[0]?.updated_count || '0');
+            await client.query(`RELEASE SAVEPOINT sp_recalc_suppliers`);
+            logger.info(`Recalculated ${balancesReset['suppliers']} supplier balances`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_suppliers`);
+            logger.warn(
+                `Supplier balance recalculation skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+            // Fallback: Direct reset if function doesn't exist
+            try {
+                await client.query(`SAVEPOINT sp_reset_suppliers_fallback`);
+                const fallbackResult = await client.query(`
                     UPDATE suppliers SET "OutstandingBalance" = 0, "UpdatedAt" = NOW() 
                     WHERE "OutstandingBalance" != 0
                 `);
-        balancesReset['suppliers'] = fallbackResult.rowCount || 0;
-        await client.query(`RELEASE SAVEPOINT sp_reset_suppliers_fallback`);
-        logger.warn('Used fallback direct reset for supplier balances');
-      } catch {
-        balancesReset['suppliers'] = 0;
-      }
-    }
+                balancesReset['suppliers'] = fallbackResult.rowCount || 0;
+                await client.query(`RELEASE SAVEPOINT sp_reset_suppliers_fallback`);
+                logger.warn('Used fallback direct reset for supplier balances');
+            } catch {
+                balancesReset['suppliers'] = 0;
+            }
+        }
 
-    // Recalculate product stock quantities (derives from inventory_batches)
-    try {
-      await client.query(`SAVEPOINT sp_recalc_inventory`);
-      const invResult = await client.query(`
+        // Recalculate product stock quantities (derives from inventory_batches)
+        try {
+            await client.query(`SAVEPOINT sp_recalc_inventory`);
+            const invResult = await client.query(`
                 SELECT COUNT(*) FILTER (WHERE status = 'UPDATED') as updated_count
                 FROM fn_recalculate_all_product_stock()
             `);
-      balancesReset['inventory'] = parseInt(invResult.rows[0]?.updated_count || '0');
-      await client.query(`RELEASE SAVEPOINT sp_recalc_inventory`);
-      logger.info(`Recalculated ${balancesReset['inventory']} product quantities`);
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_inventory`);
-      logger.warn(
-        `Product stock recalculation skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-      // Fallback: Direct reset if function doesn't exist
-      try {
-        await client.query(`SAVEPOINT sp_reset_inventory_fallback`);
-        const fallbackResult = await client.query(`
+            balancesReset['inventory'] = parseInt(invResult.rows[0]?.updated_count || '0');
+            await client.query(`RELEASE SAVEPOINT sp_recalc_inventory`);
+            logger.info(`Recalculated ${balancesReset['inventory']} product quantities`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_recalc_inventory`);
+            logger.warn(
+                `Product stock recalculation skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+            // Fallback: Direct reset if function doesn't exist
+            try {
+                await client.query(`SAVEPOINT sp_reset_inventory_fallback`);
+                const fallbackResult = await client.query(`
                     UPDATE product_inventory SET quantity_on_hand = 0, updated_at = NOW() 
                     WHERE quantity_on_hand != 0
                 `);
-        balancesReset['inventory'] = fallbackResult.rowCount || 0;
-        await client.query(`RELEASE SAVEPOINT sp_reset_inventory_fallback`);
-        logger.warn('Used fallback direct reset for product quantities');
-      } catch {
-        balancesReset['inventory'] = 0;
-      }
-    }
+                balancesReset['inventory'] = fallbackResult.rowCount || 0;
+                await client.query(`RELEASE SAVEPOINT sp_reset_inventory_fallback`);
+                logger.warn('Used fallback direct reset for product quantities');
+            } catch {
+                balancesReset['inventory'] = 0;
+            }
+        }
 
-    // GL account balances already reset in Phase 0 via fn_reset_accounting_complete()
-    // This is just a verification step to ensure balances are 0 after all ledger entries cleared
-    try {
-      await client.query(`SAVEPOINT sp_verify_accounts`);
-      const verifyResult = await client.query(`
+        // GL account balances already reset in Phase 0 via fn_reset_accounting_complete()
+        // This is just a verification step to ensure balances are 0 after all ledger entries cleared
+        try {
+            await client.query(`SAVEPOINT sp_verify_accounts`);
+            const verifyResult = await client.query(`
                 SELECT COUNT(*) as non_zero_count 
                 FROM accounts 
                 WHERE "CurrentBalance" != 0
             `);
-      const nonZeroCount = parseInt(verifyResult.rows[0]?.non_zero_count || '0');
-      await client.query(`RELEASE SAVEPOINT sp_verify_accounts`);
+            const nonZeroCount = parseInt(verifyResult.rows[0]?.non_zero_count || '0');
+            await client.query(`RELEASE SAVEPOINT sp_verify_accounts`);
 
-      if (nonZeroCount > 0) {
-        // Force reset any remaining non-zero balances
-        logger.warn(
-          `Found ${nonZeroCount} accounts with non-zero balance after reset, forcing to zero`
-        );
-        await client.query(`UPDATE accounts SET "CurrentBalance" = 0 WHERE "CurrentBalance" != 0`);
-        balancesReset['accounts_forced'] = nonZeroCount;
-      }
-      balancesReset['accounts_verified'] = 1;
-      logger.info('Account balances verified at zero');
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_verify_accounts`);
-      logger.warn(
-        `Account verification skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-      // Force reset all account balances to 0 as final fallback
-      try {
-        await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
-        balancesReset['accounts_fallback'] = 1;
-        logger.info('Forced all account balances to zero (fallback)');
-      } catch {
-        logger.error('Failed to reset account balances');
-      }
-    }
+            if (nonZeroCount > 0) {
+                // Force reset any remaining non-zero balances
+                logger.warn(
+                    `Found ${nonZeroCount} accounts with non-zero balance after reset, forcing to zero`
+                );
+                await client.query(`UPDATE accounts SET "CurrentBalance" = 0 WHERE "CurrentBalance" != 0`);
+                balancesReset['accounts_forced'] = nonZeroCount;
+            }
+            balancesReset['accounts_verified'] = 1;
+            logger.info('Account balances verified at zero');
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_verify_accounts`);
+            logger.warn(
+                `Account verification skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+            // Force reset all account balances to 0 as final fallback
+            try {
+                await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
+                balancesReset['accounts_fallback'] = 1;
+                logger.info('Forced all account balances to zero (fallback)');
+            } catch {
+                logger.error('Failed to reset account balances');
+            }
+        }
 
-    // =========================================================================
-    // PHASE 9: VERIFY POST-RESET INTEGRITY
-    // =========================================================================
-    logger.info('Phase 9: Verifying post-reset data integrity...');
-    try {
-      await client.query(`SAVEPOINT sp_verify_integrity`);
-      const verifyResult = await client.query(`
+        // =========================================================================
+        // PHASE 9: VERIFY POST-RESET INTEGRITY
+        // =========================================================================
+        logger.info('Phase 9: Verifying post-reset data integrity...');
+        try {
+            await client.query(`SAVEPOINT sp_verify_integrity`);
+            const verifyResult = await client.query(`
                 SELECT check_name, status, details
                 FROM fn_verify_post_reset_integrity()
                 WHERE status = 'FAIL'
             `);
-      await client.query(`RELEASE SAVEPOINT sp_verify_integrity`);
+            await client.query(`RELEASE SAVEPOINT sp_verify_integrity`);
 
-      if (verifyResult.rows.length > 0) {
-        const failures = verifyResult.rows.map((r) => `${r.check_name}: ${r.details}`).join('; ');
-        logger.warn(`Post-reset integrity issues detected: ${failures}`);
-      } else {
-        logger.info('Post-reset integrity verification passed');
-      }
-    } catch (error: unknown) {
-      await client.query(`ROLLBACK TO SAVEPOINT sp_verify_integrity`);
-      logger.warn(
-        `Post-reset verification skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+            if (verifyResult.rows.length > 0) {
+                const failures = verifyResult.rows.map((r) => `${r.check_name}: ${r.details}`).join('; ');
+                logger.warn(`Post-reset integrity issues detected: ${failures}`);
+            } else {
+                logger.info('Post-reset integrity verification passed');
+            }
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_verify_integrity`);
+            logger.warn(
+                `Post-reset verification skipped: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
 
-    return { tablesCleared, balancesReset };
-  },
+        return { tablesCleared, balancesReset };
+    },
 
-  // ==========================================================================
-  // INTEGRITY VALIDATION
-  // ==========================================================================
+    // ==========================================================================
+    // INTEGRITY VALIDATION
+    // ==========================================================================
 
-  async validateDatabaseIntegrity(pool: Pool): Promise<{ valid: boolean; issues: string[] }> {
-    const issues: string[] = [];
+    async validateDatabaseIntegrity(pool: Pool): Promise<{ valid: boolean; issues: string[] }> {
+        const issues: string[] = [];
 
-    // Check for orphaned records (single batched query)
-    try {
-      const orphanResult = await pool.query(`
+        // Check for orphaned records (single batched query)
+        try {
+            const orphanResult = await pool.query(`
                 SELECT 'sale_items' AS child, COUNT(*) AS count
                   FROM sale_items c LEFT JOIN sales p ON p.id = c.sale_id WHERE p.id IS NULL
                 UNION ALL
@@ -1151,37 +1151,37 @@ export const systemManagementRepository = {
                 SELECT 'goods_receipt_items', COUNT(*)
                   FROM goods_receipt_items c LEFT JOIN goods_receipts p ON p.id = c.goods_receipt_id WHERE p.id IS NULL
             `);
-      for (const row of orphanResult.rows) {
-        const count = parseInt(row.count);
-        if (count > 0) {
-          issues.push(`Found ${count} orphaned records in ${row.child}`);
+            for (const row of orphanResult.rows) {
+                const count = parseInt(row.count);
+                if (count > 0) {
+                    issues.push(`Found ${count} orphaned records in ${row.child}`);
+                }
+            }
+        } catch (error) {
+            logger.debug('Integrity check skipped', {
+                check: 'orphaned records',
+                error: (error as Error).message,
+            });
         }
-      }
-    } catch (error) {
-      logger.debug('Integrity check skipped', {
-        check: 'orphaned records',
-        error: (error as Error).message,
-      });
-    }
 
-    // Check for negative inventory
-    try {
-      const negInv = await pool.query(`
+        // Check for negative inventory
+        try {
+            const negInv = await pool.query(`
         SELECT COUNT(*) as count FROM product_inventory WHERE quantity_on_hand < 0
       `);
-      if (parseInt(negInv.rows[0].count) > 0) {
-        issues.push(`Found ${negInv.rows[0].count} products with negative inventory`);
-      }
-    } catch (error) {
-      logger.debug('Integrity check skipped', {
-        check: 'negative inventory',
-        error: (error as Error).message,
-      });
-    }
+            if (parseInt(negInv.rows[0].count) > 0) {
+                issues.push(`Found ${negInv.rows[0].count} products with negative inventory`);
+            }
+        } catch (error) {
+            logger.debug('Integrity check skipped', {
+                check: 'negative inventory',
+                error: (error as Error).message,
+            });
+        }
 
-    // Check GL balance
-    try {
-      const glBalance = await pool.query(`
+        // Check GL balance
+        try {
+            const glBalance = await pool.query(`
         SELECT 
           SUM("DebitAmount") as debits,
           SUM("CreditAmount") as credits
@@ -1189,25 +1189,25 @@ export const systemManagementRepository = {
         JOIN ledger_transactions lt ON le."LedgerTransactionId" = lt."Id"
         WHERE lt."Status" = 'POSTED'
       `);
-      const debits = new Decimal(glBalance.rows[0]?.debits || '0');
-      const credits = new Decimal(glBalance.rows[0]?.credits || '0');
-      if (debits.minus(credits).abs().greaterThan('0.01')) {
-        issues.push(
-          `GL imbalance: Debits=${debits.toFixed(2)}, Credits=${credits.toFixed(2)}, Diff=${debits.minus(credits).toFixed(2)}`
-        );
-      }
-    } catch (error) {
-      logger.debug('Integrity check skipped', {
-        check: 'GL balance',
-        error: (error as Error).message,
-      });
-    }
+            const debits = new Decimal(glBalance.rows[0]?.debits || '0');
+            const credits = new Decimal(glBalance.rows[0]?.credits || '0');
+            if (debits.minus(credits).abs().greaterThan('0.01')) {
+                issues.push(
+                    `GL imbalance: Debits=${debits.toFixed(2)}, Credits=${credits.toFixed(2)}, Diff=${debits.minus(credits).toFixed(2)}`
+                );
+            }
+        } catch (error) {
+            logger.debug('Integrity check skipped', {
+                check: 'GL balance',
+                error: (error as Error).message,
+            });
+        }
 
-    return {
-      valid: issues.length === 0,
-      issues,
-    };
-  },
+        return {
+            valid: issues.length === 0,
+            issues,
+        };
+    },
 };
 
 export default systemManagementRepository;

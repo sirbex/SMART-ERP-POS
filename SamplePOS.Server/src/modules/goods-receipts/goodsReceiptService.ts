@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
   goodsReceiptRepository,
@@ -179,7 +180,7 @@ export const goodsReceiptService = {
         // Uses pre-fetched product data instead of per-item query
         const productData = grProductsMap.get(it.productId);
         if (productData) {
-          const baseCost = Number(productData.cost_price || 0);
+          const baseCost = Money.parseDb(productData.cost_price).toNumber();
           if (baseCost > 0 && unitCost > 0) {
             const ratio = unitCost / baseCost;
             const rounded = Math.round(ratio);
@@ -223,7 +224,7 @@ export const goodsReceiptService = {
           // BR-PO-007: Check cost variance (if base cost exists)
           if (productData && productData.cost_price) {
             const costVariance = PurchaseOrderBusinessRules.validateCostVariance(
-              Number(productData.cost_price),
+              Money.parseDb(productData.cost_price).toNumber(),
               unitCost,
               10
             );
@@ -345,7 +346,7 @@ export const goodsReceiptService = {
       const nonPositiveLines = items
         .map((item) => ({
           name: item.productName ?? 'Unknown product',
-          qty: Number(item.receivedQuantity ?? 0),
+          qty: Money.parseDb(item.receivedQuantity).toNumber(),
         }))
         .filter((x) => !Number.isFinite(x.qty) || x.qty <= 0);
       if (nonPositiveLines.length > 0) {
@@ -357,8 +358,8 @@ export const goodsReceiptService = {
       const preValidationErrors: string[] = [];
       for (const item of items) {
         const productName: string = item.productName ?? 'Unknown product';
-        const receivedQty: number = Number(item.receivedQuantity ?? 0);
-        const unitCost: number = Number(item.unitCost ?? 0);
+        const receivedQty: number = Money.parseDb(item.receivedQuantity).toNumber();
+        const unitCost: number = Money.parseDb(item.unitCost).toNumber();
         const expiryDate: string | null = item.expiryDate || null;
 
         if (receivedQty <= 0)
@@ -396,9 +397,9 @@ export const goodsReceiptService = {
         const productId: string = item.productId;
         const productName: string = item.productName;
         const poItemId: string | null = item.poItemId ?? null;
-        const orderedQty: number = Number(item.orderedQuantity ?? 0);
-        const receivedQty: number = Number(item.receivedQuantity ?? 0);
-        const unitCost: number = Number(item.unitCost ?? 0);
+        const orderedQty: number = Money.parseDb(item.orderedQuantity).toNumber();
+        const receivedQty: number = Money.parseDb(item.receivedQuantity).toNumber();
+        const unitCost: number = Money.parseDb(item.unitCost).toNumber();
         const isBonus: boolean = !!item.isBonus;
 
         // Bonus stock: cost recorded as 0 for inventory batches (free goods from supplier)
@@ -444,7 +445,7 @@ export const goodsReceiptService = {
           [productId]
         );
         const previousCostNum: number = prodRes.rows.length
-          ? Number(prodRes.rows[0].cost_price || 0)
+          ? Money.parseDb(prodRes.rows[0].cost_price).toNumber()
           : 0;
 
         if (Number.isFinite(previousCostNum) && previousCostNum !== unitCost) {
@@ -564,13 +565,13 @@ export const goodsReceiptService = {
       if (supplierId) {
         for (const item of items) {
           // Only track non-bonus items for price history (bonus = free goods, not real pricing)
-          if (!item.isBonus && Number(item.unitCost ?? 0) > 0) {
+          if (!item.isBonus && Money.parseDb(item.unitCost).toNumber() > 0) {
             try {
               await supplierProductPriceRepository.upsertSupplierPrice(
                 client,
                 supplierId,
                 item.productId,
-                Number(item.unitCost),
+                Money.parseDb(item.unitCost).toNumber(),
                 receiptDateStr || null
               );
             } catch (priceErr: unknown) {
@@ -615,7 +616,7 @@ export const goodsReceiptService = {
         },
         new Decimal(0)
       );
-      const totalAmount = totalAmountDec.toNumber();
+      const totalAmount = Money.toNumber(totalAmountDec);
 
       if (totalAmount > 0 && supplierId) {
         const invoiceGrNumber = grNumber || id;
@@ -667,14 +668,14 @@ export const goodsReceiptService = {
 
             // Insert line items from GR items into the invoice
             const invoiceLineItems = items
-              .filter((lineItem) => Number(lineItem.receivedQuantity ?? 0) > 0)
+              .filter((lineItem) => Money.parseDb(lineItem.receivedQuantity).toNumber() > 0)
               .map((lineItem) => ({
                 productId: lineItem.productId,
                 productName: lineItem.productName ?? 'Unknown product',
                 description: `From GR ${invoiceGrNumber}`,
-                quantity: new Decimal(String(lineItem.receivedQuantity ?? 0)).toNumber(),
+                quantity: Money.parseDb(lineItem.receivedQuantity).toNumber(),
                 unitOfMeasure: 'EA',
-                unitCost: new Decimal(String(lineItem.unitCost ?? 0)).toNumber(),
+                unitCost: Money.parseDb(lineItem.unitCost).toNumber(),
                 taxRate: 0,
                 taxAmount: 0,
               }));
@@ -797,7 +798,7 @@ export const goodsReceiptService = {
           'goods receipt item'
         );
         // Only validate against ordered quantity when GR is linked to a PO and we have PO-sourced orderedQuantity
-        const orderedQty = Number(item.orderedQuantity ?? 0);
+        const orderedQty = Money.parseDb(item.orderedQuantity).toNumber();
         if (gr.purchaseOrderId && orderedQty > 0) {
           PurchaseOrderBusinessRules.validateReceivedQuantity(
             orderedQty,
@@ -818,7 +819,7 @@ export const goodsReceiptService = {
           productId,
         ]);
         if (productRes.rows.length > 0) {
-          const baseCost = Number(productRes.rows[0].cost_price || 0);
+          const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
           if (baseCost > 0 && data.unitCost > 0) {
             const ratio = data.unitCost / baseCost;
             const rounded = Math.round(ratio);
@@ -885,9 +886,9 @@ export const goodsReceiptService = {
         poItemId: poi.id,
         productId: poi.product_id ?? poi.productId ?? '',
         productName: poi.product_name ?? poi.productName ?? 'Unknown Product',
-        orderedQuantity: Number(poi.ordered_quantity ?? poi.quantity ?? 0),
+        orderedQuantity: Money.parseDb(poi.ordered_quantity ?? poi.quantity).toNumber(),
         receivedQuantity: 0,
-        unitCost: Number(poi.unit_price ?? poi.unitCost ?? 0),
+        unitCost: Money.parseDb(poi.unit_price ?? poi.unitCost).toNumber(),
         batchNumber: null,
         expiryDate: null,
       }));

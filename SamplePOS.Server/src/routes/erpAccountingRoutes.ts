@@ -19,6 +19,7 @@ import { AccountingPeriodService, getAccountingPeriodService } from '../services
 import { ProfitLossReportService, getProfitLossReportService } from '../services/profitLossReportService.js';
 import { ReconciliationService, getReconciliationService } from '../services/reconciliationService.js';
 import logger from '../utils/logger.js';
+import { Money } from '../utils/money.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { authenticate } from '../middleware/auth.js';
 
@@ -468,21 +469,21 @@ router.get('/reports/profit-loss', asyncHandler(async (req, res) => {
                 section: row.section,
                 accountCode: row.account_code,
                 accountName: row.account_name,
-                debitTotal: parseFloat(row.debit_total || 0),
-                creditTotal: parseFloat(row.credit_total || 0),
-                netAmount: parseFloat(row.net_amount || 0),
-                displayAmount: parseFloat(row.display_amount || 0)
+                debitTotal: Money.parseDb(row.debit_total).toNumber(),
+                creditTotal: Money.parseDb(row.credit_total).toNumber(),
+                netAmount: Money.parseDb(row.net_amount).toNumber(),
+                displayAmount: Money.parseDb(row.display_amount).toNumber()
             })),
             summary: {
-                totalRevenue: parseFloat(summary.total_revenue || 0),
-                totalCOGS: parseFloat(summary.total_cogs || 0),
-                grossProfit: parseFloat(summary.gross_profit || 0),
-                grossMarginPercent: parseFloat(summary.gross_margin_percent || 0),
-                totalOperatingExpenses: parseFloat(summary.total_operating_expenses || 0),
-                operatingIncome: parseFloat(summary.operating_income || 0),
-                operatingMarginPercent: parseFloat(summary.operating_margin_percent || 0),
-                netIncome: parseFloat(summary.net_income || 0),
-                netMarginPercent: parseFloat(summary.net_margin_percent || 0)
+                totalRevenue: Money.parseDb(summary.total_revenue).toNumber(),
+                totalCOGS: Money.parseDb(summary.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(summary.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(summary.gross_margin_percent).toNumber(),
+                totalOperatingExpenses: Money.parseDb(summary.total_operating_expenses).toNumber(),
+                operatingIncome: Money.parseDb(summary.operating_income).toNumber(),
+                operatingMarginPercent: Money.parseDb(summary.operating_margin_percent).toNumber(),
+                netIncome: Money.parseDb(summary.net_income).toNumber(),
+                netMarginPercent: Money.parseDb(summary.net_margin_percent).toNumber()
             }
         }
     });
@@ -520,11 +521,11 @@ router.get('/reports/profit-loss/by-customer', asyncHandler(async (req, res) => 
             customers: result.rows.map(row => ({
                 customerId: row.customer_id,
                 customerName: row.customer_name,
-                totalRevenue: parseFloat(row.total_revenue || 0),
-                totalCOGS: parseFloat(row.total_cogs || 0),
-                grossProfit: parseFloat(row.gross_profit || 0),
-                grossMarginPercent: parseFloat(row.gross_margin_percent || 0),
-                transactionCount: parseInt(row.transaction_count || 0)
+                totalRevenue: Money.parseDb(row.total_revenue).toNumber(),
+                totalCOGS: Money.parseDb(row.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(row.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
+                transactionCount: parseInt(row.transaction_count || '0')
             })),
             recordCount: result.rows.length
         }
@@ -564,11 +565,11 @@ router.get('/reports/profit-loss/by-product', asyncHandler(async (req, res) => {
                 productId: row.product_id,
                 productName: row.product_name,
                 productSku: row.product_sku,
-                totalRevenue: parseFloat(row.total_revenue || 0),
-                totalCOGS: parseFloat(row.total_cogs || 0),
-                grossProfit: parseFloat(row.gross_profit || 0),
-                grossMarginPercent: parseFloat(row.gross_margin_percent || 0),
-                quantitySold: parseFloat(row.quantity_sold || 0)
+                totalRevenue: Money.parseDb(row.total_revenue).toNumber(),
+                totalCOGS: Money.parseDb(row.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(row.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
+                quantitySold: Money.parseDb(row.quantity_sold).toNumber()
             })),
             recordCount: result.rows.length
         }
@@ -643,13 +644,13 @@ router.get('/reports/profit-loss/comparative', asyncHandler(async (req, res) => 
             period: periodStart.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
             startDate,
             endDate,
-            totalRevenue: parseFloat(summary.total_revenue || 0),
-            totalCOGS: parseFloat(summary.total_cogs || 0),
-            grossProfit: parseFloat(summary.gross_profit || 0),
-            grossMarginPercent: parseFloat(summary.gross_margin_percent || 0),
-            operatingExpenses: parseFloat(summary.total_operating_expenses || 0),
-            netIncome: parseFloat(summary.net_income || 0),
-            netMarginPercent: parseFloat(summary.net_margin_percent || 0)
+            totalRevenue: Money.parseDb(summary.total_revenue).toNumber(),
+            totalCOGS: Money.parseDb(summary.total_cogs).toNumber(),
+            grossProfit: Money.parseDb(summary.gross_profit).toNumber(),
+            grossMarginPercent: Money.parseDb(summary.gross_margin_percent).toNumber(),
+            operatingExpenses: Money.parseDb(summary.total_operating_expenses).toNumber(),
+            netIncome: Money.parseDb(summary.net_income).toNumber(),
+            netMarginPercent: Money.parseDb(summary.net_margin_percent).toNumber()
         });
     }
 

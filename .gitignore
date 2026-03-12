@@ -7,11 +7,16 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Environment files (security)
+# Environment files (security) — NEVER commit secrets
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.production.template
 !.env.sample
+
+# Backup directories that may contain secrets
+*.backup_*
 
 node_modules
 dist

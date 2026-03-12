@@ -1,0 +1,61 @@
+# Prometheus Configuration for SamplePOS
+# Scrapes backend health + metrics endpoints
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
+scrape_configs:
+  # Backend API instances
+  - job_name: 'samplepos-backend'
+    metrics_path: '/api/health/metrics'
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - 'backend1:3001'
+          - 'backend2:3001'
+          - 'backend3:3001'
+        labels:
+          service: 'api'
+
+  # Health endpoint (lightweight, frequent)
+  - job_name: 'samplepos-health'
+    metrics_path: '/api/health'
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - 'backend1:3001'
+        labels:
+          service: 'health'
+
+  # Nginx status (if stub_status enabled)
+  - job_name: 'nginx'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['nginx:80']
+        labels:
+          service: 'nginx'
+
+  # Redis
+  - job_name: 'redis'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+
+  # PostgreSQL (requires postgres_exporter sidecar)
+  - job_name: 'postgres'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['postgres:5432']
+        labels:
+          service: 'postgres'

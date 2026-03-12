@@ -38,14 +38,14 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
 if (process.env.NODE_ENV === 'production') {
-  if (!JWT_SECRET) {
-    console.error('FATAL: JWT_SECRET is required in production');
-    process.exit(1);
-  }
-  if (!JWT_REFRESH_SECRET) {
-    console.error('FATAL: JWT_REFRESH_SECRET is required in production (must differ from JWT_SECRET)');
-    process.exit(1);
-  }
+    if (!JWT_SECRET) {
+        console.error('FATAL: JWT_SECRET is required in production');
+        process.exit(1);
+    }
+    if (!JWT_REFRESH_SECRET) {
+        console.error('FATAL: JWT_REFRESH_SECRET is required in production (must differ from JWT_SECRET)');
+        process.exit(1);
+    }
 }
 const jwtSecret = JWT_SECRET || 'dev-only-insecure-key-change-me-32ch';
 const jwtRefreshSecret = JWT_REFRESH_SECRET || 'dev-only-refresh-secret-change-32ch';

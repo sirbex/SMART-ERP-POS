@@ -13,6 +13,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStockLevels, useAdjustInventory } from '../../hooks/useInventory';
+import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { InventoryAdjustmentSchema } from '@shared/zod/inventory';
 import apiClient from '../../utils/api';
@@ -49,19 +50,62 @@ interface Batch {
 
 // (types inferred from API; dedicated interfaces removed to avoid unused warnings)
 
+// Product item for physical count (can have zero stock)
+interface PhysicalCountItem {
+  id: string;
+  product_id: string;
+  product_name: string;
+  sku: string;
+  expected_quantity: number;
+  has_stock: boolean;
+}
+
+// Product row from products hook
+interface ProductRow {
+  id: string;
+  name: string;
+  sku?: string;
+  status?: string;
+}
+
+// Stock level row from API (snake_case)
+interface StockLevelRow {
+  product_id: string;
+  product_name: string;
+  sku?: string;
+  total_stock?: string | number;
+  total_quantity?: string | number;
+  nearest_expiry?: string | null;
+  average_cost?: string | number;
+}
+
+// Helper to format date to YYYY-MM-DD in local timezone
+const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function InventoryAdjustmentsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: stockLevelsData, isLoading, error } = useStockLevels();
   const adjustInventoryMutation = useAdjustInventory();
+  const { data: productsData } = useProducts();
 
-  // Get recent adjustment movements for quick reference
+  // Get recent adjustment movements for quick reference (today only)
+  const todayStr = formatLocalDate(new Date());
   const { data: recentAdjustmentsData } = useStockMovements({
     movementType: 'ADJUSTMENT_IN,ADJUSTMENT_OUT',
+    startDate: todayStr,
     limit: 10,
   });
 
+  const ITEMS_PER_PAGE = 50;
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [physicalCountPage, setPhysicalCountPage] = useState(1);
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
 
@@ -72,7 +116,15 @@ export default function InventoryAdjustmentsPage() {
   );
   const [adjustmentQuantity, setAdjustmentQuantity] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
-  // Validation errors removed - using Zod schema validation
+
+  // Physical Count modal state
+  const [showPhysicalCountModal, setShowPhysicalCountModal] = useState(false);
+  const [countedQuantities, setCountedQuantities] = useState<Record<string, string>>({});
+  const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + formatLocalDate(new Date()));
+  const [isProcessingCount, setIsProcessingCount] = useState(false);
+  const [physicalCountSearchTerm, setPhysicalCountSearchTerm] = useState('');
+  const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
+  const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
 
   // Refs for keyboard navigation
   const quantityInputRef = useRef<HTMLInputElement>(null);
@@ -171,6 +223,181 @@ export default function InventoryAdjustmentsPage() {
         batch.batch_number.toLowerCase().includes(term)
     );
   }, [batches, searchTerm]);
+
+  // Pagination for batch table
+  const batchTotalPages = Math.max(1, Math.ceil(filteredBatches.length / ITEMS_PER_PAGE));
+  const paginatedBatches = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredBatches.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredBatches, currentPage]);
+
+  // Reset batch page on search change
+  useEffect(() => { setCurrentPage(1); }, [searchTerm]);
+
+  // Products for physical count (includes ALL active products, even with zero stock)
+  const products = useMemo(() => {
+    if (!productsData) return [];
+    if (productsData.data && Array.isArray(productsData.data)) {
+      return productsData.data;
+    }
+    return Array.isArray(productsData) ? productsData : [];
+  }, [productsData]);
+
+  // Stock level lookup by product_id
+  const stockLevelMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (stockLevelsData?.data) {
+      const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
+      levels.forEach((level: StockLevelRow) => {
+        map.set(level.product_id, parseFloat(String(level.total_stock || level.total_quantity || 0)));
+      });
+    }
+    return map;
+  }, [stockLevelsData]);
+
+  // Product-based list for physical counting
+  const physicalCountItems = useMemo((): PhysicalCountItem[] => {
+    const activeProducts = products.filter((p: ProductRow) => p.status === 'ACTIVE' || !p.status);
+    return activeProducts.map((product: ProductRow) => {
+      const currentStock = stockLevelMap.get(product.id) || 0;
+      return {
+        id: `product-${product.id}`,
+        product_id: product.id,
+        product_name: product.name,
+        sku: product.sku || 'N/A',
+        expected_quantity: currentStock,
+        has_stock: currentStock > 0,
+      };
+    });
+  }, [products, stockLevelMap]);
+
+  // Physical count statistics
+  const physicalCountStats = useMemo(() => {
+    const counted = physicalCountItems.filter(item => countedQuantities[item.id] !== undefined && countedQuantities[item.id] !== '').length;
+    const discrepancies = physicalCountItems.filter(item => {
+      const countedValue = countedQuantities[item.id];
+      return countedValue !== undefined && countedValue !== '' && parseFloat(countedValue) !== item.expected_quantity;
+    }).length;
+    return {
+      total: physicalCountItems.length,
+      counted,
+      remaining: physicalCountItems.length - counted,
+      discrepancies,
+    };
+  }, [physicalCountItems, countedQuantities]);
+
+  // Filter physical count items
+  const physicalCountFilteredItems = useMemo(() => {
+    let filtered = [...physicalCountItems];
+    if (physicalCountSearchTerm.trim()) {
+      const searchLower = physicalCountSearchTerm.toLowerCase();
+      filtered = filtered.filter(item =>
+        String(item.product_name || '').toLowerCase().includes(searchLower) ||
+        String(item.sku || '').toLowerCase().includes(searchLower)
+      );
+    }
+    if (showOnlyDiscrepancies) {
+      filtered = filtered.filter(item => {
+        const countedValue = countedQuantities[item.id];
+        return countedValue !== undefined && countedValue !== '' && parseFloat(countedValue) !== item.expected_quantity;
+      });
+    }
+    if (showOnlyUncounted) {
+      filtered = filtered.filter(item =>
+        countedQuantities[item.id] === undefined || countedQuantities[item.id] === ''
+      );
+    }
+    return filtered;
+  }, [physicalCountItems, physicalCountSearchTerm, showOnlyDiscrepancies, showOnlyUncounted, countedQuantities]);
+
+  // Pagination for physical count items
+  const physicalCountTotalPages = Math.max(1, Math.ceil(physicalCountFilteredItems.length / ITEMS_PER_PAGE));
+  const paginatedPhysicalCountItems = useMemo(() => {
+    const start = (physicalCountPage - 1) * ITEMS_PER_PAGE;
+    return physicalCountFilteredItems.slice(start, start + ITEMS_PER_PAGE);
+  }, [physicalCountFilteredItems, physicalCountPage]);
+
+  // Reset physical count page on filter changes
+  useEffect(() => { setPhysicalCountPage(1); }, [physicalCountSearchTerm, showOnlyDiscrepancies, showOnlyUncounted]);
+
+  // Handle counted quantity change
+  const handleCountedQtyChange = (itemId: string, value: string) => {
+    setCountedQuantities(prev => ({ ...prev, [itemId]: value }));
+  };
+
+  // Handle Physical Count submission
+  const handleSubmitPhysicalCount = async () => {
+    if (!currentUser) return;
+    setIsProcessingCount(true);
+
+    try {
+      const adjustments = physicalCountItems
+        .filter(item => {
+          const counted = countedQuantities[item.id];
+          return counted !== undefined && counted !== '' && parseFloat(counted) !== item.expected_quantity;
+        })
+        .map(item => {
+          const counted = parseFloat(countedQuantities[item.id]);
+          const current = item.expected_quantity;
+          return {
+            productId: item.product_id,
+            adjustment: counted - current,
+            reason: `${physicalCountReason} | SKU: ${item.sku} | Expected: ${current.toFixed(2)}, Counted: ${counted.toFixed(2)}`,
+            userId: currentUser.id,
+            productName: item.product_name,
+          };
+        });
+
+      if (adjustments.length === 0) {
+        alert('No differences found. All counted quantities match expected quantities.');
+        setIsProcessingCount(false);
+        return;
+      }
+
+      const confirmMsg = `Process physical count?\n\n${adjustments.length} adjustment(s) will be created:\n${adjustments.slice(0, 5).map(a => `• ${a.productName}: ${a.adjustment > 0 ? '+' : ''}${a.adjustment.toFixed(2)}`).join('\n')}${adjustments.length > 5 ? `\n... and ${adjustments.length - 5} more` : ''}`;
+      if (!window.confirm(confirmMsg)) {
+        setIsProcessingCount(false);
+        return;
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
+
+      for (const adj of adjustments) {
+        try {
+          const validatedData = InventoryAdjustmentSchema.parse({
+            productId: adj.productId,
+            adjustment: adj.adjustment,
+            reason: adj.reason,
+            userId: adj.userId,
+          });
+          await adjustInventoryMutation.mutateAsync(validatedData);
+          successCount++;
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          errors.push(`${adj.productName}: ${errorMsg}`);
+          errorCount++;
+        }
+      }
+
+      let resultMessage = `Physical count complete!\n✅ ${successCount} adjustment(s) created`;
+      if (errorCount > 0) {
+        resultMessage += `\n\n❌ ${errorCount} failed:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? `\n... and ${errors.length - 3} more` : ''}`;
+      }
+      alert(resultMessage);
+
+      setShowPhysicalCountModal(false);
+      setCountedQuantities({});
+      setPhysicalCountReason('Physical inventory count - ' + formatLocalDate(new Date()));
+      queryClient.invalidateQueries({ queryKey: ['stockLevels'] });
+      queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
+    } catch (err) {
+      alert(`Failed to process physical count: ${(err as Error).message}`);
+    } finally {
+      setIsProcessingCount(false);
+    }
+  };
 
   // Recent adjustments for display
   const recentAdjustments = useMemo(() => {
@@ -372,17 +599,23 @@ export default function InventoryAdjustmentsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Adjustments & Damage Tracking</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Adjustments & Stock Count</h2>
           <p className="text-gray-600 mt-1">
-            Record stock adjustments, damages, and expiry write-offs
+            Record stock adjustments, damages, expiry write-offs, and physical counts
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setShowPhysicalCountModal(true)}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+          >
+            🔍 Physical Count
+          </button>
+          <button
             onClick={handleViewAllMovements}
             className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium transition-colors flex items-center gap-2"
           >
-            📊 View All Adjustments
+            📊 Movement History
           </button>
           <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-medium text-sm">
             {currentUser?.role}
@@ -395,7 +628,7 @@ export default function InventoryAdjustmentsPage() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-sm font-semibold text-blue-900">
-              📝 Recent Adjustments ({recentAdjustments.length})
+              📝 Today&apos;s Adjustments ({recentAdjustments.length})
             </h3>
             <button
               onClick={handleViewAllMovements}
@@ -410,40 +643,48 @@ export default function InventoryAdjustmentsPage() {
               .map(
                 (adj: {
                   id: string;
-                  movement_type: string;
+                  movementType?: string;
+                  movement_type?: string;
+                  productName?: string;
                   product_name?: string;
                   quantity?: number;
+                  createdAt?: string;
                   created_at?: string;
-                }) => (
-                  <div
-                    key={adj.id}
-                    className="flex items-center justify-between text-sm bg-white rounded px-3 py-2"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={
-                          adj.movement_type === 'ADJUSTMENT_IN'
-                            ? 'text-green-600 font-bold'
-                            : 'text-red-600 font-bold'
-                        }
-                      >
-                        {adj.movement_type === 'ADJUSTMENT_IN' ? '➕' : '➖'}
-                      </span>
-                      <span className="font-medium text-gray-900">
-                        {adj.product_name || 'Unknown'}
-                      </span>
-                      <span className="text-gray-600">
-                        {adj.movement_type === 'ADJUSTMENT_IN' ? '+' : '-'}
-                        {Math.abs(adj.quantity || 0).toFixed(2)}
-                      </span>
+                }) => {
+                  const movementType = adj.movementType || adj.movement_type || '';
+                  const productName = adj.productName || adj.product_name || 'Unknown';
+                  const createdAt = adj.createdAt || adj.created_at || '';
+                  return (
+                    <div
+                      key={adj.id}
+                      className="flex items-center justify-between text-sm bg-white rounded px-3 py-2"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={
+                            movementType === 'ADJUSTMENT_IN'
+                              ? 'text-green-600 font-bold'
+                              : 'text-red-600 font-bold'
+                          }
+                        >
+                          {movementType === 'ADJUSTMENT_IN' ? '➕' : '➖'}
+                        </span>
+                        <span className="font-medium text-gray-900">
+                          {productName}
+                        </span>
+                        <span className="text-gray-600">
+                          {movementType === 'ADJUSTMENT_IN' ? '+' : '-'}
+                          {Math.abs(adj.quantity || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {createdAt?.includes('T')
+                          ? `${formatDisplayDate(createdAt)} ${createdAt.split('T')[1].substring(0, 8)}`
+                          : formatDisplayDate(createdAt)}
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {adj.created_at?.includes('T')
-                        ? `${formatDisplayDate(adj.created_at)} ${adj.created_at.split('T')[1].substring(0, 8)}`
-                        : formatDisplayDate(adj.created_at)}
-                    </div>
-                  </div>
-                )
+                  );
+                }
               )}
           </div>
         </div>
@@ -497,7 +738,7 @@ export default function InventoryAdjustmentsPage() {
                 </td>
               </tr>
             ) : (
-              filteredBatches.map((batch: Batch) => (
+              paginatedBatches.map((batch: Batch) => (
                 <tr key={batch.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <div className="text-sm font-medium text-gray-900">{batch.product_name}</div>
@@ -511,11 +752,10 @@ export default function InventoryAdjustmentsPage() {
                   </td>
                   <td className="px-6 py-4">
                     <span
-                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        batch.status === 'ACTIVE'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}
+                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-gray-100 text-gray-800'
+                        }`}
                     >
                       {batch.status}
                     </span>
@@ -555,6 +795,34 @@ export default function InventoryAdjustmentsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Batch Table Pagination */}
+      {filteredBatches.length > ITEMS_PER_PAGE && (
+        <div className="mt-4 flex justify-between items-center">
+          <div className="text-sm text-gray-600">
+            Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredBatches.length)} of {filteredBatches.length} batches
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Previous
+            </button>
+            <span className="px-3 py-2 text-sm text-gray-700">
+              Page {currentPage} of {batchTotalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(batchTotalPages, p + 1))}
+              disabled={currentPage === batchTotalPages}
+              className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Adjustment Modal */}
       {showAdjustModal && selectedBatch && (
@@ -612,11 +880,10 @@ export default function InventoryAdjustmentsPage() {
                       setMovementCategory('ADJUSTMENT');
                       setAdjustmentType('increase');
                     }}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      movementCategory === 'ADJUSTMENT'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${movementCategory === 'ADJUSTMENT'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
                   >
                     ⚖️ Adjustment
                   </button>
@@ -626,11 +893,10 @@ export default function InventoryAdjustmentsPage() {
                       setMovementCategory('DAMAGE');
                       setAdjustmentType('decrease');
                     }}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      movementCategory === 'DAMAGE'
-                        ? 'bg-orange-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${movementCategory === 'DAMAGE'
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
                   >
                     ⚠️ Damage
                   </button>
@@ -640,11 +906,10 @@ export default function InventoryAdjustmentsPage() {
                       setMovementCategory('EXPIRY');
                       setAdjustmentType('decrease');
                     }}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      movementCategory === 'EXPIRY'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${movementCategory === 'EXPIRY'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
                   >
                     ⏰ Expiry
                   </button>
@@ -661,22 +926,20 @@ export default function InventoryAdjustmentsPage() {
                     <button
                       type="button"
                       onClick={() => setAdjustmentType('increase')}
-                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
-                        adjustmentType === 'increase'
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${adjustmentType === 'increase'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
                     >
                       ➕ Increase
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdjustmentType('decrease')}
-                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
-                        adjustmentType === 'decrease'
-                          ? 'bg-red-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${adjustmentType === 'decrease'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
                     >
                       ➖ Decrease
                     </button>
@@ -706,9 +969,8 @@ export default function InventoryAdjustmentsPage() {
                       reasonInputRef.current?.focus();
                     }
                   }}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                    formValidation.errors.quantity ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${formValidation.errors.quantity ? 'border-red-500' : 'border-gray-300'
+                    }`}
                   placeholder="0.00"
                 />
                 {formValidation.errors.quantity && (
@@ -719,16 +981,14 @@ export default function InventoryAdjustmentsPage() {
               {/* Preview New Quantity */}
               {previewNewQuantity !== null && (
                 <div
-                  className={`border rounded-lg p-3 ${
-                    previewNewQuantity < 0
-                      ? 'bg-red-50 border-red-300'
-                      : 'bg-blue-50 border-blue-200'
-                  }`}
+                  className={`border rounded-lg p-3 ${previewNewQuantity < 0
+                    ? 'bg-red-50 border-red-300'
+                    : 'bg-blue-50 border-blue-200'
+                    }`}
                 >
                   <div
-                    className={`text-sm ${
-                      previewNewQuantity < 0 ? 'text-red-800' : 'text-blue-800'
-                    }`}
+                    className={`text-sm ${previewNewQuantity < 0 ? 'text-red-800' : 'text-blue-800'
+                      }`}
                   >
                     <strong>New Quantity:</strong> {previewNewQuantity.toFixed(2)}
                     {previewNewQuantity < 0 && (
@@ -751,9 +1011,8 @@ export default function InventoryAdjustmentsPage() {
                   id="adj-reason"
                   value={adjustmentReason}
                   onChange={(e) => setAdjustmentReason(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                    formValidation.errors.reason ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${formValidation.errors.reason ? 'border-red-500' : 'border-gray-300'
+                    }`}
                   rows={3}
                   placeholder={
                     movementCategory === 'DAMAGE'
@@ -767,9 +1026,8 @@ export default function InventoryAdjustmentsPage() {
                   <p className="text-red-600 text-sm mt-1">{formValidation.errors.reason}</p>
                 )}
                 <p
-                  className={`text-xs mt-1 ${
-                    adjustmentReason.length >= 5 ? 'text-green-600' : 'text-gray-500'
-                  }`}
+                  className={`text-xs mt-1 ${adjustmentReason.length >= 5 ? 'text-green-600' : 'text-gray-500'
+                    }`}
                 >
                   {adjustmentReason.length}/5 characters minimum
                 </p>
@@ -818,28 +1076,271 @@ export default function InventoryAdjustmentsPage() {
         </div>
       )}
 
-      {/* Info Box - Relationship with Stock Movements */}
+      {/* Physical Count Modal */}
+      {showPhysicalCountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowPhysicalCountModal(false)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-purple-600">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Physical Inventory Count</h3>
+                  <p className="text-purple-100 text-sm mt-1">
+                    Enter actual counted quantities for each product
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowPhysicalCountModal(false)}
+                  className="text-white hover:text-purple-200 text-2xl leading-none"
+                  disabled={isProcessingCount}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Statistics Bar */}
+            <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
+              <div className="grid grid-cols-4 gap-4 text-center">
+                <div>
+                  <div className="text-sm text-gray-600">Total Items</div>
+                  <div className="text-xl font-bold text-gray-900">{physicalCountStats.total}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Counted</div>
+                  <div className="text-xl font-bold text-blue-600">{physicalCountStats.counted}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Remaining</div>
+                  <div className="text-xl font-bold text-yellow-600">{physicalCountStats.remaining}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Discrepancies</div>
+                  <div className="text-xl font-bold text-red-600">{physicalCountStats.discrepancies}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Count Reason */}
+            <div className="px-6 py-3 bg-white border-b border-gray-200">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Count Reference / Reason
+              </label>
+              <input
+                type="text"
+                value={physicalCountReason}
+                onChange={(e) => setPhysicalCountReason(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                placeholder="e.g., Monthly physical count - March 2026"
+              />
+            </div>
+
+            {/* Search and Filters */}
+            <div className="px-6 py-3 bg-white border-b border-gray-200">
+              <div className="mb-3">
+                <input
+                  type="text"
+                  value={physicalCountSearchTerm}
+                  onChange={(e) => setPhysicalCountSearchTerm(e.target.value)}
+                  placeholder="🔍 Search by product name or SKU..."
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showOnlyUncounted}
+                    onChange={(e) => setShowOnlyUncounted(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                  />
+                  <span className="text-sm text-gray-700">Show only uncounted</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showOnlyDiscrepancies}
+                    onChange={(e) => setShowOnlyDiscrepancies(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                  />
+                  <span className="text-sm text-gray-700">Show only discrepancies</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Products Table */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {physicalCountItems.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">
+                  No products found. Please add products first.
+                </div>
+              ) : physicalCountFilteredItems.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">
+                  No items match your search or filter criteria.
+                </div>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Expected Qty</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Counted Qty</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Difference</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {paginatedPhysicalCountItems.map((item) => {
+                      const countedValue = countedQuantities[item.id];
+                      const counted = countedValue !== undefined && countedValue !== '' ? parseFloat(countedValue) : null;
+                      const difference = counted !== null ? counted - item.expected_quantity : null;
+                      const hasDifference = difference !== null && Math.abs(difference) > 0.001;
+
+                      return (
+                        <tr key={item.id} className={hasDifference ? 'bg-yellow-50' : !item.has_stock ? 'bg-gray-50' : ''}>
+                          <td className="px-4 py-3 text-sm">
+                            <div className="font-medium text-gray-900">{item.product_name}</div>
+                            {!item.has_stock && (
+                              <div className="text-xs text-gray-500">No stock on record</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{item.sku}</td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
+                            {item.expected_quantity.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right">
+                            <input
+                              type="number"
+                              value={countedValue || ''}
+                              onChange={(e) => handleCountedQtyChange(item.id, e.target.value)}
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              className="w-32 px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                              disabled={isProcessingCount}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right">
+                            {difference !== null ? (
+                              <span className={`font-medium ${Math.abs(difference) < 0.001 ? 'text-green-600' :
+                                difference > 0 ? 'text-blue-600' : 'text-red-600'
+                                }`}>
+                                {difference > 0 ? '+' : ''}{difference.toFixed(2)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Physical Count Pagination */}
+            {physicalCountFilteredItems.length > ITEMS_PER_PAGE && (
+              <div className="px-6 py-3 border-t border-gray-200 flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  Showing {((physicalCountPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(physicalCountPage * ITEMS_PER_PAGE, physicalCountFilteredItems.length)} of {physicalCountFilteredItems.length} items
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setPhysicalCountPage(p => Math.max(1, p - 1))}
+                    disabled={physicalCountPage === 1}
+                    className="px-3 py-1 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ← Previous
+                  </button>
+                  <span className="px-2 py-1 text-sm text-gray-700">
+                    Page {physicalCountPage} of {physicalCountTotalPages}
+                  </span>
+                  <button
+                    onClick={() => setPhysicalCountPage(p => Math.min(physicalCountTotalPages, p + 1))}
+                    disabled={physicalCountPage === physicalCountTotalPages}
+                    className="px-3 py-1 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="px-6 py-3 bg-blue-50 border-t border-blue-200">
+              <p className="text-sm text-blue-800">
+                <strong>💡 How it works:</strong> Enter the actual counted quantity for each product.
+                When you submit, adjustments will be created for all items with discrepancies.
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+              <div className="text-sm text-gray-600">
+                {physicalCountStats.discrepancies > 0 ? (
+                  <span className="text-yellow-600 font-medium">
+                    ⚠️ {physicalCountStats.discrepancies} item(s) with discrepancies will be adjusted
+                  </span>
+                ) : physicalCountStats.counted > 0 ? (
+                  <span className="text-green-600 font-medium">
+                    ✅ All counted quantities match expected
+                  </span>
+                ) : (
+                  <span>Enter counted quantities to see discrepancies</span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowPhysicalCountModal(false)}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium"
+                  disabled={isProcessingCount}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmitPhysicalCount}
+                  disabled={isProcessingCount || physicalCountStats.counted === 0 || !physicalCountReason.trim()}
+                  className="px-4 py-2 bg-purple-600 text-white hover:bg-purple-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isProcessingCount ? (
+                    <>
+                      <span className="animate-spin">⏳</span>
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>✅</span>
+                      <span>Process Count ({physicalCountStats.discrepancies} adjustments)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Info Box */}
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="text-sm font-medium text-blue-900 mb-2">
-          ℹ️ About Adjustments & Damage Tracking
+          ℹ️ About Adjustments & Stock Count
         </h3>
         <ul className="text-xs text-blue-800 space-y-1">
           <li>
-            • <strong>Adjustment:</strong> Increase or decrease stock for physical count corrections
+            • <strong>Adjustment:</strong> Increase or decrease stock for corrections
           </li>
           <li>
-            • <strong>Damage:</strong> Record stock lost due to physical damage (broken, water
-            damage, etc.)
+            • <strong>Damage:</strong> Record stock lost due to physical damage
           </li>
           <li>
-            • <strong>Expiry:</strong> Write off stock that has expired and must be disposed of
+            • <strong>Expiry:</strong> Write off expired stock
+          </li>
+          <li>
+            • <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies
           </li>
           <li>• All records create immutable stock movement entries for full audit trail</li>
-          <li>
-            • View the <strong>Waste & Damage Report</strong> in Reports for aggregated loss
-            analysis
-          </li>
-          <li>• Click "History" next to each product to see all movements for that item</li>
+          <li>• View <strong>Movement History</strong> for the complete audit trail</li>
           <li>
             • <strong>Role Required:</strong> ADMIN or MANAGER
           </li>

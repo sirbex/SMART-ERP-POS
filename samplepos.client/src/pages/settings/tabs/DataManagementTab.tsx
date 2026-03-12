@@ -99,6 +99,20 @@ async function executeReset(confirmText: string, reason: string): Promise<unknow
     return response.data.data;
 }
 
+async function downloadBackup(id: string, fileName: string): Promise<void> {
+    const response = await api.get(`/system/backups/${id}/download`, {
+        responseType: 'blob',
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
 async function restoreBackup(backupId: string): Promise<unknown> {
     const response = await api.post<ApiResponse<unknown>>(`/system/restore/${backupId}`);
     if (!response.data.success) throw new Error(response.data.error);
@@ -473,8 +487,12 @@ function BackupSection({
         }
     };
 
-    const handleDownload = (id: string) => {
-        window.open(`/api/system/backups/${id}/download`, '_blank');
+    const handleDownload = async (id: string, fileName: string) => {
+        try {
+            await downloadBackup(id, fileName);
+        } catch (error: unknown) {
+            onError(error instanceof Error ? error.message : 'Failed to download backup');
+        }
     };
 
     return (
@@ -552,7 +570,7 @@ function BackupSection({
                                         </button>
                                     )}
                                     <button
-                                        onClick={() => handleDownload(backup.id)}
+                                        onClick={() => handleDownload(backup.id, backup.fileName)}
                                         className="p-2 text-green-600 hover:bg-green-50 rounded"
                                         title="Download backup"
                                     >
@@ -592,6 +610,7 @@ function ResetSection({
     const [reason, setReason] = useState('');
     const [isResetting, setIsResetting] = useState(false);
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+    const queryClient = useQueryClient();
 
     useEffect(() => {
         loadPreview();
@@ -626,6 +645,27 @@ function ResetSection({
             setShowConfirmDialog(false);
             setConfirmText('');
             setReason('');
+
+            // Invalidate all cached data across the app
+            queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
+            queryClient.invalidateQueries({ queryKey: ['sales'] });
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory'] });
+            queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+            queryClient.invalidateQueries({ queryKey: ['customers'] });
+            queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+            queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+            queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+            queryClient.invalidateQueries({ queryKey: ['ledger'] });
+            queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+            queryClient.invalidateQueries({ queryKey: ['accounting'] });
+            queryClient.invalidateQueries({ queryKey: ['erp-accounting'] });
+            queryClient.invalidateQueries({ queryKey: ['expenses'] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['quotations'] });
+            queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+
             onResetComplete();
             loadPreview();
         } catch (error: unknown) {

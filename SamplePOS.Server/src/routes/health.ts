@@ -347,6 +347,11 @@ async function checkRedis(): Promise<HealthCheckResult> {
       responseTime
     };
   } catch (error) {
+    // Discard the broken client so the next check creates a fresh one
+    if (healthRedis) {
+      try { healthRedis.disconnect(); } catch { /* already disconnected */ }
+      healthRedis = null;
+    }
     return {
       service: 'redis',
       status: 'unhealthy',
@@ -455,5 +460,88 @@ async function checkDatabaseSchema(): Promise<HealthCheckResult> {
     };
   }
 }
+
+// ============================================================
+// METRICS ENDPOINT - Prometheus text format
+// GET /api/health/metrics
+// ============================================================
+
+// Simple in-memory counters (reset on restart — sufficient for single-instance)
+const counters = {
+  httpRequestsTotal: 0,
+  httpErrorsTotal: 0,
+  salesCreatedTotal: 0,
+  bankingRetriesTotal: 0,
+};
+const metricsStartTime = Date.now();
+
+/** Increment a counter from anywhere in the app */
+export function incrementMetric(name: keyof typeof counters) {
+  counters[name]++;
+}
+
+/** Disconnect the health-check Redis client (call during shutdown) */
+export async function closeHealthRedis(): Promise<void> {
+  if (healthRedis) {
+    await healthRedis.quit().catch(() => { });
+    healthRedis = null;
+  }
+}
+
+router.get('/metrics', async (_req: Request, res: Response) => {
+  const mem = process.memoryUsage();
+  const uptime = process.uptime();
+
+  // DB connection pool stats
+  let dbPoolTotal = 0;
+  let dbPoolIdle = 0;
+  let dbPoolWaiting = 0;
+  try {
+    dbPoolTotal = globalPool.totalCount;
+    dbPoolIdle = globalPool.idleCount;
+    dbPoolWaiting = globalPool.waitingCount;
+  } catch { /* pool not available */ }
+
+  // Prometheus text exposition format
+  const lines = [
+    '# HELP process_uptime_seconds Process uptime in seconds',
+    '# TYPE process_uptime_seconds gauge',
+    `process_uptime_seconds ${uptime.toFixed(0)}`,
+    '',
+    '# HELP process_heap_bytes Process heap memory usage',
+    '# TYPE process_heap_bytes gauge',
+    `process_heap_bytes{type="used"} ${mem.heapUsed}`,
+    `process_heap_bytes{type="total"} ${mem.heapTotal}`,
+    '',
+    '# HELP process_rss_bytes Resident set size',
+    '# TYPE process_rss_bytes gauge',
+    `process_rss_bytes ${mem.rss}`,
+    '',
+    '# HELP db_pool_connections Database connection pool',
+    '# TYPE db_pool_connections gauge',
+    `db_pool_connections{state="total"} ${dbPoolTotal}`,
+    `db_pool_connections{state="idle"} ${dbPoolIdle}`,
+    `db_pool_connections{state="waiting"} ${dbPoolWaiting}`,
+    '',
+    '# HELP app_http_requests_total Total HTTP requests served',
+    '# TYPE app_http_requests_total counter',
+    `app_http_requests_total ${counters.httpRequestsTotal}`,
+    '',
+    '# HELP app_http_errors_total Total HTTP 5xx errors',
+    '# TYPE app_http_errors_total counter',
+    `app_http_errors_total ${counters.httpErrorsTotal}`,
+    '',
+    '# HELP app_sales_created_total Total sales created',
+    '# TYPE app_sales_created_total counter',
+    `app_sales_created_total ${counters.salesCreatedTotal}`,
+    '',
+    '# HELP app_banking_retries_total Banking operations queued for retry',
+    '# TYPE app_banking_retries_total counter',
+    `app_banking_retries_total ${counters.bankingRetriesTotal}`,
+  ];
+
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(lines.join('\n') + '\n');
+});
 
 export default router;

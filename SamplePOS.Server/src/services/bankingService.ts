@@ -1881,6 +1881,22 @@ export class BankingService {
             return null;
         }
 
+        // Idempotency guard: skip if a bank transaction already exists for this sale + payment method
+        const txnDescription = `Sale ${saleNumber} [${paymentMethod}]`;
+        const existing = await pool.query(
+            `SELECT id FROM bank_transactions
+             WHERE source_type = 'SALE' AND source_id = $1
+               AND description = $2
+             LIMIT 1`,
+            [saleId, txnDescription]
+        );
+        if (existing.rows.length > 0) {
+            logger.info('Bank transaction already exists for sale payment — skipping duplicate', {
+                saleId, saleNumber, paymentMethod,
+            });
+            return null;
+        }
+
         // Find appropriate bank account based on payment method
         // CARD → Credit Card Receipts (1020)
         // MOBILE_MONEY → Could be a mobile money account or checking
@@ -1922,7 +1938,7 @@ export class BankingService {
             transactionDate: saleDate,
             type: 'DEPOSIT',
             categoryId,
-            description: `Sale ${saleNumber}`,
+            description: txnDescription,
             reference: saleNumber,
             amount,
             sourceType: 'SALE',

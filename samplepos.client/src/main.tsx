@@ -116,6 +116,33 @@ if ('serviceWorker' in navigator) {
         console.warn('[SW] Registration failed:', err);
       });
   });
+
+  // ── SW ↔ Client messaging for Background Sync ────────────
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    // SW requesting sync data (auth token + offline queue)
+    if (event.data?.type === 'SW_REQUEST_SYNC_DATA') {
+      const queue = JSON.parse(localStorage.getItem('pos_offline_sales') || '[]');
+      const authToken = localStorage.getItem('auth_token');
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+      // Reply via the MessageChannel port the SW sent
+      if (event.ports[0]) {
+        event.ports[0].postMessage({ queue, authToken, apiBase });
+      }
+    }
+
+    // SW finished Background Sync — remove synced entries from localStorage
+    if (event.data?.type === 'BACKGROUND_SYNC_COMPLETE') {
+      const syncedKeys: string[] = event.data.syncedKeys || [];
+      if (syncedKeys.length > 0) {
+        const queue = JSON.parse(localStorage.getItem('pos_offline_sales') || '[]');
+        const filtered = queue.filter(
+          (s: { idempotencyKey: string }) => !syncedKeys.includes(s.idempotencyKey)
+        );
+        localStorage.setItem('pos_offline_sales', JSON.stringify(filtered));
+        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
+      }
+    }
+  });
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

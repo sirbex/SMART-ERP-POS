@@ -1,0 +1,76 @@
+# Prometheus alert rules for SamplePOS
+groups:
+  - name: samplepos-alerts
+    rules:
+      # High error rate (>5% of requests returning 5xx for 5 min)
+      - alert: HighErrorRate
+        expr: >
+          sum(rate(app_http_errors_total[5m]))
+          / sum(rate(app_http_requests_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP error rate"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      # No requests at all for 5 min (app may be down even if health passes)
+      - alert: NoTraffic
+        expr: sum(rate(app_http_requests_total[5m])) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No HTTP traffic detected"
+          description: "Zero requests across all backend instances for 5 minutes."
+
+      # Process heap exceeding 512 MB (default V8 limit ~1.5 GB)
+      - alert: HighMemoryUsage
+        expr: process_heap_bytes{type="used"} > 536870912
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High heap memory on {{ $labels.instance }}"
+          description: "Heap used is {{ $value | humanize1024 }}B."
+
+      # RSS exceeding 1 GB
+      - alert: CriticalMemoryUsage
+        expr: process_rss_bytes > 1073741824
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical RSS memory on {{ $labels.instance }}"
+          description: "RSS is {{ $value | humanize1024 }}B — risk of OOM kill."
+
+      # DB pool exhaustion — waiting clients > 5
+      - alert: DBPoolExhausted
+        expr: db_pool_connections{state="waiting"} > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database pool exhausted on {{ $labels.instance }}"
+          description: "{{ $value }} clients waiting for a connection."
+
+      # Banking retries spiking (>10 in 5 min window)
+      - alert: BankingRetriesHigh
+        expr: rate(app_banking_retries_total[5m]) * 300 > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Banking retries spiking"
+          description: "{{ $value | humanize }} retries in the last 5 minutes."
+
+      # Backend instance down (no scrape response)
+      - alert: InstanceDown
+        expr: up{job="samplepos-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend instance {{ $labels.instance }} is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }} for over 1 minute."

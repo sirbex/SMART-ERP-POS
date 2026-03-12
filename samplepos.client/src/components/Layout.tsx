@@ -35,6 +35,7 @@ export default function Layout({ children }: LayoutProps) {
 
   // Admin-only navigation items
   const adminNavItems: NavItem[] = [
+    { name: 'Import', path: '/import', icon: '📥', color: 'text-violet-600' },
     { name: 'Settings', path: '/settings', icon: '⚙️', color: 'text-gray-600' },
     { name: 'Roles', path: '/admin/roles', icon: '🔐', color: 'text-pink-600' },
   ];

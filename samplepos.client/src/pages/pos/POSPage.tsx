@@ -145,6 +145,8 @@ interface POSProductInput {
   autoUpdatePrice?: boolean;
   reorderLevel?: number;
   trackExpiry?: boolean;
+  stockOnHand?: number;
+  productType?: 'inventory' | 'consumable' | 'service';
 }
 
 /** Axios-like error shape for typed catch blocks */
@@ -412,7 +414,7 @@ export default function POSPage() {
         }
       });
       // Also re-sync catalog when coming back online
-      syncProductCatalog().catch(() => {});
+      syncProductCatalog().catch(() => { });
     }
   }, [isOnline, pendingCount]);
 
@@ -603,8 +605,19 @@ export default function POSPage() {
         const errorBeep = new Audio(
           'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgA'
         );
-        errorBeep.play().catch(() => {});
+        errorBeep.play().catch(() => { });
         return;
+      }
+
+      // Check stock availability before adding to cart
+      let stockOnHand: number | undefined;
+      try {
+        const stockRes = await api.inventory.stockLevelByProduct(match.product.id);
+        const stockData = stockRes.data?.data as Record<string, unknown> | undefined;
+        stockOnHand = stockData ? parseFloat(String(stockData.total_stock ?? stockData.quantity_on_hand ?? 0)) : undefined;
+      } catch {
+        // If stock check fails, let backend validate at checkout
+        stockOnHand = undefined;
       }
 
       // Add product to cart with correct UoM
@@ -615,6 +628,7 @@ export default function POSPage() {
         barcode: match.product.barcode || undefined,
         selectedUomId: match.uom.id,
         quantity: match.defaultQuantity,
+        stockOnHand,
       };
 
       handleAddProduct(productWithUom);
@@ -624,7 +638,7 @@ export default function POSPage() {
       const successBeep = new Audio(
         'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBztH1/LJfiwE'
       );
-      successBeep.play().catch(() => {});
+      successBeep.play().catch(() => { });
     } catch (error) {
       console.error('Barcode scan error:', error);
       toast.error('Barcode scanning failed');
@@ -776,13 +790,13 @@ export default function POSPage() {
   const handleClearAllData = () => {
     const confirmed = window.confirm(
       '⚠️ Clear ALL Data?\n\n' +
-        'This will clear:\n' +
-        '• Current cart items\n' +
-        '• Customer selection\n' +
-        '• All discounts\n' +
-        '• Offline sales queue\n' +
-        '• Persisted cart backup\n\n' +
-        'This action cannot be undone!'
+      'This will clear:\n' +
+      '• Current cart items\n' +
+      '• Customer selection\n' +
+      '• All discounts\n' +
+      '• Offline sales queue\n' +
+      '• Persisted cart backup\n\n' +
+      'This action cannot be undone!'
     );
 
     if (!confirmed) return;
@@ -834,6 +848,13 @@ export default function POSPage() {
   // Add product handler
   const handleAddProduct = useCallback(
     (product: POSProductInput) => {
+      // Block 0-stock inventory products (services/consumables are exempt)
+      const isService = product.productType === 'service' || product.productType === 'consumable';
+      if (!isService && product.stockOnHand !== undefined && product.stockOnHand <= 0) {
+        toast.error(`"${product.name}" is out of stock`);
+        return;
+      }
+
       // Use computeUomPrices to get correct price/cost for selected UoM
       type UomEntry = NonNullable<POSProductInput['uoms']>[number];
       const uom: UomEntry | undefined =
@@ -897,10 +918,10 @@ export default function POSPage() {
         marginPct:
           row.unitCost > 0
             ? new Decimal(row.sellingPrice)
-                .minus(row.unitCost)
-                .dividedBy(row.sellingPrice)
-                .times(100)
-                .toNumber()
+              .minus(row.unitCost)
+              .dividedBy(row.sellingPrice)
+              .times(100)
+              .toNumber()
             : 0,
         subtotal: row.sellingPrice,
         isTaxable: product.isTaxable ?? false,
@@ -983,10 +1004,10 @@ export default function POSPage() {
       const newMarginPct =
         newUnitPrice > 0
           ? new Decimal(newUnitPrice)
-              .minus(newCostPrice)
-              .dividedBy(newUnitPrice)
-              .times(100)
-              .toNumber()
+            .minus(newCostPrice)
+            .dividedBy(newUnitPrice)
+            .times(100)
+            .toNumber()
           : 0;
 
       updated[itemIndex] = {
@@ -1272,10 +1293,10 @@ export default function POSPage() {
             marginPct:
               item.unitPrice > 0
                 ? new Decimal(item.unitPrice)
-                    .minus(item.costPrice)
-                    .dividedBy(item.unitPrice)
-                    .times(100)
-                    .toNumber()
+                  .minus(item.costPrice)
+                  .dividedBy(item.unitPrice)
+                  .times(100)
+                  .toNumber()
                 : 0,
             subtotal: item.subtotal,
             isTaxable: item.isTaxable,
@@ -1284,11 +1305,11 @@ export default function POSPage() {
             discount:
               typeof item.discountAmount === 'number' && item.discountAmount > 0
                 ? {
-                    type: 'FIXED_AMOUNT' as DiscountType,
-                    value: item.discountAmount,
-                    amount: item.discountAmount,
-                    reason: '',
-                  }
+                  type: 'FIXED_AMOUNT' as DiscountType,
+                  value: item.discountAmount,
+                  amount: item.discountAmount,
+                  reason: '',
+                }
                 : undefined,
             productType: (item.productType || 'inventory') as
               | 'inventory'
@@ -1378,7 +1399,7 @@ export default function POSPage() {
           unitPrice: item.unitPrice,
           isTaxable: item.isTaxable,
           taxRate: item.taxRate,
-          uomId: item.selectedUomId || undefined, // Convert null to undefined for Zod
+          uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
           uomName: item.uom,
           unitCost: item.costPrice,
           productType: item.productType || 'inventory',
@@ -1752,7 +1773,7 @@ export default function POSPage() {
     } else if (amount <= 0) {
       alert(
         '⚠️ Zero Amount Not Allowed\n\nPayment amount must be greater than zero.\n\nCurrent remaining balance: ' +
-          formatCurrency(remainingBalance)
+        formatCurrency(remainingBalance)
       );
       return;
     }
@@ -2050,9 +2071,9 @@ export default function POSPage() {
         const itemTax =
           item.isTaxable && item.taxRate > 0
             ? new Decimal(item.subtotal)
-                .times(item.taxRate / 100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .times(item.taxRate / 100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0;
 
         return {
@@ -2060,7 +2081,7 @@ export default function POSPage() {
           productName: item.name,
           sku: item.sku,
           uom: item.uom,
-          uomId: item.selectedUomId || undefined, // Convert null to undefined for Zod
+          uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           costPrice: item.costPrice,
@@ -2450,9 +2471,8 @@ export default function POSPage() {
                       ref={(el) => {
                         cartRowRefs.current[idx] = el;
                       }}
-                      className={`border-b hover:bg-gray-50 transition-colors ${
-                        idx === focusedCartIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
-                      }`}
+                      className={`border-b hover:bg-gray-50 transition-colors ${idx === focusedCartIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
+                        }`}
                       onClick={() => setFocusedCartIndex(idx)}
                     >
                       <td className="px-2 py-2">
@@ -2913,31 +2933,28 @@ export default function POSPage() {
               <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <button
                   onClick={() => setPaymentMethod('CASH')}
-                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
-                    paymentMethod === 'CASH'
-                      ? 'bg-green-600 text-white ring-2 sm:ring-4 ring-green-300 shadow-lg transform scale-105'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
-                  }`}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'CASH'
+                    ? 'bg-green-600 text-white ring-2 sm:ring-4 ring-green-300 shadow-lg transform scale-105'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                    }`}
                 >
                   <span className="hidden sm:inline">💵 </span>Cash
                 </button>
                 <button
                   onClick={() => setPaymentMethod('CARD')}
-                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
-                    paymentMethod === 'CARD'
-                      ? 'bg-blue-600 text-white ring-2 sm:ring-4 ring-blue-300 shadow-lg transform scale-105'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
-                  }`}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'CARD'
+                    ? 'bg-blue-600 text-white ring-2 sm:ring-4 ring-blue-300 shadow-lg transform scale-105'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                    }`}
                 >
                   <span className="hidden sm:inline">💳 </span>Card
                 </button>
                 <button
                   onClick={() => setPaymentMethod('MOBILE_MONEY')}
-                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
-                    paymentMethod === 'MOBILE_MONEY'
-                      ? 'bg-purple-600 text-white ring-2 sm:ring-4 ring-purple-300 shadow-lg transform scale-105'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
-                  }`}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'MOBILE_MONEY'
+                    ? 'bg-purple-600 text-white ring-2 sm:ring-4 ring-purple-300 shadow-lg transform scale-105'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                    }`}
                 >
                   <span className="hidden sm:inline">📱 </span>Mobile Money
                 </button>
@@ -2948,13 +2965,12 @@ export default function POSPage() {
                   <button
                     onClick={() => customerDepositBalance > 0 && setPaymentMethod('DEPOSIT')}
                     disabled={customerDepositBalance <= 0 || isLoadingDeposits}
-                    className={`w-full py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${
-                      customerDepositBalance <= 0 || isLoadingDeposits
-                        ? 'bg-gray-100 text-gray-400 border-2 border-gray-200 cursor-not-allowed'
-                        : paymentMethod === 'DEPOSIT'
-                          ? 'bg-amber-600 text-white ring-2 sm:ring-4 ring-amber-300 shadow-lg transform scale-105'
-                          : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-2 border-amber-400'
-                    }`}
+                    className={`w-full py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${customerDepositBalance <= 0 || isLoadingDeposits
+                      ? 'bg-gray-100 text-gray-400 border-2 border-gray-200 cursor-not-allowed'
+                      : paymentMethod === 'DEPOSIT'
+                        ? 'bg-amber-600 text-white ring-2 sm:ring-4 ring-amber-300 shadow-lg transform scale-105'
+                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-2 border-amber-400'
+                      }`}
                   >
                     <span className="flex items-center justify-center gap-2">
                       <span>🏦 Use Customer Deposit</span>
@@ -3444,9 +3460,8 @@ export default function POSPage() {
                         handleUomChange(uomModalItemIndex, uom.uomId);
                       }
                     }}
-                    className={`w-full justify-between transition-all ${
-                      idx === selectedUomIndex ? 'ring-4 ring-blue-400 scale-105' : ''
-                    }`}
+                    className={`w-full justify-between transition-all ${idx === selectedUomIndex ? 'ring-4 ring-blue-400 scale-105' : ''
+                      }`}
                     aria-label={`Select ${uom.symbol || uom.name} at ${formatCurrency(uom.price)}`}
                     tabIndex={0}
                     autoFocus={idx === 0}
@@ -3692,15 +3707,14 @@ export default function POSPage() {
                             <div className="flex items-center gap-2">
                               <p className="font-semibold text-blue-600">{quote.quoteNumber}</p>
                               <span
-                                className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  (quote.status as string) === 'DRAFT'
-                                    ? 'bg-gray-100 text-gray-800'
-                                    : (quote.status as string) === 'SENT'
-                                      ? 'bg-blue-100 text-blue-800'
-                                      : (quote.status as string) === 'ACCEPTED'
-                                        ? 'bg-green-100 text-green-800'
-                                        : 'bg-gray-100 text-gray-800'
-                                }`}
+                                className={`px-2 py-0.5 rounded-full text-xs font-medium ${(quote.status as string) === 'DRAFT'
+                                  ? 'bg-gray-100 text-gray-800'
+                                  : (quote.status as string) === 'SENT'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : (quote.status as string) === 'ACCEPTED'
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-gray-100 text-gray-800'
+                                  }`}
                               >
                                 {quote.status}
                               </span>

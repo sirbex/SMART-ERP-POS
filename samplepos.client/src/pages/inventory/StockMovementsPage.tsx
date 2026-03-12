@@ -1,12 +1,10 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStockMovements, exportStockMovementsCSV } from '../../hooks/useStockMovements';
 import { useProducts } from '../../hooks/useProducts';
-import { useStockLevels, useAdjustInventory } from '../../hooks/useInventory';
-import { InventoryAdjustmentSchema } from '@shared/zod/inventory';
 import { formatCurrency } from '../../utils/currency';
 import { DatePicker } from '../../components/ui/date-picker';
 import Decimal from 'decimal.js';
-import { z } from 'zod';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -37,28 +35,7 @@ const MOVEMENT_TYPES = {
 
 type MovementType = keyof typeof MOVEMENT_TYPES;
 
-// Batch type from stock levels
-interface Batch {
-  id: string;
-  product_id: string;
-  product_name: string;
-  batch_number: string;
-  remaining_quantity: number;
-  expiry_date?: string | null;
-  cost_price: number;
-  status: string;
-  created_at: string;
-}
 
-// Product item for physical count (can have zero stock)
-interface PhysicalCountItem {
-  id: string;
-  product_id: string;
-  product_name: string;
-  sku: string;
-  expected_quantity: number;
-  has_stock: boolean;
-}
 
 // Row shape returned by the stock movements API
 interface StockMovementRow {
@@ -77,17 +54,6 @@ interface StockMovementRow {
   saleNumber?: string;
   grNumber?: string;
   userName?: string;
-}
-
-// Row shape from the stock levels API (snake_case)
-interface StockLevelRow {
-  product_id: string;
-  product_name: string;
-  sku?: string;
-  total_stock?: string | number;
-  total_quantity?: string | number;
-  nearest_expiry?: string | null;
-  average_cost?: string | number;
 }
 
 // Product row shape used in this page
@@ -171,6 +137,8 @@ const getDateRange = (preset: DateRangePreset): { start: string; end: string } =
 };
 
 export default function StockMovementsPage() {
+  const navigate = useNavigate();
+
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState<MovementType | 'ALL'>('ALL');
@@ -179,25 +147,6 @@ export default function StockMovementsPage() {
   const [endDate, setEndDate] = useState(() => getDateRange('today').end);
   const [page, setPage] = useState(1);
   const limit = 50;
-
-  // Adjustment modal state
-  const [showAdjustModal, setShowAdjustModal] = useState(false);
-  const [showBatchSelector, setShowBatchSelector] = useState(false);
-  const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
-  const [adjustmentType, setAdjustmentType] = useState<'increase' | 'decrease'>('increase');
-  const [adjustmentQuantity, setAdjustmentQuantity] = useState('');
-  const [adjustmentReason, setAdjustmentReason] = useState('');
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [batchSearchTerm, setBatchSearchTerm] = useState('');
-
-  // Physical Count modal state
-  const [showPhysicalCountModal, setShowPhysicalCountModal] = useState(false);
-  const [countedQuantities, setCountedQuantities] = useState<Record<string, string>>({});
-  const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + formatLocalDate(new Date()));
-  const [isProcessingCount, setIsProcessingCount] = useState(false);
-  const [physicalCountSearchTerm, setPhysicalCountSearchTerm] = useState('');
-  const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
-  const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
 
   // API queries
   const { data: movementsData, isLoading, error, refetch } = useStockMovements({
@@ -209,23 +158,6 @@ export default function StockMovementsPage() {
   });
 
   const { data: productsData } = useProducts();
-  const { data: stockLevelsData } = useStockLevels();
-  const adjustInventoryMutation = useAdjustInventory();
-
-  // Get current user for role check
-  const currentUser = useMemo(() => {
-    try {
-      const userStr = localStorage.getItem('user');
-      return userStr ? JSON.parse(userStr) : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  // Check if user can adjust inventory
-  const canAdjust = useMemo(() => {
-    return currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER');
-  }, [currentUser]);
 
   // Extract movements from API response
   const movements = useMemo(() => {
@@ -253,65 +185,6 @@ export default function StockMovementsPage() {
     });
     return map;
   }, [products]);
-
-  // Create batch list from stock levels
-  const batches = useMemo((): Batch[] => {
-    if (!stockLevelsData?.data) return [];
-    const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
-
-    return levels.map((level: StockLevelRow) => ({
-      id: `batch-${level.product_id}`,
-      product_id: level.product_id,
-      product_name: level.product_name,
-      batch_number: level.sku || 'MAIN',
-      remaining_quantity: parseFloat(String(level.total_stock || level.total_quantity || 0)),
-      expiry_date: level.nearest_expiry || null,
-      cost_price: parseFloat(String(level.average_cost || 0)),
-      status: 'ACTIVE',
-      created_at: new Date().toISOString(),
-    }));
-  }, [stockLevelsData]);
-
-  // Create stock level lookup by product_id for physical count
-  const stockLevelMap = useMemo(() => {
-    const map = new Map<string, number>();
-    if (stockLevelsData?.data) {
-      const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
-      levels.forEach((level: StockLevelRow) => {
-        map.set(level.product_id, parseFloat(String(level.total_stock || level.total_quantity || 0)));
-      });
-    }
-    return map;
-  }, [stockLevelsData]);
-
-  // Create product-based list for physical counting (includes ALL active products, even with zero stock)
-  const physicalCountItems = useMemo((): PhysicalCountItem[] => {
-    // Filter only active products
-    const activeProducts = products.filter((p: ProductRow) => p.status === 'ACTIVE' || !p.status);
-
-    return activeProducts.map((product: ProductRow) => {
-      const currentStock = stockLevelMap.get(product.id) || 0;
-      return {
-        id: `product-${product.id}`,
-        product_id: product.id,
-        product_name: product.name,
-        sku: product.sku || 'N/A',
-        expected_quantity: currentStock,
-        has_stock: currentStock > 0,
-      };
-    });
-  }, [products, stockLevelMap]);
-
-  // Filter batches for selector
-  const filteredBatches = useMemo(() => {
-    if (!batchSearchTerm) return batches;
-
-    const term = batchSearchTerm.toLowerCase();
-    return batches.filter((batch: Batch) =>
-      batch.product_name.toLowerCase().includes(term) ||
-      batch.batch_number.toLowerCase().includes(term)
-    );
-  }, [batches, batchSearchTerm]);
 
   // Filter movements by search term
   const filteredMovements = useMemo(() => {
@@ -434,226 +307,6 @@ export default function StockMovementsPage() {
     setPage(1);
   };
 
-  // Open batch selector for adjustment
-  const handleOpenBatchSelector = () => {
-    if (!canAdjust) {
-      alert('You do not have permission to adjust inventory. ADMIN or MANAGER role required.');
-      return;
-    }
-    setBatchSearchTerm('');
-    setShowBatchSelector(true);
-  };
-
-  // Select batch and open adjustment modal
-  const handleSelectBatch = (batch: Batch) => {
-    setSelectedBatch(batch);
-    setAdjustmentType('increase');
-    setAdjustmentQuantity('');
-    setAdjustmentReason('');
-    setValidationErrors({});
-    setShowBatchSelector(false);
-    setShowAdjustModal(true);
-  };
-
-  // Submit adjustment
-  const handleSubmitAdjustment = async () => {
-    if (!selectedBatch || !currentUser) return;
-
-    try {
-      // Calculate actual adjustment value
-      const qtyDecimal = new Decimal(adjustmentQuantity || 0);
-      const adjustment = adjustmentType === 'increase'
-        ? qtyDecimal.toNumber()
-        : qtyDecimal.times(-1).toNumber();
-
-      // Validate with Zod schema
-      const validatedData = InventoryAdjustmentSchema.parse({
-        batchId: selectedBatch.id,
-        adjustment,
-        reason: adjustmentReason,
-        userId: currentUser.id,
-      });
-
-      // Call API
-      await adjustInventoryMutation.mutateAsync(validatedData);
-
-      // Success
-      alert('Inventory adjusted successfully!');
-      setShowAdjustModal(false);
-      setSelectedBatch(null);
-      setAdjustmentQuantity('');
-      setAdjustmentReason('');
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const errors: Record<string, string> = {};
-        error.issues.forEach((issue) => {
-          if (issue.path[0]) {
-            errors[issue.path[0].toString()] = issue.message;
-          }
-        });
-        setValidationErrors(errors);
-      } else {
-        alert(`Failed to adjust inventory: ${(error as Error).message}`);
-      }
-    }
-  };
-
-  // Calculate preview of new quantity
-  const previewNewQuantity = useMemo(() => {
-    if (!selectedBatch || !adjustmentQuantity) return null;
-
-    const current = new Decimal(selectedBatch.remaining_quantity);
-    const adjustment = new Decimal(adjustmentQuantity || 0);
-    const newQty = adjustmentType === 'increase'
-      ? current.plus(adjustment)
-      : current.minus(adjustment);
-
-    return newQty.toNumber();
-  }, [selectedBatch, adjustmentQuantity, adjustmentType]);
-
-  // Handle Physical Count submission
-  const handleSubmitPhysicalCount = async () => {
-    if (!currentUser) return;
-
-    setIsProcessingCount(true);
-
-    try {
-      // Filter products with counted quantities that differ from expected (product-based, not batch-based)
-      const adjustments = physicalCountItems
-        .filter(item => {
-          const counted = countedQuantities[item.id];
-          return counted !== undefined && counted !== '' && parseFloat(counted) !== item.expected_quantity;
-        })
-        .map(item => {
-          const counted = parseFloat(countedQuantities[item.id]);
-          const current = item.expected_quantity;
-          const difference = counted - current;
-
-          return {
-            productId: item.product_id,
-            adjustment: difference,
-            reason: `${physicalCountReason} | SKU: ${item.sku} | Expected: ${current.toFixed(2)}, Counted: ${counted.toFixed(2)}`,
-            userId: currentUser.id,
-            productName: item.product_name,
-            sku: item.sku,
-          };
-        });
-
-      if (adjustments.length === 0) {
-        alert('No differences found. All counted quantities match expected quantities.');
-        setIsProcessingCount(false);
-        return;
-      }
-
-      // Confirm before processing
-      const confirm_msg = `Process physical count?\n\n${adjustments.length} adjustment(s) will be created:\n${adjustments.slice(0, 5).map(a => `• ${a.productName}: ${a.adjustment > 0 ? '+' : ''}${a.adjustment.toFixed(2)}`).join('\n')}${adjustments.length > 5 ? `\n... and ${adjustments.length - 5} more` : ''}`;
-
-      if (!window.confirm(confirm_msg)) {
-        setIsProcessingCount(false);
-        return;
-      }
-
-      // Process each adjustment
-      let successCount = 0;
-      let errorCount = 0;
-      const errors: string[] = [];
-
-      for (const adj of adjustments) {
-        try {
-          const validatedData = InventoryAdjustmentSchema.parse({
-            productId: adj.productId,
-            adjustment: adj.adjustment,
-            reason: adj.reason,
-            userId: adj.userId,
-          });
-
-          console.log('Submitting adjustment:', validatedData);
-          const result = await adjustInventoryMutation.mutateAsync(validatedData);
-          console.log('Adjustment successful:', result);
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to adjust ${adj.productName}:`, error);
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          errors.push(`${adj.productName}: ${errorMsg}`);
-          errorCount++;
-        }
-      }
-
-      // Show results with detailed error messages
-      let resultMessage = `Physical count complete!\n✅ ${successCount} adjustment(s) created`;
-      if (errorCount > 0) {
-        resultMessage += `\n\n❌ ${errorCount} failed:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? `\n... and ${errors.length - 3} more` : ''}`;
-      }
-      alert(resultMessage);
-
-      // Reset and close
-      setShowPhysicalCountModal(false);
-      setCountedQuantities({});
-      setPhysicalCountReason('Physical inventory count - ' + formatLocalDate(new Date()));
-      refetch();
-
-    } catch (error) {
-      alert(`Failed to process physical count: ${(error as Error).message}`);
-    } finally {
-      setIsProcessingCount(false);
-    }
-  };
-
-  // Handle counted quantity change
-  const handleCountedQtyChange = (batchId: string, value: string) => {
-    setCountedQuantities(prev => ({
-      ...prev,
-      [batchId]: value,
-    }));
-  };
-
-  // Calculate physical count statistics
-  const physicalCountStats = useMemo(() => {
-    const counted = physicalCountItems.filter(item => countedQuantities[item.id] !== undefined && countedQuantities[item.id] !== '').length;
-    const discrepancies = physicalCountItems.filter(item => {
-      const countedValue = countedQuantities[item.id];
-      return countedValue !== undefined && countedValue !== '' && parseFloat(countedValue) !== item.expected_quantity;
-    }).length;
-
-    return {
-      total: physicalCountItems.length,
-      counted,
-      remaining: physicalCountItems.length - counted,
-      discrepancies,
-    };
-  }, [physicalCountItems, countedQuantities]);
-
-  // Filter items for physical count modal (product-based, not batch-based)
-  const physicalCountFilteredItems = useMemo(() => {
-    let filtered = [...physicalCountItems];
-
-    // Apply search filter
-    if (physicalCountSearchTerm.trim()) {
-      const searchLower = physicalCountSearchTerm.toLowerCase();
-      filtered = filtered.filter(item =>
-        String(item.product_name || '').toLowerCase().includes(searchLower) ||
-        String(item.sku || '').toLowerCase().includes(searchLower)
-      );
-    }
-
-    // Apply discrepancy filter
-    if (showOnlyDiscrepancies) {
-      filtered = filtered.filter(item => {
-        const countedValue = countedQuantities[item.id];
-        return countedValue !== undefined && countedValue !== '' && parseFloat(countedValue) !== item.expected_quantity;
-      });
-    }
-
-    // Apply uncounted filter
-    if (showOnlyUncounted) {
-      filtered = filtered.filter(item =>
-        countedQuantities[item.id] === undefined || countedQuantities[item.id] === ''
-      );
-    }
-
-    return filtered;
-  }, [physicalCountItems, physicalCountSearchTerm, showOnlyDiscrepancies, showOnlyUncounted, countedQuantities]);
-
   // Loading state
   if (isLoading) {
     return (
@@ -687,26 +340,16 @@ export default function StockMovementsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Stock Movements & Adjustments</h2>
-          <p className="text-gray-600 mt-1">Complete audit trail and manual inventory adjustments</p>
+          <h2 className="text-2xl font-bold text-gray-900">Movement History</h2>
+          <p className="text-gray-600 mt-1">Complete audit trail of all inventory movements</p>
         </div>
         <div className="flex gap-2">
-          {canAdjust && (
-            <>
-              <button
-                onClick={handleOpenBatchSelector}
-                className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2"
-              >
-                ⚙️ Create Adjustment
-              </button>
-              <button
-                onClick={() => setShowPhysicalCountModal(true)}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
-              >
-                🔍 Physical Count
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => navigate('/inventory/adjustments')}
+            className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2"
+          >
+            ⚖️ Adjustments & Stock Count
+          </button>
           <button
             onClick={handleExportCSV}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
@@ -1103,449 +746,17 @@ export default function StockMovementsPage() {
 
       {/* Business Rules Info */}
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-900 mb-2">📋 About Stock Movements & Adjustments</h3>
+        <h3 className="text-sm font-medium text-blue-900 mb-2">📋 About Movement History</h3>
         <ul className="text-xs text-blue-800 space-y-1">
           <li>• <strong>Audit Trail:</strong> Read-only view of ALL inventory movements (immutable records)</li>
-          <li>• <strong>Create Adjustments:</strong> Use "Create Adjustment" button to manually adjust stock (ADMIN/MANAGER only)</li>
-          <li>• All stock movements are immutable - they cannot be edited or deleted once recorded</li>
+          <li>• All stock movements are immutable — they cannot be edited or deleted once recorded</li>
           <li>• Each movement updates the running balance automatically</li>
           <li>• <strong>Stock Increases (+):</strong> GOODS_RECEIPT, ADJUSTMENT_IN, TRANSFER_IN, RETURN</li>
           <li>• <strong>Stock Decreases (-):</strong> SALE, ADJUSTMENT_OUT, TRANSFER_OUT, DAMAGE, EXPIRY</li>
           <li>• All movements are linked to source documents (PO, Sales, etc.) for full traceability</li>
-          <li>• All adjustments require a reason (minimum 5 characters) and are logged with user ID and timestamp</li>
-          <li>• Balance after each movement provides complete audit trail</li>
+          <li>• To create adjustments, record damages, or run a physical count, go to <strong>Adjustments &amp; Stock Count</strong></li>
         </ul>
       </div>
-
-      {/* Batch Selector Modal */}
-      {showBatchSelector && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowBatchSelector(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Select Product to Adjust</h3>
-              <p className="text-sm text-gray-600 mt-1">Choose a product batch to create an adjustment</p>
-            </div>
-
-            <div className="px-6 py-4 border-b border-gray-200">
-              <input
-                type="text"
-                value={batchSearchTerm}
-                onChange={(e) => setBatchSearchTerm(e.target.value)}
-                placeholder="Search by product name or batch number..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                autoFocus
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Expiry</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredBatches.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                        {batchSearchTerm ? 'No batches match your search' : 'No inventory batches found'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredBatches.map((batch) => (
-                      <tr key={batch.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                          {batch.product_name}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900 font-mono">
-                          {batch.batch_number}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
-                          {batch.remaining_quantity.toFixed(2)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">
-                          {formatDisplayDate(batch.expiry_date)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => handleSelectBatch(batch)}
-                            className="text-blue-600 hover:text-blue-900 font-medium text-sm"
-                          >
-                            Select →
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setShowBatchSelector(false)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Adjustment Modal */}
-      {showAdjustModal && selectedBatch && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowAdjustModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Adjust Inventory
-              </h3>
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedBatch.product_name} - {selectedBatch.batch_number}
-              </p>
-            </div>
-
-            <div className="px-6 py-4 space-y-4">
-              {/* Current Quantity */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Current Quantity
-                </label>
-                <div className="text-2xl font-bold text-gray-900">
-                  {selectedBatch.remaining_quantity.toFixed(2)}
-                </div>
-              </div>
-
-              {/* Adjustment Type */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Adjustment Type
-                </label>
-                <div className="flex gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setAdjustmentType('increase')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${adjustmentType === 'increase'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                  >
-                    ➕ Increase
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAdjustmentType('decrease')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${adjustmentType === 'decrease'
-                      ? 'bg-red-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                  >
-                    ➖ Decrease
-                  </button>
-                </div>
-              </div>
-
-              {/* Quantity */}
-              <div>
-                <label htmlFor="adj-quantity" className="block text-sm font-medium text-gray-700 mb-1">
-                  Adjustment Quantity *
-                </label>
-                <input
-                  id="adj-quantity"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={adjustmentQuantity}
-                  onChange={(e) => setAdjustmentQuantity(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${validationErrors.adjustment ? 'border-red-500' : 'border-gray-300'
-                    }`}
-                  placeholder="0.00"
-                />
-                {validationErrors.adjustment && (
-                  <p className="text-red-600 text-sm mt-1">{validationErrors.adjustment}</p>
-                )}
-              </div>
-
-              {/* Preview New Quantity */}
-              {previewNewQuantity !== null && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <div className="text-sm text-blue-800">
-                    <strong>New Quantity:</strong> {previewNewQuantity.toFixed(2)}
-                    {previewNewQuantity < 0 && (
-                      <span className="text-red-600 ml-2">⚠️ Negative quantity not allowed</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Reason */}
-              <div>
-                <label htmlFor="adj-reason" className="block text-sm font-medium text-gray-700 mb-1">
-                  Reason * (min 5 characters)
-                </label>
-                <textarea
-                  id="adj-reason"
-                  value={adjustmentReason}
-                  onChange={(e) => setAdjustmentReason(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${validationErrors.reason ? 'border-red-500' : 'border-gray-300'
-                    }`}
-                  rows={3}
-                  placeholder="Physical count correction, damaged goods, etc."
-                />
-                {validationErrors.reason && (
-                  <p className="text-red-600 text-sm mt-1">{validationErrors.reason}</p>
-                )}
-                <p className="text-xs text-gray-500 mt-1">
-                  {adjustmentReason.length}/5 characters minimum
-                </p>
-              </div>
-            </div>
-
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={() => setShowAdjustModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium"
-                disabled={adjustInventoryMutation.isPending}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitAdjustment}
-                disabled={adjustInventoryMutation.isPending || !adjustmentQuantity || !adjustmentReason}
-                className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
-              >
-                {adjustInventoryMutation.isPending ? 'Saving...' : 'Save Adjustment'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Physical Count Modal */}
-      {showPhysicalCountModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowPhysicalCountModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-gray-200 bg-purple-600">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-xl font-semibold text-white">Physical Inventory Count</h3>
-                  <p className="text-purple-100 text-sm mt-1">
-                    Enter actual counted quantities for each product/batch
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowPhysicalCountModal(false)}
-                  className="text-white hover:text-purple-200 text-2xl leading-none"
-                  disabled={isProcessingCount}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
-            {/* Statistics Bar */}
-            <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div>
-                  <div className="text-sm text-gray-600">Total Items</div>
-                  <div className="text-xl font-bold text-gray-900">{physicalCountStats.total}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600">Counted</div>
-                  <div className="text-xl font-bold text-blue-600">{physicalCountStats.counted}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600">Remaining</div>
-                  <div className="text-xl font-bold text-yellow-600">{physicalCountStats.remaining}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600">Discrepancies</div>
-                  <div className="text-xl font-bold text-red-600">{physicalCountStats.discrepancies}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Count Reason */}
-            <div className="px-6 py-3 bg-white border-b border-gray-200">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Count Reference / Reason
-              </label>
-              <input
-                type="text"
-                value={physicalCountReason}
-                onChange={(e) => setPhysicalCountReason(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                placeholder="e.g., Monthly physical count - November 2025"
-              />
-            </div>
-
-            {/* Search and Filters */}
-            <div className="px-6 py-3 bg-white border-b border-gray-200">
-              <div className="mb-3">
-                <input
-                  type="text"
-                  value={physicalCountSearchTerm}
-                  onChange={(e) => setPhysicalCountSearchTerm(e.target.value)}
-                  placeholder="🔍 Search by product name or batch number..."
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showOnlyUncounted}
-                    onChange={(e) => setShowOnlyUncounted(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                  />
-                  <span className="text-sm text-gray-700">Show only uncounted</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showOnlyDiscrepancies}
-                    onChange={(e) => setShowOnlyDiscrepancies(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                  />
-                  <span className="text-sm text-gray-700">Show only discrepancies</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Products Table */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {physicalCountItems.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">
-                  No products found. Please add products first.
-                </div>
-              ) : physicalCountFilteredItems.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">
-                  No items match your search or filter criteria. Try adjusting your filters.
-                </div>
-              ) : (
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Expected Qty (Base Unit)</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Counted Qty (Base Unit)</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Difference</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {physicalCountFilteredItems.map((item) => {
-                      const countedValue = countedQuantities[item.id];
-                      const counted = countedValue !== undefined && countedValue !== '' ? parseFloat(countedValue) : null;
-                      const difference = counted !== null ? counted - item.expected_quantity : null;
-                      const hasDifference = difference !== null && Math.abs(difference) > 0.001;
-
-                      return (
-                        <tr key={item.id} className={hasDifference ? 'bg-yellow-50' : !item.has_stock ? 'bg-gray-50' : ''}>
-                          <td className="px-4 py-3 text-sm">
-                            <div className="font-medium text-gray-900">{item.product_name}</div>
-                            {!item.has_stock && (
-                              <div className="text-xs text-gray-500">No stock on record</div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">
-                            {item.sku}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
-                            {item.expected_quantity.toFixed(2)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right">
-                            <input
-                              type="number"
-                              value={countedValue || ''}
-                              onChange={(e) => handleCountedQtyChange(item.id, e.target.value)}
-                              step="0.01"
-                              min="0"
-                              placeholder="0.00"
-                              className="w-32 px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                              disabled={isProcessingCount}
-                            />
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right">
-                            {difference !== null ? (
-                              <span className={`font-medium ${Math.abs(difference) < 0.001 ? 'text-green-600' :
-                                difference > 0 ? 'text-blue-600' : 'text-red-600'
-                                }`}>
-                                {difference > 0 ? '+' : ''}{difference.toFixed(2)}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Info Box */}
-            <div className="px-6 py-3 bg-blue-50 border-t border-blue-200">
-              <p className="text-sm text-blue-800">
-                <strong>💡 How it works:</strong> All quantities are displayed and counted in the <strong>BASE UNIT</strong>.
-                Enter the actual counted quantity you physically verified. Products with no stock show expected quantity as 0.
-                When you submit, adjustments will be created for all items with discrepancies.
-                Stock will be automatically created for products with zero current stock.
-              </p>
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
-              <div className="text-sm text-gray-600">
-                {physicalCountStats.discrepancies > 0 ? (
-                  <span className="text-yellow-600 font-medium">
-                    ⚠️ {physicalCountStats.discrepancies} item(s) with discrepancies will be adjusted
-                  </span>
-                ) : physicalCountStats.counted > 0 ? (
-                  <span className="text-green-600 font-medium">
-                    ✅ All counted quantities match expected
-                  </span>
-                ) : (
-                  <span>Enter counted quantities to see discrepancies</span>
-                )}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowPhysicalCountModal(false)}
-                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium"
-                  disabled={isProcessingCount}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSubmitPhysicalCount}
-                  disabled={isProcessingCount || physicalCountStats.counted === 0 || !physicalCountReason.trim()}
-                  className="px-4 py-2 bg-purple-600 text-white hover:bg-purple-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isProcessingCount ? (
-                    <>
-                      <span className="animate-spin">⏳</span>
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>✅</span>
-                      <span>Process Count ({physicalCountStats.discrepancies} adjustments)</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

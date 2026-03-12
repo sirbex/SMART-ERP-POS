@@ -12,6 +12,7 @@ import {
   InventoryBusinessRules,
 } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
+import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export interface CreatePOInput {
@@ -81,7 +82,7 @@ export const purchaseOrderService = {
           item.productId,
         ]);
         if (productRes.rows.length > 0) {
-          const baseCost = Number(productRes.rows[0].cost_price || 0);
+          const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
           if (baseCost > 0 && item.unitCost > 0) {
             const ratio = item.unitCost / baseCost;
             const rounded = Math.round(ratio);
@@ -97,7 +98,7 @@ export const purchaseOrderService = {
 
         // BR-PO-003: Validate non-negative unit cost (using Decimal for precision)
         const unitCostDecimal = new Decimal(item.unitCost);
-        PurchaseOrderBusinessRules.validateUnitCost(unitCostDecimal.toNumber());
+        PurchaseOrderBusinessRules.validateUnitCost(Money.toNumber(unitCostDecimal));
         logger.info('BR-PO-003: Unit cost validation passed', {
           productId: item.productId,
           unitCost: unitCostDecimal.toString(),
@@ -113,10 +114,10 @@ export const purchaseOrderService = {
       }
 
       // Calculate total for additional validations
-      const totalAmount = input.items.reduce(
+      const totalAmount = Money.toNumber(input.items.reduce(
         (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
         new Decimal(0)
-      ).toNumber();
+      ));
 
       // BR-PO-007 & BR-PO-011: Validate supplier lead time
       if (input.expectedDate) {
@@ -163,7 +164,7 @@ export const purchaseOrderService = {
         productId: item.productId,
         productName: item.productName,
         quantity: item.quantity,
-        unitCost: new Decimal(item.unitCost).toNumber(), // Bank-grade precision
+        unitCost: Money.toNumber(new Decimal(item.unitCost)), // Bank-grade precision
       }));
 
       const items = await purchaseOrderRepository.addPOItems(client, poItems);

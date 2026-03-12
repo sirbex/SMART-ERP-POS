@@ -313,6 +313,15 @@ export function formatCurrencyPDF(amount: unknown): string {
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// Utility function to format quantity (comma-separated, no forced decimals)
+export function formatQuantityPDF(amount: unknown): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+  if (isNaN(num)) return '0';
+  // Show up to 3 decimals only if fractional, otherwise integer
+  const formatted = Number.isInteger(num) ? String(num) : num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  return formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 // Utility function to format date
 export function formatDatePDF(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;

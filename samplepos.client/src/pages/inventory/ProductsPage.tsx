@@ -129,10 +129,14 @@ export default function ProductsPage() {
 
   // API Hooks — use offline-aware hook for reading, standard hooks for mutations
   const queryClient = useQueryClient();
-  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true });
+  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true, limit: 10000 });
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();
+
+  // Pagination
+  const ITEMS_PER_PAGE = 50;
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Local State
   const [searchTerm, setSearchTerm] = useState('');
@@ -364,6 +368,18 @@ export default function ProductsPage() {
 
     return filtered;
   }, [products, searchTerm, filterStatus]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus]);
+
+  // Paginated products
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredProducts.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredProducts, currentPage]);
 
   // Validate form (Zod + duplicate SKU check + UOM check)
   const validateForm = (): boolean => {
@@ -971,7 +987,7 @@ export default function ProductsPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredProducts.length === 0 ? (
+              {paginatedProducts.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || filterStatus !== 'all'
@@ -980,7 +996,7 @@ export default function ProductsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((product: ProductListItem) => {
+                paginatedProducts.map((product: ProductListItem) => {
                   const margin = calculateMargin(product.costPrice, product.sellingPrice);
                   return (
                     <tr key={product.id} className="hover:bg-gray-50">
@@ -1063,6 +1079,34 @@ export default function ProductsPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {filteredProducts.length > ITEMS_PER_PAGE && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
+            <p className="text-sm text-gray-600">
+              Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredProducts.length)} of {filteredProducts.length} products
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-700">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Create/Edit Modal */}

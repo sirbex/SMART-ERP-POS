@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 import { BusinessError } from '../../middleware/errorHandler.js';
 
 export interface SaleRecord {
@@ -174,13 +175,13 @@ export const salesRepository = {
           saleNumber,
           data.customerId,
           data.saleDate || new Date().toLocaleDateString('en-CA'), // Use YYYY-MM-DD string format, no Date object conversion
-          parseFloat(subtotal.toFixed(2)), // $4
-          parseFloat(taxAmount.toFixed(2)), // $5
-          parseFloat(discountAmount.toFixed(2)), // $6
-          parseFloat(totalAmount.toFixed(2)), // $7
-          parseFloat(totalCost.toFixed(2)), // $8
-          parseFloat(profit.toFixed(2)), // $9
-          parseFloat(profitMargin.toFixed(4)), // 4 decimal places for margin (0.2500 = 25%)
+          subtotal.toFixed(2), // $4 — string for PostgreSQL NUMERIC (bank-grade precision)
+          taxAmount.toFixed(2), // $5
+          discountAmount.toFixed(2), // $6
+          totalAmount.toFixed(2), // $7
+          totalCost.toFixed(2), // $8
+          profit.toFixed(2), // $9
+          profitMargin.toFixed(4), // 4 decimal places for margin (0.2500 = 25%)
           data.paymentMethod,
           data.paymentReceived,
           data.changeAmount,
@@ -193,11 +194,11 @@ export const salesRepository = {
       const pgError = dbError as { constraint?: string; message?: string };
       if (pgError.constraint === 'chk_sales_payment_valid') {
         throw new BusinessError(
-          `Payment amount is invalid for this sale. Amount paid: ${data.paymentReceived}, Total: ${parseFloat(totalAmount.toFixed(2))}`,
+          `Payment amount is invalid for this sale. Amount paid: ${data.paymentReceived}, Total: ${totalAmount.toFixed(2)}`,
           'ERR_PAYMENT_005',
           {
             amountPaid: data.paymentReceived,
-            totalAmount: parseFloat(totalAmount.toFixed(2)),
+            totalAmount: Money.toNumber(totalAmount),
             constraint: 'chk_sales_payment_valid',
           }
         );
@@ -249,9 +250,9 @@ export const salesRepository = {
         itemType,
         item.quantity,
         item.unitPrice,
-        parseFloat(lineTotal.toFixed(2)), // Maps to total_price
-        parseFloat(costPrice.toFixed(2)), // Maps to unit_cost
-        parseFloat(itemProfit.toFixed(2)), // Maps to profit
+        lineTotal.toFixed(2), // Maps to total_price — string for PostgreSQL NUMERIC
+        costPrice.toFixed(2), // Maps to unit_cost
+        itemProfit.toFixed(2), // Maps to profit
         item.uomId || null, // Include uom_id (NULL if not provided)
         item.discountAmount || 0 // Per-item discount amount
       );
@@ -617,10 +618,10 @@ export const salesRepository = {
         profit_margin_pct:
           totalRevenue > 0
             ? new Decimal(totalProfit)
-                .dividedBy(totalRevenue)
-                .times(100)
-                .toDecimalPlaces(2)
-                .toString()
+              .dividedBy(totalRevenue)
+              .times(100)
+              .toDecimalPlaces(2)
+              .toString()
             : '0.00',
       };
     });

@@ -167,8 +167,9 @@ export async function getAllMovements(
   let paramIndex = 1;
 
   if (filters?.movementType) {
-    whereClauses.push(`sm.movement_type = $${paramIndex++}`);
-    values.push(filters.movementType);
+    const types = Array.isArray(filters.movementType) ? filters.movementType : [filters.movementType];
+    whereClauses.push(`sm.movement_type = ANY($${paramIndex++})`);
+    values.push(types);
   }
 
   if (filters?.startDate) {

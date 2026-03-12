@@ -155,68 +155,78 @@ export const reportsRepository = {
     // Add method as a parameter to avoid SQL injection
     params.push(method);
 
-    // Get all batches with remaining quantity as of the specified date
+    // Use product_inventory + product_valuation as the primary source;
+    // fall back to batch-level costing when batches exist.
     const query = `
-      WITH batch_quantities AS (
-        SELECT 
-          b.id as batch_id,
+      WITH batch_cost AS (
+        SELECT
           b.product_id,
-          b.batch_number,
-          b.received_date,
-          b.cost_price as unit_cost,
-          b.quantity as initial_quantity,
-          b.expiry_date,
-          b.remaining_quantity
-        FROM inventory_batches b
-        WHERE b.received_date <= $1
-          AND b.remaining_quantity > 0
-      ),
-      product_valuation AS (
-        SELECT 
-          p.id as product_id,
-          p.name as product_name,
-          p.sku,
-          p.category,
-          SUM(bq.remaining_quantity) as total_quantity,
-          CASE 
-            WHEN $${methodParamIndex} = 'FIFO' THEN 
-              (SELECT cost_price FROM inventory_batches WHERE product_id = p.id AND received_date <= $1 AND remaining_quantity > 0 ORDER BY received_date ASC LIMIT 1)
+          CASE
+            WHEN $${methodParamIndex} = 'FIFO' THEN
+              (SELECT b2.cost_price FROM inventory_batches b2
+               WHERE b2.product_id = b.product_id AND b2.received_date <= $1
+                 AND b2.remaining_quantity > 0
+               ORDER BY b2.received_date ASC LIMIT 1)
             WHEN $${methodParamIndex} = 'LIFO' THEN
-              (SELECT cost_price FROM inventory_batches WHERE product_id = p.id AND received_date <= $1 AND remaining_quantity > 0 ORDER BY received_date DESC LIMIT 1)
-            ELSE 
-              AVG(bq.unit_cost)
-          END as unit_cost
-        FROM products p
-        INNER JOIN batch_quantities bq ON bq.product_id = p.id
-        ${categoryFilter ? 'WHERE ' + categoryFilter.replace('AND ', '') : ''}
-        GROUP BY p.id, p.name, p.sku, p.category
+              (SELECT b2.cost_price FROM inventory_batches b2
+               WHERE b2.product_id = b.product_id AND b2.received_date <= $1
+                 AND b2.remaining_quantity > 0
+               ORDER BY b2.received_date DESC LIMIT 1)
+            ELSE AVG(b.cost_price)
+          END AS batch_unit_cost
+        FROM inventory_batches b
+        WHERE b.received_date <= $1 AND b.remaining_quantity > 0
+        GROUP BY b.product_id
       )
-      SELECT 
-        product_id,
-        product_name,
-        sku,
-        category,
-        total_quantity,
-        unit_cost,
-        (total_quantity * unit_cost) as total_value,
-        NOW() as last_updated
-      FROM product_valuation
-      ORDER BY total_value DESC
+      SELECT
+        p.id AS product_id,
+        p.name AS product_name,
+        p.sku,
+        p.category,
+        COALESCE(pi.quantity_on_hand, 0) AS total_quantity,
+        COALESCE(bc.batch_unit_cost, pv.cost_price, 0) AS unit_cost,
+        COALESCE(pv.selling_price, 0) AS selling_price,
+        NOW() AS last_updated
+      FROM products p
+      LEFT JOIN product_inventory pi ON pi.product_id = p.id
+      LEFT JOIN product_valuation pv ON pv.product_id = p.id
+      LEFT JOIN batch_cost bc ON bc.product_id = p.id
+      WHERE p.is_active = true
+        AND COALESCE(pi.quantity_on_hand, 0) > 0
+        ${categoryFilter}
+      ORDER BY (COALESCE(pi.quantity_on_hand, 0) * COALESCE(bc.batch_unit_cost, pv.cost_price, 0)) DESC
     `;
 
     const result = await pool.query(query, params);
 
     // Use Decimal.js for precise calculations
-    return result.rows.map(row => ({
-      productId: row.product_id,
-      productName: row.product_name,
-      sku: row.sku,
-      category: row.category,
-      quantityOnHand: new Decimal(row.total_quantity).toNumber(),
-      unitCost: new Decimal(row.unit_cost).toDecimalPlaces(2).toNumber(),
-      totalValue: new Decimal(row.total_quantity).times(row.unit_cost).toDecimalPlaces(2).toNumber(),
-      lastUpdated: formatDate(row.last_updated),
-    }));
+    return result.rows.map(row => {
+      const qty = new Decimal(row.total_quantity || 0);
+      const cost = new Decimal(row.unit_cost || 0);
+      const sell = new Decimal(row.selling_price || 0);
+      const totalValue = qty.times(cost).toDecimalPlaces(2).toNumber();
+      const potentialRevenue = qty.times(sell).toDecimalPlaces(2).toNumber();
+      const profitPerUnit = sell.minus(cost).toDecimalPlaces(2).toNumber();
+      const potentialProfit = qty.times(sell.minus(cost)).toDecimalPlaces(2).toNumber();
+      const profitMargin = sell.greaterThan(0)
+        ? sell.minus(cost).dividedBy(sell).times(100).toDecimalPlaces(2).toNumber()
+        : 0;
+      return {
+        productId: row.product_id,
+        productName: row.product_name,
+        sku: row.sku,
+        category: row.category,
+        quantityOnHand: qty.toNumber(),
+        unitCost: cost.toDecimalPlaces(2).toNumber(),
+        sellingPrice: sell.toDecimalPlaces(2).toNumber(),
+        totalValue,
+        potentialRevenue,
+        profitPerUnit,
+        potentialProfit,
+        profitMargin,
+        lastUpdated: formatDate(row.last_updated),
+      };
+    });
   },
 
   /**

@@ -5,6 +5,7 @@ import { useAuth } from './hooks/useAuth';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
+import OfflineAutoSync from './components/OfflineAutoSync';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import POSPage from './pages/pos/POSPage';
@@ -52,6 +53,7 @@ import JournalEntriesPage from './pages/JournalEntriesPage';
 import PeriodManagementPage from './pages/PeriodManagementPage';
 import BankingPage from './pages/accounting/BankingPage';
 import DeliveryPage from './pages/delivery/DeliveryPage';
+import ImportPage from './pages/ImportPage';
 import BarcodeLookupPage from './pages/inventory/BarcodeLookupPage';
 
 // Platform (Super Admin) imports
@@ -101,6 +103,7 @@ function App() {
     <PlatformAuthProvider>
       <BrowserRouter>
         <NetworkStatusBanner />
+        <OfflineAutoSync />
         <Toaster
           position="top-right"
           toastOptions={{
@@ -500,6 +503,16 @@ function App() {
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
                       <DeliveryPage />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* CSV Import - ADMIN, MANAGER */}
+                <Route
+                  path="/import"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ImportPage />
                     </ProtectedRoute>
                   }
                 />

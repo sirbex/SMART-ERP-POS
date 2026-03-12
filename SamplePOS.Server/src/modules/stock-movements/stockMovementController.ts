@@ -24,6 +24,18 @@ const RecordMovementSchema = z
   })
   .strict();
 
+const MOVEMENT_TYPE_VALUES = [
+  'GOODS_RECEIPT',
+  'SALE',
+  'ADJUSTMENT_IN',
+  'ADJUSTMENT_OUT',
+  'TRANSFER_IN',
+  'TRANSFER_OUT',
+  'RETURN',
+  'DAMAGE',
+  'EXPIRY',
+] as const;
+
 const ListMovementsQuerySchema = z.object({
   page: z
     .string()
@@ -34,18 +46,16 @@ const ListMovementsQuerySchema = z.object({
     .optional()
     .transform((val) => (val ? parseInt(val) : 100)),
   movementType: z
-    .enum([
-      'GOODS_RECEIPT',
-      'SALE',
-      'ADJUSTMENT_IN',
-      'ADJUSTMENT_OUT',
-      'TRANSFER_IN',
-      'TRANSFER_OUT',
-      'RETURN',
-      'DAMAGE',
-      'EXPIRY',
-    ])
-    .optional(),
+    .string()
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      const types = val.split(',').map((t) => t.trim());
+      const validTypes = types.filter((t): t is MovementType =>
+        (MOVEMENT_TYPE_VALUES as readonly string[]).includes(t)
+      );
+      return validTypes.length > 0 ? validTypes : undefined;
+    }),
   startDate: z
     .string()
     .optional(),
@@ -116,7 +126,7 @@ export const getAllMovements = asyncHandler(async (req, res) => {
   // .parse() throws ZodError on failure — global handler formats it
   const query = ListMovementsQuerySchema.parse(req.query);
   const result = await stockMovementService.getAllMovements(pool, query.page, query.limit, {
-    movementType: query.movementType as MovementType | undefined,
+    movementType: query.movementType,
     startDate: query.startDate,
     endDate: query.endDate,
   });

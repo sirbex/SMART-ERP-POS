@@ -1,39 +1,39 @@
 # Phase 6: Deployment & Infrastructure
 # Node.js Backend Dockerfile
 
-FROM node:18-alpine AS base
+FROM node:20-alpine AS base
 
-# Install dependencies only when needed
+# Install dumb-init for proper PID 1 signal handling (fast container shutdown)
+RUN apk add --no-cache dumb-init
+
+# Install production dependencies only
 FROM base AS deps
 WORKDIR /app
-
-# Install dependencies based on the package manager
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Rebuild the source code only when needed
+# Build stage — needs devDependencies for TypeScript compilation
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-# Install development dependencies for build
+COPY package.json package-lock.json* ./
 RUN npm ci
+COPY . .
 RUN npm run build
 
-# Production image, copy all the files and run the app
+# Production image — lean: only dist + production node_modules
 FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=512"
 
 # Create a non-privileged user
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nodejs
 
-# Copy the built application
+# Copy built output and production-only dependencies
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
 USER nodejs
@@ -43,4 +43,5 @@ EXPOSE 3001
 ENV PORT 3001
 ENV HOSTNAME "0.0.0.0"
 
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/server.js"]

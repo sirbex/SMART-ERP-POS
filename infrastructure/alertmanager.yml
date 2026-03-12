@@ -1,0 +1,55 @@
+# Alertmanager configuration for SamplePOS
+# Replace placeholder values before deploying.
+#
+# Supported receivers: email (SMTP) and Slack webhook.
+# Enable whichever channel your team uses.
+
+global:
+  resolve_timeout: 5m
+  # Uncomment and configure SMTP for email alerts:
+  # smtp_smarthost: 'smtp.gmail.com:587'
+  # smtp_from: 'alerts@samplepos.com'
+  # smtp_auth_username: 'alerts@samplepos.com'
+  # smtp_auth_password: 'your_app_password'
+  # smtp_require_tls: true
+
+route:
+  receiver: default
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    - match:
+        severity: critical
+      receiver: critical-channel
+      repeat_interval: 1h
+
+receivers:
+  - name: default
+    # Slack webhook — replace URL with your workspace's incoming webhook
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/REPLACE/WITH/WEBHOOK'
+        channel: '#samplepos-alerts'
+        title: '{{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+
+    # Email — uncomment after configuring global SMTP above
+    # email_configs:
+    #   - to: 'ops-team@samplepos.com'
+    #     send_resolved: true
+
+  - name: critical-channel
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/REPLACE/WITH/WEBHOOK'
+        channel: '#samplepos-critical'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+
+    # Email — uncomment after configuring global SMTP above
+    # email_configs:
+    #   - to: 'ops-team@samplepos.com'
+    #     send_resolved: true

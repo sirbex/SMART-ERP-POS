@@ -89,6 +89,15 @@ export function useOfflineMode() {
     saveQueue(syncQueue);
   }, [syncQueue]);
 
+  // Re-read queue when background or app-level sync updates localStorage
+  useEffect(() => {
+    const handleQueueUpdate = () => {
+      setSyncQueue(loadQueue());
+    };
+    window.addEventListener('offline-queue-updated', handleQueueUpdate);
+    return () => window.removeEventListener('offline-queue-updated', handleQueueUpdate);
+  }, []);
+
   /**
    * Save a sale for offline sync.
    * – Assigns idempotency key

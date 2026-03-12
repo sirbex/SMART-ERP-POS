@@ -79,7 +79,7 @@ export interface StockMovementWithDetails extends StockMovement {
  * Movement filters
  */
 export interface MovementFilters {
-  movementType?: MovementType;
+  movementType?: MovementType | MovementType[];
   startDate?: string;
   endDate?: string;
 }

@@ -79,6 +79,14 @@ export const queryKeys = {
     detail: (id: string) => ['invoices', 'detail', id] as const,
     payments: (id: string) => ['invoices', 'payments', id] as const,
   },
+  import: {
+    all: ['import'] as const,
+    jobs: (page?: number, limit?: number, entityType?: string, status?: string) =>
+      ['import', 'jobs', page, limit, entityType, status] as const,
+    job: (id: string) => ['import', 'job', id] as const,
+    errors: (jobId: string, page?: number, limit?: number) =>
+      ['import', 'errors', jobId, page, limit] as const,
+  },
 };
 
 // Generic Hooks

@@ -168,13 +168,12 @@ export class InventoryBusinessRules {
           oldestExpiry: oldestBatch.expiry_date,
         });
 
-        // Warning only - don't throw, but log for audit
-        // In strict mode, uncomment to enforce:
-        // throw new BusinessRuleViolation(
-        //   'BR-INV-006',
-        //   `FEFO violation: Must use batch ${oldestBatch.batch_number} expiring ${oldestBatch.expiry_date}`,
-        //   'FEFO_VIOLATION'
-        // );
+        // Enforce FEFO — reject if not using the oldest expiring batch
+        throw new BusinessRuleViolation(
+          'BR-INV-006',
+          `FEFO violation: Must use batch ${oldestBatch.batch_number} expiring ${oldestBatch.expiry_date}`,
+          'FEFO_VIOLATION'
+        );
       }
     }
   }

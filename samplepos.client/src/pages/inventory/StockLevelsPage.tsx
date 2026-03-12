@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useOfflineStockLevels, useOfflineProducts } from '../../hooks/useOfflineData';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { formatMultiUomQuantity } from '../../utils/formatQuantity';
@@ -46,8 +46,10 @@ export default function StockLevelsPage() {
 
   // Use offline-aware hooks that cache to IndexedDB and fall back when offline
   const { data: stockLevelsData, isLoading, error, refetch } = useOfflineStockLevels();
-  const { data: productsData } = useOfflineProducts();
+  const { data: productsData } = useOfflineProducts({ limit: 10000 });
 
+  const ITEMS_PER_PAGE = 50;
+  const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'low' | 'expiring'>('all');
 
@@ -122,6 +124,18 @@ export default function StockLevelsPage() {
 
     return filtered;
   }, [stockLevels, searchTerm, filterStatus]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus]);
+
+  // Paginated stock levels
+  const totalPages = Math.max(1, Math.ceil(filteredStockLevels.length / ITEMS_PER_PAGE));
+  const paginatedStockLevels = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredStockLevels.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredStockLevels, currentPage]);
 
   if (isLoading) {
     return (
@@ -238,7 +252,7 @@ export default function StockLevelsPage() {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {filteredStockLevels.length === 0 ? (
+            {paginatedStockLevels.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                   {searchTerm || filterStatus !== 'all'
@@ -247,7 +261,7 @@ export default function StockLevelsPage() {
                 </td>
               </tr>
             ) : (
-              filteredStockLevels.map((item: StockLevelItem) => {
+              paginatedStockLevels.map((item: StockLevelItem) => {
                 const product = productMap.get(item.product_id);
                 // Backend returns total_stock, not total_quantity
                 const totalQty =
@@ -304,11 +318,10 @@ export default function StockLevelsPage() {
                     </td>
                     <td className="px-4 py-4 text-center whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${
-                          needsReorder
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-green-100 text-green-800'
-                        }`}
+                        className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${needsReorder
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-green-100 text-green-800'
+                          }`}
                       >
                         {needsReorder ? '⚠️ Low Stock' : '✓ Normal'}
                       </span>
@@ -320,6 +333,34 @@ export default function StockLevelsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {filteredStockLevels.length > ITEMS_PER_PAGE && (
+        <div className="flex items-center justify-between px-4 py-4 bg-white rounded-lg shadow mt-4">
+          <p className="text-sm text-gray-600">
+            Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredStockLevels.length)} of {filteredStockLevels.length} products
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-700">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">

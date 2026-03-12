@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+*.test.ts
+*.spec.ts
+__tests__
+.env
+.env.*
+coverage
+.vscode
+logs
+*.log

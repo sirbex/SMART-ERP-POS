@@ -14,6 +14,7 @@ import {
   ReportPDFGenerator,
   PDFTableColumn,
   formatCurrencyPDF,
+  formatQuantityPDF,
   formatDatePDF,
   PDFColors
 } from '../../utils/pdfGenerator.js';
@@ -180,7 +181,7 @@ export const reportsController = {
       pdfGen.addSummaryCards([
         { label: 'Total Value', value: formatCurrencyPDF(report.summary.totalValue), color: PDFColors.success },
         { label: 'Total Items', value: String(report.summary.totalItems), color: PDFColors.primary },
-        { label: 'Total Quantity', value: formatCurrencyPDF(report.summary.totalQuantity), color: PDFColors.info },
+        { label: 'Total Quantity', value: formatQuantityPDF(report.summary.totalQuantity), color: PDFColors.info },
         { label: 'Valuation Method', value: method, color: PDFColors.secondary },
       ]);
 
@@ -321,7 +322,7 @@ export const reportsController = {
 
       pdfGen.addSummaryCards([
         { label: 'Total Expiring Items', value: String(report.summary.totalItems), color: PDFColors.warning },
-        { label: 'Total Qty at Risk', value: formatCurrencyPDF(report.summary.totalQuantityAtRisk || 0), color: PDFColors.danger },
+        { label: 'Total Qty at Risk', value: formatQuantityPDF(report.summary.totalQuantityAtRisk || 0), color: PDFColors.danger },
         { label: 'Potential Loss', value: formatCurrencyPDF(report.summary.totalPotentialLoss || 0), color: PDFColors.danger },
         { label: 'Days Threshold', value: String(days), color: PDFColors.info },
       ]);
@@ -456,7 +457,7 @@ export const reportsController = {
       pdfGen.addSummaryCards([
         { label: 'Total Products', value: String(report.summary.totalProducts), color: PDFColors.primary },
         { label: 'Total Revenue', value: formatCurrencyPDF(report.summary.totalRevenue || 0), color: PDFColors.success },
-        { label: 'Total Units Sold', value: formatCurrencyPDF(report.summary.totalQuantitySold || 0), color: PDFColors.info },
+        { label: 'Total Units Sold', value: formatQuantityPDF(report.summary.totalQuantitySold || 0), color: PDFColors.info },
         { label: 'Total Profit', value: formatCurrencyPDF(report.summary.totalProfit || 0), color: PDFColors.secondary },
       ]);
 
@@ -2346,7 +2347,7 @@ export const reportsController = {
       // Summary cards
       pdfGen.addSummaryCards([
         { label: 'Total Revenue', value: formatCurrencyPDF(summary.totalRevenue || 0), color: PDFColors.success },
-        { label: 'Total Quantity', value: formatCurrencyPDF(summary.totalQuantity || 0), color: PDFColors.info },
+        { label: 'Total Quantity', value: formatQuantityPDF(summary.totalQuantity || 0), color: PDFColors.info },
         { label: 'Avg Profit Margin', value: summary.avgProfitMargin || '0%', color: PDFColors.primary },
         { label: 'Transactions', value: String(summary.transactionCount || 0), color: PDFColors.secondary },
       ]);
@@ -2357,7 +2358,7 @@ export const reportsController = {
         { header: 'Product', key: 'product_name', width: 0.22, align: 'left' },
         { header: 'SKU', key: 'sku', width: 0.12, align: 'left' },
         { header: 'UOM', key: 'unit_of_measure', width: 0.08, align: 'center' },
-        { header: 'Qty', key: 'total_quantity', width: 0.11, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'Qty', key: 'total_quantity', width: 0.11, align: 'right', format: (v) => formatQuantityPDF(v) },
         { header: 'Avg Price', key: 'avg_unit_price', width: 0.11, align: 'right', format: (v) => formatCurrencyPDF(v) },
         { header: 'Revenue', key: 'total_revenue', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v) },
         { header: 'Margin %', key: 'profit_margin_percent', width: 0.12, align: 'right', format: (v) => v + '%' },

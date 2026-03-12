@@ -10,6 +10,7 @@
 
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
+import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 
 // Configure Decimal.js for financial precision
@@ -110,10 +111,10 @@ export class ProfitLossReportService {
                     section: row.section,
                     accountCode: row.account_code,
                     accountName: row.account_name,
-                    debitTotal: parseFloat(row.debit_total || '0'),
-                    creditTotal: parseFloat(row.credit_total || '0'),
-                    netAmount: parseFloat(row.net_amount || '0'),
-                    displayAmount: parseFloat(row.display_amount || '0')
+                    debitTotal: Money.parseDb(row.debit_total).toNumber(),
+                    creditTotal: Money.parseDb(row.credit_total).toNumber(),
+                    netAmount: Money.parseDb(row.net_amount).toNumber(),
+                    displayAmount: Money.parseDb(row.display_amount).toNumber()
                 };
 
                 switch (row.section) {
@@ -133,15 +134,15 @@ export class ProfitLossReportService {
             // Parse summary
             const summaryRow = summaryResult.rows[0] || {};
             const summary: ProfitLossSummary = {
-                totalRevenue: parseFloat(summaryRow.total_revenue || '0'),
-                totalCogs: parseFloat(summaryRow.total_cogs || '0'),
-                grossProfit: parseFloat(summaryRow.gross_profit || '0'),
-                grossMarginPercent: parseFloat(summaryRow.gross_margin_percent || '0'),
-                totalOperatingExpenses: parseFloat(summaryRow.total_operating_expenses || '0'),
-                operatingIncome: parseFloat(summaryRow.operating_income || '0'),
-                operatingMarginPercent: parseFloat(summaryRow.operating_margin_percent || '0'),
-                netIncome: parseFloat(summaryRow.net_income || '0'),
-                netMarginPercent: parseFloat(summaryRow.net_margin_percent || '0')
+                totalRevenue: Money.parseDb(summaryRow.total_revenue).toNumber(),
+                totalCogs: Money.parseDb(summaryRow.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(summaryRow.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(summaryRow.gross_margin_percent).toNumber(),
+                totalOperatingExpenses: Money.parseDb(summaryRow.total_operating_expenses).toNumber(),
+                operatingIncome: Money.parseDb(summaryRow.operating_income).toNumber(),
+                operatingMarginPercent: Money.parseDb(summaryRow.operating_margin_percent).toNumber(),
+                netIncome: Money.parseDb(summaryRow.net_income).toNumber(),
+                netMarginPercent: Money.parseDb(summaryRow.net_margin_percent).toNumber()
             };
 
             logger.info('P&L report generated', {
@@ -181,10 +182,10 @@ export class ProfitLossReportService {
             const customers = result.rows.map(row => ({
                 customerId: row.customer_id,
                 customerName: row.customer_name,
-                totalRevenue: parseFloat(row.total_revenue || '0'),
-                totalCogs: parseFloat(row.total_cogs || '0'),
-                grossProfit: parseFloat(row.gross_profit || '0'),
-                grossMarginPercent: parseFloat(row.gross_margin_percent || '0'),
+                totalRevenue: Money.parseDb(row.total_revenue).toNumber(),
+                totalCogs: Money.parseDb(row.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(row.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
                 transactionCount: parseInt(row.transaction_count || '0')
             }));
 
@@ -217,11 +218,11 @@ export class ProfitLossReportService {
                 productId: row.product_id,
                 productName: row.product_name,
                 productSku: row.product_sku || '',
-                totalRevenue: parseFloat(row.total_revenue || '0'),
-                totalCogs: parseFloat(row.total_cogs || '0'),
-                grossProfit: parseFloat(row.gross_profit || '0'),
-                grossMarginPercent: parseFloat(row.gross_margin_percent || '0'),
-                quantitySold: parseFloat(row.quantity_sold || '0')
+                totalRevenue: Money.parseDb(row.total_revenue).toNumber(),
+                totalCogs: Money.parseDb(row.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(row.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
+                quantitySold: Money.parseDb(row.quantity_sold).toNumber()
             }));
 
             logger.info('P&L by product generated', {
@@ -255,7 +256,7 @@ export class ProfitLossReportService {
                 SELECT * FROM fn_get_profit_loss_summary($1::DATE, $2::DATE)
             `, [dateFrom, dateTo]);
 
-            const plNetIncome = parseFloat(plResult.rows[0]?.net_income || '0');
+            const plNetIncome = Money.parseDb(plResult.rows[0]?.net_income).toNumber();
 
             // Calculate net income from Trial Balance
             // Revenue (credits - debits) - Expenses (debits - credits)
@@ -278,11 +279,11 @@ export class ProfitLossReportService {
                   AND lt."TransactionDate"::DATE <= $2
             `, [dateFrom, dateTo]);
 
-            const revenue = parseFloat(tbResult.rows[0]?.revenue || '0');
-            const expenses = parseFloat(tbResult.rows[0]?.expenses || '0');
-            const trialBalanceNetIncome = new Decimal(revenue).minus(expenses).toNumber();
+            const revenueDec = Money.parseDb(tbResult.rows[0]?.revenue);
+            const expensesDec = Money.parseDb(tbResult.rows[0]?.expenses);
+            const trialBalanceNetIncome = Money.toNumber(revenueDec.minus(expensesDec));
 
-            const difference = new Decimal(plNetIncome).minus(trialBalanceNetIncome).toNumber();
+            const difference = Money.toNumber(new Decimal(plNetIncome).minus(trialBalanceNetIncome));
             const isConsistent = Math.abs(difference) < 0.01;
 
             if (!isConsistent) {
