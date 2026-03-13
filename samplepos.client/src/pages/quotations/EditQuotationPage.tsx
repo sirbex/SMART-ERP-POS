@@ -3,7 +3,7 @@
  * Edit DRAFT quotations - loads existing data and allows modifications
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -36,13 +36,18 @@ interface QuoteItem {
   productType?: string;
 }
 
-interface ProductListItem {
-  id: string;
-  name: string;
+interface StockLevelItem {
+  product_id: string;
+  product_name: string;
   sku?: string;
-  selling_price?: string;
+  barcode?: string;
+  generic_name?: string;
+  total_stock: number | string;
+  selling_price: number | string;
+  average_cost: number | string;
+  nearest_expiry?: string;
   is_taxable?: boolean;
-  tax_rate?: string;
+  tax_rate?: number | string;
   uom_id?: string;
   uom_name?: string;
   unit_cost?: string;
@@ -141,25 +146,30 @@ export default function EditQuotationPage() {
     }
   }, [quotation, quote, quoteNumber, navigate]);
 
-  // Product search
+  // Pre-fetch all stock data once — filtering is instant in-memory
   const [productSearch, setProductSearch] = useState('');
-  const { data: productsData } = useQuery({
-    queryKey: ['products', productSearch],
+  const { data: allStockData } = useQuery({
+    queryKey: ['stock-levels-cache'],
     queryFn: async () => {
-      const res = await api.products.list();
+      const res = await api.inventory.stockLevels();
       if (!res.data.success) return [];
-      const products = (res.data.data ?? []) as ProductListItem[];
-      if (!productSearch) return products;
-      return products.filter(
-        (p) =>
-          p.name?.toLowerCase().includes(productSearch.toLowerCase()) ||
-          p.sku?.toLowerCase().includes(productSearch.toLowerCase())
-      );
+      return (res.data.data ?? []) as StockLevelItem[];
     },
-    enabled: productSearch.length > 0,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
   });
 
-  const products = productsData || [];
+  // Instant client-side filtering — no API call per keystroke
+  const products = useMemo(() => {
+    if (!productSearch || !allStockData) return [];
+    const term = productSearch.toLowerCase();
+    return allStockData.filter((item: StockLevelItem) =>
+      item.product_name?.toLowerCase().includes(term) ||
+      item.sku?.toLowerCase().includes(term) ||
+      item.barcode?.toLowerCase().includes(term) ||
+      item.generic_name?.toLowerCase().includes(term)
+    );
+  }, [productSearch, allStockData]);
 
   // Update mutation
   const updateMutation = useMutation({
@@ -190,18 +200,18 @@ export default function EditQuotationPage() {
     setItems([...items, newItem]);
   };
 
-  const addProductAsItem = (product: ProductListItem) => {
+  const addProductAsItem = (product: StockLevelItem) => {
     const newItem: QuoteItem = {
       id: crypto.randomUUID(),
-      productId: product.id,
+      productId: product.product_id,
       itemType: 'product',
       sku: product.sku,
-      description: product.name,
+      description: product.product_name,
       quantity: 1,
-      unitPrice: parseFloat(product.selling_price || '0'),
+      unitPrice: parseFloat(String(product.selling_price || '0')),
       discountAmount: 0,
       isTaxable: product.is_taxable || false,
-      taxRate: parseFloat(product.tax_rate || '0'),
+      taxRate: parseFloat(String(product.tax_rate || '0')),
       uomId: product.uom_id,
       uomName: product.uom_name,
       unitCost: product.unit_cost ? parseFloat(product.unit_cost) : undefined,
@@ -484,21 +494,25 @@ export default function EditQuotationPage() {
               type="text"
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="Search products to add..."
+              placeholder="Search by name, SKU, or barcode..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             {productSearch && products.length > 0 && (
               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                {products.map((product: ProductListItem) => (
+                {products.map((product: StockLevelItem) => (
                   <button
-                    key={product.id}
+                    key={product.product_id}
                     onClick={() => addProductAsItem(product)}
                     className="w-full px-4 py-2 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
                   >
-                    <div className="font-medium text-gray-900">{product.name}</div>
+                    <div className="font-medium text-gray-900">{product.product_name}</div>
                     <div className="text-sm text-gray-500">
                       {product.sku && `SKU: ${product.sku} • `}
-                      {formatCurrency(parseFloat(product.selling_price || '0'))}
+                      {product.barcode && `BC: ${product.barcode} • `}
+                      {formatCurrency(parseFloat(String(product.selling_price || '0')))}
+                      <span className="ml-2 text-gray-400">
+                        Stock: {Number(product.total_stock || 0)}
+                      </span>
                     </div>
                   </button>
                 ))}

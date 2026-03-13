@@ -42,7 +42,7 @@ export default function DiscountDialog({
   const [error, setError] = useState('');
 
   const valueInputRef = useRef<HTMLInputElement>(null);
-  const reasonInputRef = useRef<HTMLTextAreaElement>(null);
+  const reasonInputRef = useRef<HTMLInputElement>(null);
 
   const userLimit = ROLE_LIMITS[userRole] || 0;
 
@@ -71,23 +71,16 @@ export default function DiscountDialog({
     }
   }, [isOpen]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts handled via onKeyDown on dialog container
+  // (avoids stale closure issues with useEffect + window listener)
   useEffect(() => {
     if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-      if (e.key === 'Enter' && e.ctrlKey) {
-        e.preventDefault();
-        handleApply();
-      }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
     };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, discountValue, reason]);
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
 
   const handleApply = () => {
     setError('');
@@ -125,7 +118,16 @@ export default function DiscountDialog({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            handleApply();
+          }
+        }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-gray-900">
@@ -196,12 +198,12 @@ export default function DiscountDialog({
           <label htmlFor="discount-reason" className="block text-sm font-medium text-gray-700 mb-1">
             Reason <span className="text-red-500">*</span>
           </label>
-          <textarea
+          <input
             ref={reasonInputRef}
             id="discount-reason"
+            type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            rows={3}
             className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             placeholder="Enter reason for discount (minimum 5 characters)"
           />
@@ -263,7 +265,7 @@ export default function DiscountDialog({
         </div>
 
         <p className="text-xs text-gray-500 mt-3 text-center">
-          Keyboard: <kbd>Ctrl+Enter</kbd> to apply, <kbd>Esc</kbd> to cancel
+          Keyboard: <kbd>Enter</kbd> to apply, <kbd>Esc</kbd> to cancel
         </p>
       </div>
     </div>

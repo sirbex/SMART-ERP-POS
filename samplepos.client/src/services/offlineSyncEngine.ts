@@ -17,6 +17,7 @@ import type { OfflineSale } from '../hooks/useOfflineMode';
 import type { AxiosError } from 'axios';
 
 const OFFLINE_SALES_KEY = 'pos_offline_sales';
+const OFFLINE_CUSTOMERS_KEY = 'pos_offline_customers';
 
 /** Module-level lock — only one sync at a time per tab */
 let syncing = false;
@@ -73,12 +74,25 @@ export async function syncOfflineSales(): Promise<SyncResult> {
     let reviewCount = 0;
 
     try {
+        // Sync offline customers first so we can resolve temp IDs
+        const customerIdMap = await syncOfflineCustomers();
+
         const queue = loadQueue();
         const pending = queue.filter((s) => s.status === 'PENDING_SYNC');
         if (pending.length === 0) return { synced: 0, failed: 0, review: 0 };
 
         for (const sale of pending) {
             try {
+                // Resolve offline customer IDs to real UUIDs
+                if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
+                    const realId = customerIdMap.get(sale.data.customerId);
+                    if (!realId) {
+                        // Customer not yet synced — skip this sale, retry next cycle
+                        continue;
+                    }
+                    sale.data.customerId = realId;
+                }
+
                 let response;
                 try {
                     response = await apiClient.post('/pos/sync-offline-sales', {
@@ -131,6 +145,51 @@ export async function syncOfflineSales(): Promise<SyncResult> {
         return { synced: syncedCount, failed: failedCount, review: reviewCount };
     } finally {
         syncing = false;
+    }
+}
+
+/**
+ * Sync offline-created customers to the server.
+ * Returns a map of temp offline IDs → real server UUIDs so that
+ * pending sales can update their customerId before syncing.
+ */
+export async function syncOfflineCustomers(): Promise<Map<string, string>> {
+    const idMap = new Map<string, string>();
+    if (!navigator.onLine) return idMap;
+
+    try {
+        const raw = localStorage.getItem(OFFLINE_CUSTOMERS_KEY);
+        if (!raw) return idMap;
+        const queue: Array<{ id: string; name: string; email?: string; phone?: string; address?: string; creditLimit?: number }> = JSON.parse(raw);
+        if (queue.length === 0) return idMap;
+
+        const remaining: typeof queue = [];
+
+        for (const cust of queue) {
+            try {
+                const response = await apiClient.post('customers', {
+                    name: cust.name,
+                    email: cust.email || null,
+                    phone: cust.phone || null,
+                    address: cust.address || null,
+                    creditLimit: cust.creditLimit ?? 0,
+                });
+                if (response.data?.success && response.data?.data?.id) {
+                    idMap.set(cust.id, response.data.data.id as string);
+                } else {
+                    remaining.push(cust);
+                }
+            } catch (err: unknown) {
+                const axErr = err as AxiosError;
+                if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) break;
+                remaining.push(cust);
+            }
+        }
+
+        localStorage.setItem(OFFLINE_CUSTOMERS_KEY, JSON.stringify(remaining));
+        return idMap;
+    } catch {
+        return idMap;
     }
 }
 

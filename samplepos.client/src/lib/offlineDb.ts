@@ -232,6 +232,12 @@ export async function putCustomers(customers: OfflineCustomer[]): Promise<void> 
   await setLastSync(STORES.CUSTOMERS);
 }
 
+/** Insert or update a single customer in IndexedDB (used for offline quick-add). */
+export async function putCustomer(customer: OfflineCustomer): Promise<void> {
+  const db = await getDb();
+  await db.put(STORES.CUSTOMERS, customer);
+}
+
 export async function searchCustomers(query: string): Promise<OfflineCustomer[]> {
   if (!query || query.trim().length === 0) return [];
   const all = await getAllCustomers();

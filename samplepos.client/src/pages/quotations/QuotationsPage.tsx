@@ -388,17 +388,6 @@ export default function QuotationsPage() {
                             Open in POS
                           </button>
                         )}
-                        {normalizeStatus(quote.status) === 'OPEN' && daysUntilExpiry > 0 && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/quotations/${quote.quoteNumber}/convert`);
-                            }}
-                            className="text-green-600 hover:text-green-900"
-                          >
-                            Convert
-                          </button>
-                        )}
                       </td>
                     </tr>
                   );

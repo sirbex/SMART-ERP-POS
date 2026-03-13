@@ -3,7 +3,7 @@
  * Simple 3-step process: Customer → Items → Review
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -34,14 +34,21 @@ interface QuoteItem {
   uomName?: string;
 }
 
-interface ProductListItem {
-  id: string;
-  name: string;
+interface StockLevelItem {
+  product_id: string;
+  product_name: string;
   sku?: string;
-  sellingPrice?: number;
-  trackExpiry?: boolean;
-  uomId?: string;
-  uomName?: string;
+  barcode?: string;
+  generic_name?: string;
+  total_stock: number | string;
+  selling_price: number | string;
+  average_cost: number | string;
+  nearest_expiry?: string;
+  is_taxable?: boolean;
+  tax_rate?: number | string;
+  uom_id?: string;
+  uom_name?: string;
+  product_type?: string;
 }
 
 export default function NewQuotationPage() {
@@ -70,23 +77,30 @@ export default function NewQuotationPage() {
   const [internalNotes, setInternalNotes] = useState('');
   const [requiresApproval, setRequiresApproval] = useState(false);
 
-  // Product search
+  // Pre-fetch all stock data once — filtering is instant in-memory
   const [productSearch, setProductSearch] = useState('');
-  const { data: productsData } = useQuery({
-    queryKey: ['products', productSearch],
+  const { data: allStockData } = useQuery({
+    queryKey: ['stock-levels-cache'],
     queryFn: async () => {
-      const res = await api.products.list();
+      const res = await api.inventory.stockLevels();
       if (!res.data.success) return [];
-      const all = (res.data.data ?? []) as ProductListItem[];
-      if (!productSearch) return all;
-      const term = productSearch.toLowerCase();
-      return all.filter((p: ProductListItem) =>
-        String(p.name ?? '').toLowerCase().includes(term) ||
-        (p.sku && String(p.sku).toLowerCase().includes(term))
-      );
+      return (res.data.data ?? []) as StockLevelItem[];
     },
-    enabled: productSearch.length > 0,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
   });
+
+  // Instant client-side filtering — no API call per keystroke
+  const productsData = useMemo(() => {
+    if (!productSearch || !allStockData) return [];
+    const term = productSearch.toLowerCase();
+    return allStockData.filter((item: StockLevelItem) =>
+      item.product_name?.toLowerCase().includes(term) ||
+      item.sku?.toLowerCase().includes(term) ||
+      item.barcode?.toLowerCase().includes(term) ||
+      item.generic_name?.toLowerCase().includes(term)
+    );
+  }, [productSearch, allStockData]);
 
   const createQuoteMutation = useMutation({
     mutationFn: (data: CreateQuotationInput) => quotationApi.createQuotation(data),
@@ -126,30 +140,30 @@ export default function NewQuotationPage() {
     ]);
   };
 
-  const addProductToItems = (product: ProductListItem) => {
-    const existing = items.find((item) => item.productId === product.id);
+  const addProductToItems = (product: StockLevelItem) => {
+    const existing = items.find((item) => item.productId === product.product_id);
     if (existing) {
       updateItem(items.indexOf(existing), 'quantity', existing.quantity + 1);
-      toast.success(`Increased ${product.name} quantity`);
+      toast.success(`Increased ${product.product_name} quantity`);
     } else {
       setItems([
         ...items,
         {
           id: `temp_${Date.now()}`,
-          productId: product.id,
+          productId: product.product_id,
           itemType: 'product',
           sku: product.sku,
-          description: product.name,
+          description: product.product_name,
           quantity: 1,
-          unitPrice: product.sellingPrice || 0,
+          unitPrice: parseFloat(String(product.selling_price || '0')),
           discountAmount: 0,
-          isTaxable: product.trackExpiry !== false,
-          taxRate: 18,
-          uomId: product.uomId,
-          uomName: product.uomName,
+          isTaxable: product.is_taxable || false,
+          taxRate: parseFloat(String(product.tax_rate || '18')),
+          uomId: product.uom_id,
+          uomName: product.uom_name,
         },
       ]);
-      toast.success(`Added ${product.name}`);
+      toast.success(`Added ${product.product_name}`);
     }
     setProductSearch('');
   };
@@ -441,25 +455,29 @@ export default function NewQuotationPage() {
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
                   className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-                  placeholder="Search by product name or SKU..."
+                  placeholder="Search by name, SKU, or barcode..."
                   autoFocus
                 />
                 {productSearch && productsData && productsData.length > 0 && (
                   <div className="mt-2 border border-gray-300 rounded-lg max-h-64 overflow-y-auto bg-white shadow-lg">
-                    {productsData.slice(0, 10).map((product: ProductListItem) => (
+                    {productsData.slice(0, 10).map((product: StockLevelItem) => (
                       <button
-                        key={product.id}
+                        key={product.product_id}
                         type="button"
                         onClick={() => addProductToItems(product)}
                         className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b last:border-b-0 transition-colors"
                       >
                         <div className="flex justify-between items-center">
                           <div>
-                            <div className="font-semibold text-gray-900">{product.name}</div>
+                            <div className="font-semibold text-gray-900">{product.product_name}</div>
                             <div className="text-sm text-gray-600">
                               {product.sku && <span className="mr-2">SKU: {product.sku}</span>}
+                              {product.barcode && <span className="mr-2">BC: {product.barcode}</span>}
                               <span className="text-green-600 font-medium">
-                                {formatCurrency(product.sellingPrice || 0)}
+                                {formatCurrency(parseFloat(String(product.selling_price || 0)))}
+                              </span>
+                              <span className="ml-2 text-gray-500">
+                                Stock: {Number(product.total_stock || 0)}
                               </span>
                             </div>
                           </div>

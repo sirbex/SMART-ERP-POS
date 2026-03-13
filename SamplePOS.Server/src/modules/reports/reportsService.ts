@@ -83,30 +83,30 @@ export const reportsService = {
    * @param pool - Database connection pool
    * @param options - Report parameters (date, category, method, format, user)
    * @returns Report data with summary and execution metrics
-   * 
+   *
    * Valuation Methods:
    * - **FIFO** (First In First Out): Values using oldest cost layers
    * - **AVCO** (Average Cost): Weighted average across all layers
    * - **LIFO** (Last In First Out): Values using newest cost layers (rare)
-   * 
+   *
    * Report Structure:
    * - Per-product inventory line items
    * - quantity_on_hand: Current stock level
    * - unit_cost: Per-unit cost based on valuation method
    * - total_value: quantity * unit_cost
    * - Summary: Total items, total value, total quantity
-   * 
+   *
    * Use Cases:
    * - Financial statements (Balance Sheet - Current Assets)
    * - Insurance valuation
    * - Tax reporting (year-end inventory value)
    * - Stock audits and reconciliation
-   * 
+   *
    * Performance:
    * - Execution time logged for monitoring
    * - Category filter reduces dataset for large inventories
    * - as_of_date enables historical valuation snapshots
-   * 
+   *
    * Audit Trail:
    * - Logs to report_runs table (BR-RPT-001)
    * - Records: user, parameters, execution time, row count
@@ -134,10 +134,22 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalValue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalValue || 0), new Decimal(0));
-    const totalQuantity = data.reduce((sum, item) => new Decimal(sum).plus(item.quantityOnHand || 0), new Decimal(0));
-    const totalPotentialRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialRevenue || 0), new Decimal(0));
-    const totalPotentialProfit = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialProfit || 0), new Decimal(0));
+    const totalValue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalValue || 0),
+      new Decimal(0)
+    );
+    const totalQuantity = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.quantityOnHand || 0),
+      new Decimal(0)
+    );
+    const totalPotentialRevenue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.potentialRevenue || 0),
+      new Decimal(0)
+    );
+    const totalPotentialProfit = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.potentialProfit || 0),
+      new Decimal(0)
+    );
 
     const executionTime = Date.now() - startTime;
 
@@ -145,7 +157,11 @@ export const reportsService = {
     await reportsRepository.logReportRun(pool, {
       reportType: 'INVENTORY_VALUATION',
       reportName: 'Inventory Valuation Report',
-      parameters: { asOfDate: options.asOfDate, categoryId: options.categoryId, valuationMethod: options.valuationMethod },
+      parameters: {
+        asOfDate: options.asOfDate,
+        categoryId: options.categoryId,
+        valuationMethod: options.valuationMethod,
+      },
       generatedById: options.userId || null,
       recordCount: data.length,
       fileFormat: options.format || 'json',
@@ -155,21 +171,42 @@ export const reportsService = {
     return {
       reportType: 'INVENTORY_VALUATION' as const,
       reportName: 'Inventory Valuation Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       systemSettings: systemContext,
       parameters: options,
       data,
       summary: {
         totalItems: data.length,
         totalValue: totalValue.toDecimalPlaces(2).toNumber(),
-        totalValueFormatted: formatCurrency(totalValue.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        totalValueFormatted: formatCurrency(
+          totalValue.toDecimalPlaces(2).toNumber(),
+          systemContext.currencySymbol
+        ),
         totalQuantity: totalQuantity.toDecimalPlaces(3).toNumber(),
         totalPotentialRevenue: totalPotentialRevenue.toDecimalPlaces(2).toNumber(),
-        totalPotentialRevenueFormatted: formatCurrency(totalPotentialRevenue.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        totalPotentialRevenueFormatted: formatCurrency(
+          totalPotentialRevenue.toDecimalPlaces(2).toNumber(),
+          systemContext.currencySymbol
+        ),
         totalPotentialProfit: totalPotentialProfit.toDecimalPlaces(2).toNumber(),
-        totalPotentialProfitFormatted: formatCurrency(totalPotentialProfit.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        totalPotentialProfitFormatted: formatCurrency(
+          totalPotentialProfit.toDecimalPlaces(2).toNumber(),
+          systemContext.currencySymbol
+        ),
         overallMargin: totalPotentialRevenue.greaterThan(0)
-          ? totalPotentialProfit.dividedBy(totalPotentialRevenue).times(100).toDecimalPlaces(2).toNumber()
+          ? totalPotentialProfit
+              .dividedBy(totalPotentialRevenue)
+              .times(100)
+              .toDecimalPlaces(2)
+              .toNumber()
           : 0,
         valuationMethod: options.valuationMethod || 'FIFO',
       },
@@ -183,7 +220,7 @@ export const reportsService = {
    * @param pool - Database connection pool
    * @param options - Report parameters (date range, groupBy, customer, format, user)
    * @returns Sales data grouped by selected dimension with profit metrics
-   * 
+   *
    * Grouping Dimensions:
    * - **day**: Daily sales totals (trend analysis)
    * - **week**: Weekly aggregation (performance tracking)
@@ -191,7 +228,7 @@ export const reportsService = {
    * - **product**: Best sellers and profitability by product
    * - **customer**: Customer purchase patterns and value
    * - **payment_method**: Payment preference analysis
-   * 
+   *
    * Metrics Calculated:
    * - totalSales: Revenue (sum of sale.total_amount)
    * - totalCost: COGS (sum of sale_items.unit_cost * quantity)
@@ -199,19 +236,19 @@ export const reportsService = {
    * - profitMargin: (grossProfit / totalSales) * 100
    * - transactionCount: Number of sales
    * - averageTransactionValue: totalSales / transactionCount
-   * 
+   *
    * Use Cases:
    * - Daily/weekly/monthly sales tracking
    * - Product performance analysis (ABC classification)
    * - Customer segmentation (VIP identification)
    * - Payment method trends (cash vs card vs mobile)
    * - Profit center analysis
-   * 
+   *
    * Performance:
    * - Date range filtering for fast queries
    * - Customer filter for account statements
    * - Execution time monitoring via report_runs
-   * 
+   *
    * Precision: Uses Decimal.js for financial calculations
    */
   async generateSalesReport(
@@ -238,13 +275,27 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalSales = data.reduce((sum, item) => new Decimal(sum).plus(item.totalSales), new Decimal(0));
-    const totalDiscounts = data.reduce((sum, item) => new Decimal(sum).plus(item.totalDiscounts || 0), new Decimal(0));
-    const netRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.netRevenue), new Decimal(0));
-    const totalCost = data.reduce((sum, item) => new Decimal(sum).plus(item.totalCost), new Decimal(0));
+    const totalSales = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalSales),
+      new Decimal(0)
+    );
+    const totalDiscounts = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalDiscounts || 0),
+      new Decimal(0)
+    );
+    const netRevenue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.netRevenue),
+      new Decimal(0)
+    );
+    const totalCost = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalCost),
+      new Decimal(0)
+    );
     const grossProfit = netRevenue.minus(totalCost);
     const totalTransactions = data.reduce((sum, item) => sum + item.transactionCount, 0);
-    const averageDiscountRate = totalSales.isZero() ? new Decimal(0) : totalDiscounts.dividedBy(totalSales).times(100);
+    const averageDiscountRate = totalSales.isZero()
+      ? new Decimal(0)
+      : totalDiscounts.dividedBy(totalSales).times(100);
 
     const executionTime = Date.now() - startTime;
 
@@ -263,20 +314,39 @@ export const reportsService = {
     return {
       reportType: 'SALES_REPORT' as const,
       reportName: 'Sales Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       systemSettings: systemContext,
       parameters: options,
       data,
       summary: {
         totalSales: totalSales.toDecimalPlaces(2).toNumber(),
-        totalSalesFormatted: formatCurrency(totalSales.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        totalSalesFormatted: formatCurrency(
+          totalSales.toDecimalPlaces(2).toNumber(),
+          systemContext.currencySymbol
+        ),
         totalDiscounts: totalDiscounts.toDecimalPlaces(2).toNumber(),
         netRevenue: netRevenue.toDecimalPlaces(2).toNumber(),
-        netRevenueFormatted: formatCurrency(netRevenue.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
+        netRevenueFormatted: formatCurrency(
+          netRevenue.toDecimalPlaces(2).toNumber(),
+          systemContext.currencySymbol
+        ),
         totalCost: totalCost.toDecimalPlaces(2).toNumber(),
         grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
-        grossProfitFormatted: formatCurrency(grossProfit.toDecimalPlaces(2).toNumber(), systemContext.currencySymbol),
-        profitMargin: netRevenue.isZero() ? 0 : grossProfit.dividedBy(netRevenue).times(100).toDecimalPlaces(2).toNumber(),
+        grossProfitFormatted: formatCurrency(
+          grossProfit.toDecimalPlaces(2).toNumber(),
+          systemContext.currencySymbol
+        ),
+        profitMargin: netRevenue.isZero()
+          ? 0
+          : grossProfit.dividedBy(netRevenue).times(100).toDecimalPlaces(2).toNumber(),
         averageDiscountRate: averageDiscountRate.toDecimalPlaces(2).toNumber(),
         totalTransactions,
       },
@@ -305,8 +375,14 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalPotentialLoss = data.reduce((sum, item) => new Decimal(sum).plus(item.potentialLoss), new Decimal(0));
-    const totalQuantity = data.reduce((sum, item) => new Decimal(sum).plus(item.quantityRemaining), new Decimal(0));
+    const totalPotentialLoss = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.potentialLoss),
+      new Decimal(0)
+    );
+    const totalQuantity = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.quantityRemaining),
+      new Decimal(0)
+    );
 
     const executionTime = Date.now() - startTime;
 
@@ -323,7 +399,15 @@ export const reportsService = {
     return {
       reportType: 'EXPIRING_ITEMS' as const,
       reportName: 'Expiring Items Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -356,9 +440,9 @@ export const reportsService = {
     });
 
     // Count by status
-    const critical = data.filter(item => item.status === 'CRITICAL').length;
-    const low = data.filter(item => item.status === 'LOW').length;
-    const warning = data.filter(item => item.status === 'WARNING').length;
+    const critical = data.filter((item) => item.status === 'CRITICAL').length;
+    const low = data.filter((item) => item.status === 'LOW').length;
+    const warning = data.filter((item) => item.status === 'WARNING').length;
 
     const executionTime = Date.now() - startTime;
 
@@ -375,7 +459,15 @@ export const reportsService = {
     return {
       reportType: 'LOW_STOCK' as const,
       reportName: 'Low Stock Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -413,9 +505,18 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalRevenue), new Decimal(0));
-    const totalProfit = data.reduce((sum, item) => new Decimal(sum).plus(item.grossProfit), new Decimal(0));
-    const totalQuantity = data.reduce((sum, item) => new Decimal(sum).plus(item.quantitySold), new Decimal(0));
+    const totalRevenue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalRevenue),
+      new Decimal(0)
+    );
+    const totalProfit = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.grossProfit),
+      new Decimal(0)
+    );
+    const totalQuantity = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.quantitySold),
+      new Decimal(0)
+    );
 
     const executionTime = Date.now() - startTime;
 
@@ -434,7 +535,15 @@ export const reportsService = {
     return {
       reportType: 'BEST_SELLING_PRODUCTS' as const,
       reportName: 'Best Selling Products',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -470,7 +579,10 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalPurchaseValue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalPurchaseValue), new Decimal(0));
+    const totalPurchaseValue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalPurchaseValue),
+      new Decimal(0)
+    );
     const totalPOs = data.reduce((sum, item) => sum + item.totalPurchaseOrders, 0);
 
     const executionTime = Date.now() - startTime;
@@ -490,7 +602,15 @@ export const reportsService = {
     return {
       reportType: 'SUPPLIER_COST_ANALYSIS' as const,
       reportName: 'Supplier Cost Analysis',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -527,7 +647,10 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalValue = data.reduce((sum, item) => new Decimal(sum).plus(item.totalValue), new Decimal(0));
+    const totalValue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalValue),
+      new Decimal(0)
+    );
 
     const executionTime = Date.now() - startTime;
 
@@ -546,7 +669,15 @@ export const reportsService = {
     return {
       reportType: 'GOODS_RECEIVED' as const,
       reportName: 'Goods Received Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -580,7 +711,10 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalAmount = data.reduce((sum, item) => new Decimal(sum).plus(item.totalAmount), new Decimal(0));
+    const totalAmount = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalAmount),
+      new Decimal(0)
+    );
     const totalTransactions = data.reduce((sum, item) => sum + item.transactionCount, 0);
 
     const executionTime = Date.now() - startTime;
@@ -600,7 +734,15 @@ export const reportsService = {
     return {
       reportType: 'PAYMENT_REPORT' as const,
       reportName: 'Payment Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -637,12 +779,30 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalInvoiced = data.reduce((sum, item) => new Decimal(sum).plus(item.totalInvoiced), new Decimal(0));
-    const totalPaid = data.reduce((sum, item) => new Decimal(sum).plus(item.totalPaid), new Decimal(0));
-    const totalOutstanding = data.reduce((sum, item) => new Decimal(sum).plus(item.totalOutstanding), new Decimal(0));
-    const totalOverdue = data.reduce((sum, item) => new Decimal(sum).plus(item.overdueAmount), new Decimal(0));
-    const totalDeposited = data.reduce((sum, item) => new Decimal(sum).plus(item.totalDeposited || 0), new Decimal(0));
-    const totalDepositAvailable = data.reduce((sum, item) => new Decimal(sum).plus(item.depositAvailable || 0), new Decimal(0));
+    const totalInvoiced = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalInvoiced),
+      new Decimal(0)
+    );
+    const totalPaid = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalPaid),
+      new Decimal(0)
+    );
+    const totalOutstanding = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalOutstanding),
+      new Decimal(0)
+    );
+    const totalOverdue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.overdueAmount),
+      new Decimal(0)
+    );
+    const totalDeposited = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalDeposited || 0),
+      new Decimal(0)
+    );
+    const totalDepositAvailable = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.depositAvailable || 0),
+      new Decimal(0)
+    );
 
     const executionTime = Date.now() - startTime;
 
@@ -661,7 +821,15 @@ export const reportsService = {
     return {
       reportType: 'CUSTOMER_PAYMENTS' as const,
       reportName: 'Customer Payments Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -700,8 +868,14 @@ export const reportsService = {
     });
 
     // Calculate summary
-    const totalRevenue = data.reduce((sum, item) => new Decimal(sum).plus(item.revenue), new Decimal(0));
-    const totalCOGS = data.reduce((sum, item) => new Decimal(sum).plus(item.costOfGoodsSold), new Decimal(0));
+    const totalRevenue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.revenue),
+      new Decimal(0)
+    );
+    const totalCOGS = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.costOfGoodsSold),
+      new Decimal(0)
+    );
     const totalGrossProfit = totalRevenue.minus(totalCOGS);
 
     const executionTime = Date.now() - startTime;
@@ -721,14 +895,24 @@ export const reportsService = {
     return {
       reportType: 'PROFIT_LOSS' as const,
       reportName: 'Profit & Loss Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
         totalRevenue: totalRevenue.toDecimalPlaces(2).toNumber(),
         totalCOGS: totalCOGS.toDecimalPlaces(2).toNumber(),
         grossProfit: totalGrossProfit.toDecimalPlaces(2).toNumber(),
-        grossProfitMargin: totalRevenue.isZero() ? 0 : totalGrossProfit.dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber(),
+        grossProfitMargin: totalRevenue.isZero()
+          ? 0
+          : totalGrossProfit.dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber(),
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -771,7 +955,15 @@ export const reportsService = {
     return {
       reportType: 'DELETED_ITEMS' as const,
       reportName: 'Deleted Items Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -805,11 +997,13 @@ export const reportsService = {
 
     // Calculate summary
     const totalAdjustmentsIn = data
-      .filter(item => ['ADJUSTMENT_IN', 'RETURN_FROM_CUSTOMER'].includes(item.movementType))
+      .filter((item) => ['ADJUSTMENT_IN', 'RETURN_FROM_CUSTOMER'].includes(item.movementType))
       .reduce((sum, item) => new Decimal(sum).plus(Math.abs(item.quantityChange)), new Decimal(0));
 
     const totalAdjustmentsOut = data
-      .filter(item => ['ADJUSTMENT_OUT', 'WASTE', 'DAMAGE', 'RETURN_TO_SUPPLIER'].includes(item.movementType))
+      .filter((item) =>
+        ['ADJUSTMENT_OUT', 'WASTE', 'DAMAGE', 'RETURN_TO_SUPPLIER'].includes(item.movementType)
+      )
       .reduce((sum, item) => new Decimal(sum).plus(Math.abs(item.quantityChange)), new Decimal(0));
 
     const executionTime = Date.now() - startTime;
@@ -829,7 +1023,15 @@ export const reportsService = {
     return {
       reportType: 'INVENTORY_ADJUSTMENTS' as const,
       reportName: 'Inventory Adjustments Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary: {
@@ -862,9 +1064,15 @@ export const reportsService = {
 
     const summary = {
       totalOrders: data.length,
-      totalAmount: data.reduce((sum, po) => new Decimal(sum).plus(po.totalAmount || 0), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalAmount: data
+        .reduce((sum, po) => new Decimal(sum).plus(po.totalAmount || 0), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
       totalReceipts: data.reduce((sum, po) => sum + (po.totalReceipts || 0), 0),
-      totalReceived: data.reduce((sum, po) => new Decimal(sum).plus(po.totalReceived || 0), new Decimal(0)).toDecimalPlaces(3).toNumber(),
+      totalReceived: data
+        .reduce((sum, po) => new Decimal(sum).plus(po.totalReceived || 0), new Decimal(0))
+        .toDecimalPlaces(3)
+        .toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -884,7 +1092,15 @@ export const reportsService = {
     return {
       reportType: 'PURCHASE_ORDER_SUMMARY' as const,
       reportName: 'Purchase Order Summary Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -914,9 +1130,18 @@ export const reportsService = {
 
     const summary = {
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
-      totalIn: data.reduce((sum, item) => new Decimal(sum).plus(item.totalIn), new Decimal(0)).toDecimalPlaces(3).toNumber(),
-      totalOut: data.reduce((sum, item) => new Decimal(sum).plus(item.totalOut), new Decimal(0)).toDecimalPlaces(3).toNumber(),
-      netMovement: data.reduce((sum, item) => new Decimal(sum).plus(item.netMovement), new Decimal(0)).toDecimalPlaces(3).toNumber(),
+      totalIn: data
+        .reduce((sum, item) => new Decimal(sum).plus(item.totalIn), new Decimal(0))
+        .toDecimalPlaces(3)
+        .toNumber(),
+      totalOut: data
+        .reduce((sum, item) => new Decimal(sum).plus(item.totalOut), new Decimal(0))
+        .toDecimalPlaces(3)
+        .toNumber(),
+      netMovement: data
+        .reduce((sum, item) => new Decimal(sum).plus(item.netMovement), new Decimal(0))
+        .toDecimalPlaces(3)
+        .toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -936,7 +1161,15 @@ export const reportsService = {
     return {
       reportType: 'STOCK_MOVEMENT_ANALYSIS' as const,
       reportName: 'Stock Movement Analysis Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -964,9 +1197,18 @@ export const reportsService = {
 
     const summary = {
       totalTransactions: data.transactions.length,
-      totalSales: data.transactions.reduce((sum: Decimal, t) => new Decimal(sum).plus(t.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalPaid: data.transactions.reduce((sum: Decimal, t) => new Decimal(sum).plus(t.amountPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalOutstanding: data.transactions.reduce((sum: Decimal, t) => new Decimal(sum).plus(t.balanceDue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalSales: data.transactions
+        .reduce((sum: Decimal, t) => new Decimal(sum).plus(t.totalAmount), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalPaid: data.transactions
+        .reduce((sum: Decimal, t) => new Decimal(sum).plus(t.amountPaid), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalOutstanding: data.transactions
+        .reduce((sum: Decimal, t) => new Decimal(sum).plus(t.balanceDue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -986,7 +1228,15 @@ export const reportsService = {
     return {
       reportType: 'CUSTOMER_ACCOUNT_STATEMENT' as const,
       reportName: 'Customer Account Statement',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1015,12 +1265,26 @@ export const reportsService = {
 
     const summary = {
       totalProducts: data.length,
-      totalRevenue: data.reduce((sum, p) => new Decimal(sum).plus(p.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalCost: data.reduce((sum, p) => new Decimal(sum).plus(p.totalCost), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalProfit: data.reduce((sum, p) => new Decimal(sum).plus(p.totalProfit), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      averageMarginPercent: data.length > 0
-        ? data.reduce((sum, p) => sum.plus(p.profitMarginPercent), new Decimal(0)).dividedBy(data.length).toDecimalPlaces(2).toNumber()
-        : 0,
+      totalRevenue: data
+        .reduce((sum, p) => new Decimal(sum).plus(p.totalRevenue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalCost: data
+        .reduce((sum, p) => new Decimal(sum).plus(p.totalCost), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalProfit: data
+        .reduce((sum, p) => new Decimal(sum).plus(p.totalProfit), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      averageMarginPercent:
+        data.length > 0
+          ? data
+              .reduce((sum, p) => sum.plus(p.profitMarginPercent), new Decimal(0))
+              .dividedBy(data.length)
+              .toDecimalPlaces(2)
+              .toNumber()
+          : 0,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1040,7 +1304,15 @@ export const reportsService = {
     return {
       reportType: 'PROFIT_MARGIN_BY_PRODUCT' as const,
       reportName: 'Profit Margin by Product Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1067,33 +1339,53 @@ export const reportsService = {
 
     const data = await reportsRepository.getDailyCashFlow(pool, {
       ...options,
-      includeDebCollections: true
+      includeDebCollections: true,
     });
 
     // Separate sales revenue from debt collections and deposit receipts for advanced analysis
-    const salesRevenue = data.filter(d => d.revenueType === 'SALES_REVENUE');
-    const debtCollections = data.filter(d => d.revenueType === 'DEBT_COLLECTION');
-    const depositReceipts = data.filter(d => d.revenueType === 'DEPOSIT_RECEIPT');
+    const salesRevenue = data.filter((d) => d.revenueType === 'SALES_REVENUE');
+    const debtCollections = data.filter((d) => d.revenueType === 'DEBT_COLLECTION');
+    const depositReceipts = data.filter((d) => d.revenueType === 'DEPOSIT_RECEIPT');
 
     // Calculate metrics with bank-grade precision
-    const salesRevenueTotal = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.cashAmount), new Decimal(0));
-    const debtCollectionsTotal = debtCollections.reduce((sum, d) => new Decimal(sum).plus(d.cashAmount), new Decimal(0));
-    const depositReceiptsTotal = depositReceipts.reduce((sum, d) => new Decimal(sum).plus(d.cashAmount), new Decimal(0));
+    const salesRevenueTotal = salesRevenue.reduce(
+      (sum, d) => new Decimal(sum).plus(d.cashAmount),
+      new Decimal(0)
+    );
+    const debtCollectionsTotal = debtCollections.reduce(
+      (sum, d) => new Decimal(sum).plus(d.cashAmount),
+      new Decimal(0)
+    );
+    const depositReceiptsTotal = depositReceipts.reduce(
+      (sum, d) => new Decimal(sum).plus(d.cashAmount),
+      new Decimal(0)
+    );
     const totalCashFlow = salesRevenueTotal.plus(debtCollectionsTotal).plus(depositReceiptsTotal);
-    const totalSalesValue = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.totalSales), new Decimal(0));
-    const totalProfit = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.grossProfit), new Decimal(0));
-    const totalCreditExtended = salesRevenue.reduce((sum, d) => new Decimal(sum).plus(d.creditCreated), new Decimal(0));
+    const totalSalesValue = salesRevenue.reduce(
+      (sum, d) => new Decimal(sum).plus(d.totalSales),
+      new Decimal(0)
+    );
+    const totalProfit = salesRevenue.reduce(
+      (sum, d) => new Decimal(sum).plus(d.grossProfit),
+      new Decimal(0)
+    );
+    const totalCreditExtended = salesRevenue.reduce(
+      (sum, d) => new Decimal(sum).plus(d.creditCreated),
+      new Decimal(0)
+    );
 
     // Flat summary structure to match frontend expectations
     const summary = {
-      totalDays: [...new Set(data.map(d => d.transactionDate))].length,
+      totalDays: [...new Set(data.map((d) => d.transactionDate))].length,
 
       // Sales Revenue Metrics (flattened for frontend)
       salesRevenue: salesRevenueTotal.toDecimalPlaces(2).toNumber(),
       salesTransactionCount: salesRevenue.reduce((sum, d) => sum + d.transactionCount, 0),
       totalSalesValue: totalSalesValue.toDecimalPlaces(2).toNumber(),
       grossProfit: totalProfit.toDecimalPlaces(2).toNumber(),
-      overallProfitMargin: totalSalesValue.isZero() ? 0 : totalProfit.div(totalSalesValue).mul(100).toDecimalPlaces(2).toNumber(),
+      overallProfitMargin: totalSalesValue.isZero()
+        ? 0
+        : totalProfit.div(totalSalesValue).mul(100).toDecimalPlaces(2).toNumber(),
 
       // Debt Collections Metrics (flattened for frontend)
       debtCollections: debtCollectionsTotal.toDecimalPlaces(2).toNumber(),
@@ -1108,9 +1400,15 @@ export const reportsService = {
       totalTransactions: data.reduce((sum, d) => sum + d.transactionCount, 0),
 
       // Revenue Composition (completely flattened for frontend)
-      salesPercent: totalCashFlow.isZero() ? 0 : salesRevenueTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
-      collectionsPercent: totalCashFlow.isZero() ? 0 : debtCollectionsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
-      depositsPercent: totalCashFlow.isZero() ? 0 : depositReceiptsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
+      salesPercent: totalCashFlow.isZero()
+        ? 0
+        : salesRevenueTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
+      collectionsPercent: totalCashFlow.isZero()
+        ? 0
+        : debtCollectionsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
+      depositsPercent: totalCashFlow.isZero()
+        ? 0
+        : depositReceiptsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
       salesAmount: salesRevenueTotal.toDecimalPlaces(2).toNumber(),
       collectionsAmount: debtCollectionsTotal.toDecimalPlaces(2).toNumber(),
       depositsAmount: depositReceiptsTotal.toDecimalPlaces(2).toNumber(),
@@ -1120,12 +1418,23 @@ export const reportsService = {
 
       // Business Intelligence Insights
       businessInsights: [
-        ...(salesRevenueTotal.greaterThan(debtCollectionsTotal) ? ['Strong new business growth - sales exceed collections'] : []),
-        ...(debtCollectionsTotal.greaterThan(salesRevenueTotal) ? ['Focus on debt recovery - collections exceed new sales'] : []),
-        ...(totalProfit.div(totalSalesValue.isZero() ? new Decimal(1) : totalSalesValue).mul(100).greaterThan(20) ? ['Healthy profit margins (>20%)'] : []),
+        ...(salesRevenueTotal.greaterThan(debtCollectionsTotal)
+          ? ['Strong new business growth - sales exceed collections']
+          : []),
+        ...(debtCollectionsTotal.greaterThan(salesRevenueTotal)
+          ? ['Focus on debt recovery - collections exceed new sales']
+          : []),
+        ...(totalProfit
+          .div(totalSalesValue.isZero() ? new Decimal(1) : totalSalesValue)
+          .mul(100)
+          .greaterThan(20)
+          ? ['Healthy profit margins (>20%)']
+          : []),
         ...(data.length > 0 && totalCashFlow.greaterThan(0) ? ['Positive overall cash flow'] : []),
-        ...(depositReceiptsTotal.greaterThan(0) ? [`Customer deposits received: ${depositReceiptsTotal.toDecimalPlaces(2).toNumber()}`] : []),
-      ]
+        ...(depositReceiptsTotal.greaterThan(0)
+          ? [`Customer deposits received: ${depositReceiptsTotal.toDecimalPlaces(2).toNumber()}`]
+          : []),
+      ],
     };
 
     const executionTime = Date.now() - startTime;
@@ -1145,7 +1454,15 @@ export const reportsService = {
     return {
       reportType: 'DAILY_CASH_FLOW' as const,
       reportName: 'Daily Cash Flow Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1172,9 +1489,18 @@ export const reportsService = {
 
     const summary = {
       totalSuppliers: data.length,
-      totalAmount: data.reduce((sum, s) => new Decimal(sum).plus(s.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalPaid: data.reduce((sum, s) => new Decimal(sum).plus(s.totalPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalOutstanding: data.reduce((sum, s) => new Decimal(sum).plus(s.outstandingBalance), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalAmount: data
+        .reduce((sum, s) => new Decimal(sum).plus(s.totalAmount), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalPaid: data
+        .reduce((sum, s) => new Decimal(sum).plus(s.totalPaid), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalOutstanding: data
+        .reduce((sum, s) => new Decimal(sum).plus(s.outstandingBalance), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -1194,7 +1520,15 @@ export const reportsService = {
     return {
       reportType: 'SUPPLIER_PAYMENT_STATUS' as const,
       reportName: 'Supplier Payment Status Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1223,11 +1557,20 @@ export const reportsService = {
 
     const summary = {
       totalCustomers: data.length,
-      totalRevenue: data.reduce((sum, c) => new Decimal(sum).plus(c.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.totalRevenue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
       totalPurchases: data.reduce((sum, c) => sum + c.totalPurchases, 0),
-      averageOrderValue: data.length > 0
-        ? new Decimal(data.reduce((sum, c) => new Decimal(sum).plus(c.totalRevenue), new Decimal(0))).div(data.reduce((sum, c) => sum + c.totalPurchases, 0)).toDecimalPlaces(2).toNumber()
-        : 0,
+      averageOrderValue:
+        data.length > 0
+          ? new Decimal(
+              data.reduce((sum, c) => new Decimal(sum).plus(c.totalRevenue), new Decimal(0))
+            )
+              .div(data.reduce((sum, c) => sum + c.totalPurchases, 0))
+              .toDecimalPlaces(2)
+              .toNumber()
+          : 0,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1247,7 +1590,15 @@ export const reportsService = {
     return {
       reportType: 'TOP_CUSTOMERS' as const,
       reportName: 'Top Customers Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1275,13 +1626,34 @@ export const reportsService = {
 
     const summary = {
       totalCustomers: data.length,
-      totalOutstanding: data.reduce((sum, c) => new Decimal(sum).plus(c.totalOutstanding), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      current: data.reduce((sum, c) => new Decimal(sum).plus(c.current), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      days30: data.reduce((sum, c) => new Decimal(sum).plus(c.days30), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      days60: data.reduce((sum, c) => new Decimal(sum).plus(c.days60), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      days90: data.reduce((sum, c) => new Decimal(sum).plus(c.days90), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      over90: data.reduce((sum, c) => new Decimal(sum).plus(c.over90), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      overdueAmount: data.reduce((sum, c) => new Decimal(sum).plus(c.overdueAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalOutstanding: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.totalOutstanding), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      current: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.current), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      days30: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.days30), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      days60: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.days60), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      days90: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.days90), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      over90: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.over90), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      overdueAmount: data
+        .reduce((sum, c) => new Decimal(sum).plus(c.overdueAmount), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -1301,7 +1673,15 @@ export const reportsService = {
     return {
       reportType: 'CUSTOMER_AGING' as const,
       reportName: 'Customer Aging Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1328,11 +1708,15 @@ export const reportsService = {
 
     const summary = {
       totalBatches: data.length,
-      totalValue: data.reduce((sum, b) => new Decimal(sum).plus(b.totalValue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      averageDaysInStock: data.length > 0
-        ? Math.round(data.reduce((sum, b) => sum + b.daysInStock, 0) / data.length)
-        : 0,
-      oldestBatchDays: data.length > 0 ? Math.max(...data.map(b => b.daysInStock)) : 0,
+      totalValue: data
+        .reduce((sum, b) => new Decimal(sum).plus(b.totalValue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      averageDaysInStock:
+        data.length > 0
+          ? Math.round(data.reduce((sum, b) => sum + b.daysInStock, 0) / data.length)
+          : 0,
+      oldestBatchDays: data.length > 0 ? Math.max(...data.map((b) => b.daysInStock)) : 0,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1352,7 +1736,15 @@ export const reportsService = {
     return {
       reportType: 'STOCK_AGING' as const,
       reportName: 'Stock Aging Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1370,6 +1762,7 @@ export const reportsService = {
       startDate: Date;
       endDate: Date;
       productId?: string;
+      reason?: 'DAMAGE' | 'EXPIRY' | 'THEFT' | 'OTHER';
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
@@ -1380,10 +1773,16 @@ export const reportsService = {
 
     const summary = {
       totalLossEvents: data.length,
-      totalQuantityLost: data.reduce((sum, l) => new Decimal(sum).plus(l.quantityLost), new Decimal(0)).toDecimalPlaces(3).toNumber(),
-      totalLossValue: data.reduce((sum, l) => new Decimal(sum).plus(l.totalLossValue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      damageCount: data.filter(l => l.lossType === 'DAMAGE').length,
-      expiryCount: data.filter(l => l.lossType === 'EXPIRY').length,
+      totalQuantityLost: data
+        .reduce((sum, l) => new Decimal(sum).plus(l.quantityLost), new Decimal(0))
+        .toDecimalPlaces(3)
+        .toNumber(),
+      totalLossValue: data
+        .reduce((sum, l) => new Decimal(sum).plus(l.totalLossValue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      damageCount: data.filter((l) => l.lossType === 'DAMAGE').length,
+      expiryCount: data.filter((l) => l.lossType === 'EXPIRY').length,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1403,7 +1802,15 @@ export const reportsService = {
     return {
       reportType: 'WASTE_DAMAGE_REPORT' as const,
       reportName: 'Waste & Damage Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1433,15 +1840,22 @@ export const reportsService = {
 
     const summary = {
       totalProductsNeedingReorder: data.length,
-      urgentCount: data.filter(p => p.priority === 'URGENT').length,
-      highCount: data.filter(p => p.priority === 'HIGH').length,
-      mediumCount: data.filter(p => p.priority === 'MEDIUM').length,
-      totalEstimatedCost: data.reduce((sum, p) => new Decimal(sum).plus(p.estimatedOrderCost), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      trendingUp: data.filter(p => p.demandTrend === 'INCREASING').length,
-      trendingDown: data.filter(p => p.demandTrend === 'DECREASING').length,
-      avgLeadTimeDays: data.length > 0
-        ? new Decimal(data.reduce((sum, p) => sum + p.leadTimeDays, 0)).dividedBy(data.length).toDecimalPlaces(1).toNumber()
-        : 0,
+      urgentCount: data.filter((p) => p.priority === 'URGENT').length,
+      highCount: data.filter((p) => p.priority === 'HIGH').length,
+      mediumCount: data.filter((p) => p.priority === 'MEDIUM').length,
+      totalEstimatedCost: data
+        .reduce((sum, p) => new Decimal(sum).plus(p.estimatedOrderCost), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      trendingUp: data.filter((p) => p.demandTrend === 'INCREASING').length,
+      trendingDown: data.filter((p) => p.demandTrend === 'DECREASING').length,
+      avgLeadTimeDays:
+        data.length > 0
+          ? new Decimal(data.reduce((sum, p) => sum + p.leadTimeDays, 0))
+              .dividedBy(data.length)
+              .toDecimalPlaces(1)
+              .toNumber()
+          : 0,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1461,7 +1875,15 @@ export const reportsService = {
     return {
       reportType: 'REORDER_RECOMMENDATIONS' as const,
       reportName: 'Reorder Recommendations Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1488,8 +1910,14 @@ export const reportsService = {
 
     const summary = {
       totalCategories: data.length,
-      totalRevenue: data.reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalProfit: data.reduce((sum: Decimal, item) => sum.plus(item.grossProfit), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data
+        .reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalProfit: data
+        .reduce((sum: Decimal, item) => sum.plus(item.grossProfit), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
       topCategory: data.length > 0 ? data[0].category : null,
     };
@@ -1499,7 +1927,15 @@ export const reportsService = {
     return {
       reportType: 'SALES_BY_CATEGORY' as const,
       reportName: 'Sales by Category Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1526,7 +1962,10 @@ export const reportsService = {
 
     const summary = {
       totalPaymentMethods: data.length,
-      totalRevenue: data.reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data
+        .reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
       topPaymentMethod: data.length > 0 ? data[0].paymentMethod : null,
     };
@@ -1536,7 +1975,15 @@ export const reportsService = {
     return {
       reportType: 'SALES_BY_PAYMENT_METHOD' as const,
       reportName: 'Sales by Payment Method Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1561,13 +2008,17 @@ export const reportsService = {
     const data = await reportsRepository.getHourlySalesAnalysis(pool, options);
     const executionTime = Date.now() - startTime;
 
-    const peakHour = data.length > 0 ? data.reduce((max, item) =>
-      item.totalRevenue > max.totalRevenue ? item : max
-    ) : null;
+    const peakHour =
+      data.length > 0
+        ? data.reduce((max, item) => (item.totalRevenue > max.totalRevenue ? item : max))
+        : null;
 
     const summary = {
       totalHours: data.length,
-      totalRevenue: data.reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0)).toDecimalPlaces(2).toNumber(),
+      totalRevenue: data
+        .reduce((sum: Decimal, item) => sum.plus(item.totalRevenue), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
       totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
       peakHour: peakHour?.hour,
       peakHourRevenue: peakHour?.totalRevenue || 0,
@@ -1578,7 +2029,15 @@ export const reportsService = {
     return {
       reportType: 'HOURLY_SALES_ANALYSIS' as const,
       reportName: 'Hourly Sales Analysis Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1606,10 +2065,17 @@ export const reportsService = {
     const data = await reportsRepository.getSalesComparison(pool, options);
     const executionTime = Date.now() - startTime;
 
-    const totalCurrentSales = data.reduce((sum: Decimal, item) => sum.plus(item.currentSales), new Decimal(0));
-    const totalPreviousSales = data.reduce((sum: Decimal, item) => sum.plus(item.previousSales), new Decimal(0));
-    const overallChange = totalPreviousSales.isZero() ? new Decimal(100) :
-      totalCurrentSales.minus(totalPreviousSales).dividedBy(totalPreviousSales).times(100);
+    const totalCurrentSales = data.reduce(
+      (sum: Decimal, item) => sum.plus(item.currentSales),
+      new Decimal(0)
+    );
+    const totalPreviousSales = data.reduce(
+      (sum: Decimal, item) => sum.plus(item.previousSales),
+      new Decimal(0)
+    );
+    const overallChange = totalPreviousSales.isZero()
+      ? new Decimal(100)
+      : totalCurrentSales.minus(totalPreviousSales).dividedBy(totalPreviousSales).times(100);
 
     const summary = {
       totalPeriods: data.length,
@@ -1624,7 +2090,15 @@ export const reportsService = {
     return {
       reportType: 'SALES_COMPARISON' as const,
       reportName: 'Sales Comparison Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1652,11 +2126,26 @@ export const reportsService = {
 
     const summary = {
       totalPurchases: data.length,
-      totalSpent: data.reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalPaid: data.reduce((sum: Decimal, item) => sum.plus(item.amountPaid), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      totalOutstanding: data.reduce((sum: Decimal, item) => sum.plus(item.outstandingBalance), new Decimal(0)).toDecimalPlaces(2).toNumber(),
-      averagePurchaseValue: data.length > 0 ?
-        data.reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0)).dividedBy(data.length).toDecimalPlaces(2).toNumber() : 0,
+      totalSpent: data
+        .reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalPaid: data
+        .reduce((sum: Decimal, item) => sum.plus(item.amountPaid), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      totalOutstanding: data
+        .reduce((sum: Decimal, item) => sum.plus(item.outstandingBalance), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
+      averagePurchaseValue:
+        data.length > 0
+          ? data
+              .reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0))
+              .dividedBy(data.length)
+              .toDecimalPlaces(2)
+              .toNumber()
+          : 0,
     };
 
     // Audit logging handled by controller layer
@@ -1664,7 +2153,15 @@ export const reportsService = {
     return {
       reportType: 'CUSTOMER_PURCHASE_HISTORY' as const,
       reportName: 'Customer Purchase History Report',
-      generatedAt: new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
       parameters: options,
       data,
       summary,
@@ -1699,85 +2196,135 @@ export const reportsService = {
     const enhancedAnalysis = {
       // Liquidity Ratios (Bank-grade analysis)
       liquidityMetrics: {
-        currentRatio: data.cashPosition.totalCashIn > 0 ?
-          new Decimal(data.cashPosition.totalCashIn)
-            .div(Math.max(data.cashPosition.newCreditExtended, 1))
-            .toDecimalPlaces(2).toNumber() : 0,
-        quickRatio: data.cashPosition.totalCashIn > 0 ?
-          new Decimal(data.cashPosition.totalCashIn)
-            .div(Math.max(data.cashPosition.outstandingReceivables, 1))
-            .toDecimalPlaces(2).toNumber() : 0,
-        cashTurnoverRatio: data.salesPerformance.totalRevenue > 0 ?
-          new Decimal(data.cashPosition.totalCashIn)
-            .div(data.salesPerformance.totalRevenue)
-            .toDecimalPlaces(2).toNumber() : 0,
+        currentRatio:
+          data.cashPosition.totalCashIn > 0
+            ? new Decimal(data.cashPosition.totalCashIn)
+                .div(Math.max(data.cashPosition.newCreditExtended, 1))
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        quickRatio:
+          data.cashPosition.totalCashIn > 0
+            ? new Decimal(data.cashPosition.totalCashIn)
+                .div(Math.max(data.cashPosition.outstandingReceivables, 1))
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        cashTurnoverRatio:
+          data.salesPerformance.totalRevenue > 0
+            ? new Decimal(data.cashPosition.totalCashIn)
+                .div(data.salesPerformance.totalRevenue)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
       },
 
       // Profitability Analysis
       profitabilityMetrics: {
         grossProfitMargin: data.cashPosition.profitMarginPercent,
-        netProfitRatio: data.salesPerformance.totalRevenue > 0 ?
-          new Decimal(data.salesPerformance.grossProfit)
-            .div(data.salesPerformance.totalRevenue)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
-        returnOnSales: data.salesPerformance.totalRevenue > 0 ?
-          new Decimal(data.salesPerformance.grossProfit)
-            .div(data.salesPerformance.totalRevenue)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
+        netProfitRatio:
+          data.salesPerformance.totalRevenue > 0
+            ? new Decimal(data.salesPerformance.grossProfit)
+                .div(data.salesPerformance.totalRevenue)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        returnOnSales:
+          data.salesPerformance.totalRevenue > 0
+            ? new Decimal(data.salesPerformance.grossProfit)
+                .div(data.salesPerformance.totalRevenue)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
       },
 
       // Efficiency Metrics
       efficiencyMetrics: {
-        assetTurnover: data.inventoryHealth.inventoryValue > 0 ?
-          new Decimal(data.salesPerformance.totalRevenue)
-            .div(data.inventoryHealth.inventoryValue)
-            .toDecimalPlaces(2).toNumber() : 0,
-        inventoryTurnover: data.inventoryHealth.inventoryValue > 0 ?
-          new Decimal(data.salesPerformance.totalCost)
-            .div(data.inventoryHealth.inventoryValue)
-            .toDecimalPlaces(2).toNumber() : 0,
-        receivablesToSalesRatio: data.salesPerformance.totalRevenue > 0 ?
-          new Decimal(data.customerMetrics.totalReceivables)
-            .div(data.salesPerformance.totalRevenue)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
+        assetTurnover:
+          data.inventoryHealth.inventoryValue > 0
+            ? new Decimal(data.salesPerformance.totalRevenue)
+                .div(data.inventoryHealth.inventoryValue)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        inventoryTurnover:
+          data.inventoryHealth.inventoryValue > 0
+            ? new Decimal(data.salesPerformance.totalCost)
+                .div(data.inventoryHealth.inventoryValue)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        receivablesToSalesRatio:
+          data.salesPerformance.totalRevenue > 0
+            ? new Decimal(data.customerMetrics.totalReceivables)
+                .div(data.salesPerformance.totalRevenue)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
       },
 
       // Customer Analytics
       customerInsights: {
-        customerRetentionIndicator: data.customerMetrics.totalCustomers > 0 ?
-          new Decimal(data.salesPerformance.uniqueCustomers)
-            .div(data.customerMetrics.totalCustomers)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
-        averageCustomerValue: data.salesPerformance.uniqueCustomers > 0 ?
-          new Decimal(data.salesPerformance.totalRevenue)
-            .div(data.salesPerformance.uniqueCustomers)
-            .toDecimalPlaces(2).toNumber() : 0,
-        creditUtilizationRate: data.customerMetrics.totalCustomers > 0 ?
-          new Decimal(data.customerMetrics.customersWithBalance)
-            .div(data.customerMetrics.totalCustomers)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
+        customerRetentionIndicator:
+          data.customerMetrics.totalCustomers > 0
+            ? new Decimal(data.salesPerformance.uniqueCustomers)
+                .div(data.customerMetrics.totalCustomers)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        averageCustomerValue:
+          data.salesPerformance.uniqueCustomers > 0
+            ? new Decimal(data.salesPerformance.totalRevenue)
+                .div(data.salesPerformance.uniqueCustomers)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        creditUtilizationRate:
+          data.customerMetrics.totalCustomers > 0
+            ? new Decimal(data.customerMetrics.customersWithBalance)
+                .div(data.customerMetrics.totalCustomers)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
       },
 
       // Risk Assessment (Advanced)
       riskMetrics: {
-        concentrationRisk: data.salesPerformance.customerRevenue > 0 ?
-          new Decimal(data.salesPerformance.customerRevenue)
-            .div(data.salesPerformance.totalRevenue)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
-        badDebtRisk: data.customerMetrics.totalReceivables > 0 ?
-          new Decimal(data.customerMetrics.totalReceivables)
-            .div(Math.max(data.salesPerformance.totalRevenue * 30, 1)) // 30 days of sales
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
-        inventoryObsolescenceRisk: data.inventoryHealth.totalProducts > 0 ?
-          new Decimal(data.inventoryHealth.lowStockItems + data.inventoryHealth.expiringUnits)
-            .div(data.inventoryHealth.totalProducts)
-            .mul(100).toDecimalPlaces(2).toNumber() : 0,
+        concentrationRisk:
+          data.salesPerformance.customerRevenue > 0
+            ? new Decimal(data.salesPerformance.customerRevenue)
+                .div(data.salesPerformance.totalRevenue)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        badDebtRisk:
+          data.customerMetrics.totalReceivables > 0
+            ? new Decimal(data.customerMetrics.totalReceivables)
+                .div(Math.max(data.salesPerformance.totalRevenue * 30, 1)) // 30 days of sales
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
+        inventoryObsolescenceRisk:
+          data.inventoryHealth.totalProducts > 0
+            ? new Decimal(data.inventoryHealth.lowStockItems + data.inventoryHealth.expiringUnits)
+                .div(data.inventoryHealth.totalProducts)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
       },
 
       // Performance Benchmarks
       performanceBenchmarks: {
         dailyRevenueTarget: 10000, // Configurable business target
-        profitMarginTarget: 25,    // Configurable business target
+        profitMarginTarget: 25, // Configurable business target
         inventoryTurnoverTarget: 12, // Configurable business target
         collectionEfficiencyTarget: 85, // Configurable business target
       },
@@ -1790,8 +2337,9 @@ export const reportsService = {
           recommendations.push({
             priority: 'HIGH',
             category: 'CASH_FLOW',
-            message: 'Cash collection rate is below 70%. Consider tightening credit terms or implementing automated collection processes.',
-            impact: 'FINANCIAL'
+            message:
+              'Cash collection rate is below 70%. Consider tightening credit terms or implementing automated collection processes.',
+            impact: 'FINANCIAL',
           });
         }
 
@@ -1800,7 +2348,7 @@ export const reportsService = {
             priority: 'HIGH',
             category: 'PROFITABILITY',
             message: 'Profit margin is below 15%. Review pricing strategy and cost management.',
-            impact: 'PROFITABILITY'
+            impact: 'PROFITABILITY',
           });
         }
 
@@ -1808,8 +2356,9 @@ export const reportsService = {
           recommendations.push({
             priority: 'MEDIUM',
             category: 'INVENTORY',
-            message: 'Over 20% of products are low stock. Review reorder points and supplier lead times.',
-            impact: 'OPERATIONAL'
+            message:
+              'Over 20% of products are low stock. Review reorder points and supplier lead times.',
+            impact: 'OPERATIONAL',
           });
         }
 
@@ -1817,8 +2366,9 @@ export const reportsService = {
           recommendations.push({
             priority: 'MEDIUM',
             category: 'GROWTH',
-            message: 'Customer acquisition rate is low. Consider marketing initiatives to attract new customers.',
-            impact: 'GROWTH'
+            message:
+              'Customer acquisition rate is low. Consider marketing initiatives to attract new customers.',
+            impact: 'GROWTH',
           });
         }
 
@@ -1826,8 +2376,9 @@ export const reportsService = {
           recommendations.push({
             priority: 'URGENT',
             category: 'RISK_MANAGEMENT',
-            message: 'Overall business risk is HIGH. Immediate attention required for risk mitigation.',
-            impact: 'STRATEGIC'
+            message:
+              'Overall business risk is HIGH. Immediate attention required for risk mitigation.',
+            impact: 'STRATEGIC',
           });
         }
 
@@ -1853,14 +2404,14 @@ export const reportsService = {
     return {
       reportType: 'BUSINESS_POSITION' as const,
       reportName: 'Comprehensive Business Position Report',
-      generatedAt: new Date().toLocaleString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
       }),
       parameters: options,
       data: {
@@ -1877,13 +2428,12 @@ export const reportsService = {
           outstandingReceivables: data.cashPosition.outstandingReceivables,
           inventoryValue: data.inventoryHealth.inventoryValue,
         },
-        criticalAlerts: enhancedAnalysis.recommendations.filter(r => r.priority === 'URGENT' || r.priority === 'HIGH').length,
+        criticalAlerts: enhancedAnalysis.recommendations.filter(
+          (r) => r.priority === 'URGENT' || r.priority === 'HIGH'
+        ).length,
       },
       recordCount: 1,
       executionTimeMs: executionTime,
     };
   },
 };
-
-
-

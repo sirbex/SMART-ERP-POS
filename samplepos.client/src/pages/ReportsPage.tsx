@@ -92,7 +92,10 @@ const formatFieldValue = (key: string, value: unknown): string => {
       lowerKey.endsWith('users') ||
       lowerKey.endsWith('categories') ||
       lowerKey.includes('count') ||
-      lowerKey.includes('needingreorder')
+      lowerKey.includes('needingreorder') ||
+      lowerKey.endsWith('events') ||
+      lowerKey.endsWith('cashiers') ||
+      lowerKey.endsWith('periods')
     );
     if (isCountField) {
       return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -890,6 +893,8 @@ export default function ReportsPage() {
         params.append('customer_number', customerId);
       } else if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY' && customerId) {
         params.append('customer_id', customerId);
+      } else if (selectedReport === 'WASTE_DAMAGE_REPORT' && reason) {
+        params.append('reason', reason);
       } else if (selectedReport === 'SALES_COMPARISON') {
         // Sales Comparison needs different date parameters - override the default ones
         params.delete('start_date');

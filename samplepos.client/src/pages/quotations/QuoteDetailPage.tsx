@@ -325,7 +325,10 @@ export default function QuoteDetailPage() {
         <div className="mb-6 flex gap-3 flex-wrap no-print">
           {canConvert && (
             <button
-              onClick={() => navigate(`/quotations/${quoteNumber}/convert`)}
+              onClick={() => {
+                localStorage.setItem('loadQuoteNumber', quotation.quoteNumber);
+                navigate('/pos');
+              }}
               className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
             >
               Convert to Sale

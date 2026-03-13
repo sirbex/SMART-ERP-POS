@@ -34,7 +34,7 @@ export const QuotationItemSchema = z.object({
   lineNumber: z.number().int().positive(),
   productId: z.string().min(1).nullable().optional(),
   itemType: QuoteItemTypeEnum.default('product'),
-  sku: z.string().max(100).nullable().optional(),
+  sku: z.preprocess(val => val != null ? String(val) : val, z.string().max(100).nullable().optional()),
   description: z.string().min(1).max(500),
   notes: z.string().max(500).optional().or(z.null()).transform(val => val ?? undefined),
   quantity: z.number().positive(),
@@ -103,7 +103,7 @@ export const QuotationSchema = z.object({
 const QuotationItemInputSchema = z.object({
   productId: z.string().min(1).nullable().optional(),
   itemType: QuoteItemTypeEnum.default('product'),
-  sku: z.string().max(100).nullable().optional(),
+  sku: z.preprocess(val => val != null ? String(val) : val, z.string().max(100).nullable().optional()),
   description: z.string().min(1).max(500),
   notes: z.string().max(500).optional().or(z.null()).transform(val => val ?? undefined),
   quantity: z.number().positive(),

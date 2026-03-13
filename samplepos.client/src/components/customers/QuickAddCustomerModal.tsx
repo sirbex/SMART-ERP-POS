@@ -6,6 +6,10 @@ import { CreateCustomerSchema } from '@shared/zod/customer';
 import POSModal from '../pos/POSModal';
 import POSButton from '../pos/POSButton';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { putCustomer } from '../../lib/offlineDb';
+
+// LocalStorage key for offline customer creation queue
+const OFFLINE_CUSTOMERS_KEY = 'pos_offline_customers';
 
 interface CreatedCustomerData {
   id: string;
@@ -21,12 +25,26 @@ interface QuickAddCustomerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: (customer: CreatedCustomerData) => void;
+  isOffline?: boolean;
+}
+
+/** Queue an offline-created customer for later sync */
+function queueOfflineCustomer(customer: CreatedCustomerData): void {
+  try {
+    const raw = localStorage.getItem(OFFLINE_CUSTOMERS_KEY);
+    const queue: CreatedCustomerData[] = raw ? JSON.parse(raw) : [];
+    queue.push(customer);
+    localStorage.setItem(OFFLINE_CUSTOMERS_KEY, JSON.stringify(queue));
+  } catch {
+    // Best-effort queue
+  }
 }
 
 export default function QuickAddCustomerModal({
   isOpen,
   onClose,
   onSuccess,
+  isOffline = false,
 }: QuickAddCustomerModalProps) {
   const queryClient = useQueryClient();
   const modalRef = useFocusTrap(isOpen);
@@ -88,6 +106,40 @@ export default function QuickAddCustomerModal({
         }
       });
       setErrors(fieldErrors);
+      return;
+    }
+
+    if (isOffline) {
+      // Save locally when offline
+      const tempId = `offline_cust_${Date.now()}`;
+      const offlineCustomer: CreatedCustomerData = {
+        id: tempId,
+        name: validation.data.name,
+        email: validation.data.email || undefined,
+        phone: validation.data.phone || undefined,
+        address: validation.data.address || undefined,
+        creditLimit: validation.data.creditLimit ?? 0,
+        balance: 0,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      // Persist to IndexedDB so it shows in future offline searches
+      putCustomer({
+        id: tempId,
+        name: validation.data.name,
+        email: validation.data.email || '',
+        phone: validation.data.phone || '',
+        address: validation.data.address || '',
+        creditLimit: validation.data.creditLimit ?? 0,
+        balance: 0,
+        isActive: true,
+      }).catch(() => { /* best effort */ });
+      // Queue for server sync when online
+      queueOfflineCustomer(offlineCustomer);
+      if (onSuccess) onSuccess(offlineCustomer);
+      resetForm();
+      onClose();
       return;
     }
 

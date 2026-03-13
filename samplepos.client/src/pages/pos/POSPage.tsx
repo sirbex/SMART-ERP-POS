@@ -46,6 +46,7 @@ import type {
   QuotationDetail,
   QuotationItem,
 } from '@shared/types/quotation';
+import { normalizeStatus, getQuoteStatusBadge } from '@shared/types/quotation';
 import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 
@@ -427,6 +428,11 @@ export default function POSPage() {
       setTimeout(async () => {
         try {
           const response = await quotationApi.getQuotationByNumber(loadQuoteNumber);
+          const quoteStatus = response.quotation?.status || '';
+          if (normalizeStatus(quoteStatus) !== 'OPEN') {
+            toast.error(`Quote ${loadQuoteNumber} is ${quoteStatus.toLowerCase()} and cannot be loaded`);
+            return;
+          }
           await handleLoadQuoteToCart(response);
           toast.success(`Quote ${loadQuoteNumber} loaded!`, { duration: 3000 });
         } catch (error) {
@@ -1471,12 +1477,19 @@ export default function POSPage() {
   // Load quote to cart
   const handleLoadQuoteToCart = async (quoteData: QuotationDetail) => {
     try {
+      const quote = quoteData.quotation || quoteData;
+
+      // Guard: prevent loading CONVERTED or CANCELLED quotes
+      if (normalizeStatus(quote.status) !== 'OPEN') {
+        toast.error(`Cannot load quote ${quote.quoteNumber} — it is already ${quote.status.toLowerCase()}`);
+        return;
+      }
+
       if (items.length > 0) {
         const confirmed = window.confirm('This will replace current cart items. Continue?');
         if (!confirmed) return;
       }
 
-      const quote = quoteData.quotation || quoteData;
       const quoteItems = quoteData.items || [];
 
       // If we have the quote number but need full data
@@ -1555,21 +1568,52 @@ export default function POSPage() {
           toast.error('Error loading customer for quote');
         }
       } else if (quotation.customerName) {
-        // If we have customer name but no ID, create a basic customer object
-        console.log('📋 Using customer name from quote:', quotation.customerName);
-        const basicCustomer: Customer = {
-          id: 'temp_' + Date.now(),
-          name: quotation.customerName || 'Walk-in Customer',
-          email: quotation.customerEmail || '',
-          phone: quotation.customerPhone || '',
-          balance: 0,
-          creditLimit: 0,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        setSelectedCustomer(basicCustomer);
-        localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(basicCustomer));
+        // If we have customer name but no ID, try to find the customer in DB by name
+        console.log('📋 Searching DB for customer by name:', quotation.customerName);
+        try {
+          const listRes = await api.customers.list();
+          const allCustomers = (listRes.data?.data || []) as Customer[];
+          const matchedCustomer = allCustomers.find(
+            (c: Customer) => c.name.toLowerCase() === quotation.customerName!.toLowerCase()
+          );
+          if (matchedCustomer) {
+            console.log('✅ Found matching customer in DB:', matchedCustomer.id, matchedCustomer.name);
+            setSelectedCustomer(matchedCustomer);
+            localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(matchedCustomer));
+          } else {
+            // No match found — create a temporary placeholder (credit sales won't work)
+            console.log('📋 No DB match, using temp customer:', quotation.customerName);
+            const basicCustomer: Customer = {
+              id: 'temp_' + Date.now(),
+              name: quotation.customerName || 'Walk-in Customer',
+              email: quotation.customerEmail || '',
+              phone: quotation.customerPhone || '',
+              balance: 0,
+              creditLimit: 0,
+              isActive: true,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            setSelectedCustomer(basicCustomer);
+            localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(basicCustomer));
+          }
+        } catch (err) {
+          console.error('❌ Failed to search customers by name:', err);
+          // Fallback to temp customer
+          const basicCustomer: Customer = {
+            id: 'temp_' + Date.now(),
+            name: quotation.customerName || 'Walk-in Customer',
+            email: quotation.customerEmail || '',
+            phone: quotation.customerPhone || '',
+            balance: 0,
+            creditLimit: 0,
+            isActive: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          setSelectedCustomer(basicCustomer);
+          localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(basicCustomer));
+        }
       }
 
       setShowLoadQuoteDialog(false);
@@ -1588,9 +1632,12 @@ export default function POSPage() {
       const response = await quotationApi.listQuotations({
         page: 1,
         limit: 20,
-        // No status filter - get recent quotations regardless of status
       });
-      setAvailableQuotes(response.quotations || []);
+      // Only show OPEN quotes — exclude CONVERTED and CANCELLED
+      const openQuotes = (response.quotations || []).filter(
+        (q) => normalizeStatus(q.status) === 'OPEN'
+      );
+      setAvailableQuotes(openQuotes);
     } catch (error) {
       console.error('Failed to fetch quotes:', error);
       toast.error('Failed to load quotes');
@@ -2058,10 +2105,21 @@ export default function POSPage() {
       calculation: `${subtotalAfterDiscount} + ${tax} = ${grandTotal}`,
     });
 
-    // Strip temp_ customer IDs — they're placeholders for quotation customers with no DB record
-    const resolvedCustomerId = selectedCustomer?.id?.startsWith('temp_')
+    // Strip temp_ and offline_cust_ customer IDs — they're placeholders with no DB record
+    const resolvedCustomerId = selectedCustomer?.id?.startsWith('temp_') || selectedCustomer?.id?.startsWith('offline_cust_')
       ? undefined
       : selectedCustomer?.id;
+
+    // Validate: CREDIT payments require a real (non-temp) customer
+    const hasCreditPayment = finalPaymentLines.some((line) => line.paymentMethod === 'CREDIT');
+    if (hasCreditPayment && !resolvedCustomerId) {
+      isSubmittingRef.current = false;
+      setIsProcessingSale(false);
+      alert(
+        `❌ Cannot Complete Sale\n\n💳 Credit Payment Requires a Customer\n\nThe selected customer "${selectedCustomer?.name || 'Unknown'}" is not linked to a database record.\n\n📋 To fix this:\n1. Remove the current customer (click ✕)\n2. Search and select "${selectedCustomer?.name || 'the customer'}" from the customer dropdown\n3. Try completing the payment again\n\n💡 Tip: The customer must exist in the system for credit/invoice sales.`
+      );
+      return;
+    }
 
     const saleData = {
       customerId: resolvedCustomerId,
@@ -2142,8 +2200,55 @@ export default function POSPage() {
     // If offline, save to queue with local stock validation
     if (!isOnline) {
       try {
-        const offlineId = saveSaleOffline(saleData as unknown as OfflineSaleData);
+        // Preserve offline_cust_ ID so sync engine can resolve it later
+        const offlineSaleData = {
+          ...saleData,
+          customerId: selectedCustomer?.id || saleData.customerId,
+        };
+        const offlineId = saveSaleOffline(offlineSaleData as unknown as OfflineSaleData);
         toast.success(`Sale saved offline (${offlineId}). Will sync when online.`);
+
+        // Build receipt data BEFORE clearing state so user gets a receipt
+        const itemDiscountTotalOffline = items.reduce(
+          (sum, item) => new Decimal(sum).plus(item.discount?.amount || 0).toNumber(),
+          0
+        );
+        const today = new Date();
+        const offlineSaleDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+        setReceiptData({
+          saleNumber: offlineId,
+          saleDate: offlineSaleDate,
+          subtotal,
+          discountAmount: cartDiscountAmount + itemDiscountTotalOffline,
+          taxAmount: tax,
+          totalAmount: grandTotal,
+          cashierName: currentUser?.fullName,
+          items: items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+            uom: item.uom,
+            discountAmount: item.discount?.amount,
+          })),
+          payments: finalPaymentLines.map((line) => ({
+            method: line.paymentMethod,
+            amount: line.amount,
+            reference: line.reference,
+          })),
+          changeGiven: changeAmount,
+          customerName: selectedCustomer?.name,
+          companyName: invoiceSettings?.companyName,
+          companyAddress: invoiceSettings?.companyAddress || undefined,
+          companyPhone: invoiceSettings?.companyPhone || undefined,
+        });
+        setLastSale({
+          id: offlineId,
+          saleNumber: offlineId,
+          saleDate: offlineSaleDate,
+          totalAmount: grandTotal,
+        });
       } catch (stockErr: unknown) {
         toast.error(
           stockErr instanceof Error ? stockErr.message : 'Insufficient stock for offline sale'
@@ -2163,6 +2268,7 @@ export default function POSPage() {
       setPaymentReference('');
       setSaleDate('');
       setShowDatePicker(false);
+      setShowReceiptModal(true);
       clearPersistedCart();
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
@@ -3707,16 +3813,16 @@ export default function POSPage() {
                             <div className="flex items-center gap-2">
                               <p className="font-semibold text-blue-600">{quote.quoteNumber}</p>
                               <span
-                                className={`px-2 py-0.5 rounded-full text-xs font-medium ${(quote.status as string) === 'DRAFT'
-                                  ? 'bg-gray-100 text-gray-800'
-                                  : (quote.status as string) === 'SENT'
-                                    ? 'bg-blue-100 text-blue-800'
-                                    : (quote.status as string) === 'ACCEPTED'
-                                      ? 'bg-green-100 text-green-800'
-                                      : 'bg-gray-100 text-gray-800'
-                                  }`}
+                                className={`px-2 py-0.5 rounded-full text-xs font-medium ${{
+                                  gray: 'bg-gray-100 text-gray-800',
+                                  blue: 'bg-blue-100 text-blue-800',
+                                  green: 'bg-green-100 text-green-800',
+                                  yellow: 'bg-yellow-100 text-yellow-800',
+                                  red: 'bg-red-100 text-red-800',
+                                  purple: 'bg-purple-100 text-purple-800',
+                                }[getQuoteStatusBadge(quote.status).color]}`}
                               >
-                                {quote.status}
+                                {getQuoteStatusBadge(quote.status).label}
                               </span>
                             </div>
                             <p className="text-gray-900 mt-1">

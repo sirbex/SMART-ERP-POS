@@ -6,16 +6,37 @@ import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import type {
-  SalesReportRow, SupplierCostAnalysisRow, PaymentReportRow,
-  InventoryAdjustmentRow, PurchaseOrderSummaryRow, StockMovementAnalysisRow,
-  CustomerAccountStatementData, DailyCashFlowRow, TopCustomerRow,
-  StockAgingRow, SalesByCategoryRow, SalesByPaymentMethodRow,
-  HourlySalesAnalysisRow, BusinessPositionData, InventoryValuationRow,
-  ExpiringItemRow, LowStockItemRow, BestSellingProductRow, GoodsReceivedRow,
-  CustomerPaymentsRow, ProfitLossRow, DeletedItemRow, ProfitMarginByProductRow,
-  SupplierPaymentStatusRow, CustomerAgingRow, WasteDamageRow,
-  ReorderRecommendationRow, SalesComparisonRow, CustomerPurchaseHistoryRow,
-  CashRegisterSessionSummaryData, CashRegisterMovementBreakdownData,
+  SalesReportRow,
+  SupplierCostAnalysisRow,
+  PaymentReportRow,
+  InventoryAdjustmentRow,
+  PurchaseOrderSummaryRow,
+  StockMovementAnalysisRow,
+  CustomerAccountStatementData,
+  DailyCashFlowRow,
+  TopCustomerRow,
+  StockAgingRow,
+  SalesByCategoryRow,
+  SalesByPaymentMethodRow,
+  HourlySalesAnalysisRow,
+  BusinessPositionData,
+  InventoryValuationRow,
+  ExpiringItemRow,
+  LowStockItemRow,
+  BestSellingProductRow,
+  GoodsReceivedRow,
+  CustomerPaymentsRow,
+  ProfitLossRow,
+  DeletedItemRow,
+  ProfitMarginByProductRow,
+  SupplierPaymentStatusRow,
+  CustomerAgingRow,
+  WasteDamageRow,
+  ReorderRecommendationRow,
+  SalesComparisonRow,
+  CustomerPurchaseHistoryRow,
+  CashRegisterSessionSummaryData,
+  CashRegisterMovementBreakdownData,
   CashRegisterSessionHistoryData,
 } from './reportTypes.js';
 
@@ -35,7 +56,7 @@ function formatDate(date: Date | string | null | undefined): string | null {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false
+    hour12: false,
   });
 }
 
@@ -49,7 +70,7 @@ function formatDateOnly(date: Date | string | null | undefined): string | null {
   return d.toLocaleString('en-US', {
     year: 'numeric',
     month: 'short',
-    day: '2-digit'
+    day: '2-digit',
   });
 }
 
@@ -122,7 +143,9 @@ export const reportsRepository = {
       );
       return result.rows[0];
     } catch (error: unknown) {
-      logger.warn('Failed to log report run', { error: error instanceof Error ? error.message : String(error) });
+      logger.warn('Failed to log report run', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   },
@@ -200,7 +223,7 @@ export const reportsRepository = {
     const result = await pool.query(query, params);
 
     // Use Decimal.js for precise calculations
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const qty = new Decimal(row.total_quantity || 0);
       const cost = new Decimal(row.unit_cost || 0);
       const sell = new Decimal(row.selling_price || 0);
@@ -254,8 +277,8 @@ export const reportsRepository = {
 
     switch (options.groupBy) {
       case 'day':
-        selectClause = "DATE(fs.sale_date) as period";
-        groupByClause = "DATE(fs.sale_date)";
+        selectClause = 'DATE(fs.sale_date) as period';
+        groupByClause = 'DATE(fs.sale_date)';
         break;
       case 'week':
         selectClause = "DATE_TRUNC('week', fs.sale_date)::DATE as period";
@@ -275,12 +298,12 @@ export const reportsRepository = {
         groupByClause = "COALESCE(c.name, 'Walk-in Customer')";
         break;
       case 'payment_method':
-        selectClause = "fs.payment_method as period";
-        groupByClause = "fs.payment_method";
+        selectClause = 'fs.payment_method as period';
+        groupByClause = 'fs.payment_method';
         break;
       default:
-        selectClause = "DATE(fs.sale_date) as period";
-        groupByClause = "DATE(fs.sale_date)";
+        selectClause = 'DATE(fs.sale_date) as period';
+        groupByClause = 'DATE(fs.sale_date)';
     }
 
     let query: string;
@@ -348,13 +371,15 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const totalSales = new Decimal(row.total_sales || 0);
       const totalDiscounts = new Decimal(row.total_discounts || 0);
       const netRevenue = totalSales.minus(totalDiscounts);
       const totalCost = new Decimal(row.total_cost || 0);
       const grossProfit = netRevenue.minus(totalCost);
-      const profitMargin = netRevenue.isZero() ? new Decimal(0) : grossProfit.dividedBy(netRevenue).times(100);
+      const profitMargin = netRevenue.isZero()
+        ? new Decimal(0)
+        : grossProfit.dividedBy(netRevenue).times(100);
 
       return {
         period: formatDateOnly(row.period) || String(row.period),
@@ -365,7 +390,9 @@ export const reportsRepository = {
         grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
         profitMargin: profitMargin.toDecimalPlaces(2).toNumber(),
         transactionCount: parseInt(row.transaction_count),
-        averageTransactionValue: new Decimal(row.average_transaction_value || 0).toDecimalPlaces(2).toNumber(),
+        averageTransactionValue: new Decimal(row.average_transaction_value || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
       };
     });
   },
@@ -410,7 +437,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const quantityRemaining = new Decimal(row.quantity_remaining);
       const unitCost = new Decimal(row.unit_cost);
       const potentialLoss = quantityRemaining.times(unitCost);
@@ -500,7 +527,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const currentStock = new Decimal(row.current_stock);
       const reorderLevel = new Decimal(row.reorder_level);
 
@@ -517,7 +544,9 @@ export const reportsRepository = {
         sku: row.sku,
         currentStock: currentStock.toDecimalPlaces(3).toNumber(),
         reorderLevel: reorderLevel.toDecimalPlaces(3).toNumber(),
-        reorderQuantity: row.reorder_quantity ? new Decimal(row.reorder_quantity).toDecimalPlaces(3).toNumber() : undefined,
+        reorderQuantity: row.reorder_quantity
+          ? new Decimal(row.reorder_quantity).toDecimalPlaces(3).toNumber()
+          : undefined,
         status,
       };
     });
@@ -567,11 +596,13 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const totalRevenue = new Decimal(row.total_revenue);
       const totalCost = new Decimal(row.total_cost);
       const grossProfit = totalRevenue.minus(totalCost);
-      const profitMargin = totalRevenue.isZero() ? new Decimal(0) : grossProfit.dividedBy(totalRevenue).times(100);
+      const profitMargin = totalRevenue.isZero()
+        ? new Decimal(0)
+        : grossProfit.dividedBy(totalRevenue).times(100);
 
       return {
         productId: row.product_id,
@@ -651,15 +682,19 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       supplierId: row.supplier_id,
       supplierNumber: row.supplier_number,
       supplierName: row.supplier_name,
       totalPurchaseOrders: parseInt(row.total_purchase_orders),
       totalPurchaseValue: new Decimal(row.total_purchase_value || 0).toDecimalPlaces(2).toNumber(),
       totalItemsReceived: new Decimal(row.total_items_received || 0).toDecimalPlaces(3).toNumber(),
-      averageLeadTime: row.average_lead_time_days ? new Decimal(row.average_lead_time_days).toDecimalPlaces(1).toNumber() : undefined,
-      onTimeDeliveryRate: row.on_time_delivery_rate ? new Decimal(row.on_time_delivery_rate).toDecimalPlaces(2).toNumber() : undefined,
+      averageLeadTime: row.average_lead_time_days
+        ? new Decimal(row.average_lead_time_days).toDecimalPlaces(1).toNumber()
+        : undefined,
+      onTimeDeliveryRate: row.on_time_delivery_rate
+        ? new Decimal(row.on_time_delivery_rate).toDecimalPlaces(2).toNumber()
+        : undefined,
     }));
   },
 
@@ -716,7 +751,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       goodsReceiptId: row.goods_receipt_id,
       goodsReceiptNumber: row.goods_receipt_number,
       purchaseOrderNumber: row.purchase_order_number,
@@ -777,7 +812,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       paymentMethod: row.payment_method,
       transactionCount: parseInt(row.transaction_count),
       totalAmount: new Decimal(row.total_amount).toDecimalPlaces(2).toNumber(),
@@ -861,7 +896,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       customerId: row.customer_id,
       customerNumber: row.customer_number,
       customerName: row.customer_name,
@@ -870,7 +905,9 @@ export const reportsRepository = {
       totalPaid: new Decimal(row.total_paid || 0).toDecimalPlaces(2).toNumber(),
       totalOutstanding: new Decimal(row.total_outstanding || 0).toDecimalPlaces(2).toNumber(),
       overdueAmount: new Decimal(row.overdue_amount || 0).toDecimalPlaces(2).toNumber(),
-      averagePaymentDays: row.average_payment_days ? new Decimal(row.average_payment_days).toDecimalPlaces(1).toNumber() : undefined,
+      averagePaymentDays: row.average_payment_days
+        ? new Decimal(row.average_payment_days).toDecimalPlaces(1).toNumber()
+        : undefined,
     }));
   },
 
@@ -889,7 +926,7 @@ export const reportsRepository = {
     let dateGroup = '';
     switch (options.groupBy) {
       case 'day':
-        dateGroup = "DATE(s.sale_date)";
+        dateGroup = 'DATE(s.sale_date)';
         break;
       case 'week':
         dateGroup = "DATE_TRUNC('week', s.sale_date)::DATE";
@@ -922,11 +959,13 @@ export const reportsRepository = {
 
     const result = await pool.query(query, [options.startDate, options.endDate]);
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const revenue = new Decimal(row.revenue || 0);
       const cogs = new Decimal(row.cost_of_goods_sold || 0);
       const grossProfit = revenue.minus(cogs);
-      const grossProfitMargin = revenue.isZero() ? new Decimal(0) : grossProfit.dividedBy(revenue).times(100);
+      const grossProfitMargin = revenue.isZero()
+        ? new Decimal(0)
+        : grossProfit.dividedBy(revenue).times(100);
 
       return {
         period: formatDateOnly(row.period) || String(row.period),
@@ -981,7 +1020,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       productId: row.product_id,
       productName: row.product_name,
       sku: row.sku,
@@ -1034,7 +1073,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       movementId: row.movement_id,
       movementDate: formatDate(row.movement_date),
       movementType: row.movement_type,
@@ -1066,7 +1105,9 @@ export const reportsRepository = {
 
     if (options.startDate && options.endDate) {
       params.push(options.startDate, options.endDate);
-      filters.push(`DATE(po.order_date) BETWEEN DATE($${params.length - 1}) AND DATE($${params.length})`);
+      filters.push(
+        `DATE(po.order_date) BETWEEN DATE($${params.length - 1}) AND DATE($${params.length})`
+      );
     }
 
     if (options.status) {
@@ -1109,7 +1150,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       id: row.id,
       poNumber: row.order_number,
       status: row.status,
@@ -1165,11 +1206,11 @@ export const reportsRepository = {
         selectFields = `DATE(sm.created_at) as period`;
         break;
       case 'week':
-        groupByClause = 'DATE_TRUNC(\'week\', sm.created_at)';
+        groupByClause = "DATE_TRUNC('week', sm.created_at)";
         selectFields = `DATE_TRUNC('week', sm.created_at) as period`;
         break;
       case 'month':
-        groupByClause = 'DATE_TRUNC(\'month\', sm.created_at)';
+        groupByClause = "DATE_TRUNC('month', sm.created_at)";
         selectFields = `DATE_TRUNC('month', sm.created_at) as period`;
         break;
       case 'product':
@@ -1201,7 +1242,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       ...row,
       transactionCount: parseInt(row.transaction_count),
       totalIn: new Decimal(row.total_in || 0).toDecimalPlaces(3).toNumber(),
@@ -1297,7 +1338,7 @@ export const reportsRepository = {
         currentBalance: new Decimal(customer.current_balance).toDecimalPlaces(2).toNumber(),
         customerGroupId: customer.customer_group_id,
       },
-      transactions: transactionsResult.rows.map(row => ({
+      transactions: transactionsResult.rows.map((row) => ({
         saleId: row.sale_id,
         saleNumber: row.sale_number,
         saleDate: formatDate(row.sale_date),
@@ -1360,13 +1401,20 @@ export const reportsRepository = {
       ${whereClause}
       GROUP BY p.id, p.name, p.sku, p.category
       HAVING SUM(si.quantity) > 0
-      ${options.minMarginPercent !== undefined ? (() => { params.push(options.minMarginPercent); return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`; })() : ''}
+      ${
+        options.minMarginPercent !== undefined
+          ? (() => {
+              params.push(options.minMarginPercent);
+              return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`;
+            })()
+          : ''
+      }
       ORDER BY total_profit DESC
     `;
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       productId: row.product_id,
       productName: row.product_name,
       sku: row.sku,
@@ -1376,7 +1424,9 @@ export const reportsRepository = {
       totalRevenue: new Decimal(row.total_revenue || 0).toDecimalPlaces(2).toNumber(),
       totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
       totalProfit: new Decimal(row.total_profit || 0).toDecimalPlaces(2).toNumber(),
-      profitMarginPercent: new Decimal(row.profit_margin_percent || 0).toDecimalPlaces(2).toNumber(),
+      profitMarginPercent: new Decimal(row.profit_margin_percent || 0)
+        .toDecimalPlaces(2)
+        .toNumber(),
     }));
   },
 
@@ -1395,12 +1445,14 @@ export const reportsRepository = {
     }
   ): Promise<DailyCashFlowRow[]> {
     // Convert dates to YYYY-MM-DD strings to avoid timezone issues
-    const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toLocaleDateString('en-CA')
-      : options.startDate;
-    const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toLocaleDateString('en-CA')
-      : options.endDate;
+    const startDateStr =
+      options.startDate instanceof Date
+        ? options.startDate.toLocaleDateString('en-CA')
+        : options.startDate;
+    const endDateStr =
+      options.endDate instanceof Date
+        ? options.endDate.toLocaleDateString('en-CA')
+        : options.endDate;
 
     try {
       // Enhanced query that separates sales revenue from debt collections
@@ -1500,7 +1552,7 @@ export const reportsRepository = {
         return [];
       }
 
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         transactionDate: row.transaction_date,
         paymentMethod: row.payment_method,
         revenueType: row.revenue_type,
@@ -1510,11 +1562,18 @@ export const reportsRepository = {
         totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
         grossProfit: new Decimal(row.gross_profit || 0).toDecimalPlaces(2).toNumber(),
         creditCreated: new Decimal(row.credit_created || 0).toDecimalPlaces(2).toNumber(),
-        averageTransactionValue: new Decimal(row.average_transaction_value || 0).toDecimalPlaces(2).toNumber(),
+        averageTransactionValue: new Decimal(row.average_transaction_value || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
         // Calculated fields for business intelligence
-        profitMargin: row.total_sales > 0
-          ? new Decimal(row.gross_profit || 0).div(row.total_sales).mul(100).toDecimalPlaces(2).toNumber()
-          : 0,
+        profitMargin:
+          row.total_sales > 0
+            ? new Decimal(row.gross_profit || 0)
+                .div(row.total_sales)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
+            : 0,
         cashFlowImpact: new Decimal(row.cash_amount || 0).toDecimalPlaces(2).toNumber(),
       }));
     } catch (error) {
@@ -1547,17 +1606,19 @@ export const reportsRepository = {
     if (options.status) {
       // Map report filter status to supplier_invoices status values
       const statusMap: Record<string, string[]> = {
-        'PAID': ['Paid'],
-        'PARTIAL': ['PartiallyPaid'],
-        'PENDING': ['Unpaid', 'Overdue'],
+        PAID: ['Paid'],
+        PARTIAL: ['PartiallyPaid'],
+        PENDING: ['Unpaid', 'Overdue'],
       };
       const invoiceStatuses = statusMap[options.status] || [options.status];
       params.push(invoiceStatuses);
       invoiceFilters.push(`"Status" = ANY($${params.length})`);
     }
 
-    const supplierWhereClause = supplierFilters.length > 0 ? `WHERE ${supplierFilters.join(' AND ')}` : '';
-    const invoiceWhereClause = invoiceFilters.length > 0 ? `WHERE ${invoiceFilters.join(' AND ')}` : '';
+    const supplierWhereClause =
+      supplierFilters.length > 0 ? `WHERE ${supplierFilters.join(' AND ')}` : '';
+    const invoiceWhereClause =
+      invoiceFilters.length > 0 ? `WHERE ${invoiceFilters.join(' AND ')}` : '';
 
     // Use supplier_invoices as the source of truth for billing/payment amounts.
     // purchase_orders.paid_amount is NOT synced when supplier_payments are recorded;
@@ -1600,11 +1661,9 @@ export const reportsRepository = {
     const result = await pool.query(query, params);
 
     // Filter out rows with no invoices (no billing activity)
-    const filtered = result.rows.filter(row =>
-      new Decimal(row.total_amount || 0).greaterThan(0)
-    );
+    const filtered = result.rows.filter((row) => new Decimal(row.total_amount || 0).greaterThan(0));
 
-    return filtered.map(row => ({
+    return filtered.map((row) => ({
       supplierId: row.supplier_id,
       supplierNumber: row.supplier_number,
       supplierName: row.supplier_name,
@@ -1682,7 +1741,9 @@ export const reportsRepository = {
       totalPurchases: parseInt(row.total_purchases),
       totalRevenue: new Decimal(row.total_revenue || 0).toDecimalPlaces(2).toNumber(),
       totalProfit: new Decimal(row.total_profit || 0).toDecimalPlaces(2).toNumber(),
-      averagePurchaseValue: new Decimal(row.average_purchase_value || 0).toDecimalPlaces(2).toNumber(),
+      averagePurchaseValue: new Decimal(row.average_purchase_value || 0)
+        .toDecimalPlaces(2)
+        .toNumber(),
       lastPurchaseDate: formatDate(row.last_purchase_date),
       outstandingBalance: new Decimal(row.outstanding_balance || 0).toDecimalPlaces(2).toNumber(),
     }));
@@ -1699,9 +1760,7 @@ export const reportsRepository = {
     }
   ): Promise<CustomerAgingRow[]> {
     const asOfDate = options.asOfDate || new Date();
-    const asOfDateStr = asOfDate instanceof Date
-      ? asOfDate.toLocaleDateString('en-CA')
-      : asOfDate;
+    const asOfDateStr = asOfDate instanceof Date ? asOfDate.toLocaleDateString('en-CA') : asOfDate;
 
     const query = `
       WITH customer_invoices AS (
@@ -1748,13 +1807,15 @@ export const reportsRepository = {
     const result = await pool.query(query, [asOfDateStr]);
 
     // Map to field names expected by frontend CustomerAgingReport component
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const current = new Decimal(row.current_amount || 0).toDecimalPlaces(2).toNumber();
       const days30 = new Decimal(row.days_1_30 || 0).toDecimalPlaces(2).toNumber();
       const days60 = new Decimal(row.days_31_60 || 0).toDecimalPlaces(2).toNumber();
       const days90 = new Decimal(row.days_61_90 || 0).toDecimalPlaces(2).toNumber();
       const over90 = new Decimal(row.days_over_90 || 0).toDecimalPlaces(2).toNumber();
-      const totalOutstanding = new Decimal(row.total_outstanding || 0).toDecimalPlaces(2).toNumber();
+      const totalOutstanding = new Decimal(row.total_outstanding || 0)
+        .toDecimalPlaces(2)
+        .toNumber();
       // overdueAmount is everything past current (days30 + days60 + days90 + over90)
       const overdueAmount = days30 + days60 + days90 + over90;
 
@@ -1830,7 +1891,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       productId: row.product_id,
       productName: row.product_name,
       sku: row.sku,
@@ -1856,17 +1917,23 @@ export const reportsRepository = {
       startDate: Date;
       endDate: Date;
       productId?: string;
+      reason?: 'DAMAGE' | 'EXPIRY' | 'THEFT' | 'OTHER';
     }
   ): Promise<WasteDamageRow[]> {
     const params: unknown[] = [options.startDate, options.endDate];
     const filters: string[] = [
       'sm.created_at BETWEEN $1 AND $2',
-      "sm.movement_type IN ('DAMAGE', 'EXPIRY')"
+      "sm.movement_type IN ('DAMAGE', 'EXPIRY')",
     ];
 
     if (options.productId) {
       params.push(options.productId);
       filters.push(`sm.product_id = $${params.length}`);
+    }
+
+    if (options.reason) {
+      params.push(options.reason);
+      filters.push(`sm.movement_type = $${params.length}`);
     }
 
     const whereClause = filters.join(' AND ');
@@ -1896,7 +1963,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       movementId: row.movement_id,
       lossDate: formatDate(row.loss_date),
       lossType: row.loss_type,
@@ -1906,9 +1973,9 @@ export const reportsRepository = {
       category: row.category,
       batchNumber: row.batch_number,
       expiryDate: formatDateOnly(row.expiry_date),
-      quantityLost: new Decimal(row.quantity_lost).toDecimalPlaces(3).toNumber(),
-      unitCost: new Decimal(row.unit_cost).toDecimalPlaces(2).toNumber(),
-      totalLossValue: new Decimal(row.total_loss_value).toDecimalPlaces(2).toNumber(),
+      quantityLost: new Decimal(row.quantity_lost || 0).toDecimalPlaces(3).toNumber(),
+      unitCost: new Decimal(row.unit_cost || 0).toDecimalPlaces(2).toNumber(),
+      totalLossValue: new Decimal(row.total_loss_value || 0).toDecimalPlaces(2).toNumber(),
       notes: row.notes,
       createdBy: row.created_by_id,
     }));
@@ -2081,12 +2148,16 @@ export const reportsRepository = {
       logger.warn('Demand forecast data unavailable, using live calculations only');
     }
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const productId: string = row.product_id;
       const learned = learnedStats.get(productId);
       const seasonalIdx = seasonalIndexes.get(productId) ?? null;
-      const dailyVelocity = new Decimal(row.daily_sales_velocity || 0).toDecimalPlaces(2).toNumber();
-      const recent7dayVelocity = new Decimal(row.recent_7day_velocity || 0).toDecimalPlaces(2).toNumber();
+      const dailyVelocity = new Decimal(row.daily_sales_velocity || 0)
+        .toDecimalPlaces(2)
+        .toNumber();
+      const recent7dayVelocity = new Decimal(row.recent_7day_velocity || 0)
+        .toDecimalPlaces(2)
+        .toNumber();
       const salesStdDev = new Decimal(row.sales_std_deviation || 0).toDecimalPlaces(2).toNumber();
       const daysUntilStockout = new Decimal(row.days_until_stockout).toDecimalPlaces(0).toNumber();
 
@@ -2097,16 +2168,20 @@ export const reportsRepository = {
 
       // Seasonal trend: compare recent week vs overall average
       // ratio > 1 = demand increasing, < 1 = demand decreasing
-      const trendRatio = dailyVelocity > 0
-        ? new Decimal(recent7dayVelocity).dividedBy(dailyVelocity).toDecimalPlaces(2).toNumber()
-        : 1;
+      const trendRatio =
+        dailyVelocity > 0
+          ? new Decimal(recent7dayVelocity).dividedBy(dailyVelocity).toDecimalPlaces(2).toNumber()
+          : 1;
 
       // Effective velocity: weight recent trend (70% current avg + 30% recent trend)
-      const effectiveVelocity = dailyVelocity > 0
-        ? new Decimal(dailyVelocity).times(0.7)
-          .plus(new Decimal(recent7dayVelocity).times(0.3))
-          .toDecimalPlaces(2).toNumber()
-        : 0;
+      const effectiveVelocity =
+        dailyVelocity > 0
+          ? new Decimal(dailyVelocity)
+              .times(0.7)
+              .plus(new Decimal(recent7dayVelocity).times(0.3))
+              .toDecimalPlaces(2)
+              .toNumber()
+          : 0;
 
       // ── Self-Learning Override: use pre-computed stats when available ──
       // When learning_cycles > 0, the demand forecast engine has run at least once
@@ -2128,18 +2203,16 @@ export const reportsRepository = {
 
       // ── Seasonal adjustment multiplier ──
       // seasonalIdx > 1 = hot month (order more), < 1 = cool month (order less)
-      const seasonalMultiplier = (seasonalIdx !== null && seasonalIdx > 0) ? seasonalIdx : 1;
+      const seasonalMultiplier = seasonalIdx !== null && seasonalIdx > 0 ? seasonalIdx : 1;
 
       // Order quantity: cover lead time + review period, minus current stock, plus safety stock
       // Apply seasonal adjustment to account for demand fluctuations
       const reviewPeriod = Math.max(daysToAnalyze, 30);
       let suggestedOrderQty: number;
       if (effectiveVelocity > 0) {
-        const baseOrder = effectiveVelocity * (leadTimeDays + reviewPeriod) + safetyStock - currentStock;
-        suggestedOrderQty = Math.max(
-          Math.ceil(baseOrder * seasonalMultiplier),
-          0
-        );
+        const baseOrder =
+          effectiveVelocity * (leadTimeDays + reviewPeriod) + safetyStock - currentStock;
+        suggestedOrderQty = Math.max(Math.ceil(baseOrder * seasonalMultiplier), 0);
       } else if (reorderLevel > 0 && currentStock < reorderLevel) {
         suggestedOrderQty = Math.ceil(reorderLevel - currentStock);
       } else {
@@ -2161,9 +2234,11 @@ export const reportsRepository = {
       // Use learned demand trend when available (more accurate from rolling stats)
       const demandTrend = useLearned
         ? learned.demandTrend
-        : trendRatio > 1.15 ? 'INCREASING' as const
-          : trendRatio < 0.85 ? 'DECREASING' as const
-            : 'STABLE' as const;
+        : trendRatio > 1.15
+          ? ('INCREASING' as const)
+          : trendRatio < 0.85
+            ? ('DECREASING' as const)
+            : ('STABLE' as const);
 
       return {
         productId: row.product_id,
@@ -2176,7 +2251,10 @@ export const reportsRepository = {
         dailySalesVelocity: dailyVelocity,
         daysUntilStockout: daysUntilStockout > 900 ? null : daysUntilStockout,
         suggestedOrderQuantity: suggestedOrderQty,
-        estimatedOrderCost: new Decimal(row.unit_cost || 0).times(suggestedOrderQty).toDecimalPlaces(2).toNumber(),
+        estimatedOrderCost: new Decimal(row.unit_cost || 0)
+          .times(suggestedOrderQty)
+          .toDecimalPlaces(2)
+          .toNumber(),
         preferredSupplier: row.preferred_supplier,
         priority,
         leadTimeDays,
@@ -2203,12 +2281,14 @@ export const reportsRepository = {
       endDate: Date | string;
     }
   ): Promise<SalesByCategoryRow[]> {
-    const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toLocaleDateString('en-CA')
-      : options.startDate;
-    const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toLocaleDateString('en-CA')
-      : options.endDate;
+    const startDateStr =
+      options.startDate instanceof Date
+        ? options.startDate.toLocaleDateString('en-CA')
+        : options.startDate;
+    const endDateStr =
+      options.endDate instanceof Date
+        ? options.endDate.toLocaleDateString('en-CA')
+        : options.endDate;
 
     const params: unknown[] = [startDateStr, endDateStr];
 
@@ -2233,11 +2313,13 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => {
+    return result.rows.map((row) => {
       const totalRevenue = new Decimal(row.total_revenue || 0);
       const totalCost = new Decimal(row.total_cost || 0);
       const grossProfit = new Decimal(row.gross_profit || 0);
-      const profitMargin = totalRevenue.isZero() ? new Decimal(0) : grossProfit.dividedBy(totalRevenue).times(100);
+      const profitMargin = totalRevenue.isZero()
+        ? new Decimal(0)
+        : grossProfit.dividedBy(totalRevenue).times(100);
 
       return {
         category: row.category,
@@ -2248,7 +2330,9 @@ export const reportsRepository = {
         grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
         profitMargin: profitMargin.toDecimalPlaces(2).toNumber(),
         transactionCount: parseInt(row.transaction_count),
-        averageTransactionValue: new Decimal(row.average_transaction_value || 0).toDecimalPlaces(2).toNumber(),
+        averageTransactionValue: new Decimal(row.average_transaction_value || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
       };
     });
   },
@@ -2264,12 +2348,14 @@ export const reportsRepository = {
       endDate: Date | string;
     }
   ): Promise<SalesByPaymentMethodRow[]> {
-    const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toLocaleDateString('en-CA')
-      : options.startDate;
-    const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toLocaleDateString('en-CA')
-      : options.endDate;
+    const startDateStr =
+      options.startDate instanceof Date
+        ? options.startDate.toLocaleDateString('en-CA')
+        : options.startDate;
+    const endDateStr =
+      options.endDate instanceof Date
+        ? options.endDate.toLocaleDateString('en-CA')
+        : options.endDate;
 
     const params: unknown[] = [startDateStr, endDateStr];
 
@@ -2301,11 +2387,13 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       paymentMethod: row.payment_method || 'UNKNOWN',
       transactionCount: parseInt(row.transaction_count),
       totalRevenue: new Decimal(row.total_revenue || 0).toDecimalPlaces(2).toNumber(),
-      averageTransactionValue: new Decimal(row.average_transaction_value || 0).toDecimalPlaces(2).toNumber(),
+      averageTransactionValue: new Decimal(row.average_transaction_value || 0)
+        .toDecimalPlaces(2)
+        .toNumber(),
       percentageOfTotal: new Decimal(row.percentage_of_total || 0).toDecimalPlaces(2).toNumber(),
     }));
   },
@@ -2321,12 +2409,14 @@ export const reportsRepository = {
       endDate: Date | string;
     }
   ): Promise<HourlySalesAnalysisRow[]> {
-    const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toLocaleDateString('en-CA')
-      : options.startDate;
-    const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toLocaleDateString('en-CA')
-      : options.endDate;
+    const startDateStr =
+      options.startDate instanceof Date
+        ? options.startDate.toLocaleDateString('en-CA')
+        : options.startDate;
+    const endDateStr =
+      options.endDate instanceof Date
+        ? options.endDate.toLocaleDateString('en-CA')
+        : options.endDate;
 
     const params: unknown[] = [startDateStr, endDateStr];
 
@@ -2346,11 +2436,13 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       hour: parseInt(row.hour),
       transactionCount: parseInt(row.transaction_count),
       totalRevenue: new Decimal(row.total_revenue || 0).toDecimalPlaces(2).toNumber(),
-      averageTransactionValue: new Decimal(row.average_transaction_value || 0).toDecimalPlaces(2).toNumber(),
+      averageTransactionValue: new Decimal(row.average_transaction_value || 0)
+        .toDecimalPlaces(2)
+        .toNumber(),
       peakDay: row.peak_day?.trim(),
     }));
   },
@@ -2369,18 +2461,22 @@ export const reportsRepository = {
       groupBy: 'day' | 'week' | 'month';
     }
   ): Promise<SalesComparisonRow[]> {
-    const currentStartStr = options.currentStartDate instanceof Date
-      ? options.currentStartDate.toLocaleDateString('en-CA')
-      : options.currentStartDate;
-    const currentEndStr = options.currentEndDate instanceof Date
-      ? options.currentEndDate.toLocaleDateString('en-CA')
-      : options.currentEndDate;
-    const previousStartStr = options.previousStartDate instanceof Date
-      ? options.previousStartDate.toLocaleDateString('en-CA')
-      : options.previousStartDate;
-    const previousEndStr = options.previousEndDate instanceof Date
-      ? options.previousEndDate.toLocaleDateString('en-CA')
-      : options.previousEndDate;
+    const currentStartStr =
+      options.currentStartDate instanceof Date
+        ? options.currentStartDate.toLocaleDateString('en-CA')
+        : options.currentStartDate;
+    const currentEndStr =
+      options.currentEndDate instanceof Date
+        ? options.currentEndDate.toLocaleDateString('en-CA')
+        : options.currentEndDate;
+    const previousStartStr =
+      options.previousStartDate instanceof Date
+        ? options.previousStartDate.toLocaleDateString('en-CA')
+        : options.previousStartDate;
+    const previousEndStr =
+      options.previousEndDate instanceof Date
+        ? options.previousEndDate.toLocaleDateString('en-CA')
+        : options.previousEndDate;
 
     const params: unknown[] = [currentStartStr, currentEndStr, previousStartStr, previousEndStr];
 
@@ -2390,7 +2486,7 @@ export const reportsRepository = {
     switch (options.groupBy) {
       case 'day':
         selectClause = "to_char(DATE(s.sale_date), 'YYYY-MM-DD')";
-        groupByClause = "DATE(s.sale_date)";
+        groupByClause = 'DATE(s.sale_date)';
         break;
       case 'week':
         selectClause = "to_char(DATE_TRUNC('week', s.sale_date), 'YYYY-MM-DD')";
@@ -2441,7 +2537,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       period: row.period,
       currentSales: new Decimal(row.current_sales || 0).toDecimalPlaces(2).toNumber(),
       previousSales: new Decimal(row.previous_sales || 0).toDecimalPlaces(2).toNumber(),
@@ -2464,15 +2560,19 @@ export const reportsRepository = {
       endDate: Date | string;
     }
   ): Promise<CustomerPurchaseHistoryRow[]> {
-    const startDateStr = options.startDate instanceof Date
-      ? options.startDate.toLocaleDateString('en-CA')
-      : options.startDate;
-    const endDateStr = options.endDate instanceof Date
-      ? options.endDate.toLocaleDateString('en-CA')
-      : options.endDate;
+    const startDateStr =
+      options.startDate instanceof Date
+        ? options.startDate.toLocaleDateString('en-CA')
+        : options.startDate;
+    const endDateStr =
+      options.endDate instanceof Date
+        ? options.endDate.toLocaleDateString('en-CA')
+        : options.endDate;
 
     // Determine if input is UUID or customer_number
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.customerId);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      options.customerId
+    );
 
     // If not UUID, look up customer by customer_number first
     let customerUuid = options.customerId;
@@ -2513,7 +2613,7 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       saleId: row.sale_id,
       saleNumber: row.sale_number,
       saleDate: row.sale_date,
@@ -2539,9 +2639,10 @@ export const reportsRepository = {
       includeForecasts?: boolean;
     }
   ): Promise<BusinessPositionData> {
-    const reportDateStr = options.reportDate instanceof Date
-      ? options.reportDate.toLocaleDateString('en-CA')
-      : options.reportDate;
+    const reportDateStr =
+      options.reportDate instanceof Date
+        ? options.reportDate.toLocaleDateString('en-CA')
+        : options.reportDate;
 
     // Complex multi-CTE query for comprehensive business metrics
     const query = `
@@ -2691,12 +2792,49 @@ export const reportsRepository = {
       return {
         reportDate: reportDateStr,
         businessHealthScore: 0,
-        salesPerformance: { transactionsCount: 0, uniqueCustomers: 0, totalRevenue: 0, totalCost: 0, grossProfit: 0, avgTransactionValue: 0, walkInRevenue: 0, customerRevenue: 0, salesCashCollected: 0, creditExtended: 0 },
-        collectionsPerformance: { collectionTransactions: 0, totalCollections: 0, avgCollectionValue: 0, payingCustomers: 0 },
-        inventoryHealth: { totalProducts: 0, lowStockItems: 0, expiringUnits: 0, inventoryValue: 0 },
-        customerMetrics: { totalCustomers: 0, newCustomers30d: 0, totalReceivables: 0, customersWithBalance: 0, avgCustomerBalance: 0 },
-        cashPosition: { totalCashIn: 0, newCreditExtended: 0, outstandingReceivables: 0, profitMarginPercent: 0, cashCollectionRate: 0 },
-        riskAssessment: { receivablesRisk: 'LOW' as const, inventoryRisk: 'LOW' as const, overallRiskLevel: 'LOW' as const },
+        salesPerformance: {
+          transactionsCount: 0,
+          uniqueCustomers: 0,
+          totalRevenue: 0,
+          totalCost: 0,
+          grossProfit: 0,
+          avgTransactionValue: 0,
+          walkInRevenue: 0,
+          customerRevenue: 0,
+          salesCashCollected: 0,
+          creditExtended: 0,
+        },
+        collectionsPerformance: {
+          collectionTransactions: 0,
+          totalCollections: 0,
+          avgCollectionValue: 0,
+          payingCustomers: 0,
+        },
+        inventoryHealth: {
+          totalProducts: 0,
+          lowStockItems: 0,
+          expiringUnits: 0,
+          inventoryValue: 0,
+        },
+        customerMetrics: {
+          totalCustomers: 0,
+          newCustomers30d: 0,
+          totalReceivables: 0,
+          customersWithBalance: 0,
+          avgCustomerBalance: 0,
+        },
+        cashPosition: {
+          totalCashIn: 0,
+          newCreditExtended: 0,
+          outstandingReceivables: 0,
+          profitMarginPercent: 0,
+          cashCollectionRate: 0,
+        },
+        riskAssessment: {
+          receivablesRisk: 'LOW' as const,
+          inventoryRisk: 'LOW' as const,
+          overallRiskLevel: 'LOW' as const,
+        },
       };
     }
 
@@ -2711,17 +2849,23 @@ export const reportsRepository = {
         totalRevenue: new Decimal(row.total_revenue || 0).toDecimalPlaces(2).toNumber(),
         totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
         grossProfit: new Decimal(row.gross_profit || 0).toDecimalPlaces(2).toNumber(),
-        avgTransactionValue: new Decimal(row.avg_transaction_value || 0).toDecimalPlaces(2).toNumber(),
+        avgTransactionValue: new Decimal(row.avg_transaction_value || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
         walkInRevenue: new Decimal(row.walk_in_revenue || 0).toDecimalPlaces(2).toNumber(),
         customerRevenue: new Decimal(row.customer_revenue || 0).toDecimalPlaces(2).toNumber(),
-        salesCashCollected: new Decimal(row.sales_cash_collected || 0).toDecimalPlaces(2).toNumber(),
+        salesCashCollected: new Decimal(row.sales_cash_collected || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
         creditExtended: new Decimal(row.credit_extended || 0).toDecimalPlaces(2).toNumber(),
       },
 
       collectionsPerformance: {
         collectionTransactions: parseInt(row.collection_transactions || 0),
         totalCollections: new Decimal(row.total_collections || 0).toDecimalPlaces(2).toNumber(),
-        avgCollectionValue: new Decimal(row.avg_collection_value || 0).toDecimalPlaces(2).toNumber(),
+        avgCollectionValue: new Decimal(row.avg_collection_value || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
         payingCustomers: parseInt(row.paying_customers || 0),
       },
 
@@ -2737,15 +2881,23 @@ export const reportsRepository = {
         newCustomers30d: parseInt(row.new_customers_30d || 0),
         totalReceivables: new Decimal(row.total_receivables || 0).toDecimalPlaces(2).toNumber(),
         customersWithBalance: parseInt(row.customers_with_balance || 0),
-        avgCustomerBalance: new Decimal(row.avg_customer_balance || 0).toDecimalPlaces(2).toNumber(),
+        avgCustomerBalance: new Decimal(row.avg_customer_balance || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
       },
 
       cashPosition: {
         totalCashIn: new Decimal(row.total_cash_in || 0).toDecimalPlaces(2).toNumber(),
         newCreditExtended: new Decimal(row.new_credit_extended || 0).toDecimalPlaces(2).toNumber(),
-        outstandingReceivables: new Decimal(row.outstanding_receivables || 0).toDecimalPlaces(2).toNumber(),
-        profitMarginPercent: new Decimal(row.profit_margin_percent || 0).toDecimalPlaces(2).toNumber(),
-        cashCollectionRate: new Decimal(row.cash_collection_rate || 0).toDecimalPlaces(2).toNumber(),
+        outstandingReceivables: new Decimal(row.outstanding_receivables || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
+        profitMarginPercent: new Decimal(row.profit_margin_percent || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
+        cashCollectionRate: new Decimal(row.cash_collection_rate || 0)
+          .toDecimalPlaces(2)
+          .toNumber(),
       },
 
       riskAssessment: {
@@ -2757,7 +2909,7 @@ export const reportsRepository = {
           if (risks.includes('MEDIUM')) return 'MEDIUM';
           return 'LOW';
         })(),
-      }
+      },
     };
   },
 
@@ -2775,11 +2927,14 @@ export const reportsRepository = {
   ): Promise<CashRegisterSessionSummaryData | null> {
     try {
       // Determine if input is UUID or session_number
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        sessionId
+      );
       const whereClause = isUuid ? 's.id = $1' : 's.session_number = $1';
 
       // Get session details
-      const sessionResult = await pool.query(`
+      const sessionResult = await pool.query(
+        `
         SELECT 
           s.id,
           s.session_number as "sessionNumber",
@@ -2798,14 +2953,17 @@ export const reportsRepository = {
         LEFT JOIN cash_registers r ON s.register_id = r.id
         LEFT JOIN users u ON s.user_id = u.id
         WHERE ${whereClause}
-      `, [sessionId]);
+      `,
+        [sessionId]
+      );
 
       if (sessionResult.rows.length === 0) return null;
       const session = sessionResult.rows[0];
       const actualSessionId = session.id; // Use the actual UUID for subsequent queries
 
       // Get movement summary with breakdown
-      const summaryResult = await pool.query(`
+      const summaryResult = await pool.query(
+        `
         SELECT 
           COALESCE(SUM(CASE WHEN movement_type IN ('CASH_IN', 'CASH_IN_FLOAT', 'CASH_IN_PAYMENT', 'CASH_IN_OTHER') THEN amount ELSE 0 END), 0) as total_cash_in,
           COALESCE(SUM(CASE WHEN movement_type IN ('CASH_OUT', 'CASH_OUT_BANK', 'CASH_OUT_EXPENSE', 'CASH_OUT_OTHER') THEN amount ELSE 0 END), 0) as total_cash_out,
@@ -2821,7 +2979,9 @@ export const reportsRepository = {
           COUNT(*) as movement_count
         FROM cash_movements
         WHERE session_id = $1
-      `, [actualSessionId]);
+      `,
+        [actualSessionId]
+      );
 
       const s = summaryResult.rows[0];
       const totalCashIn = new Decimal(s.total_cash_in || 0);
@@ -2829,11 +2989,16 @@ export const reportsRepository = {
       const totalSales = new Decimal(s.total_sales || 0);
       const totalRefunds = new Decimal(s.total_refunds || 0);
       const openingFloat = new Decimal(session.openingFloat || 0);
-      const expectedClosing = openingFloat.plus(totalCashIn).plus(totalSales).minus(totalCashOut).minus(totalRefunds);
+      const expectedClosing = openingFloat
+        .plus(totalCashIn)
+        .plus(totalSales)
+        .minus(totalCashOut)
+        .minus(totalRefunds);
       const netCashFlow = expectedClosing.minus(openingFloat);
 
       // Get movements list
-      const movementsResult = await pool.query(`
+      const movementsResult = await pool.query(
+        `
         SELECT 
           m.id,
           m.movement_type as "movementType",
@@ -2846,7 +3011,9 @@ export const reportsRepository = {
         LEFT JOIN users u ON m.created_by = u.id
         WHERE m.session_id = $1
         ORDER BY m.created_at DESC
-      `, [actualSessionId]);
+      `,
+        [actualSessionId]
+      );
 
       return {
         reportType: 'CASH_REGISTER_SESSION_SUMMARY',
@@ -2888,7 +3055,7 @@ export const reportsRepository = {
 
         paymentSummary: session.paymentSummary || null,
 
-        movements: movementsResult.rows.map(m => ({
+        movements: movementsResult.rows.map((m) => ({
           id: m.id,
           movementType: m.movementType,
           amount: new Decimal(m.amount || 0).toDecimalPlaces(2).toNumber(),
@@ -2932,7 +3099,8 @@ export const reportsRepository = {
       }
 
       // Get totals by movement type
-      const typeResult = await pool.query(`
+      const typeResult = await pool.query(
+        `
         SELECT 
           m.movement_type,
           COUNT(*) as count,
@@ -2942,7 +3110,9 @@ export const reportsRepository = {
         ${whereClause}
         GROUP BY m.movement_type
         ORDER BY m.movement_type
-      `, params);
+      `,
+        params
+      );
 
       // Calculate totals
       let totalCashIn = new Decimal(0);
@@ -2951,7 +3121,8 @@ export const reportsRepository = {
       let totalRefunds = new Decimal(0);
       let movementCount = 0;
 
-      const byMovementType: Record<string, { count: number; total: number; percentage: number }> = {};
+      const byMovementType: Record<string, { count: number; total: number; percentage: number }> =
+        {};
       let grandTotal = new Decimal(0);
 
       for (const row of typeResult.rows) {
@@ -2959,9 +3130,17 @@ export const reportsRepository = {
         grandTotal = grandTotal.plus(amount.abs());
         movementCount += parseInt(row.count);
 
-        if (['CASH_IN', 'CASH_IN_FLOAT', 'CASH_IN_PAYMENT', 'CASH_IN_OTHER'].includes(row.movement_type)) {
+        if (
+          ['CASH_IN', 'CASH_IN_FLOAT', 'CASH_IN_PAYMENT', 'CASH_IN_OTHER'].includes(
+            row.movement_type
+          )
+        ) {
           totalCashIn = totalCashIn.plus(amount);
-        } else if (['CASH_OUT', 'CASH_OUT_BANK', 'CASH_OUT_EXPENSE', 'CASH_OUT_OTHER'].includes(row.movement_type)) {
+        } else if (
+          ['CASH_OUT', 'CASH_OUT_BANK', 'CASH_OUT_EXPENSE', 'CASH_OUT_OTHER'].includes(
+            row.movement_type
+          )
+        ) {
           totalCashOut = totalCashOut.plus(amount);
         } else if (row.movement_type === 'SALE') {
           totalSales = totalSales.plus(amount);
@@ -2979,20 +3158,28 @@ export const reportsRepository = {
       // Calculate percentages
       for (const type of Object.keys(byMovementType)) {
         byMovementType[type].percentage = grandTotal.gt(0)
-          ? new Decimal(byMovementType[type].total).div(grandTotal).times(100).toDecimalPlaces(2).toNumber()
+          ? new Decimal(byMovementType[type].total)
+              .div(grandTotal)
+              .times(100)
+              .toDecimalPlaces(2)
+              .toNumber()
           : 0;
       }
 
       // Get session count
-      const sessionResult = await pool.query(`
+      const sessionResult = await pool.query(
+        `
         SELECT COUNT(DISTINCT s.id) as session_count
         FROM cash_register_sessions s
         INNER JOIN cash_movements m ON m.session_id = s.id
         ${whereClause}
-      `, params);
+      `,
+        params
+      );
 
       // Get daily breakdown
-      const dailyResult = await pool.query(`
+      const dailyResult = await pool.query(
+        `
         SELECT 
           DATE(m.created_at) as date,
           COALESCE(SUM(CASE WHEN m.movement_type = 'CASH_IN_FLOAT' THEN m.amount ELSE 0 END), 0) as cash_in_float,
@@ -3008,7 +3195,9 @@ export const reportsRepository = {
         ${whereClause}
         GROUP BY DATE(m.created_at)
         ORDER BY DATE(m.created_at) DESC
-      `, params);
+      `,
+        params
+      );
 
       const netCashFlow = totalCashIn.plus(totalSales).minus(totalCashOut).minus(totalRefunds);
 
@@ -3032,10 +3221,17 @@ export const reportsRepository = {
 
         byMovementType,
 
-        dailyBreakdown: dailyResult.rows.map(row => {
-          const cashIn = new Decimal(row.cash_in_float || 0).plus(row.cash_in_payment || 0).plus(row.cash_in_other || 0);
-          const cashOut = new Decimal(row.cash_out_bank || 0).plus(row.cash_out_expense || 0).plus(row.cash_out_other || 0);
-          const netFlow = cashIn.plus(row.sales || 0).minus(cashOut).minus(row.refunds || 0);
+        dailyBreakdown: dailyResult.rows.map((row) => {
+          const cashIn = new Decimal(row.cash_in_float || 0)
+            .plus(row.cash_in_payment || 0)
+            .plus(row.cash_in_other || 0);
+          const cashOut = new Decimal(row.cash_out_bank || 0)
+            .plus(row.cash_out_expense || 0)
+            .plus(row.cash_out_other || 0);
+          const netFlow = cashIn
+            .plus(row.sales || 0)
+            .minus(cashOut)
+            .minus(row.refunds || 0);
 
           return {
             date: row.date?.toLocaleDateString('en-CA'),
@@ -3057,7 +3253,15 @@ export const reportsRepository = {
         reportType: 'CASH_REGISTER_MOVEMENT_BREAKDOWN',
         generatedAt: new Date().toISOString(),
         period: { startDate: options.startDate, endDate: options.endDate },
-        totals: { totalCashIn: 0, totalCashOut: 0, totalSales: 0, totalRefunds: 0, netCashFlow: 0, sessionCount: 0, movementCount: 0 },
+        totals: {
+          totalCashIn: 0,
+          totalCashOut: 0,
+          totalSales: 0,
+          totalRefunds: 0,
+          netCashFlow: 0,
+          sessionCount: 0,
+          movementCount: 0,
+        },
         byMovementType: {},
         dailyBreakdown: [],
       };
@@ -3097,7 +3301,8 @@ export const reportsRepository = {
       }
 
       // Get sessions with movement counts
-      const sessionsResult = await pool.query(`
+      const sessionsResult = await pool.query(
+        `
         SELECT 
           s.id,
           s.session_number as "sessionNumber",
@@ -3118,7 +3323,9 @@ export const reportsRepository = {
         LEFT JOIN users u ON s.user_id = u.id
         ${whereClause}
         ORDER BY s.opened_at DESC
-      `, params);
+      `,
+        params
+      );
 
       // Calculate summary stats
       let totalVariance = new Decimal(0);
@@ -3148,11 +3355,12 @@ export const reportsRepository = {
           openSessions: openCount,
           closedSessions: closedCount,
           totalVariance: totalVariance.toDecimalPlaces(2).toNumber(),
-          averageVariance: varianceCount > 0 ? totalVariance.div(varianceCount).toDecimalPlaces(2).toNumber() : 0,
+          averageVariance:
+            varianceCount > 0 ? totalVariance.div(varianceCount).toDecimalPlaces(2).toNumber() : 0,
           sessionsWithVariance: varianceCount,
         },
 
-        sessions: sessionsResult.rows.map(row => ({
+        sessions: sessionsResult.rows.map((row) => ({
           id: row.id,
           sessionNumber: row.sessionNumber,
           registerName: row.registerName || 'Unknown',
@@ -3161,8 +3369,12 @@ export const reportsRepository = {
           openedAt: row.openedAt?.toISOString(),
           closedAt: row.closedAt?.toISOString() || null,
           openingFloat: new Decimal(row.openingFloat || 0).toDecimalPlaces(2).toNumber(),
-          expectedClosing: row.expectedClosing ? new Decimal(row.expectedClosing).toDecimalPlaces(2).toNumber() : null,
-          actualClosing: row.actualClosing ? new Decimal(row.actualClosing).toDecimalPlaces(2).toNumber() : null,
+          expectedClosing: row.expectedClosing
+            ? new Decimal(row.expectedClosing).toDecimalPlaces(2).toNumber()
+            : null,
+          actualClosing: row.actualClosing
+            ? new Decimal(row.actualClosing).toDecimalPlaces(2).toNumber()
+            : null,
           variance: row.variance ? new Decimal(row.variance).toDecimalPlaces(2).toNumber() : null,
           varianceReason: row.varianceReason,
           movementCount: parseInt(row.movement_count || 0),
@@ -3175,7 +3387,14 @@ export const reportsRepository = {
         reportType: 'CASH_REGISTER_SESSION_HISTORY',
         generatedAt: new Date().toISOString(),
         period: { startDate: options.startDate, endDate: options.endDate },
-        summary: { totalSessions: 0, openSessions: 0, closedSessions: 0, totalVariance: 0, averageVariance: 0, sessionsWithVariance: 0 },
+        summary: {
+          totalSessions: 0,
+          openSessions: 0,
+          closedSessions: 0,
+          totalVariance: 0,
+          averageVariance: 0,
+          sessionsWithVariance: 0,
+        },
         sessions: [],
       };
     }

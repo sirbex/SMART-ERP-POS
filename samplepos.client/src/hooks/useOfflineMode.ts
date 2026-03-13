@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOfflineContext } from '../contexts/OfflineContext';
 import { decrementLocalStock, restoreLocalStock } from '../services/offlineCatalogService';
+import { syncOfflineCustomers } from '../services/offlineSyncEngine';
 import type { AxiosInstance, AxiosError } from 'axios';
 
 // ── Storage ───────────────────────────────────────────────────
@@ -166,10 +167,25 @@ export function useOfflineMode() {
       if (pending.length === 0) return [];
 
       isSyncingRef.current = true;
+
+      // Sync offline customers first and resolve temp IDs
+      const customerIdMap = await syncOfflineCustomers();
+
       const results: Array<{ offlineId: string; success: boolean; error?: string }> = [];
 
       for (const sale of pending) {
         try {
+          // Resolve offline customer IDs to real UUIDs
+          if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
+            const realId = customerIdMap.get(sale.data.customerId);
+            if (!realId) {
+              // Customer not yet synced — skip, retry next cycle
+              results.push({ offlineId: sale.offlineId, success: false, error: 'Customer not yet synced' });
+              continue;
+            }
+            sale.data.customerId = realId;
+          }
+
           // Use the dedicated offline-sync endpoint (falls back to regular create if not available)
           let response;
           try {

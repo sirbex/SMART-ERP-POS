@@ -117,10 +117,10 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       const marginPct =
         cached.sellingPrice > 0
           ? new Decimal(cached.sellingPrice)
-              .minus(cached.costPrice)
-              .dividedBy(cached.sellingPrice)
-              .times(100)
-              .toNumber()
+            .minus(cached.costPrice)
+            .dividedBy(cached.sellingPrice)
+            .times(100)
+            .toNumber()
           : 0;
       return {
         id: cached.id,
@@ -173,10 +173,10 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
             const marginPct =
               sellingPrice > 0
                 ? new Decimal(sellingPrice)
-                    .minus(averageCost)
-                    .dividedBy(sellingPrice)
-                    .times(100)
-                    .toNumber()
+                  .minus(averageCost)
+                  .dividedBy(sellingPrice)
+                  .times(100)
+                  .toNumber()
                 : 0;
 
             // Parse UoMs from backend (already in correct format)
@@ -260,6 +260,15 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
           return;
         }
 
+        // Escape: Clear search (works even with no results)
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSearch('');
+          setSelectedIndex(0);
+          searchInputRef.current?.focus();
+          return;
+        }
+
         // Only handle arrow keys and Enter when search has results
         if (!data || data.length === 0) return;
 
@@ -330,15 +339,6 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
           }
           return;
         }
-
-        // Escape: Clear search
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setSearch('');
-          setSelectedIndex(0);
-          searchInputRef.current?.focus();
-          return;
-        }
       };
 
       window.addEventListener('keydown', handleKeyDown);
@@ -390,9 +390,8 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
               data.map((p: ProductSearchResult, index: number) => (
                 <button
                   key={p.id}
-                  className={`w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 flex flex-col gap-1 transition-colors ${
-                    index === selectedIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
-                  }`}
+                  className={`w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 flex flex-col gap-1 transition-colors ${index === selectedIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
+                    }`}
                   onClick={() => {
                     // If product has 0 or 1 UoM, directly select it
                     // If product has multiple UoMs, show selection modal
@@ -420,7 +419,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                       <span
                         className={
                           new Date(p.expiryDate + 'T00:00:00') <
-                          new Date(Date.now() + 7 * 24 * 3600 * 1000)
+                            new Date(Date.now() + 7 * 24 * 3600 * 1000)
                             ? 'bg-yellow-100 text-yellow-800 px-2 rounded'
                             : 'text-gray-500'
                         }

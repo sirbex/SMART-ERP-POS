@@ -5,6 +5,8 @@ import type { Customer } from '@shared/zod/customer';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import QuickAddCustomerModal from '../customers/QuickAddCustomerModal';
+import { useOfflineContext } from '../../contexts/OfflineContext';
+import { searchCustomers as searchOfflineCustomers, getAllCustomers } from '../../lib/offlineDb';
 
 interface CustomerSelectorProps {
   selectedCustomer: Customer | null;
@@ -16,10 +18,17 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
   const [search, setSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const { isOnline } = useOfflineContext();
 
   const { data: customers, isLoading } = useQuery({
-    queryKey: ['customers', search],
+    queryKey: ['customers', search, isOnline],
     queryFn: async () => {
+      // Offline: search IndexedDB
+      if (!isOnline) {
+        if (search) return (await searchOfflineCustomers(search)) as unknown as Customer[];
+        return (await getAllCustomers()) as unknown as Customer[];
+      }
+      // Online: search API
       const res = await api.customers.list();
       if (!res.data.success) return [];
       const all = (res.data.data || []) as Customer[];
@@ -166,6 +175,7 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
         isOpen={showQuickAdd}
         onClose={() => setShowQuickAdd(false)}
         onSuccess={handleQuickAddSuccess}
+        isOffline={!isOnline}
       />
     </>
   );

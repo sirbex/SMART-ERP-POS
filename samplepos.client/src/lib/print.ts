@@ -281,7 +281,7 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
             </div>
             ${data.payments.map(payment => `
               <div class="info-row" style="padding-left: 16px;">
-                <span>${payment.method === 'CREDIT' ? 'Balance' : payment.method}${payment.reference ? ` (${payment.reference})` : ''}:</span>
+                <span>${payment.method === 'CREDIT' ? 'Balance' : payment.method === 'CASH' ? 'Cash Given' : payment.method}${payment.reference ? ` (${payment.reference})` : ''}:</span>
                 <span>${formatCurrency(payment.amount)}</span>
               </div>
             `).join('')}
@@ -470,7 +470,7 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
           <div style="font-size: 10px; font-weight: bold; margin-bottom: 3px;">PAYMENTS:</div>
           ${data.payments.map(payment => `
             <div class="info-line" style="padding-left: 10px;">
-              <span>${payment.method === 'CREDIT' ? 'Balance' : payment.method}</span>
+              <span>${payment.method === 'CREDIT' ? 'Balance' : payment.method === 'CASH' ? 'Cash Given' : payment.method}</span>
               <span>${formatCurrency(payment.amount)}</span>
             </div>
           `).join('')}

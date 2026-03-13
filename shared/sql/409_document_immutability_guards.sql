@@ -33,9 +33,28 @@ BEGIN
     END IF;
 
     -- COMPLETED sales: only allow status transition to VOID or REFUNDED
+    -- AND payment synchronization (amount_paid, payment_method, change_amount)
     IF OLD.status = 'COMPLETED' THEN
         -- Allow the status change itself (+ associated void tracking columns)
         IF NEW.status IN ('VOID', 'REFUNDED') THEN
+            RETURN NEW;
+        END IF;
+
+        -- Allow payment synchronization updates (invoice payments syncing back to sale)
+        -- Only the payment-tracking columns may change; core financial data stays locked
+        IF NEW.status = OLD.status
+           AND NEW.sale_number      IS NOT DISTINCT FROM OLD.sale_number
+           AND NEW.customer_id      IS NOT DISTINCT FROM OLD.customer_id
+           AND NEW.sale_date        IS NOT DISTINCT FROM OLD.sale_date
+           AND NEW.subtotal         IS NOT DISTINCT FROM OLD.subtotal
+           AND NEW.tax_amount       IS NOT DISTINCT FROM OLD.tax_amount
+           AND NEW.discount_amount  IS NOT DISTINCT FROM OLD.discount_amount
+           AND NEW.total_amount     IS NOT DISTINCT FROM OLD.total_amount
+           AND NEW.total_cost       IS NOT DISTINCT FROM OLD.total_cost
+           AND NEW.profit           IS NOT DISTINCT FROM OLD.profit
+           AND NEW.cashier_id       IS NOT DISTINCT FROM OLD.cashier_id
+        THEN
+            -- Only amount_paid, payment_method, change_amount changed — allow it
             RETURN NEW;
         END IF;
 
