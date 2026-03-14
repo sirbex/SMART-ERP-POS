@@ -9,13 +9,13 @@ RUN apk add --no-cache dumb-init
 FROM base AS deps
 WORKDIR /app/SamplePOS.Server
 COPY SamplePOS.Server/package.json SamplePOS.Server/package-lock.json* ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 # Build — needs devDependencies + shared types
 FROM base AS builder
 WORKDIR /app/SamplePOS.Server
 COPY SamplePOS.Server/package.json SamplePOS.Server/package-lock.json* ./
-RUN npm ci
+RUN npm install --no-audit --no-fund
 # Copy shared types (referenced via ../../../../shared/ from modules)
 COPY shared/ /app/shared/
 # Copy backend source
