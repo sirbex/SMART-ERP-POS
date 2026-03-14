@@ -1,23 +1,13 @@
 # Phase 6: Frontend Dockerfile
 
-FROM node:18-alpine AS base
+FROM node:20-alpine AS base
 
-# Install dependencies only when needed
-FROM base AS deps
-WORKDIR /app
-
-# Install dependencies based on the package manager
-COPY package.json package-lock.json* ./
-RUN npm ci --only=production
-
-# Rebuild the source code only when needed
+# Build stage
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-# Install all dependencies for build
+COPY package.json package-lock.json* ./
 RUN npm ci
+COPY . .
 RUN npm run build
 
 # Production image with nginx
