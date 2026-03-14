@@ -24,7 +24,9 @@ COPY shared/ /app/shared/
 COPY SamplePOS.Server/ ./
 # Copy tenant config files
 COPY config/ /app/config/
-RUN npm run build
+# Install tsc-alias to resolve path aliases and add .js extensions post-build
+RUN npm install --no-save tsc-alias
+RUN npm run build && npx tsc-alias -p tsconfig.json --resolve-full-paths
 
 # Production image
 FROM base AS runner
