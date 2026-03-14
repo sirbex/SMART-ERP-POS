@@ -69,8 +69,8 @@ services:
   # Frontend (React build served by Nginx)
   frontend:
     build:
-      context: ./samplepos.client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: samplepos.client/Dockerfile.deploy
     container_name: smarterp-frontend
     restart: unless-stopped
     networks:
