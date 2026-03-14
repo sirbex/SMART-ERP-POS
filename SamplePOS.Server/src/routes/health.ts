@@ -370,9 +370,10 @@ function checkMemoryUsage(): HealthCheckResult {
   const usage = process.memoryUsage();
   const totalMem = usage.heapTotal;
   const usedMem = usage.heapUsed;
-  const memoryUsagePercentage = (usedMem / totalMem) * 100;
-
-  const status = memoryUsagePercentage > 90 ? 'unhealthy' : 'healthy';
+  // Compare RSS (actual memory usage) against a sensible limit (e.g. 450MB of the 512MB max)
+  const rssLimitMB = 450;
+  const rssMB = usage.rss / 1024 / 1024;
+  const status = rssMB > rssLimitMB ? 'unhealthy' : 'healthy';
 
   return {
     service: 'memory',
@@ -380,7 +381,7 @@ function checkMemoryUsage(): HealthCheckResult {
     details: {
       heapUsed: `${Math.round(usedMem / 1024 / 1024)}MB`,
       heapTotal: `${Math.round(totalMem / 1024 / 1024)}MB`,
-      usagePercentage: `${memoryUsagePercentage.toFixed(1)}%`,
+      usagePercentage: `${((usedMem / totalMem) * 100).toFixed(1)}%`,
       external: `${Math.round(usage.external / 1024 / 1024)}MB`,
       rss: `${Math.round(usage.rss / 1024 / 1024)}MB`
     },
