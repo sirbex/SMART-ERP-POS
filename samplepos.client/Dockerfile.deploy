@@ -22,6 +22,7 @@ COPY samplepos.client/ .
 
 # Build (skip tsc type-check — Vite/esbuild handles transpilation;
 # type-checking runs in local dev and CI)
+ENV NODE_ENV=production
 RUN npx vite build
 
 # Production image — serve with nginx
