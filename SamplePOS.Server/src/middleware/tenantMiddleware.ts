@@ -156,6 +156,11 @@ function extractSubdomain(host: string): string | undefined {
     return undefined;
   }
 
+  // IP addresses — no subdomain (e.g. 209.38.203.138)
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    return undefined;
+  }
+
   const parts = hostname.split('.');
 
   // Need at least 3 parts for a subdomain (sub.domain.tld)
