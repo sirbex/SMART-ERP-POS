@@ -41,4 +41,4 @@ RUN chown -R nginx:nginx /usr/share/nginx/html \
 
 USER nginx
 EXPOSE 3000
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["nginx", "-g", "daemon off; pid /tmp/nginx.pid;"]
