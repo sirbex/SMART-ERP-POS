@@ -18,18 +18,50 @@ Decimal.set({
 });
 
 /**
- * Currency configuration
+ * Currency configuration — starts with UGX defaults, updated at runtime
+ * by TenantContext when the tenant config loads.
  */
-export const CURRENCY_CONFIG = {
+export const CURRENCY_CONFIG: {
+  code: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  maxDecimals: number;
+  thousandsSeparator: string;
+  decimalSeparator: string;
+  symbolPosition: 'before' | 'after';
+} = {
   code: 'UGX',
   symbol: 'UGX',
   name: 'Ugandan Shillings',
-  decimals: 2, // Default display decimals (user-facing)
-  maxDecimals: 6, // Bank-grade precision for calculations
+  decimals: 2,
+  maxDecimals: 6,
   thousandsSeparator: ',',
   decimalSeparator: '.',
-  symbolPosition: 'before' as const
+  symbolPosition: 'before',
 };
+
+/**
+ * Apply tenant currency config at runtime.
+ * Called by TenantContext after fetching /api/tenant/config.
+ */
+export function applyCurrencyConfig(currency: {
+  code: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  thousandsSeparator: string;
+  decimalSeparator: string;
+  symbolPosition: 'before' | 'after';
+}): void {
+  CURRENCY_CONFIG.code = currency.code;
+  CURRENCY_CONFIG.symbol = currency.symbol;
+  CURRENCY_CONFIG.name = currency.name;
+  CURRENCY_CONFIG.decimals = currency.decimals;
+  CURRENCY_CONFIG.thousandsSeparator = currency.thousandsSeparator;
+  CURRENCY_CONFIG.decimalSeparator = currency.decimalSeparator;
+  CURRENCY_CONFIG.symbolPosition = currency.symbolPosition;
+}
 
 /**
  * Precision levels for different use cases

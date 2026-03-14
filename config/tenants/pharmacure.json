@@ -1,0 +1,46 @@
+{
+  "tenantId": "pharmacure",
+  "slug": "pharmacure",
+  "name": "Pharmacure",
+  "currency": {
+    "code": "UGX",
+    "symbol": "UGX",
+    "name": "Ugandan Shillings",
+    "decimals": 2,
+    "thousandsSeparator": ",",
+    "decimalSeparator": ".",
+    "symbolPosition": "before"
+  },
+  "branding": {
+    "companyName": "Pharmacure",
+    "companyAddress": "Kampala, Uganda",
+    "companyPhone": "",
+    "companyEmail": "",
+    "logoUrl": null,
+    "primaryColor": "#2563eb",
+    "secondaryColor": "#10b981",
+    "footerText": "Thank you for choosing Pharmacure!"
+  },
+  "locale": {
+    "country": "UG",
+    "timezone": "Africa/Kampala",
+    "dateFormat": "YYYY-MM-DD",
+    "timeFormat": "HH:mm"
+  },
+  "tax": {
+    "enabled": true,
+    "defaultRate": 18,
+    "name": "VAT",
+    "inclusive": false
+  },
+  "features": {
+    "pharmacy_mode": true,
+    "restaurant_mode": false,
+    "offline_pos": true,
+    "credit_sales": true,
+    "quotations": true,
+    "purchase_orders": true,
+    "multi_currency": false,
+    "barcode_scanner": true
+  }
+}

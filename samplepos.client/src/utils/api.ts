@@ -415,6 +415,11 @@ export const api = {
       apiClient.put<ApiResponse>('settings/invoice', data),
   },
 
+  // Tenant Config (public — no auth required)
+  tenant: {
+    getConfig: () => apiClient.get<ApiResponse>('tenant/config'),
+  },
+
   // Generic HTTP methods for backward compatibility
   get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) => apiClient.get<T>(url, config),
   post: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>

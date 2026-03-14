@@ -51,6 +51,7 @@ import { auditContextMiddleware } from './middleware/auditContext.js';
 import { createRbacRoutes, initializeRbacMiddleware } from './rbac/index.js';
 import { platformRoutes } from './modules/platform/platformRoutes.js';
 import { syncRoutes } from './modules/platform/syncRoutes.js';
+import { tenantConfigRoutes } from './modules/tenant/tenantConfigRoutes.js';
 import { tenantMiddleware } from './middleware/tenantMiddleware.js';
 import { jobQueue } from './services/jobQueue.js';
 import { connectionManager } from './db/connectionManager.js';
@@ -241,6 +242,9 @@ app.use('/api/health', healthRoutes);
 
 // Platform routes (super admin — tenant management, no tenant middleware needed)
 app.use('/api/platform', platformRoutes);
+
+// Tenant config (public — frontend fetches branding/currency/features before login)
+app.use('/api/tenant', tenantConfigRoutes);
 
 // Sync routes (edge node ↔ cloud synchronization)
 app.use('/api/sync', syncRoutes);

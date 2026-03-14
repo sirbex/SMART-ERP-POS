@@ -28,7 +28,8 @@ if [ ! -z "$BACKEND_FILES" ]; then
   
   # Linting check
   echo "   🧹 Running ESLint..."
-  npm run lint -- $BACKEND_FILES 2>&1 | head -20
+  BACKEND_REL=$(echo "$BACKEND_FILES" | sed 's|SamplePOS\.Server/||g')
+  npm run lint -- $BACKEND_REL 2>&1 | head -20
   if [ $? -ne 0 ]; then
     echo "   ⚠️  Linting warnings found (non-blocking)"
   fi
@@ -55,7 +56,8 @@ if [ ! -z "$FRONTEND_FILES" ]; then
   
   # Linting check
   echo "   🧹 Running ESLint..."
-  npm run lint -- $FRONTEND_FILES 2>&1 | head -20
+  FRONTEND_REL=$(echo "$FRONTEND_FILES" | sed 's|samplepos\.client/||g')
+  npm run lint -- $FRONTEND_REL 2>&1 | head -20
   if [ $? -ne 0 ]; then
     echo "   ⚠️  Linting warnings found (non-blocking)"
   fi

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './contexts/AuthContext';
 import { OfflineProvider } from './contexts/OfflineContext';
+import { TenantProvider } from './contexts/TenantContext';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
@@ -149,11 +150,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary section="Root">
       <QueryClientProvider client={queryClient}>
-        <OfflineProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </OfflineProvider>
+        <TenantProvider>
+          <OfflineProvider>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </OfflineProvider>
+        </TenantProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   </React.StrictMode>
