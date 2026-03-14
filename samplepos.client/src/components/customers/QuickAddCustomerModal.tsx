@@ -95,8 +95,17 @@ export default function QuickAddCustomerModal({
     e.preventDefault();
     setErrors({});
 
+    // Convert empty strings to undefined so Zod .optional() accepts them
+    const sanitized = {
+      ...formData,
+      email: formData.email?.trim() || undefined,
+      phone: formData.phone?.trim() || undefined,
+      address: formData.address?.trim() || undefined,
+      customerGroupId: formData.customerGroupId || undefined,
+    };
+
     // Validate with Zod
-    const validation = CreateCustomerSchema.safeParse(formData);
+    const validation = CreateCustomerSchema.safeParse(sanitized);
 
     if (!validation.success) {
       const fieldErrors: Record<string, string> = {};
