@@ -24,7 +24,17 @@ declare global {
       auditContext?: import('../../../shared/types/audit.js').AuditContext;
       requestId?: string;
       // JWT token payload (set by authenticate middleware)
-      tokenPayload?: Record<string, unknown>;
+      tokenPayload?: {
+        userId: string;
+        email: string;
+        fullName: string;
+        role: string;
+        tenantId?: string;
+        tenantSlug?: string;
+        iat?: number;
+        exp?: number;
+        [key: string]: unknown;
+      };
     }
   }
 }

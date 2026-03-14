@@ -45,4 +45,4 @@ USER nodejs
 EXPOSE 3001
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/SamplePOS.Server/src/server.js"]
