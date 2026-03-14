@@ -51,7 +51,7 @@ export function tenantMiddleware(req: Request, res: Response, next: NextFunction
 
 async function resolveTenant(req: Request, res: Response, next: NextFunction): Promise<void> {
   // Skip tenant resolution for health checks and super-admin routes
-  if (req.path === '/health' || req.path.startsWith('/api/platform')) {
+  if (req.path === '/health' || req.path.startsWith('/api/health') || req.path.startsWith('/api/platform')) {
     return next();
   }
 
