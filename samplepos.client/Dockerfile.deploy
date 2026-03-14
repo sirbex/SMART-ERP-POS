@@ -14,11 +14,15 @@ COPY shared/ /app/shared/
 COPY samplepos.client/package.json samplepos.client/package-lock.json* ./
 RUN npm install --no-audit --no-fund
 
+# Symlink node_modules at /app/ level so shared/ files can resolve 'zod' etc.
+RUN ln -s /app/samplepos.client/node_modules /app/node_modules
+
 # Copy frontend source
 COPY samplepos.client/ .
 
-# Build
-RUN npm run build
+# Build (skip tsc type-check — Vite/esbuild handles transpilation;
+# type-checking runs in local dev and CI)
+RUN npx vite build
 
 # Production image — serve with nginx
 FROM nginx:alpine AS runner
