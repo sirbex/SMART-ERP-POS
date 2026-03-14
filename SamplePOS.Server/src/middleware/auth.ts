@@ -44,22 +44,7 @@ if (JWT_SECRET && JWT_SECRET.length < 32) {
 }
 const jwtSecret = JWT_SECRET || 'dev-only-insecure-key-change-me-32ch';
 
-// Extend Express Request interface to include enhanced user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        email: string;
-        fullName: string;
-        role: UserRole;
-        tenantId?: string;
-        tenantSlug?: string;
-      };
-      tokenPayload?: JwtPayload;
-    }
-  }
-}
+// Express Request.user is already declared in src/types/express.d.ts
 
 /**
  * Extract JWT token from Authorization header

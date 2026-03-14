@@ -16,6 +16,8 @@ FROM base AS builder
 WORKDIR /app/SamplePOS.Server
 COPY SamplePOS.Server/package.json SamplePOS.Server/package-lock.json* ./
 RUN npm install --no-audit --no-fund
+# Symlink node_modules at /app/ level so shared/ files can resolve 'zod' etc.
+RUN ln -s /app/SamplePOS.Server/node_modules /app/node_modules
 # Copy shared types (referenced via ../../../../shared/ from modules)
 COPY shared/ /app/shared/
 # Copy backend source
