@@ -2108,26 +2108,28 @@ export default function POSPage() {
 
     // Resolve customer ID — strip temp_ placeholders, sync offline_cust_ customers first
     let resolvedCustomerId: string | undefined = selectedCustomer?.id;
+    const hasOfflineCustomer = resolvedCustomerId?.startsWith('offline_cust_') ?? false;
     if (resolvedCustomerId?.startsWith('temp_')) {
       resolvedCustomerId = undefined;
-    } else if (resolvedCustomerId?.startsWith('offline_cust_')) {
+    } else if (hasOfflineCustomer) {
       if (isOnline) {
         // Network is back — sync the offline customer to get a real UUID
         try {
           const idMap = await syncOfflineCustomers();
-          resolvedCustomerId = idMap.get(resolvedCustomerId) || undefined;
+          resolvedCustomerId = idMap.get(resolvedCustomerId!) || undefined;
         } catch {
           resolvedCustomerId = undefined;
         }
       } else {
-        // Still offline — keep the offline_cust_ ID; the offline branch below preserves it
+        // Still offline — resolvedCustomerId stays undefined for Zod (UUID) validation,
+        // but the offline branch below will preserve the offline_cust_ ID for later sync
         resolvedCustomerId = undefined;
       }
     }
 
-    // Validate: CREDIT payments require a real (non-temp) customer
+    // Validate: CREDIT payments require a real customer (or an offline customer when offline)
     const hasCreditPayment = finalPaymentLines.some((line) => line.paymentMethod === 'CREDIT');
-    if (hasCreditPayment && !resolvedCustomerId) {
+    if (hasCreditPayment && !resolvedCustomerId && !(hasOfflineCustomer && !isOnline)) {
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
       alert(

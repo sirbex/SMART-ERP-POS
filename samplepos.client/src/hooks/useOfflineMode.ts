@@ -31,7 +31,7 @@ export interface OfflineSaleLineItem {
 }
 
 export interface OfflineSalePaymentLine {
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT';
   amount: number;
   reference?: string;
 }
@@ -126,12 +126,16 @@ export function useOfflineMode() {
         stockDeductions.push({ productId: item.productId, quantity: item.quantity });
       }
 
-      // Strip disallowed offline payment methods (credit/deposit require server)
+      // Strip disallowed offline payment methods (deposit requires server).
+      // Keep CREDIT lines when a customer is attached — the sync engine
+      // will resolve the offline customer first so the backend can create the invoice.
+      const hasCustomer = !!saleData.customerId;
       const cleanedPaymentLines = saleData.paymentLines.filter(
         (pl) =>
           pl.paymentMethod === 'CASH' ||
           pl.paymentMethod === 'CARD' ||
-          pl.paymentMethod === 'MOBILE_MONEY'
+          pl.paymentMethod === 'MOBILE_MONEY' ||
+          (pl.paymentMethod === 'CREDIT' && hasCustomer)
       ) as OfflineSalePaymentLine[];
 
       const sale: OfflineSale = {
