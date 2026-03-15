@@ -86,6 +86,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   // ── Cache pre-warming ─────────────────────────────────────
   const prewarmCache = useCallback(async () => {
     if (warmingRef.current || !navigator.onLine) return;
+    // Don't prewarm if user is not authenticated
+    if (!localStorage.getItem('auth_token')) return;
     warmingRef.current = true;
     setIsCacheWarming(true);
 

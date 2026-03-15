@@ -8,6 +8,13 @@ import type {
   InternalAxiosRequestConfig,
   AxiosResponse,
 } from 'axios';
+import {
+  isTokenExpired,
+  getRefreshToken,
+  getAccessToken,
+  clearTokens,
+  storeTokens,
+} from '../hooks/useTokenRefresh';
 import type {
   CreateProductInput,
   UpdateProductInput,
@@ -66,11 +73,40 @@ const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request Interceptor - Add auth token
-apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('auth_token');
+// Token refresh state (shared across interceptors on this instance)
+let _isRefreshing = false;
+let _refreshPromise: Promise<void> | null = null;
 
+async function _doRefresh(): Promise<void> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) throw new Error('No refresh token');
+  const res = await axios.post(`${API_BASE_URL.replace(/\/api$/, '/api')}/auth/token/refresh`, { refreshToken });
+  const data = res.data.data;
+  storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
+}
+
+// Request Interceptor - Add auth token + refresh if expired
+apiClient.interceptors.request.use(
+  async (config: InternalAxiosRequestConfig) => {
+    // Skip auth for public routes
+    if (config.url?.includes('/login') || config.url?.includes('/register') || config.url?.includes('/token/refresh')) {
+      return config;
+    }
+
+    // Refresh expired token (skip when offline)
+    if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
+      if (!_isRefreshing) {
+        _isRefreshing = true;
+        _refreshPromise = _doRefresh().finally(() => { _isRefreshing = false; _refreshPromise = null; });
+      }
+      try {
+        await _refreshPromise;
+      } catch {
+        // Refresh failed while online — don't clear tokens here, response interceptor handles it
+      }
+    }
+
+    const token = getAccessToken() || localStorage.getItem('auth_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -107,7 +143,7 @@ apiClient.interceptors.response.use(
 
     return response;
   },
-  (error: AxiosError<ApiResponse>) => {
+  async (error: AxiosError<ApiResponse>) => {
     // Log error
     console.error('[API Response Error]', {
       url: error.config?.url,
@@ -123,12 +159,27 @@ apiClient.interceptors.response.use(
         return Promise.reject(error);
       }
 
+      // Try to refresh once on 401 (if we haven't already retried this request)
+      const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+      if (originalRequest && !originalRequest._retry && getRefreshToken()) {
+        originalRequest._retry = true;
+        try {
+          await _doRefresh();
+          const token = getAccessToken();
+          if (token && originalRequest.headers) {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+          }
+          return apiClient(originalRequest);
+        } catch {
+          // Refresh failed — fall through to logout
+        }
+      }
+
       // Unauthorized - clear token and redirect to login
-      // Only redirect if we actually have auth data (prevents loops on initial page load)
       const hasAuthData = localStorage.getItem('auth_token') || localStorage.getItem('user');
 
       if (hasAuthData) {
-        localStorage.removeItem('auth_token');
+        clearTokens();
         localStorage.removeItem('user');
 
         if (window.location.pathname !== '/login') {

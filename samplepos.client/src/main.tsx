@@ -85,10 +85,12 @@ const queryClient = new QueryClient({
       retry: 1,
       staleTime: 5 * 60 * 1000, // 5 minutes
       gcTime: 30 * 60 * 1000, // Keep unused cache for 30 min (helps offline)
+      networkMode: 'offlineFirst', // Don't fire queries when offline — use cache
     },
     mutations: {
       // Mutations should not retry by default — offline queue handles retries
       retry: 0,
+      networkMode: 'offlineFirst',
     },
   },
 });
