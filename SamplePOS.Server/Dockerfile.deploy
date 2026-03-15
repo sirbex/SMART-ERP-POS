@@ -26,7 +26,8 @@ COPY SamplePOS.Server/ ./
 COPY config/ /app/config/
 # Install tsc-alias to resolve path aliases and add .js extensions post-build
 RUN npm install --no-save tsc-alias
-RUN npm run build && npx tsc-alias -p tsconfig.json --resolve-full-paths
+# Clean dist to prevent stale compiled files, then build fresh
+RUN rm -rf dist && npm run build && npx tsc-alias -p tsconfig.json --resolve-full-paths
 
 # Production image
 FROM base AS runner
