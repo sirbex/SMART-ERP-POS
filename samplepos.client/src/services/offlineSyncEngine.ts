@@ -98,12 +98,29 @@ export async function syncOfflineSales(): Promise<SyncResult> {
             try {
                 // Resolve offline customer IDs to real UUIDs
                 if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
-                    const realId = customerIdMap.get(sale.data.customerId);
+                    let realId = customerIdMap.get(sale.data.customerId);
+
+                    // If not in map (customer already synced previously), try to look up by name
                     if (!realId) {
-                        // Customer not yet synced — skip this sale, retry next cycle
-                        continue;
+                        try {
+                            const offlineCusts = JSON.parse(localStorage.getItem(OFFLINE_CUSTOMERS_KEY) || '[]') as Array<{ id: string; name: string }>;
+                            const custEntry = offlineCusts.find(c => c.id === sale.data.customerId);
+                            if (custEntry?.name) {
+                                const searchResp = await apiClient.get('/customers/search', { params: { q: custEntry.name, limit: 1 } });
+                                const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
+                                if (found?.id) realId = found.id;
+                            }
+                        } catch {
+                            // Search failed — will fall through to clearing the ID
+                        }
                     }
-                    sale.data.customerId = realId;
+
+                    if (realId) {
+                        sale.data.customerId = realId;
+                    } else {
+                        // Can't resolve — clear the offline customer ID so the sale can still sync as walk-in
+                        sale.data.customerId = undefined;
+                    }
                 }
 
                 let response;
