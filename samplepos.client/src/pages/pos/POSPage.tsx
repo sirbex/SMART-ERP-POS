@@ -49,6 +49,7 @@ import type {
 import { normalizeStatus, getQuoteStatusBadge } from '@shared/types/quotation';
 import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
+import { syncOfflineCustomers } from '../../services/offlineSyncEngine';
 
 // ── Discount applied from DiscountDialog (before manager approval extension) ──
 interface AppliedDiscount {
@@ -2105,10 +2106,24 @@ export default function POSPage() {
       calculation: `${subtotalAfterDiscount} + ${tax} = ${grandTotal}`,
     });
 
-    // Strip temp_ and offline_cust_ customer IDs — they're placeholders with no DB record
-    const resolvedCustomerId = selectedCustomer?.id?.startsWith('temp_') || selectedCustomer?.id?.startsWith('offline_cust_')
-      ? undefined
-      : selectedCustomer?.id;
+    // Resolve customer ID — strip temp_ placeholders, sync offline_cust_ customers first
+    let resolvedCustomerId: string | undefined = selectedCustomer?.id;
+    if (resolvedCustomerId?.startsWith('temp_')) {
+      resolvedCustomerId = undefined;
+    } else if (resolvedCustomerId?.startsWith('offline_cust_')) {
+      if (isOnline) {
+        // Network is back — sync the offline customer to get a real UUID
+        try {
+          const idMap = await syncOfflineCustomers();
+          resolvedCustomerId = idMap.get(resolvedCustomerId) || undefined;
+        } catch {
+          resolvedCustomerId = undefined;
+        }
+      } else {
+        // Still offline — keep the offline_cust_ ID; the offline branch below preserves it
+        resolvedCustomerId = undefined;
+      }
+    }
 
     // Validate: CREDIT payments require a real (non-temp) customer
     const hasCreditPayment = finalPaymentLines.some((line) => line.paymentMethod === 'CREDIT');

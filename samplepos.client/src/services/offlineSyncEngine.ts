@@ -167,13 +167,17 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
 
         for (const cust of queue) {
             try {
-                const response = await apiClient.post('customers', {
+                // Send undefined (omitted) for empty optional fields – NOT null.
+                // Backend CreateCustomerSchema uses .optional() which rejects null.
+                const payload: Record<string, unknown> = {
                     name: cust.name,
-                    email: cust.email || null,
-                    phone: cust.phone || null,
-                    address: cust.address || null,
                     creditLimit: cust.creditLimit ?? 0,
-                });
+                };
+                if (cust.email) payload.email = cust.email;
+                if (cust.phone) payload.phone = cust.phone;
+                if (cust.address) payload.address = cust.address;
+
+                const response = await apiClient.post('customers', payload);
                 if (response.data?.success && response.data?.data?.id) {
                     idMap.set(cust.id, response.data.data.id as string);
                 } else {
