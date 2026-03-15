@@ -34,7 +34,7 @@ export class ReportPDFGenerator {
   private pageWidth: number;
   private margin: number = 40;
   private contentWidth: number;
-  private companyName: string = 'SamplePOS';
+  private companyName: string = 'SMART ERP';
 
   constructor(companyName?: string) {
     this.doc = new PDFDocument({
@@ -65,7 +65,7 @@ export class ReportPDFGenerator {
     // Company Header with white text
     this.doc.fillColor('#ffffff')
       .fontSize(28).font('Helvetica-Bold')
-      .text(companyName || 'SamplePOS', this.margin, 25, { align: 'center', width: this.contentWidth, lineBreak: false });
+      .text(companyName || 'SMART ERP', this.margin, 25, { align: 'center', width: this.contentWidth, lineBreak: false });
 
     this.doc.fontSize(12).font('Helvetica')
       .text(title, this.margin, 55, { align: 'center', width: this.contentWidth, lineBreak: false });

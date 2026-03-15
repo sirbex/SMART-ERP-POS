@@ -962,7 +962,7 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
     const totalEquity = new Decimal(equityTotal).plus(retainedEarnings).toNumber();
 
     return {
-      companyName: 'SamplePOS Company',
+      companyName: 'SMART ERP',
       reportDate: asOfDate,
       generatedAt: new Date().toISOString(),
       assets: {
@@ -1126,7 +1126,7 @@ export async function getIncomeStatement(startDate: string, endDate: string, dbP
       : 0;
 
     return {
-      companyName: 'SamplePOS Company',
+      companyName: 'SMART ERP',
       periodStart: startDate,
       periodEnd: endDate,
       generatedAt: new Date().toISOString(),

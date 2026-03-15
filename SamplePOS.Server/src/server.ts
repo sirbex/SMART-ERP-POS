@@ -325,7 +325,7 @@ async function startServer() {
     // Start Express server
     const server = app.listen(PORT, () => {
       console.log('');
-      console.log('✅ SamplePOS Backend API Started');
+      console.log('✅ SMART ERP Backend API Started');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 API endpoint: http://localhost:${PORT}`);

@@ -20,7 +20,7 @@ authenticator.options = {
     window: 2, // Allow 2 steps before/after for clock drift (±60 seconds)
 };
 
-const APP_NAME = process.env.APP_NAME || 'SamplePOS';
+const APP_NAME = process.env.APP_NAME || 'SMART ERP';
 
 // Roles that require 2FA
 const ROLES_REQUIRING_2FA = ['ADMIN', 'MANAGER'];

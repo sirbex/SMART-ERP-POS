@@ -316,7 +316,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   // Company Header with white text
   doc.fillColor('#ffffff')
     .fontSize(24).font('Helvetica-Bold')
-    .text(settings.companyName || 'SamplePOS', margin, 18, { align: 'center', width: contentWidth });
+    .text(settings.companyName || 'SMART ERP', margin, 18, { align: 'center', width: contentWidth });
 
   // Company contact info
   const contactParts: string[] = [];
@@ -595,7 +595,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
 
     // Page number and branding
     doc.fontSize(8).fillColor(colors.dark)
-      .text(`${settings.companyName || 'SamplePOS'} • Customer Statement`, margin, 790, {
+      .text(`${settings.companyName || 'SMART ERP'} • Customer Statement`, margin, 790, {
         width: contentWidth / 2,
         align: 'left'
       })

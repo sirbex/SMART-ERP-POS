@@ -436,7 +436,7 @@ router.get('/balance-sheet', asyncHandler(async (req, res) => {
 
   // Get company name from settings
   const settings = await getSettings(pool);
-  const companyName = settings.companyName || 'SamplePOS';
+  const companyName = settings.companyName || 'SMART ERP';
 
   res.json({
     success: true,
@@ -465,7 +465,7 @@ router.get('/income-statement', asyncHandler(async (req, res) => {
 
   // Get company name from settings
   const settings = await getSettings(pool);
-  const companyName = settings.companyName || 'SamplePOS';
+  const companyName = settings.companyName || 'SMART ERP';
 
   res.json({
     success: true,
@@ -616,7 +616,7 @@ router.get('/cash-flow', asyncHandler(async (req, res) => {
 
   // Get company name from settings
   const settings = await getSettings(pool);
-  const companyName = settings.companyName || 'SamplePOS';
+  const companyName = settings.companyName || 'SMART ERP';
 
   res.json({
     success: true,

@@ -21,7 +21,7 @@ interface TenantContextValue {
 const DEFAULT_CONFIG: TenantConfig = {
   tenantId: 'default',
   slug: 'default',
-  name: 'SamplePOS',
+  name: 'SMART ERP',
   currency: {
     code: 'UGX',
     symbol: 'UGX',
@@ -32,7 +32,7 @@ const DEFAULT_CONFIG: TenantConfig = {
     symbolPosition: 'before',
   },
   branding: {
-    companyName: 'SamplePOS',
+    companyName: 'SMART ERP',
     companyAddress: '',
     companyPhone: '',
     companyEmail: '',

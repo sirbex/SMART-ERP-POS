@@ -151,7 +151,7 @@ router.get('/config', (req: Request, res: Response) => {
       data: {
         tenantId: 'default',
         slug: 'default',
-        name: 'SamplePOS',
+        name: 'SMART ERP',
         currency: {
           code: 'UGX',
           symbol: 'UGX',
@@ -162,7 +162,7 @@ router.get('/config', (req: Request, res: Response) => {
           symbolPosition: 'before',
         },
         branding: {
-          companyName: 'SamplePOS',
+          companyName: 'SMART ERP',
           companyAddress: '',
           companyPhone: '',
           companyEmail: '',

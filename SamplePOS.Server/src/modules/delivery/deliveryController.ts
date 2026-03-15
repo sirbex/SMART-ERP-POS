@@ -415,10 +415,10 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
 
   // Company details from settings
   const company = {
-    name: settings.companyName || 'SamplePOS',
+    name: settings.companyName || 'SMART ERP',
     address: settings.companyAddress || 'Kampala, Uganda',
     phone: settings.companyPhone || '+256 700 000 000',
-    email: settings.companyEmail || 'info@samplepos.com',
+    email: settings.companyEmail || 'info@smarterp.com',
     tin: settings.companyTin || '',
   };
 

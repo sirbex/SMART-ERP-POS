@@ -69,10 +69,10 @@ export default function Layout({ children }: LayoutProps) {
         <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200">
           {(sidebarOpen || window.innerWidth >= 1024) ? (
             <h1 className={`${sidebarOpen || window.innerWidth >= 1024 ? 'text-2xl' : 'text-xl'} font-bold text-gray-900`}>
-              {sidebarOpen ? 'SamplePOS' : 'SP'}
+              {sidebarOpen ? 'SMART ERP' : 'SE'}
             </h1>
           ) : (
-            <span className="text-2xl font-bold text-gray-900">SP</span>
+            <span className="text-2xl font-bold text-gray-900">SE</span>
           )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -175,7 +175,7 @@ export default function Layout({ children }: LayoutProps) {
               />
             </svg>
           </button>
-          <h1 className="text-xl font-bold text-gray-900">SamplePOS</h1>
+          <h1 className="text-xl font-bold text-gray-900">SMART ERP</h1>
           <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
             {user?.fullName?.charAt(0).toUpperCase() || 'U'}
           </div>

@@ -65,10 +65,10 @@ export async function initializeDefaults(pool: Pool): Promise<InvoiceSettings> {
       payment_instructions,
       footer_text
     ) VALUES (
-      'SamplePOS',
+      'SMART ERP',
       'Kampala, Uganda',
       '+256 700 000 000',
-      'info@samplepos.com',
+      'info@smarterp.com',
       'TIN: 1000000000',
       'modern',
       '#2563eb',

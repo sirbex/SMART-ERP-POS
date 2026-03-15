@@ -203,7 +203,7 @@ export const systemSettingsRepository = {
         tax_inclusive
       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *`,
-            ['SamplePOS', 'UGX', 'UGX', false, 18.0, 'VAT', true]
+            ['SMART ERP', 'UGX', 'UGX', false, 18.0, 'VAT', true]
         );
 
         return normalizeSystemSettings(result.rows[0]);

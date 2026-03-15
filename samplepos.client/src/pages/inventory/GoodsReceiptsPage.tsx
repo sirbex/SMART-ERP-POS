@@ -263,7 +263,7 @@ export default function GoodsReceiptsPage() {
     // Header
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
-    doc.text('SamplePOS', 14, 20);
+    doc.text('SMART ERP', 14, 20);
 
     doc.setFontSize(14);
     doc.text('Goods Receipt', 14, 30);
@@ -415,7 +415,7 @@ export default function GoodsReceiptsPage() {
     doc.setFontSize(8);
     doc.setTextColor(128, 128, 128);
     doc.text(`Generated on ${new Date().toLocaleString()}`, 14, 285);
-    doc.text('SamplePOS - Goods Receipt Document', 196, 285, { align: 'right' });
+    doc.text('SMART ERP - Goods Receipt Document', 196, 285, { align: 'right' });
 
     // Save
     doc.save(`GoodsReceipt_${grNumber}.pdf`);

@@ -246,10 +246,10 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         const contentWidth = doc.page.width - 2 * margin;
 
         const companyInfo = {
-            name: settings.companyName || 'SamplePOS',
+            name: settings.companyName || 'SMART ERP',
             address: settings.companyAddress || 'Kampala, Uganda',
             phone: settings.companyPhone || '+256 700 000 000',
-            email: settings.companyEmail || 'info@samplepos.com',
+            email: settings.companyEmail || 'info@smarterp.com',
             tin: settings.companyTin || 'TIN: 1000000000',
         };
 

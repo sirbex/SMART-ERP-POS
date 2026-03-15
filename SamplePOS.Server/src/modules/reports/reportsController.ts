@@ -23,9 +23,9 @@ import {
 async function getCompanyName(pool: Pool): Promise<string> {
   try {
     const settings = await reportsService.getSystemSettings(pool);
-    return settings.businessName || 'SamplePOS';
+    return settings.businessName || 'SMART ERP';
   } catch {
-    return 'SamplePOS';
+    return 'SMART ERP';
   }
 }
 

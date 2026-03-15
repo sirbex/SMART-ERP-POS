@@ -1,7 +1,7 @@
 {
   "tenantId": "default",
   "slug": "default",
-  "name": "SamplePOS",
+  "name": "SMART ERP",
   "currency": {
     "code": "UGX",
     "symbol": "UGX",
@@ -12,10 +12,10 @@
     "symbolPosition": "before"
   },
   "branding": {
-    "companyName": "SamplePOS",
+    "companyName": "SMART ERP",
     "companyAddress": "Kampala, Uganda",
     "companyPhone": "+256 700 000 000",
-    "companyEmail": "info@samplepos.com",
+    "companyEmail": "info@smarterp.com",
     "logoUrl": null,
     "primaryColor": "#2563eb",
     "secondaryColor": "#10b981",
