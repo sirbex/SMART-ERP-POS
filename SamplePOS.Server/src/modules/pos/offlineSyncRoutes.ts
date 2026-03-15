@@ -30,12 +30,13 @@ const SyncPayloadSchema = z.object({
     offlineTimestamp: z.number(),
     saleData: z.object({
         customerId: z.preprocess(
-            (v) => (v === '' ? null : v),
-            z.string().uuid().optional().nullable()
+            (v) => (v === '' || v === undefined ? null : v),
+            z.string().nullable().optional()
         ),
+        quoteId: z.string().optional().nullable(),
         cashRegisterSessionId: z.preprocess(
-            (v) => (v === '' ? null : v),
-            z.string().uuid().optional().nullable()
+            (v) => (v === '' || v === undefined ? null : v),
+            z.string().nullable().optional()
         ),
         lineItems: z.array(
             z.object({
@@ -64,7 +65,7 @@ const SyncPayloadSchema = z.object({
             })
         ).min(1),
         saleDate: z.string().optional(),
-    }),
+    }).passthrough(),
 });
 
 // ── Route factory ─────────────────────────────────────────────
@@ -96,6 +97,18 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             }
 
             const { idempotencyKey, offlineId, saleData, offlineTimestamp } = validation.data;
+
+            // ── 1b. Reject unresolved offline customer IDs ──
+            if (saleData.customerId && saleData.customerId.startsWith('offline_cust_')) {
+                logger.warn(`[OfflineSync] Unresolved offline customer ID: ${saleData.customerId} for ${offlineId}`);
+                res.status(200).json({
+                    success: false,
+                    requiresReview: true,
+                    error: `Customer was created offline and has not been synced yet. Please sync the customer first, then retry this sale.`,
+                    offlineId,
+                });
+                return;
+            }
 
             // ── 2. Idempotency check ──
             const existing = await pool.query(
