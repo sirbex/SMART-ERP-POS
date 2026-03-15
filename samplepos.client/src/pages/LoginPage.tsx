@@ -24,21 +24,66 @@ interface LoginResponseData {
 const OFFLINE_CREDENTIALS_KEY = 'offline_login_credentials';
 const MAX_OFFLINE_USERS = 10;
 
+/** Check once at module load whether SubtleCrypto is available (requires HTTPS or localhost) */
+const SUBTLE_AVAILABLE = typeof crypto !== 'undefined' && !!crypto.subtle;
+
+type HashMethod = 'pbkdf2' | 'basic';
+
+function getHashMethod(): HashMethod {
+  return SUBTLE_AVAILABLE ? 'pbkdf2' : 'basic';
+}
+
 interface OfflineCachedUser {
   email: string; // lowercase for matching
-  hash: string; // PBKDF2-derived key (hex)
+  hash: string; // derived key (hex)
   salt: string; // per-user random salt (hex)
+  method?: HashMethod; // undefined = 'pbkdf2' for backward compat
   user: { id: string; email: string; fullName: string; role: UserRole };
   cachedAt: number; // timestamp — evict oldest when over limit
 }
 
-/** Derive a key using PBKDF2-SHA256 with 100k iterations */
-async function deriveKey(password: string, saltHex: string): Promise<string> {
-  const enc = new TextEncoder();
-  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
-  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' }, keyMaterial, 256);
-  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+// ── Pure-JS hash for non-secure (HTTP) contexts ──────────────────
+/** cyrb53-based hash — returns fixed-length hex string */
+function cyrb53(str: string, seed = 0): string {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const n = 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  return n.toString(16).padStart(16, '0');
+}
+
+/** Key stretching via iterative hashing — fallback for HTTP contexts */
+function deriveKeyBasic(password: string, saltHex: string): string {
+  let current = `${saltHex}:${password}`;
+  for (let i = 0; i < 5000; i++) {
+    current = cyrb53(current + ':' + saltHex, i);
+  }
+  return current;
+}
+
+// ── Main derive function — picks best available method ───────────
+/** Derive a key — PBKDF2 on HTTPS, pure-JS fallback on HTTP */
+async function deriveKey(password: string, saltHex: string, method?: HashMethod): Promise<string> {
+  const useMethod = method || getHashMethod();
+
+  if (useMethod === 'pbkdf2' && SUBTLE_AVAILABLE) {
+    const enc = new TextEncoder();
+    const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' }, keyMaterial, 256);
+    return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Fallback: pure-JS key stretching (works on plain HTTP)
+  return deriveKeyBasic(password, saltHex);
 }
 
 function randomSalt(): string {
@@ -60,8 +105,8 @@ export async function cacheLoginCredential(email: string, password: string, user
   // Remove existing entry for this user (update it)
   credentials = credentials.filter(c => c.email !== normalEmail);
 
-  // Add new entry
-  credentials.push({ email: normalEmail, hash, salt, user, cachedAt: Date.now() });
+  // Add new entry (record which hash method was used)
+  credentials.push({ email: normalEmail, hash, salt, method: getHashMethod(), user, cachedAt: Date.now() });
 
   // Evict oldest if over limit
   if (credentials.length > MAX_OFFLINE_USERS) {
@@ -84,7 +129,12 @@ async function validateOfflineLogin(email: string, password: string): Promise<{ 
 
   const entry = credentials.find(c => c.email === normalEmail);
   if (entry) {
-    const inputHash = await deriveKey(password, entry.salt);
+    const entryMethod: HashMethod = entry.method || 'pbkdf2'; // backward compat
+    // If credential was cached with PBKDF2 but we're now on HTTP, can't validate — need online re-login
+    if (entryMethod === 'pbkdf2' && !SUBTLE_AVAILABLE) {
+      return null;
+    }
+    const inputHash = await deriveKey(password, entry.salt, entryMethod);
     if (inputHash === entry.hash) return entry.user;
     return null; // Wrong password — don't fall through to old key
   }

@@ -2584,8 +2584,8 @@ export default function POSPage() {
                   </div>
                   <div className="flex items-center gap-2 ml-3">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${sale.status === 'PENDING_SYNC' ? 'bg-yellow-100 text-yellow-700' :
-                        sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
-                          'bg-red-100 text-red-700'
+                      sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
+                        'bg-red-100 text-red-700'
                       }`}>
                       {sale.status.replace('_', ' ')}
                     </span>
