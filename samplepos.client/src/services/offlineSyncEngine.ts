@@ -130,7 +130,8 @@ export async function syncOfflineSales(): Promise<SyncResult> {
                     break;
                 }
                 sale.status = 'FAILED';
-                sale.syncError = axErr.message || 'Sync error';
+                const serverMsg = (axErr.response?.data as Record<string, unknown>)?.error;
+                sale.syncError = (typeof serverMsg === 'string' ? serverMsg : '') || axErr.message || 'Sync error';
                 failedCount++;
             }
         }

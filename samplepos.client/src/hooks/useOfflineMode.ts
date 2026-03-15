@@ -224,7 +224,8 @@ export function useOfflineMode() {
         } catch (error: unknown) {
           // If server is still unreachable, leave as PENDING_SYNC
           const axiosError = error as AxiosError;
-          const errMsg = axiosError.message || 'Unknown sync error';
+          const serverMsg = (axiosError.response?.data as Record<string, unknown>)?.error;
+          const errMsg = (typeof serverMsg === 'string' ? serverMsg : '') || axiosError.message || 'Unknown sync error';
           if (axiosError.code === 'ERR_NETWORK' || !navigator.onLine) {
             results.push({ offlineId: sale.offlineId, success: false, error: 'Still offline' });
           } else {

@@ -33,8 +33,8 @@ export default function OfflineAutoSync() {
             // We just transitioned offline → online
             syncOfflineSales().then(({ synced, failed, review }) => {
                 if (synced > 0) toast.success(`Synced ${synced} offline sale(s)`);
-                if (failed > 0) toast.error(`${failed} sale(s) failed to sync`);
-                if (review > 0) toast(`${review} sale(s) need review`, { icon: '⚠️' });
+                if (failed > 0) toast.error(`${failed} sale(s) failed — go to Settings › Offline & Sync to see details`, { duration: 6000 });
+                if (review > 0) toast(`${review} sale(s) need review — go to Settings › Offline & Sync`, { icon: '⚠️', duration: 6000 });
             });
         }
         wasOfflineRef.current = !isOnline;

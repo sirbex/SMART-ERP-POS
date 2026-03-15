@@ -46,10 +46,13 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
     try {
       const results = await syncPendingSales(apiClient);
       const synced = results.filter((r) => r.success).length;
-      const failed = results.filter((r) => !r.success).length;
+      const failedResults = results.filter((r) => !r.success);
       if (synced > 0) toast.success(`Synced ${synced} offline sale(s)`);
-      if (failed > 0) toast.error(`${failed} sale(s) failed to sync`);
-      if (synced === 0 && failed === 0) toast.success('Nothing to sync');
+      if (failedResults.length > 0) {
+        const firstError = failedResults[0]?.error || 'Unknown error';
+        toast.error(`${failedResults.length} sale(s) failed: ${firstError}`, { duration: 6000 });
+      }
+      if (synced === 0 && failedResults.length === 0) toast.success('Nothing to sync');
     } catch (err) {
       toast.error('Sync failed');
     } finally {
@@ -178,7 +181,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                     <span>{new Date(sale.timestamp).toLocaleTimeString()}</span>
                   </div>
                   {sale.syncError && (
-                    <p className="text-xs text-red-500 mt-0.5 truncate">{sale.syncError}</p>
+                    <p className="text-xs text-red-500 mt-0.5 break-words whitespace-normal">{sale.syncError}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 ml-3">
