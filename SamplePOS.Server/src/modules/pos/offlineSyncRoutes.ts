@@ -29,8 +29,14 @@ const SyncPayloadSchema = z.object({
     offlineId: z.string().min(1),
     offlineTimestamp: z.number(),
     saleData: z.object({
-        customerId: z.string().uuid().optional().nullable(),
-        cashRegisterSessionId: z.string().uuid().optional().nullable(),
+        customerId: z.preprocess(
+            (v) => (v === '' ? null : v),
+            z.string().uuid().optional().nullable()
+        ),
+        cashRegisterSessionId: z.preprocess(
+            (v) => (v === '' ? null : v),
+            z.string().uuid().optional().nullable()
+        ),
         lineItems: z.array(
             z.object({
                 productId: z.string().min(1),
@@ -43,6 +49,7 @@ const SyncPayloadSchema = z.object({
                 costPrice: z.number().nonnegative().optional().default(0),
                 subtotal: z.number().nonnegative().optional().default(0),
                 taxAmount: z.number().nonnegative().optional().default(0),
+                discountAmount: z.number().nonnegative().optional().default(0),
             })
         ).min(1),
         subtotal: z.number().nonnegative(),
@@ -51,8 +58,8 @@ const SyncPayloadSchema = z.object({
         totalAmount: z.number().nonnegative(),
         paymentLines: z.array(
             z.object({
-                paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY']),
-                amount: z.number().positive(),
+                paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']),
+                amount: z.number().nonnegative(),
                 reference: z.string().optional(),
             })
         ).min(1),
@@ -76,9 +83,13 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             // ── 1. Validate payload ──
             const validation = SyncPayloadSchema.safeParse(req.body);
             if (!validation.success) {
+                const fieldErrors = validation.error.errors
+                    .map((e) => `${e.path.join('.')}: ${e.message}`)
+                    .join('; ');
+                logger.warn(`[OfflineSync] Payload validation failed: ${fieldErrors}`);
                 res.status(400).json({
                     success: false,
-                    error: 'Invalid offline sale payload',
+                    error: `Invalid offline sale payload: ${fieldErrors}`,
                     details: validation.error.errors,
                 });
                 return;
