@@ -278,6 +278,33 @@ export function useOfflineMode() {
     localStorage.removeItem(OFFLINE_SALES_KEY);
   }, []);
 
+  /**
+   * Retry a single failed/review sale by resetting it to PENDING_SYNC.
+   */
+  const retryFailedSale = useCallback((idempotencyKey: string) => {
+    setSyncQueue((prev) =>
+      prev.map((s) =>
+        s.idempotencyKey === idempotencyKey &&
+        (s.status === 'FAILED' || s.status === 'REQUIRES_REVIEW')
+          ? { ...s, status: 'PENDING_SYNC' as const, syncError: undefined }
+          : s
+      )
+    );
+  }, []);
+
+  /**
+   * Retry all failed and requires-review sales at once.
+   */
+  const retryAllFailed = useCallback(() => {
+    setSyncQueue((prev) =>
+      prev.map((s) =>
+        s.status === 'FAILED' || s.status === 'REQUIRES_REVIEW'
+          ? { ...s, status: 'PENDING_SYNC' as const, syncError: undefined }
+          : s
+      )
+    );
+  }, []);
+
   const pendingCount = syncQueue.filter((s) => s.status === 'PENDING_SYNC').length;
   const reviewCount = syncQueue.filter((s) => s.status === 'REQUIRES_REVIEW').length;
   const failedCount = syncQueue.filter((s) => s.status === 'FAILED').length;
@@ -289,6 +316,8 @@ export function useOfflineMode() {
     syncPendingSales,
     cancelOfflineSale,
     clearSyncQueue,
+    retryFailedSale,
+    retryAllFailed,
     pendingCount,
     reviewCount,
     failedCount,

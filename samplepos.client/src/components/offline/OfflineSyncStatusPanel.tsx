@@ -32,6 +32,8 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
     failedCount,
     syncPendingSales,
     cancelOfflineSale,
+    retryFailedSale,
+    retryAllFailed,
   } = useOfflineMode();
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -147,6 +149,19 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                 Sales will auto-sync when back online
               </div>
             )}
+
+            {/* Retry All Failed Button */}
+            {(failedCount > 0 || reviewCount > 0) && isOnline && (
+              <button
+                onClick={() => {
+                  retryAllFailed();
+                  toast.success(`Moved ${failedCount + reviewCount} sale(s) back to pending`);
+                }}
+                className="w-full px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium transition-colors mt-2"
+              >
+                🔄 Retry {failedCount + reviewCount} Failed Sale(s)
+              </button>
+            )}
           </>
         )}
 
@@ -175,18 +190,32 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                     {sale.status.replace('_', ' ')}
                   </span>
                   {sale.status !== 'SYNCED' && (
-                    <button
-                      onClick={() => {
-                        if (confirm(`Cancel offline sale ${sale.offlineId}? Stock will be restored.`)) {
-                          cancelOfflineSale(sale.idempotencyKey);
-                          toast.success(`Cancelled ${sale.offlineId}`);
-                        }
-                      }}
-                      className="text-red-400 hover:text-red-600 text-xs"
-                      title="Cancel and restore stock"
-                    >
-                      ✕
-                    </button>
+                    <>
+                      {(sale.status === 'FAILED' || sale.status === 'REQUIRES_REVIEW') && (
+                        <button
+                          onClick={() => {
+                            retryFailedSale(sale.idempotencyKey);
+                            toast.success(`${sale.offlineId} moved back to pending`);
+                          }}
+                          className="text-blue-500 hover:text-blue-700 text-xs font-medium"
+                          title="Retry this sale"
+                        >
+                          ↻ Retry
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          if (confirm(`Cancel offline sale ${sale.offlineId}? Stock will be restored.`)) {
+                            cancelOfflineSale(sale.idempotencyKey);
+                            toast.success(`Cancelled ${sale.offlineId}`);
+                          }
+                        }}
+                        className="text-red-400 hover:text-red-600 text-xs"
+                          title="Cancel and restore stock"
+                        >
+                          ✕
+                        </button>
+                    </>
                   )}
                 </div>
               </div>

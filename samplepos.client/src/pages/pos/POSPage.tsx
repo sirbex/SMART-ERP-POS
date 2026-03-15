@@ -2520,14 +2520,22 @@ export default function POSPage() {
             </span>
           )}
           {reviewCount > 0 && (
-            <span className="text-xs px-2 py-1 rounded bg-orange-100 text-orange-800">
+            <button
+              onClick={() => navigate('/settings?tab=offline')}
+              className="text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer"
+              title="Go to Offline & Sync to retry"
+            >
               {reviewCount} review
-            </span>
+            </button>
           )}
           {failedCount > 0 && (
-            <span className="text-xs px-2 py-1 rounded bg-red-100 text-red-800">
+            <button
+              onClick={() => navigate('/settings?tab=offline')}
+              className="text-xs px-2 py-1 rounded bg-red-100 text-red-800 hover:bg-red-200 cursor-pointer"
+              title="Go to Offline & Sync to retry"
+            >
               {failedCount} failed
-            </span>
+            </button>
           )}
           <span className="hidden lg:inline text-xs text-gray-500">Bank-grade precision</span>
         </div>

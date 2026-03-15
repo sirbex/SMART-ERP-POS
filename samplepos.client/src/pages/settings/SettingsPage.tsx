@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import * as Tabs from '@radix-ui/react-tabs';
 import InvoiceSettingsTab from './tabs/InvoiceSettingsTab';
@@ -7,8 +8,20 @@ import SystemSettingsTab from './tabs/SystemSettingsTab';
 import DataManagementTab from './tabs/DataManagementTab';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 
+const VALID_TABS = ['invoice', 'company', 'users', 'system', 'data', 'offline'] as const;
+
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('invoice');
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const initialTab = tabParam && (VALID_TABS as readonly string[]).includes(tabParam) ? tabParam : 'invoice';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Update tab if the URL search param changes (e.g. navigating from POS badge)
+  useEffect(() => {
+    if (tabParam && (VALID_TABS as readonly string[]).includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
 
   return (
     <Layout>
