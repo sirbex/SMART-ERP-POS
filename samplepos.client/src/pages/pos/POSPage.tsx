@@ -408,12 +408,14 @@ export default function POSPage() {
       syncPendingSales(apiClient).then((results) => {
         if (results && results.length > 0) {
           const synced = results.filter((r: SyncResult) => r.success).length;
-          const failed = results.filter((r: SyncResult) => !r.success).length;
+          const failedResults = results.filter((r: SyncResult) => !r.success);
           if (synced > 0) {
             toast.success(`Synced ${synced} offline sale(s) successfully!`);
           }
-          if (failed > 0) {
-            toast.error(`${failed} offline sale(s) failed to sync. Check review queue.`);
+          if (failedResults.length > 0) {
+            const firstError = failedResults[0]?.error || 'Unknown error';
+            toast.error(`${failedResults.length} sale(s) failed: ${firstError}`, { duration: 6000 });
+            setShowSyncPanel(true);
           }
         }
       });
