@@ -56,6 +56,8 @@ export interface CreateSaleInput {
   saleDate?: string; // ISO 8601 datetime for backdated sales
   paymentLines?: PaymentLineInput[]; // Split payment support
   cashRegisterSessionId?: string; // Link to cash register session for drawer tracking
+  idempotencyKey?: string; // Offline sync idempotency key
+  offlineId?: string; // Offline sale identifier
 }
 
 export const salesService = {
@@ -630,6 +632,8 @@ export const salesService = {
         soldBy: input.soldBy,
         saleDate: input.saleDate, // Pass through backdated sale date if provided
         quoteId: input.quoteId || null, // Link to quotation for auto-conversion
+        idempotencyKey: input.idempotencyKey,
+        offlineId: input.offlineId,
       };
 
       const sale = await salesRepository.createSale(client, saleData);

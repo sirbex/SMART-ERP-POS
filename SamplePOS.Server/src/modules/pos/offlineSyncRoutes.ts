@@ -148,7 +148,7 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             }
 
             // ── 4. Build service input ──
-            const serviceInput: CreateSaleInput & { idempotencyKey?: string; offlineId?: string } = {
+            const serviceInput: CreateSaleInput = {
                 customerId: saleData.customerId || null,
                 cashRegisterSessionId: cashRegisterSessionId || undefined,
                 items: saleData.lineItems.map((item) => ({
@@ -173,17 +173,11 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             };
 
             // ── 5. Attempt to create sale via existing service ──
+            // idempotency_key is now included in the INSERT (atomic),
+            // so a concurrent duplicate triggers a PG unique violation
+            // instead of a TOCTOU race.
             try {
                 const result = await salesService.createSale(pool, serviceInput);
-
-                // ── 6. Store idempotency key on the sale ──
-                await pool.query(
-                    `UPDATE sales SET idempotency_key = $1, offline_id = $2 WHERE id = $3`,
-                    [idempotencyKey, offlineId, result.sale.id]
-                ).catch(() => {
-                    // Columns may not exist yet – non-critical
-                    logger.warn(`[OfflineSync] Could not store idempotency key on sale ${result.sale.id}`);
-                });
 
                 logger.info(`[OfflineSync] Successfully synced offline sale ${offlineId} → ${result.sale.saleNumber}`);
 
@@ -197,6 +191,28 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
                 });
             } catch (saleError: unknown) {
                 const errMsg = saleError instanceof Error ? saleError.message : String(saleError);
+
+                // ── Duplicate idempotency key (concurrent request already created this sale) ──
+                const pgErr = saleError as { code?: string; constraint?: string };
+                if (pgErr.code === '23505' && String(pgErr.constraint || errMsg).includes('idempotency_key')) {
+                    const dup = await pool.query(
+                        `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
+                        [idempotencyKey]
+                    );
+                    if (dup.rows.length > 0) {
+                        logger.info(`[OfflineSync] Concurrent duplicate for ${idempotencyKey}, returning existing sale`);
+                        res.json({
+                            success: true,
+                            data: {
+                                saleId: dup.rows[0].id,
+                                saleNumber: dup.rows[0].sale_number,
+                                alreadySynced: true,
+                                offlineId,
+                            },
+                        });
+                        return;
+                    }
+                }
 
                 // ── Stock conflict → REQUIRES_REVIEW ──
                 if (

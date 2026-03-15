@@ -22,6 +22,21 @@ const OFFLINE_CUSTOMERS_KEY = 'pos_offline_customers';
 /** Module-level lock — only one sync at a time per tab */
 let syncing = false;
 
+/**
+ * Shared sync lock — prevents concurrent syncs across hook and engine.
+ * Returns true if lock was acquired, false if already locked.
+ */
+export function acquireSyncLock(): boolean {
+    if (syncing) return false;
+    syncing = true;
+    return true;
+}
+
+/** Release the shared sync lock. */
+export function releaseSyncLock(): void {
+    syncing = false;
+}
+
 // ── Queue helpers ─────────────────────────────────────────────
 
 function loadQueue(): OfflineSale[] {
@@ -74,8 +89,7 @@ export function hasPendingSales(): boolean {
  * - Dispatches `offline-queue-updated` event when done
  */
 export async function syncOfflineSales(): Promise<SyncResult> {
-    if (syncing || !navigator.onLine) return { synced: 0, failed: 0, review: 0 };
-    syncing = true;
+    if (!navigator.onLine || !acquireSyncLock()) return { synced: 0, failed: 0, review: 0 };
 
     let syncedCount = 0;
     let failedCount = 0;
@@ -175,7 +189,7 @@ export async function syncOfflineSales(): Promise<SyncResult> {
 
         return { synced: syncedCount, failed: failedCount, review: reviewCount };
     } finally {
-        syncing = false;
+        releaseSyncLock();
     }
 }
 

@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOfflineContext } from '../contexts/OfflineContext';
 import { decrementLocalStock, restoreLocalStock } from '../services/offlineCatalogService';
-import { syncOfflineCustomers } from '../services/offlineSyncEngine';
+import { syncOfflineCustomers, acquireSyncLock, releaseSyncLock } from '../services/offlineSyncEngine';
 import type { AxiosInstance, AxiosError } from 'axios';
 
 // ── Storage ───────────────────────────────────────────────────
@@ -116,6 +116,17 @@ export function useOfflineMode() {
    */
   const saveSaleOffline = useCallback(
     (saleData: OfflineSaleData): string => {
+      // Prevent duplicate save (same content within 5 seconds)
+      const existingQueue = loadQueue();
+      const now = Date.now();
+      const dup = existingQueue.find(s =>
+        s.status === 'PENDING_SYNC' &&
+        Math.abs(s.timestamp - now) < 5000 &&
+        s.data.totalAmount === saleData.totalAmount &&
+        s.data.lineItems.length === saleData.lineItems.length
+      );
+      if (dup) return dup.offlineId;
+
       const idempotencyKey = generateIdempotencyKey();
       const offlineId = `OFFLINE-${Date.now().toString(36).toUpperCase()}`;
 
@@ -180,9 +191,14 @@ export function useOfflineMode() {
     async (apiClient: AxiosInstance) => {
       if (!navigator.onLine || isSyncingRef.current) return [];
 
+      if (!acquireSyncLock()) return []; // Engine or another sync already in progress
+
       const currentQueue = loadQueue(); // Read fresh from localStorage
       const pending = currentQueue.filter((s) => s.status === 'PENDING_SYNC');
-      if (pending.length === 0) return [];
+      if (pending.length === 0) {
+        releaseSyncLock();
+        return [];
+      }
 
       isSyncingRef.current = true;
 
@@ -289,6 +305,7 @@ export function useOfflineMode() {
         setSyncQueue(updatedQueue);
       } finally {
         isSyncingRef.current = false;
+        releaseSyncLock();
       }
       return results;
     },

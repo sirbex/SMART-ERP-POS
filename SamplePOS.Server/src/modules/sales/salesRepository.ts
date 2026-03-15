@@ -70,6 +70,8 @@ export interface CreateSaleData {
   totalPaid?: number; // Total amount paid (may differ from totalAmount for credit)
   balanceDue?: number; // Remaining balance (for customer credit)
   quoteId?: string | null; // Link to quotation if sale is from quote conversion
+  idempotencyKey?: string; // Offline sync idempotency key
+  offlineId?: string; // Offline sale identifier
 }
 
 export interface CreateSaleItemData {
@@ -151,8 +153,9 @@ export const salesRepository = {
         `INSERT INTO sales (
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
-        payment_method, amount_paid, change_amount, cashier_id, quote_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        payment_method, amount_paid, change_amount, cashier_id, quote_id,
+        idempotency_key, offline_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING 
         id,
         sale_number as "saleNumber",
@@ -187,6 +190,8 @@ export const salesRepository = {
           data.changeAmount,
           data.soldBy, // Maps to cashier_id
           data.quoteId || null, // Link to quotation
+          data.idempotencyKey || null,
+          data.offlineId || null,
         ]
       );
     } catch (dbError: unknown) {
