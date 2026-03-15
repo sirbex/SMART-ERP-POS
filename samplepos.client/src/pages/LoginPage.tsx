@@ -102,7 +102,7 @@ async function validateOfflineLogin(email: string, password: string): Promise<{ 
       const oldHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
       if (oldHash === hash) {
         // Migrate to new format then clean up old key
-        cacheLoginCredential(email, password, user).catch(() => {});
+        cacheLoginCredential(email, password, user).catch(() => { });
         localStorage.removeItem(OLD_KEY);
         return user;
       }

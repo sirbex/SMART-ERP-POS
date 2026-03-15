@@ -95,12 +95,34 @@ export const salesController = {
     if (posValidation.success) {
       const posData = posValidation.data;
 
+      // ── Idempotency check: return existing sale if key already used ──
+      if (posData.idempotencyKey) {
+        const existing = await pool.query(
+          `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
+          [posData.idempotencyKey]
+        );
+        if (existing.rows.length > 0) {
+          res.status(200).json({
+            success: true,
+            data: {
+              sale: { id: existing.rows[0].id, saleNumber: existing.rows[0].sale_number },
+              items: [],
+              paymentLines: [],
+              alreadySynced: true,
+            },
+            message: 'Sale already created (idempotent)',
+          });
+          return;
+        }
+      }
+
       // Convert POS format to service format
       serviceInput = {
         customerId: posData.customerId || null,
         quoteId: posData.quoteId || null, // Link to quotation for auto-conversion
         cashRegisterSessionId: posData.cashRegisterSessionId || undefined, // Link to cash register for drawer tracking
         customerName: null, // Will be fetched from DB if needed
+        idempotencyKey: posData.idempotencyKey,
         items: posData.lineItems.map((item: z.infer<typeof POSSaleLineItemSchema>) => ({
           productId: item.productId,
           productName: item.productName,
@@ -143,7 +165,33 @@ export const salesController = {
       }
     }
 
-    const result = await salesService.createSale(pool, serviceInput);
+    let result;
+    try {
+      result = await salesService.createSale(pool, serviceInput);
+    } catch (createErr: unknown) {
+      // Handle concurrent duplicate: PG unique violation on idempotency_key
+      const pgErr = createErr as { code?: string; constraint?: string };
+      if (pgErr.code === '23505' && String(pgErr.constraint || '').includes('idempotency_key') && serviceInput.idempotencyKey) {
+        const dup = await pool.query(
+          `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
+          [serviceInput.idempotencyKey]
+        );
+        if (dup.rows.length > 0) {
+          res.status(200).json({
+            success: true,
+            data: {
+              sale: { id: dup.rows[0].id, saleNumber: dup.rows[0].sale_number },
+              items: [],
+              paymentLines: [],
+              alreadySynced: true,
+            },
+            message: 'Sale already created (idempotent)',
+          });
+          return;
+        }
+      }
+      throw createErr; // Re-throw non-duplicate errors
+    }
 
     // Log audit trail with context from request
     try {

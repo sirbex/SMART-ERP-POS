@@ -2122,10 +2122,15 @@ export default function POSPage() {
       return;
     }
 
+    // Generate idempotency key to prevent duplicate sale creation
+    // This key is unique per sale attempt — used by both online and offline paths
+    const saleIdempotencyKey = `pos_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
+
     const saleData = {
       customerId: resolvedCustomerId,
       quoteId: loadedQuoteId || undefined, // Pass quote ID for auto-conversion
       cashRegisterSessionId: currentSession?.id, // Link to cash register for drawer tracking
+      idempotencyKey: saleIdempotencyKey,
       lineItems: items.map((item) => {
         const itemTax =
           item.isTaxable && item.taxRate > 0
@@ -2578,11 +2583,10 @@ export default function POSPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      sale.status === 'PENDING_SYNC' ? 'bg-yellow-100 text-yellow-700' :
-                      sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
-                      'bg-red-100 text-red-700'
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${sale.status === 'PENDING_SYNC' ? 'bg-yellow-100 text-yellow-700' :
+                        sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
+                          'bg-red-100 text-red-700'
+                      }`}>
                       {sale.status.replace('_', ' ')}
                     </span>
                     {(sale.status === 'FAILED' || sale.status === 'REQUIRES_REVIEW') && (

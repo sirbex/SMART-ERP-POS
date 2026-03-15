@@ -116,17 +116,6 @@ export function useOfflineMode() {
    */
   const saveSaleOffline = useCallback(
     (saleData: OfflineSaleData): string => {
-      // Prevent duplicate save (same content within 5 seconds)
-      const existingQueue = loadQueue();
-      const now = Date.now();
-      const dup = existingQueue.find(s =>
-        s.status === 'PENDING_SYNC' &&
-        Math.abs(s.timestamp - now) < 5000 &&
-        s.data.totalAmount === saleData.totalAmount &&
-        s.data.lineItems.length === saleData.lineItems.length
-      );
-      if (dup) return dup.offlineId;
-
       const idempotencyKey = generateIdempotencyKey();
       const offlineId = `OFFLINE-${Date.now().toString(36).toUpperCase()}`;
 

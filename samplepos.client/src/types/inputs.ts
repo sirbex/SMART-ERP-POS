@@ -79,6 +79,7 @@ export interface CreateSaleInput {
   taxAmount?: number | string;
   saleDate?: string;
   holdId?: string;
+  idempotencyKey?: string;
 }
 
 // ─── Purchase Order ────────────────────────────────────────────────────

@@ -41,6 +41,7 @@ export const POSSaleSchema = z.object({
   saleDate: z.string().datetime().optional(), // ISO 8601 datetime for backdated sales
   notes: z.string().max(500).optional(),
   requiresApproval: z.boolean().optional(), // Flag for discount approvals or special pricing
+  idempotencyKey: z.string().min(1).max(100).optional(), // Prevents duplicate sale creation
 }).strict().superRefine((data, ctx) => {
   // Must have either paymentMethod OR paymentLines
   if (!data.paymentMethod && (!data.paymentLines || data.paymentLines.length === 0)) {
