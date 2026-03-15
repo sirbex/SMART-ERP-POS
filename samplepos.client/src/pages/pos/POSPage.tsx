@@ -13,6 +13,7 @@ import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
+import type { OfflineSale } from '../../hooks/useOfflineMode';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { useCreateInvoice } from '../../hooks/useApi';
 import { api } from '../../utils/api';
@@ -285,8 +286,9 @@ export default function POSPage() {
   const createSale = useCreatePOSSale();
   // createInvoice kept for future manual invoice creation
   useCreateInvoice();
-  const { isOnline, saveSaleOffline, syncPendingSales, pendingCount, reviewCount, failedCount } =
+  const { isOnline, saveSaleOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, reviewCount, failedCount } =
     useOfflineMode();
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
@@ -2521,18 +2523,18 @@ export default function POSPage() {
           )}
           {reviewCount > 0 && (
             <button
-              onClick={() => navigate('/settings?tab=offline')}
+              onClick={() => setShowSyncPanel((p) => !p)}
               className="text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer"
-              title="Go to Offline & Sync to retry"
+              title="View & retry offline sales"
             >
               {reviewCount} review
             </button>
           )}
           {failedCount > 0 && (
             <button
-              onClick={() => navigate('/settings?tab=offline')}
+              onClick={() => setShowSyncPanel((p) => !p)}
               className="text-xs px-2 py-1 rounded bg-red-100 text-red-800 hover:bg-red-200 cursor-pointer"
-              title="Go to Offline & Sync to retry"
+              title="View & retry offline sales"
             >
               {failedCount} failed
             </button>
@@ -2540,6 +2542,95 @@ export default function POSPage() {
           <span className="hidden lg:inline text-xs text-gray-500">Bank-grade precision</span>
         </div>
       </header>
+      {/* Inline Offline Sync Panel — accessible to cashiers */}
+      {showSyncPanel && (failedCount > 0 || reviewCount > 0 || pendingCount > 0) && (
+        <div className="border-b bg-white px-4 py-3 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-900">Offline Sales Queue</h3>
+            <div className="flex items-center gap-2">
+              {(failedCount > 0 || reviewCount > 0) && isOnline && (
+                <button
+                  onClick={() => {
+                    retryAllFailed();
+                    toast.success(`Moved ${failedCount + reviewCount} sale(s) back to pending`);
+                  }}
+                  className="text-xs px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded font-medium transition-colors"
+                >
+                  🔄 Retry All ({failedCount + reviewCount})
+                </button>
+              )}
+              {pendingCount > 0 && isOnline && (
+                <button
+                  onClick={async () => {
+                    const results = await syncPendingSales(apiClient);
+                    const synced = results.filter((r: { success: boolean }) => r.success).length;
+                    if (synced > 0) toast.success(`Synced ${synced} sale(s)`);
+                  }}
+                  className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded font-medium transition-colors"
+                >
+                  ⬆️ Sync Pending ({pendingCount})
+                </button>
+              )}
+              <button
+                onClick={() => setShowSyncPanel(false)}
+                className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="max-h-48 overflow-y-auto border rounded divide-y divide-gray-100">
+            {syncQueue
+              .filter((s: OfflineSale) => s.status !== 'SYNCED')
+              .map((sale: OfflineSale) => (
+                <div key={sale.idempotencyKey} className="px-3 py-2 flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900">{sale.offlineId}</p>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <span>{sale.data.lineItems.length} items</span>
+                      <span>•</span>
+                      <span>{new Date(sale.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    {sale.syncError && (
+                      <p className="text-xs text-red-500 mt-0.5 break-words">{sale.syncError}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 ml-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      sale.status === 'PENDING_SYNC' ? 'bg-yellow-100 text-yellow-700' :
+                      sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>
+                      {sale.status.replace('_', ' ')}
+                    </span>
+                    {(sale.status === 'FAILED' || sale.status === 'REQUIRES_REVIEW') && (
+                      <button
+                        onClick={() => {
+                          retryFailedSale(sale.idempotencyKey);
+                          toast.success(`${sale.offlineId} moved to pending`);
+                        }}
+                        className="text-blue-500 hover:text-blue-700 text-xs font-medium"
+                      >
+                        ↻ Retry
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (confirm(`Cancel offline sale ${sale.offlineId}? Stock will be restored.`)) {
+                          cancelOfflineSale(sale.idempotencyKey);
+                          toast.success(`Cancelled ${sale.offlineId}`);
+                        }
+                      }}
+                      className="text-red-400 hover:text-red-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
       {/* Offline Mode Banner */}
       {!isOnline && (
         <div className="px-4 py-2 bg-amber-500 text-white text-sm font-medium flex items-center justify-between">
