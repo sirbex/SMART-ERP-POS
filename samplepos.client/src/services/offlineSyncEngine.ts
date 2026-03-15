@@ -27,7 +27,15 @@ let syncing = false;
 function loadQueue(): OfflineSale[] {
     try {
         const raw = localStorage.getItem(OFFLINE_SALES_KEY);
-        return raw ? (JSON.parse(raw) as OfflineSale[]) : [];
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(
+            (s: unknown): s is OfflineSale =>
+                typeof s === 'object' && s !== null &&
+                'idempotencyKey' in s && 'offlineId' in s &&
+                'data' in s && 'status' in s
+        );
     } catch {
         return [];
     }
@@ -75,7 +83,12 @@ export async function syncOfflineSales(): Promise<SyncResult> {
 
     try {
         // Sync offline customers first so we can resolve temp IDs
-        const customerIdMap = await syncOfflineCustomers();
+        let customerIdMap = new Map<string, string>();
+        try {
+            customerIdMap = await syncOfflineCustomers();
+        } catch {
+            // Customer sync failure is non-fatal
+        }
 
         const queue = loadQueue();
         const pending = queue.filter((s) => s.status === 'PENDING_SYNC');

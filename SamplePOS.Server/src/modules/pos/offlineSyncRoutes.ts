@@ -196,25 +196,32 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
                     },
                 });
             } catch (saleError: unknown) {
+                const errMsg = saleError instanceof Error ? saleError.message : String(saleError);
+
                 // ── Stock conflict → REQUIRES_REVIEW ──
                 if (
-                    (saleError instanceof Error ? saleError.message : String(saleError))?.includes('Insufficient') ||
-                    (saleError instanceof Error ? saleError.message : String(saleError))?.includes('stock') ||
-                    (saleError instanceof Error ? saleError.message : String(saleError))?.includes('inventory') ||
-                    (saleError instanceof Error ? saleError.message : String(saleError))?.includes('cost layer')
+                    errMsg.includes('Insufficient') ||
+                    errMsg.includes('stock') ||
+                    errMsg.includes('inventory') ||
+                    errMsg.includes('cost layer')
                 ) {
-                    logger.warn(`[OfflineSync] Stock conflict for ${offlineId}: ${(saleError instanceof Error ? saleError.message : String(saleError))}`);
+                    logger.warn(`[OfflineSync] Stock conflict for ${offlineId}: ${errMsg}`);
                     res.status(200).json({
                         success: false,
                         requiresReview: true,
-                        error: (saleError instanceof Error ? saleError.message : String(saleError)),
+                        error: errMsg,
                         offlineId,
                     });
                     return;
                 }
 
-                // Other errors
-                throw saleError;
+                // ── All other errors → FAILED with descriptive message ──
+                logger.error(`[OfflineSync] Failed to create sale ${offlineId}: ${errMsg}`);
+                res.status(200).json({
+                    success: false,
+                    error: errMsg,
+                    offlineId,
+                });
             }
         })
     );

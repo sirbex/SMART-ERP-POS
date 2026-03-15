@@ -69,7 +69,16 @@ function generateIdempotencyKey(): string {
 function loadQueue(): OfflineSale[] {
   try {
     const raw = localStorage.getItem(OFFLINE_SALES_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Filter out corrupted entries
+    return parsed.filter(
+      (s: unknown): s is OfflineSale =>
+        typeof s === 'object' && s !== null &&
+        'idempotencyKey' in s && 'offlineId' in s &&
+        'data' in s && 'status' in s
+    );
   } catch {
     return [];
   }
@@ -138,6 +147,11 @@ export function useOfflineMode() {
           (pl.paymentMethod === 'CREDIT' && hasCustomer)
       ) as OfflineSalePaymentLine[];
 
+      // Ensure at least one payment line (fallback to CASH for the total)
+      if (cleanedPaymentLines.length === 0) {
+        cleanedPaymentLines.push({ paymentMethod: 'CASH', amount: saleData.totalAmount });
+      }
+
       const sale: OfflineSale = {
         idempotencyKey,
         offlineId,
@@ -172,85 +186,93 @@ export function useOfflineMode() {
 
       isSyncingRef.current = true;
 
-      // Sync offline customers first and resolve temp IDs
-      const customerIdMap = await syncOfflineCustomers();
-
       const results: Array<{ offlineId: string; success: boolean; error?: string }> = [];
 
-      for (const sale of pending) {
+      try {
+        // Sync offline customers first and resolve temp IDs
+        let customerIdMap = new Map<string, string>();
         try {
-          // Resolve offline customer IDs to real UUIDs
-          if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
-            const realId = customerIdMap.get(sale.data.customerId);
-            if (!realId) {
-              // Customer not yet synced — skip, retry next cycle
-              results.push({ offlineId: sale.offlineId, success: false, error: 'Customer not yet synced' });
-              continue;
-            }
-            sale.data.customerId = realId;
-          }
+          customerIdMap = await syncOfflineCustomers();
+        } catch {
+          // Customer sync failure is non-fatal — sales without offline customers still sync
+        }
 
-          // Use the dedicated offline-sync endpoint (falls back to regular create if not available)
-          let response;
+        for (const sale of pending) {
           try {
-            response = await apiClient.post('/pos/sync-offline-sales', {
-              idempotencyKey: sale.idempotencyKey,
-              offlineId: sale.offlineId,
-              saleData: sale.data,
-              offlineTimestamp: sale.timestamp,
-            });
-          } catch (syncErr: unknown) {
-            // If sync endpoint doesn't exist yet (404), fall back to regular sales.create
-            const axiosErr = syncErr as AxiosError;
-            if (axiosErr.response?.status === 404) {
-              response = await apiClient.post('/sales', sale.data);
+            // Resolve offline customer IDs to real UUIDs
+            if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
+              const realId = customerIdMap.get(sale.data.customerId);
+              if (!realId) {
+                // Customer not yet synced — skip, retry next cycle
+                results.push({ offlineId: sale.offlineId, success: false, error: 'Customer not yet synced' });
+                continue;
+              }
+              sale.data.customerId = realId;
+            }
+
+            // Use the dedicated offline-sync endpoint (falls back to regular create if not available)
+            let response;
+            try {
+              response = await apiClient.post('/pos/sync-offline-sales', {
+                idempotencyKey: sale.idempotencyKey,
+                offlineId: sale.offlineId,
+                saleData: sale.data,
+                offlineTimestamp: sale.timestamp,
+              });
+            } catch (syncErr: unknown) {
+              // If sync endpoint doesn't exist yet (404), fall back to regular sales.create
+              const axiosErr = syncErr as AxiosError;
+              if (axiosErr.response?.status === 404) {
+                response = await apiClient.post('/sales', sale.data);
+              } else {
+                throw syncErr;
+              }
+            }
+
+            if (response.data?.success) {
+              sale.status = 'SYNCED';
+              results.push({ offlineId: sale.offlineId, success: true });
+            } else if (response.data?.requiresReview) {
+              sale.status = 'REQUIRES_REVIEW';
+              sale.syncError = response.data.error || 'Stock conflict';
+              results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
             } else {
-              throw syncErr;
+              sale.status = 'FAILED';
+              sale.syncError = response.data?.error || 'Unknown error';
+              results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
+            }
+          } catch (error: unknown) {
+            // If server is still unreachable, leave as PENDING_SYNC
+            const axiosError = error as AxiosError;
+            const serverMsg = (axiosError.response?.data as Record<string, unknown>)?.error;
+            const errMsg = (typeof serverMsg === 'string' ? serverMsg : '') || axiosError.message || 'Unknown sync error';
+            if (axiosError.code === 'ERR_NETWORK' || !navigator.onLine) {
+              results.push({ offlineId: sale.offlineId, success: false, error: 'Still offline' });
+            } else {
+              sale.status = 'FAILED';
+              sale.syncError = errMsg;
+              results.push({ offlineId: sale.offlineId, success: false, error: errMsg });
             }
           }
+        }
 
-          if (response.data?.success) {
-            sale.status = 'SYNCED';
-            results.push({ offlineId: sale.offlineId, success: true });
-          } else if (response.data?.requiresReview) {
-            sale.status = 'REQUIRES_REVIEW';
-            sale.syncError = response.data.error || 'Stock conflict';
-            results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
-          } else {
-            sale.status = 'FAILED';
-            sale.syncError = response.data?.error || 'Unknown error';
-            results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
-          }
-        } catch (error: unknown) {
-          // If server is still unreachable, leave as PENDING_SYNC
-          const axiosError = error as AxiosError;
-          const serverMsg = (axiosError.response?.data as Record<string, unknown>)?.error;
-          const errMsg = (typeof serverMsg === 'string' ? serverMsg : '') || axiosError.message || 'Unknown sync error';
-          if (axiosError.code === 'ERR_NETWORK' || !navigator.onLine) {
-            results.push({ offlineId: sale.offlineId, success: false, error: 'Still offline' });
-          } else {
-            sale.status = 'FAILED';
-            sale.syncError = errMsg;
-            results.push({ offlineId: sale.offlineId, success: false, error: errMsg });
+        // Rebuild queue: remove synced, keep everything else
+        const updatedQueue = currentQueue.filter((s) => {
+          const synced = pending.find((p) => p.idempotencyKey === s.idempotencyKey);
+          return !synced || synced.status !== 'SYNCED';
+        });
+        // Update failed/review statuses
+        for (const p of pending) {
+          const idx = updatedQueue.findIndex((q) => q.idempotencyKey === p.idempotencyKey);
+          if (idx >= 0) {
+            updatedQueue[idx] = p;
           }
         }
-      }
 
-      // Rebuild queue: remove synced, keep everything else
-      const updatedQueue = currentQueue.filter((s) => {
-        const synced = pending.find((p) => p.idempotencyKey === s.idempotencyKey);
-        return !synced || synced.status !== 'SYNCED';
-      });
-      // Update failed/review statuses
-      for (const p of pending) {
-        const idx = updatedQueue.findIndex((q) => q.idempotencyKey === p.idempotencyKey);
-        if (idx >= 0) {
-          updatedQueue[idx] = p;
-        }
+        setSyncQueue(updatedQueue);
+      } finally {
+        isSyncingRef.current = false;
       }
-
-      setSyncQueue(updatedQueue);
-      isSyncingRef.current = false;
       return results;
     },
     [syncQueue]
