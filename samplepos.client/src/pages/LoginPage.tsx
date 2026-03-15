@@ -75,16 +75,41 @@ export async function cacheLoginCredential(email: string, password: string, user
 /** Validate offline login against cached credentials (multi-user) */
 async function validateOfflineLogin(email: string, password: string): Promise<{ id: string; email: string; fullName: string; role: UserRole } | null> {
   const normalEmail = email.toLowerCase().trim();
+
+  // ── Try new multi-user cache (PBKDF2) ──
   let credentials: OfflineCachedUser[] = [];
   try {
     credentials = JSON.parse(localStorage.getItem(OFFLINE_CREDENTIALS_KEY) || '[]');
-  } catch { return null; }
+  } catch { /* corrupted */ }
 
   const entry = credentials.find(c => c.email === normalEmail);
-  if (!entry) return null;
+  if (entry) {
+    const inputHash = await deriveKey(password, entry.salt);
+    if (inputHash === entry.hash) return entry.user;
+    return null; // Wrong password — don't fall through to old key
+  }
 
-  const inputHash = await deriveKey(password, entry.salt);
-  return inputHash === entry.hash ? entry.user : null;
+  // ── Fallback: migrate old single-user SHA-256 cache ──
+  const OLD_KEY = 'offline_login_credential';
+  try {
+    const raw = localStorage.getItem(OLD_KEY);
+    if (raw) {
+      const { hash, user } = JSON.parse(raw);
+      // Verify with the old SHA-256 method
+      const enc = new TextEncoder();
+      const data = enc.encode(`${normalEmail}:${password}`);
+      const buf = await crypto.subtle.digest('SHA-256', data);
+      const oldHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (oldHash === hash) {
+        // Migrate to new format then clean up old key
+        cacheLoginCredential(email, password, user).catch(() => {});
+        localStorage.removeItem(OLD_KEY);
+        return user;
+      }
+    }
+  } catch { /* old key corrupted or crypto unavailable */ }
+
+  return null;
 }
 
 /** Generate a distinct offline session token */
