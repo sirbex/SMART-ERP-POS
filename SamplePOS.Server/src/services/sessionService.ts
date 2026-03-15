@@ -317,7 +317,8 @@ export class SessionService {
         readAccess('products'),
         ...writeAccess('sales'),
         readAccess('inventory'),
-        readAccess('customers')
+        readAccess('customers'),
+        'customers.create'
       ],
       STAFF: [
         readAccess('products'),

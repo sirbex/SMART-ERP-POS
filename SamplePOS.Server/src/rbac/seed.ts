@@ -216,7 +216,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     const cashierPermissions = [
       'pos.read', 'pos.create',
       'sales.read', 'sales.create',
-      'customers.read',
+      'customers.read', 'customers.create',
       'inventory.read',
     ];
     for (const permKey of cashierPermissions) {

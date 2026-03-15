@@ -22,8 +22,8 @@ export const CustomerSchema = z.object({
 
 export const CreateCustomerSchema = z.object({
   name: z.string().min(1, 'Customer name is required').max(255),
-  email: z.string().email('Invalid email format').optional(),
-  phone: z.string().max(50).optional(),
+  email: z.union([z.string().email('Invalid email format'), z.literal('')]).optional().transform(v => v === '' ? undefined : v),
+  phone: z.union([z.string().max(50), z.literal('')]).optional().transform(v => v === '' ? undefined : v),
   address: z.string().optional(),
   customerGroupId: z.string().uuid().optional(),
   creditLimit: z.number().nonnegative().default(0),

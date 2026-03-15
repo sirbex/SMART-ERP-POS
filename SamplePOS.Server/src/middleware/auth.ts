@@ -14,6 +14,7 @@ import logger from '../utils/logger.js';
 
 // JWT Payload interface — must match the shape produced by generateToken()
 interface JwtPayload {
+  [key: string]: unknown;
   userId: string;
   email: string;
   fullName: string;

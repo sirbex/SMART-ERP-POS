@@ -115,7 +115,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
     return ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'accounting'].includes(module);
   },
   CASHIER: (key) => {
-    return ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'inventory.read', 'suppliers.read'].includes(key);
+    return ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'customers.create', 'inventory.read', 'suppliers.read'].includes(key);
   },
   STAFF: (key) => key.endsWith('.read'),
 };
