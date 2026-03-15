@@ -243,24 +243,13 @@ export function useOfflineMode() {
               }
             }
 
-            // Use the dedicated offline-sync endpoint (falls back to regular create if not available)
-            let response;
-            try {
-              response = await apiClient.post('/pos/sync-offline-sales', {
-                idempotencyKey: sale.idempotencyKey,
-                offlineId: sale.offlineId,
-                saleData: sale.data,
-                offlineTimestamp: sale.timestamp,
-              });
-            } catch (syncErr: unknown) {
-              // If sync endpoint doesn't exist yet (404), fall back to regular sales.create
-              const axiosErr = syncErr as AxiosError;
-              if (axiosErr.response?.status === 404) {
-                response = await apiClient.post('/sales', sale.data);
-              } else {
-                throw syncErr;
-              }
-            }
+            // Use the dedicated offline-sync endpoint (idempotency-protected)
+            const response = await apiClient.post('/pos/sync-offline-sales', {
+              idempotencyKey: sale.idempotencyKey,
+              offlineId: sale.offlineId,
+              saleData: sale.data,
+              offlineTimestamp: sale.timestamp,
+            });
 
             if (response.data?.success) {
               sale.status = 'SYNCED';

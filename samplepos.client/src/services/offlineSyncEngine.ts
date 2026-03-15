@@ -137,23 +137,13 @@ export async function syncOfflineSales(): Promise<SyncResult> {
                     }
                 }
 
-                let response;
-                try {
-                    response = await apiClient.post('/pos/sync-offline-sales', {
-                        idempotencyKey: sale.idempotencyKey,
-                        offlineId: sale.offlineId,
-                        saleData: sale.data,
-                        offlineTimestamp: sale.timestamp,
-                    });
-                } catch (syncErr: unknown) {
-                    const axErr = syncErr as AxiosError;
-                    // Fallback to regular sales endpoint if sync route doesn't exist
-                    if (axErr.response?.status === 404) {
-                        response = await apiClient.post('/sales', sale.data);
-                    } else {
-                        throw syncErr;
-                    }
-                }
+                // Use the dedicated offline-sync endpoint (idempotency-protected)
+                const response = await apiClient.post('/pos/sync-offline-sales', {
+                    idempotencyKey: sale.idempotencyKey,
+                    offlineId: sale.offlineId,
+                    saleData: sale.data,
+                    offlineTimestamp: sale.timestamp,
+                });
 
                 if (response.data?.success) {
                     sale.status = 'SYNCED';

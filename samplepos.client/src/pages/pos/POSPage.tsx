@@ -104,13 +104,6 @@ interface SaleRecord {
   total_amount?: number;
 }
 
-/** Sync-result shape returned by syncPendingSales */
-interface SyncResult {
-  offlineId: string;
-  success: boolean;
-  error?: string;
-}
-
 /** Product search result (mirrors POSProductSearch's ProductSearchResult) */
 interface POSProductInput {
   id: string;
@@ -402,27 +395,14 @@ export default function POSPage() {
     fetchInvoiceSettings();
   }, []);
 
-  // Sync pending sales when coming online
+  // Re-sync catalog when coming back online
+  // NOTE: Sale syncing is handled exclusively by OfflineAutoSync to prevent
+  // duplicate sync races between this useEffect and the auto-sync timer.
   useEffect(() => {
-    if (isOnline && pendingCount > 0) {
-      syncPendingSales(apiClient).then((results) => {
-        if (results && results.length > 0) {
-          const synced = results.filter((r: SyncResult) => r.success).length;
-          const failedResults = results.filter((r: SyncResult) => !r.success);
-          if (synced > 0) {
-            toast.success(`Synced ${synced} offline sale(s) successfully!`);
-          }
-          if (failedResults.length > 0) {
-            const firstError = failedResults[0]?.error || 'Unknown error';
-            toast.error(`${failedResults.length} sale(s) failed: ${firstError}`, { duration: 6000 });
-            setShowSyncPanel(true);
-          }
-        }
-      });
-      // Also re-sync catalog when coming back online
+    if (isOnline) {
       syncProductCatalog().catch(() => { });
     }
-  }, [isOnline, pendingCount]);
+  }, [isOnline]);
 
   // Check for quote to load on mount (from quotations page) and restore customer
   useEffect(() => {
