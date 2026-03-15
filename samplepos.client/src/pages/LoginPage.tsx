@@ -93,13 +93,16 @@ export default function LoginPage() {
     try {
       // Offline login: validate against cached credentials
       if (!navigator.onLine) {
-        const offlineUser = await validateOfflineLogin(email, password);
-        if (offlineUser) {
-          // Use the existing token if still in localStorage, or create a placeholder
-          const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
-          login(offlineUser, existingToken);
-          navigate(from, { replace: true });
-          return;
+        try {
+          const offlineUser = await validateOfflineLogin(email, password);
+          if (offlineUser) {
+            const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
+            login(offlineUser, existingToken);
+            navigate(from, { replace: true });
+            return;
+          }
+        } catch {
+          // crypto.subtle may be unavailable in non-HTTPS contexts
         }
         setError('Offline login failed. You must have logged in online at least once with these credentials.');
         return;
@@ -145,19 +148,33 @@ export default function LoginPage() {
         setError(response.data.error || 'Login failed');
       }
     } catch (err: unknown) {
-      // If network error and we have cached credentials, try offline login
-      if (!navigator.onLine || (err instanceof Error && 'code' in err && (err as { code?: string }).code === 'ERR_NETWORK')) {
-        const offlineUser = await validateOfflineLogin(email, password);
-        if (offlineUser) {
-          const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
-          login(offlineUser, existingToken);
-          navigate(from, { replace: true });
-          return;
+      // Determine if this is a server-unreachable error (not a clear auth rejection)
+      const axiosErr = err as { code?: string; response?: { status?: number; data?: { error?: string } } };
+      const status = axiosErr.response?.status;
+      const isServerUnreachable =
+        !navigator.onLine ||
+        axiosErr.code === 'ERR_NETWORK' ||
+        axiosErr.code === 'ECONNABORTED' ||
+        status === 502 || status === 503 || status === 504 ||
+        !axiosErr.response; // No response at all = server unreachable
+
+      // If server is unreachable, try offline login before showing error
+      if (isServerUnreachable) {
+        try {
+          const offlineUser = await validateOfflineLogin(email, password);
+          if (offlineUser) {
+            const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
+            login(offlineUser, existingToken);
+            navigate(from, { replace: true });
+            return;
+          }
+        } catch {
+          // Offline validation failed (e.g. crypto.subtle unavailable) — fall through to error
         }
       }
-      if (err instanceof Error && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { error?: string } } };
-        setError(axiosErr.response?.data?.error || 'Login failed. Please try again.');
+
+      if (axiosErr.response?.data?.error) {
+        setError(axiosErr.response.data.error);
       } else {
         setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
       }
@@ -191,6 +208,10 @@ export default function LoginPage() {
       role: data.user.role as UserRole,
     };
     login(authUser, token, data.refreshToken, data.expiresIn);
+    // Cache for offline login (email/password are still in component state)
+    if (email && password) {
+      cacheLoginCredential(email, password, authUser).catch(() => {});
+    }
     navigate(from, { replace: true });
   };
 
