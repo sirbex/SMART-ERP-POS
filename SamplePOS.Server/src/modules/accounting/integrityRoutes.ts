@@ -1,15 +1,15 @@
 /**
  * ACCOUNTING INTEGRITY API
- * 
+ *
  * Endpoints for checking and validating accounting integrity.
- * 
+ *
  * PERMANENT SOLUTION - DO NOT MODIFY WITHOUT REVIEW:
  * - All routes use defensive error handling
  * - UUID validation on all ID parameters
  * - Graceful fallbacks for null/undefined data
  * - Comprehensive logging for debugging
  * - Consistent API response format
- * 
+ *
  * @see glValidationService for underlying validation logic
  */
 
@@ -17,8 +17,14 @@ import { Router, Request, Response } from 'express';
 import { glValidationService } from '../../services/glValidationService.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 const router = Router();
+
+// All integrity routes require authentication + accounting.read permission
+router.use(authenticate);
+router.use(requirePermission('accounting.read'));
 
 // ============================================================================
 // HELPER FUNCTIONS - Ensure robustness and prevent breakage
@@ -70,7 +76,7 @@ function sendError(res: Response, statusCode: number, message: string): void {
 /**
  * GET /api/accounting/integrity
  * Run full accounting integrity check
- * 
+ *
  * Returns comprehensive integrity status for all accounting subsystems.
  */
 router.get('/', async (_req: Request, res: Response) => {
@@ -95,7 +101,7 @@ router.get('/', async (_req: Request, res: Response) => {
           subledgerBalance: results.arReconciliation?.subledgerBalance ?? 0,
           difference: results.arReconciliation?.difference ?? 0,
           isBalanced: results.arReconciliation?.isBalanced ?? false,
-          status: results.arReconciliation?.isBalanced ? 'PASS' : 'FAIL'
+          status: results.arReconciliation?.isBalanced ? 'PASS' : 'FAIL',
         },
         apReconciliation: {
           account: results.apReconciliation?.account ?? 'AP (2100)',
@@ -103,7 +109,7 @@ router.get('/', async (_req: Request, res: Response) => {
           subledgerBalance: results.apReconciliation?.subledgerBalance ?? 0,
           difference: results.apReconciliation?.difference ?? 0,
           isBalanced: results.apReconciliation?.isBalanced ?? false,
-          status: results.apReconciliation?.isBalanced ? 'PASS' : 'FAIL'
+          status: results.apReconciliation?.isBalanced ? 'PASS' : 'FAIL',
         },
         inventoryReconciliation: {
           account: results.inventoryReconciliation?.account ?? 'Inventory (1300)',
@@ -111,26 +117,27 @@ router.get('/', async (_req: Request, res: Response) => {
           subledgerBalance: results.inventoryReconciliation?.subledgerBalance ?? 0,
           difference: results.inventoryReconciliation?.difference ?? 0,
           isBalanced: results.inventoryReconciliation?.isBalanced ?? false,
-          status: results.inventoryReconciliation?.isBalanced ? 'PASS' : 'FAIL'
+          status: results.inventoryReconciliation?.isBalanced ? 'PASS' : 'FAIL',
         },
         journalEntryBalance: {
           unbalancedCount: results.unbalancedJournalEntries ?? 0,
-          status: (results.unbalancedJournalEntries ?? 0) === 0 ? 'PASS' : 'FAIL'
+          status: (results.unbalancedJournalEntries ?? 0) === 0 ? 'PASS' : 'FAIL',
         },
         creditSalesGL: {
           missingCount: results.creditSalesWithoutGL ?? 0,
-          status: (results.creditSalesWithoutGL ?? 0) === 0 ? 'PASS' : 'FAIL'
+          status: (results.creditSalesWithoutGL ?? 0) === 0 ? 'PASS' : 'FAIL',
         },
         paymentsGL: {
           missingCount: results.paymentsWithoutGL ?? 0,
-          status: (results.paymentsWithoutGL ?? 0) === 0 ? 'PASS' : 'FAIL'
-        }
-      }
+          status: (results.paymentsWithoutGL ?? 0) === 0 ? 'PASS' : 'FAIL',
+        },
+      },
     });
   } catch (error) {
     logger.error('Integrity check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
+      stack:
+        error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined,
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -139,7 +146,7 @@ router.get('/', async (_req: Request, res: Response) => {
 /**
  * GET /api/accounting/integrity/ar
  * Check AR reconciliation only
- * 
+ *
  * Returns Accounts Receivable GL balance vs Customer subledger balance.
  */
 router.get('/ar', async (_req: Request, res: Response) => {
@@ -158,12 +165,13 @@ router.get('/ar', async (_req: Request, res: Response) => {
       subledgerBalance: result.subledgerBalance ?? 0,
       difference: result.difference ?? 0,
       isBalanced: result.isBalanced ?? false,
-      status: result.isBalanced ? 'PASS' : 'FAIL'
+      status: result.isBalanced ? 'PASS' : 'FAIL',
     });
   } catch (error) {
     logger.error('AR reconciliation check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
+      stack:
+        error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined,
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -172,7 +180,7 @@ router.get('/ar', async (_req: Request, res: Response) => {
 /**
  * GET /api/accounting/integrity/ap
  * Check AP reconciliation only
- * 
+ *
  * Returns Accounts Payable GL balance vs Supplier subledger balance.
  */
 router.get('/ap', async (_req: Request, res: Response) => {
@@ -191,12 +199,13 @@ router.get('/ap', async (_req: Request, res: Response) => {
       subledgerBalance: result.subledgerBalance ?? 0,
       difference: result.difference ?? 0,
       isBalanced: result.isBalanced ?? false,
-      status: result.isBalanced ? 'PASS' : 'FAIL'
+      status: result.isBalanced ? 'PASS' : 'FAIL',
     });
   } catch (error) {
     logger.error('AP reconciliation check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
+      stack:
+        error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined,
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -205,7 +214,7 @@ router.get('/ap', async (_req: Request, res: Response) => {
 /**
  * GET /api/accounting/integrity/inventory
  * Check Inventory reconciliation only
- * 
+ *
  * Returns Inventory GL balance (1300) vs Cost Layers subledger balance.
  * CRITICAL: Detects when cost layers exist without corresponding GL entries.
  */
@@ -228,12 +237,13 @@ router.get('/inventory', async (_req: Request, res: Response) => {
       status: result.isBalanced ? 'PASS' : 'FAIL',
       warning: !result.isBalanced
         ? 'DISCREPANCY DETECTED: Cost layers exist without GL entries. This may indicate inventory was added without proper goods receipt workflow.'
-        : null
+        : null,
     });
   } catch (error) {
     logger.error('Inventory reconciliation check failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined
+      stack:
+        error instanceof Error ? (error instanceof Error ? error.stack : undefined) : undefined,
     });
     sendError(res, 500, getErrorMessage(error));
   }
@@ -242,10 +252,12 @@ router.get('/inventory', async (_req: Request, res: Response) => {
 /**
  * POST /api/accounting/integrity/validate/sale/:id
  * Validate GL entries for a specific sale
- * 
+ *
  * Checks that a sale has proper journal entries with correct amounts.
  */
-router.post('/validate/sale/:id', asyncHandler(async (req, res) => {
+router.post(
+  '/validate/sale/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     // Validate UUID format - prevents SQL injection and invalid lookups
@@ -266,17 +278,20 @@ router.post('/validate/sale/:id', asyncHandler(async (req, res) => {
       saleId: id,
       isValid: result.isValid ?? false,
       errors: result.errors ?? [],
-      warnings: result.warnings ?? []
+      warnings: result.warnings ?? [],
     });
-}));
+  })
+);
 
 /**
  * POST /api/accounting/integrity/validate/payment/:id
  * Validate GL entries for a specific payment
- * 
+ *
  * Checks that a payment has proper journal entries with correct amounts.
  */
-router.post('/validate/payment/:id', asyncHandler(async (req, res) => {
+router.post(
+  '/validate/payment/:id',
+  asyncHandler(async (req, res) => {
     const { id } = req.params;
 
     // Validate UUID format - prevents SQL injection and invalid lookups
@@ -297,8 +312,9 @@ router.post('/validate/payment/:id', asyncHandler(async (req, res) => {
       paymentId: id,
       isValid: result.isValid ?? false,
       errors: result.errors ?? [],
-      warnings: result.warnings ?? []
+      warnings: result.warnings ?? [],
     });
-}));
+  })
+);
 
 export default router;

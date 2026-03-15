@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { holdService } from './holdService.js';
 import { CreateHoldOrderSchema } from '../../../../shared/zod/hold-order.schema.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
@@ -12,139 +13,152 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
  */
 
 export function createHoldRoutes(pool: Pool): Router {
-    const router = Router();
+  const router = Router();
 
-    // All hold routes require authentication
-    router.use(authenticate);
+  // All hold routes require authentication + POS permission
+  router.use(authenticate);
+  router.use(requirePermission('pos.create'));
 
-    /**
-     * POST /api/pos/hold
-     * Put cart on hold
-     * 
-     * Body: CreateHoldOrderInput (validated with Zod)
-     * Returns: Created hold order with items
-     * 
-     * Business Rules:
-     * - At least 1 item required
-     * - NO stock movements created
-     * - Expires in 24 hours by default
-     */
-    router.post('/', asyncHandler(async (req, res) => {
-        const userId = req.user?.id; // From auth middleware
+  /**
+   * POST /api/pos/hold
+   * Put cart on hold
+   *
+   * Body: CreateHoldOrderInput (validated with Zod)
+   * Returns: Created hold order with items
+   *
+   * Business Rules:
+   * - At least 1 item required
+   * - NO stock movements created
+   * - Expires in 24 hours by default
+   */
+  router.post(
+    '/',
+    asyncHandler(async (req, res) => {
+      const userId = req.user?.id; // From auth middleware
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                error: 'Unauthorized - user ID required',
-            });
-        }
-
-        // Inject userId from auth context
-        const input = {
-            ...req.body,
-            userId,
-        };
-
-        const hold = await holdService.holdCart(pool, input);
-
-        res.status(201).json({
-            success: true,
-            data: hold,
-            message: `Cart held as ${hold.holdNumber}`,
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized - user ID required',
         });
-    }));
+      }
 
-    /**
-     * GET /api/pos/hold
-     * List held orders for current user/terminal
-     * 
-     * Query Params:
-     * - terminalId (optional): Filter by terminal
-     * 
-     * Returns: Array of held orders with item counts
-     */
-    router.get('/', asyncHandler(async (req, res) => {
-        const userId = req.user?.id;
+      // Inject userId from auth context
+      const input = {
+        ...req.body,
+        userId,
+      };
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                error: 'Unauthorized',
-            });
-        }
+      const hold = await holdService.holdCart(pool, input);
 
-        const terminalId = req.query.terminalId as string | undefined;
+      res.status(201).json({
+        success: true,
+        data: hold,
+        message: `Cart held as ${hold.holdNumber}`,
+      });
+    })
+  );
 
-        const holds = await holdService.listHolds(pool, {
-            userId,
-            terminalId,
+  /**
+   * GET /api/pos/hold
+   * List held orders for current user/terminal
+   *
+   * Query Params:
+   * - terminalId (optional): Filter by terminal
+   *
+   * Returns: Array of held orders with item counts
+   */
+  router.get(
+    '/',
+    asyncHandler(async (req, res) => {
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
         });
+      }
 
-        res.json({
-            success: true,
-            data: holds,
+      const terminalId = req.query.terminalId as string | undefined;
+
+      const holds = await holdService.listHolds(pool, {
+        userId,
+        terminalId,
+      });
+
+      res.json({
+        success: true,
+        data: holds,
+      });
+    })
+  );
+
+  /**
+   * GET /api/pos/hold/:id
+   * Get held order by ID (for resume)
+   *
+   * Params:
+   * - id: Hold order UUID
+   *
+   * Returns: Full hold order with items
+   */
+  router.get(
+    '/:id',
+    asyncHandler(async (req, res) => {
+      const { id } = req.params;
+      const userId = req.user?.id;
+
+      const hold = await holdService.getHoldById(pool, id);
+
+      // Verify ownership (user can only load their own holds)
+      if (hold.userId !== userId) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden - not your hold order',
         });
-    }));
+      }
 
-    /**
-     * GET /api/pos/hold/:id
-     * Get held order by ID (for resume)
-     * 
-     * Params:
-     * - id: Hold order UUID
-     * 
-     * Returns: Full hold order with items
-     */
-    router.get('/:id', asyncHandler(async (req, res) => {
-        const { id } = req.params;
-        const userId = req.user?.id;
+      res.json({
+        success: true,
+        data: hold,
+      });
+    })
+  );
 
-        const hold = await holdService.getHoldById(pool, id);
+  /**
+   * DELETE /api/pos/hold/:id
+   * Delete held order (after resuming)
+   *
+   * Params:
+   * - id: Hold order UUID
+   *
+   * Use Case: After loading hold into POS cart
+   */
+  router.delete(
+    '/:id',
+    asyncHandler(async (req, res) => {
+      const { id } = req.params;
+      const userId = req.user?.id;
 
-        // Verify ownership (user can only load their own holds)
-        if (hold.userId !== userId) {
-            return res.status(403).json({
-                success: false,
-                error: 'Forbidden - not your hold order',
-            });
-        }
+      // Verify ownership before deletion
+      const hold = await holdService.getHoldById(pool, id);
 
-        res.json({
-            success: true,
-            data: hold,
+      if (hold.userId !== userId) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden - not your hold order',
         });
-    }));
+      }
 
-    /**
-     * DELETE /api/pos/hold/:id
-     * Delete held order (after resuming)
-     * 
-     * Params:
-     * - id: Hold order UUID
-     * 
-     * Use Case: After loading hold into POS cart
-     */
-    router.delete('/:id', asyncHandler(async (req, res) => {
-        const { id } = req.params;
-        const userId = req.user?.id;
+      await holdService.deleteHold(pool, id);
 
-        // Verify ownership before deletion
-        const hold = await holdService.getHoldById(pool, id);
+      res.json({
+        success: true,
+        message: 'Hold order deleted',
+      });
+    })
+  );
 
-        if (hold.userId !== userId) {
-            return res.status(403).json({
-                success: false,
-                error: 'Forbidden - not your hold order',
-            });
-        }
-
-        await holdService.deleteHold(pool, id);
-
-        res.json({
-            success: true,
-            message: 'Hold order deleted',
-        });
-    }));
-
-    return router;
+  return router;
 }

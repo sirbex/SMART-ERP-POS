@@ -5,6 +5,7 @@
 import express from 'express';
 import { paymentsController } from './paymentsController.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 
 export function createPaymentsRoutes() {
   const router = express.Router();
@@ -12,12 +13,28 @@ export function createPaymentsRoutes() {
   // All routes require authentication
   router.use(authenticate);
 
-  router.get('/methods', paymentsController.getPaymentMethods);
-  router.post('/process-split', paymentsController.processSplitPayment);
-  router.get('/sale/:saleId', paymentsController.getSalePayments);
-  router.get('/customer/:customerId/balance', paymentsController.getCustomerBalance);
-  router.get('/customer/:customerId/history', paymentsController.getCustomerCreditHistory);
-  router.post('/customer/:customerId/payment', paymentsController.recordCustomerPayment);
+  router.get('/methods', requirePermission('pos.read'), paymentsController.getPaymentMethods);
+  router.post(
+    '/process-split',
+    requirePermission('pos.create'),
+    paymentsController.processSplitPayment
+  );
+  router.get('/sale/:saleId', requirePermission('sales.read'), paymentsController.getSalePayments);
+  router.get(
+    '/customer/:customerId/balance',
+    requirePermission('customers.read'),
+    paymentsController.getCustomerBalance
+  );
+  router.get(
+    '/customer/:customerId/history',
+    requirePermission('customers.read'),
+    paymentsController.getCustomerCreditHistory
+  );
+  router.post(
+    '/customer/:customerId/payment',
+    requirePermission('pos.create'),
+    paymentsController.recordCustomerPayment
+  );
 
   return router;
 }

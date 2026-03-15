@@ -481,7 +481,7 @@ export default function GoodsReceiptsPage() {
               edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
             (edits.expiryDate !== undefined &&
               edits.expiryDate !==
-                (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
+              (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
             (edits.receivedQuantity !== undefined &&
               edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
             (edits.unitCost !== undefined &&
@@ -1125,11 +1125,10 @@ export default function GoodsReceiptsPage() {
               {costAlerts.map((alert, index) => (
                 <div
                   key={index}
-                  className={`rounded-lg p-4 border-2 ${
-                    alert.severity === 'HIGH'
+                  className={`rounded-lg p-4 border-2 ${alert.severity === 'HIGH'
                       ? 'bg-red-50 border-red-200'
                       : 'bg-yellow-50 border-yellow-200'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-shrink-0 text-2xl">
@@ -1138,11 +1137,10 @@ export default function GoodsReceiptsPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span
-                          className={`px-2 py-1 text-xs font-bold rounded ${
-                            alert.severity === 'HIGH'
+                          className={`px-2 py-1 text-xs font-bold rounded ${alert.severity === 'HIGH'
                               ? 'bg-red-600 text-white'
                               : 'bg-yellow-600 text-white'
-                          }`}
+                            }`}
                         >
                           {alert.severity} SEVERITY
                         </span>
@@ -1420,9 +1418,9 @@ function GRItemRow({
   // For DRAFT GRs, default received to ordered quantity if not set
   const baseReceived = Number(
     es.receivedQuantity ??
-      item.receivedQuantity ??
-      item.received_quantity ??
-      (selectedGR.status === 'DRAFT' ? ordered : 0)
+    item.receivedQuantity ??
+    item.received_quantity ??
+    (selectedGR.status === 'DRAFT' ? ordered : 0)
   );
   const disabled = selectedGR.status !== 'DRAFT';
   const baseUnitCost = Number(es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0);
@@ -1525,13 +1523,12 @@ function GRItemRow({
         ) : (
           <div className="flex items-center gap-2">
             <span
-              className={`px-2 py-1 rounded text-xs font-semibold ${
-                needsReorder
+              className={`px-2 py-1 rounded text-xs font-semibold ${needsReorder
                   ? 'bg-red-100 text-red-800'
                   : onHandQty > reorderLevel * 1.5
                     ? 'bg-green-100 text-green-800'
                     : 'bg-yellow-100 text-yellow-800'
-              }`}
+                }`}
               title={`Reorder Level: ${reorderLevel}`}
             >
               {onHandQty.toFixed(4)}

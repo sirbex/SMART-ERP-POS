@@ -1,9 +1,24 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Label from '@radix-ui/react-label';
 import * as Switch from '@radix-ui/react-switch';
 import * as RadioGroup from '@radix-ui/react-radio-group';
 import { api } from '../../../services/api';
+
+type PaymentAccountType = 'BANK' | 'MOBILE_MONEY' | 'WALLET';
+
+interface PaymentAccount {
+  id: string;
+  type: PaymentAccountType;
+  provider: string;
+  accountName: string;
+  accountNumber: string;
+  branchOrCode?: string;
+  isActive: boolean;
+  showOnReceipt: boolean;
+  showOnInvoice: boolean;
+  sortOrder: number;
+}
 
 // Utility function to format dates without timezone conversion
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -30,6 +45,7 @@ interface InvoiceSettings {
   showCompanyLogo: boolean;
   showTaxBreakdown: boolean;
   showPaymentInstructions: boolean;
+  paymentAccounts: PaymentAccount[];
   paymentInstructions: string | null;
   termsAndConditions: string | null;
   footerText: string | null;
@@ -49,6 +65,50 @@ export default function InvoiceSettingsTab() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+
+  const generateId = () => crypto.randomUUID();
+
+  const addPaymentAccount = useCallback(() => {
+    const newAccount: PaymentAccount = {
+      id: generateId(),
+      type: 'MOBILE_MONEY',
+      provider: '',
+      accountName: '',
+      accountNumber: '',
+      branchOrCode: '',
+      isActive: true,
+      showOnReceipt: true,
+      showOnInvoice: true,
+      sortOrder: paymentAccounts.length,
+    };
+    setPaymentAccounts(prev => [...prev, newAccount]);
+    setEditingAccountId(newAccount.id);
+  }, [paymentAccounts.length]);
+
+  const updatePaymentAccount = useCallback((id: string, updates: Partial<PaymentAccount>) => {
+    setPaymentAccounts(prev =>
+      prev.map(acc => (acc.id === id ? { ...acc, ...updates } : acc))
+    );
+  }, []);
+
+  const removePaymentAccount = useCallback((id: string) => {
+    setPaymentAccounts(prev => prev.filter(acc => acc.id !== id));
+    if (editingAccountId === id) setEditingAccountId(null);
+  }, [editingAccountId]);
+
+  const moveAccount = useCallback((id: string, direction: 'up' | 'down') => {
+    setPaymentAccounts(prev => {
+      const idx = prev.findIndex(a => a.id === id);
+      if (idx < 0) return prev;
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+      return next.map((a, i) => ({ ...a, sortOrder: i }));
+    });
+  }, []);
 
   // Fetch settings
   const { data: settingsData, isLoading, error: fetchError } = useQuery({
@@ -58,7 +118,10 @@ export default function InvoiceSettingsTab() {
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch settings');
       }
-      return result.data as InvoiceSettings;
+      const settings = result.data as InvoiceSettings;
+      // Sync payment accounts state from server
+      setPaymentAccounts(settings.paymentAccounts || []);
+      return settings;
     },
     retry: 1,
     staleTime: 30000, // Consider data fresh for 30 seconds
@@ -132,6 +195,7 @@ export default function InvoiceSettingsTab() {
       showCompanyLogo: formData.get('showCompanyLogo') === 'on',
       showTaxBreakdown: formData.get('showTaxBreakdown') === 'on',
       showPaymentInstructions: formData.get('showPaymentInstructions') === 'on',
+      paymentAccounts: paymentAccounts.filter(a => a.provider && a.accountName && a.accountNumber),
       paymentInstructions: getFormValue('paymentInstructions'),
       termsAndConditions: getFormValue('termsAndConditions'),
       footerText: getFormValue('footerText'),
@@ -483,6 +547,211 @@ export default function InvoiceSettingsTab() {
             </Switch.Root>
           </div>
         </div>
+      </section>
+
+      {/* Payment Accounts */}
+      <section className="bg-white rounded-lg shadow-sm p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Payment Accounts</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Add bank accounts, mobile money, and wallet details to display on receipts and invoices
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={addPaymentAccount}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          >
+            + Add Account
+          </button>
+        </div>
+
+        {paymentAccounts.length === 0 ? (
+          <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg">
+            <p className="text-gray-500">No payment accounts configured</p>
+            <p className="text-sm text-gray-400 mt-1">Add accounts so customers know where to send payments</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {paymentAccounts.map((account, index) => {
+              const isEditing = editingAccountId === account.id;
+              return (
+                <div
+                  key={account.id}
+                  className={`border rounded-lg p-4 ${isEditing ? 'border-blue-300 bg-blue-50/50' : 'border-gray-200'} ${!account.isActive ? 'opacity-60' : ''}`}
+                >
+                  {isEditing ? (
+                    /* Edit Mode */
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
+                          <select
+                            value={account.type}
+                            onChange={(e) => updatePaymentAccount(account.id, { type: e.target.value as PaymentAccountType })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          >
+                            <option value="BANK">Bank Account</option>
+                            <option value="MOBILE_MONEY">Mobile Money</option>
+                            <option value="WALLET">Wallet / Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Provider *</label>
+                          <input
+                            type="text"
+                            value={account.provider}
+                            onChange={(e) => updatePaymentAccount(account.id, { provider: e.target.value })}
+                            placeholder={account.type === 'BANK' ? 'e.g. Stanbic Bank' : account.type === 'MOBILE_MONEY' ? 'e.g. MTN Mobile Money' : 'e.g. PayPal'}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Account Name *</label>
+                          <input
+                            type="text"
+                            value={account.accountName}
+                            onChange={(e) => updatePaymentAccount(account.id, { accountName: e.target.value })}
+                            placeholder="Account holder name"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Account Number *</label>
+                          <input
+                            type="text"
+                            value={account.accountNumber}
+                            onChange={(e) => updatePaymentAccount(account.id, { accountNumber: e.target.value })}
+                            placeholder={account.type === 'MOBILE_MONEY' ? 'e.g. 0770123456' : 'e.g. 9030001234567'}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            {account.type === 'BANK' ? 'Branch' : 'Short Code / Reference'}
+                          </label>
+                          <input
+                            type="text"
+                            value={account.branchOrCode || ''}
+                            onChange={(e) => updatePaymentAccount(account.id, { branchOrCode: e.target.value || undefined })}
+                            placeholder={account.type === 'BANK' ? 'e.g. Kampala Branch' : 'Optional'}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-6">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={account.isActive}
+                            onChange={(e) => updatePaymentAccount(account.id, { isActive: e.target.checked })}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Active
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={account.showOnReceipt}
+                            onChange={(e) => updatePaymentAccount(account.id, { showOnReceipt: e.target.checked })}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Show on Receipt
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={account.showOnInvoice}
+                            onChange={(e) => updatePaymentAccount(account.id, { showOnInvoice: e.target.checked })}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Show on Invoice
+                        </label>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setEditingAccountId(null)}
+                          className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Display Mode */
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${
+                          account.type === 'BANK' ? 'bg-indigo-500' : account.type === 'MOBILE_MONEY' ? 'bg-yellow-500' : 'bg-green-500'
+                        }`}>
+                          {account.type === 'BANK' ? '🏦' : account.type === 'MOBILE_MONEY' ? '📱' : '💳'}
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900">{account.provider || 'Unnamed provider'}</div>
+                          <div className="text-sm text-gray-600">{account.accountName} &middot; {account.accountNumber}</div>
+                          {account.branchOrCode && (
+                            <div className="text-sm text-gray-500">{account.type === 'BANK' ? 'Branch' : 'Code'}: {account.branchOrCode}</div>
+                          )}
+                          <div className="flex gap-2 mt-1">
+                            {account.showOnReceipt && (
+                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Receipt</span>
+                            )}
+                            {account.showOnInvoice && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Invoice</span>
+                            )}
+                            {!account.isActive && (
+                              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">Inactive</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveAccount(account.id, 'up')}
+                          disabled={index === 0}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                          title="Move up"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveAccount(account.id, 'down')}
+                          disabled={index === paymentAccounts.length - 1}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                          title="Move down"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingAccountId(account.id)}
+                          className="p-1.5 text-blue-600 hover:text-blue-800"
+                          title="Edit"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removePaymentAccount(account.id)}
+                          className="p-1.5 text-red-500 hover:text-red-700"
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* Content Customization */}

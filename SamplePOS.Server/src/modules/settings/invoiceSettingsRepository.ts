@@ -16,6 +16,18 @@ export interface InvoiceSettings {
   showCompanyLogo: boolean;
   showTaxBreakdown: boolean;
   showPaymentInstructions: boolean;
+  paymentAccounts: Array<{
+    id: string;
+    type: 'BANK' | 'MOBILE_MONEY' | 'WALLET';
+    provider: string;
+    accountName: string;
+    accountNumber: string;
+    branchOrCode?: string;
+    isActive: boolean;
+    showOnReceipt: boolean;
+    showOnInvoice: boolean;
+    sortOrder: number;
+  }>;
   paymentInstructions: string | null;
   termsAndConditions: string | null;
   footerText: string | null;
@@ -39,6 +51,7 @@ export async function getInvoiceSettings(pool: Pool): Promise<InvoiceSettings | 
       show_company_logo as "showCompanyLogo",
       show_tax_breakdown as "showTaxBreakdown",
       show_payment_instructions as "showPaymentInstructions",
+      payment_accounts as "paymentAccounts",
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
       footer_text as "footerText",
@@ -90,6 +103,7 @@ export async function initializeDefaults(pool: Pool): Promise<InvoiceSettings> {
       show_company_logo as "showCompanyLogo",
       show_tax_breakdown as "showTaxBreakdown",
       show_payment_instructions as "showPaymentInstructions",
+      payment_accounts as "paymentAccounts",
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
       footer_text as "footerText",
@@ -157,6 +171,10 @@ export async function updateInvoiceSettings(
     fields.push(`show_payment_instructions = $${paramIndex++}`);
     values.push(data.showPaymentInstructions);
   }
+  if (data.paymentAccounts !== undefined) {
+    fields.push(`payment_accounts = $${paramIndex++}`);
+    values.push(JSON.stringify(data.paymentAccounts));
+  }
   if (data.paymentInstructions !== undefined) {
     fields.push(`payment_instructions = $${paramIndex++}`);
     values.push(data.paymentInstructions);
@@ -189,6 +207,7 @@ export async function updateInvoiceSettings(
       show_company_logo as "showCompanyLogo",
       show_tax_breakdown as "showTaxBreakdown",
       show_payment_instructions as "showPaymentInstructions",
+      payment_accounts as "paymentAccounts",
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
       footer_text as "footerText",

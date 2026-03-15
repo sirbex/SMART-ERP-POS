@@ -371,7 +371,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
     }, [selected, onSelect]);
 
     return (
-      <div>
+      <div className="relative">
         <POSSearchBar value={search} onChange={setSearch} autoFocus inputRef={searchInputRef} />
         {isLoading && <div className="mt-2 text-xs text-gray-500">Searching...</div>}
         {!isOnline && search && (
@@ -382,7 +382,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
         {search && Array.isArray(data) && (
           <div
             ref={productListRef}
-            className="mt-2 divide-y border rounded bg-white shadow max-h-[60vh] overflow-y-auto"
+            className="mt-2 divide-y border rounded bg-white shadow max-h-[50vh] lg:max-h-[60vh] overflow-y-auto absolute left-0 right-0 z-30 lg:relative"
           >
             {data.length === 0 ? (
               <div className="p-3 text-xs text-gray-500">No products found</div>

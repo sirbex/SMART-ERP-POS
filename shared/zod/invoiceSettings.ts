@@ -2,6 +2,22 @@
 
 import { z } from 'zod';
 
+// Payment account schema for bank, mobile money, etc.
+export const PaymentAccountSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(['BANK', 'MOBILE_MONEY', 'WALLET']),
+  provider: z.string().min(1).max(100),   // e.g. "Stanbic Bank", "MTN Mobile Money", "Airtel Money"
+  accountName: z.string().min(1).max(255),
+  accountNumber: z.string().min(1).max(100),
+  branchOrCode: z.string().max(100).optional(), // bank branch or short code
+  isActive: z.boolean().default(true),
+  showOnReceipt: z.boolean().default(true),
+  showOnInvoice: z.boolean().default(true),
+  sortOrder: z.number().int().min(0).default(0),
+});
+
+export type PaymentAccount = z.infer<typeof PaymentAccountSchema>;
+
 export const InvoiceTemplateType = z.enum(['modern', 'classic', 'minimal', 'professional']);
 
 // Helper schema for nullable empty strings (convert empty strings to null)
@@ -33,6 +49,9 @@ export const InvoiceSettingsSchema = z.object({
   showCompanyLogo: z.boolean().default(false),
   showTaxBreakdown: z.boolean().default(true),
   showPaymentInstructions: z.boolean().default(true),
+
+  // Payment Accounts
+  paymentAccounts: z.array(PaymentAccountSchema).default([]),
 
   // Text Content
   paymentInstructions: z.string().max(2000, 'Payment instructions too long').nullable(),
@@ -79,6 +98,8 @@ export const UpdateInvoiceSettingsSchema = z.object({
   showCompanyLogo: z.boolean().optional(),
   showTaxBreakdown: z.boolean().optional(),
   showPaymentInstructions: z.boolean().optional(),
+
+  paymentAccounts: z.array(PaymentAccountSchema).optional(),
 
   paymentInstructions: z.preprocess(
     val => val === '' ? null : val,

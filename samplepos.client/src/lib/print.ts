@@ -44,6 +44,14 @@ export interface ReceiptData {
   companyName?: string;
   companyAddress?: string;
   companyPhone?: string;
+  // Payment accounts from settings
+  paymentAccounts?: Array<{
+    type: string;
+    provider: string;
+    accountName: string;
+    accountNumber: string;
+    branchOrCode?: string;
+  }>;
 }
 
 /**
@@ -312,6 +320,18 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
         </div>
 
         <div class="footer">
+          ${data.paymentAccounts && data.paymentAccounts.length > 0 ? `
+            <div style="border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 8px; text-align: left;">
+              <div style="font-weight: bold; font-size: 11px; margin-bottom: 4px;">Payment Details:</div>
+              ${data.paymentAccounts.map(acc => `
+                <div style="margin-bottom: 4px; font-size: 10px;">
+                  <div style="font-weight: bold;">${acc.provider}</div>
+                  <div>${acc.accountName} - ${acc.accountNumber}</div>
+                  ${acc.branchOrCode ? `<div>${acc.branchOrCode}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
           <p>Thank you for your business!</p>
         </div>
       </body>
@@ -501,6 +521,18 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
         ` : ''}
 
         <div class="footer">
+          ${data.paymentAccounts && data.paymentAccounts.length > 0 ? `
+            <div style="border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px; text-align: left;">
+              <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px;">Payment Details:</div>
+              ${data.paymentAccounts.map(acc => `
+                <div style="margin-bottom: 3px; font-size: 9px;">
+                  <div style="font-weight: bold;">${acc.provider}</div>
+                  <div>${acc.accountName} - ${acc.accountNumber}</div>
+                  ${acc.branchOrCode ? `<div>${acc.branchOrCode}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
           <p style="margin: 3px 0;">Thank you!</p>
         </div>
       </body>

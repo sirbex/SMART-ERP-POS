@@ -8,7 +8,13 @@ import { getSettings } from '../settings/invoiceSettingsService.js';
 import PDFDocument from 'pdfkit';
 import Decimal from 'decimal.js';
 import Money from '../../utils/money.js';
-import { asyncHandler, NotFoundError, ConflictError, ValidationError, AppError } from '../../middleware/errorHandler.js';
+import {
+  asyncHandler,
+  NotFoundError,
+  ConflictError,
+  ValidationError,
+  AppError,
+} from '../../middleware/errorHandler.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 
@@ -42,7 +48,14 @@ export const invoiceController = {
         initialPaymentAmount: data.initialPaymentAmount || null,
       });
 
-      res.status(201).json({ success: true, data: result.invoice, initialPayment: result.initialPayment, message: 'Invoice created' });
+      res
+        .status(201)
+        .json({
+          success: true,
+          data: result.invoice,
+          initialPayment: result.initialPayment,
+          message: 'Invoice created',
+        });
     } catch (error: unknown) {
       if (error instanceof AppError) throw error;
       const msg = error instanceof Error ? error.message : String(error);
@@ -93,7 +106,14 @@ export const invoiceController = {
       notes: data.notes || null,
       processedById: userId,
     });
-    res.status(201).json({ success: true, data: result.invoice, payment: result.payment, message: 'Payment recorded' });
+    res
+      .status(201)
+      .json({
+        success: true,
+        data: result.invoice,
+        payment: result.payment,
+        message: 'Payment recorded',
+      });
   }),
 
   listPayments: asyncHandler(async (req: Request, res: Response) => {
@@ -135,7 +155,10 @@ export const invoiceController = {
 
       // Set response headers
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename=invoice-${invoice.invoice_number || invoice.invoiceNumber}.pdf`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=invoice-${invoice.invoice_number || invoice.invoiceNumber}.pdf`
+      );
 
       doc.pipe(res);
 
@@ -168,34 +191,61 @@ export const invoiceController = {
       doc.rect(0, 0, doc.page.width, 100).fill(colors.primary);
 
       // Company name and invoice title
-      doc.fillColor('#ffffff')
-        .fontSize(24).font('Helvetica-Bold')
+      doc
+        .fillColor('#ffffff')
+        .fontSize(24)
+        .font('Helvetica-Bold')
         .text(companyInfo.name, margin, 20, { align: 'left' });
 
-      doc.fontSize(20).font('Helvetica-Bold')
+      doc
+        .fontSize(20)
+        .font('Helvetica-Bold')
         .text('INVOICE', margin, 20, { align: 'right', width: contentWidth });
 
       // Company contact info
-      doc.fontSize(8).font('Helvetica')
+      doc
+        .fontSize(8)
+        .font('Helvetica')
         .text(companyInfo.address, margin, 48, { align: 'left' })
         .text(companyInfo.phone, margin, 58, { align: 'left' })
         .text(companyInfo.email, margin, 68, { align: 'left' })
         .text(companyInfo.tin, margin, 78, { align: 'left' });
 
       // Invoice number and date on right
-      doc.fontSize(11).font('Helvetica-Bold')
-        .text(String(invoice.invoice_number || ''), margin, 52, { align: 'right', width: contentWidth });
+      doc
+        .fontSize(11)
+        .font('Helvetica-Bold')
+        .text(String(invoice.invoice_number || ''), margin, 52, {
+          align: 'right',
+          width: contentWidth,
+        });
 
-      doc.fontSize(8).font('Helvetica')
-        .text(`Issue: ${invoice.issue_date ? new Date(String(invoice.issue_date)).toLocaleDateString() : 'N/A'}`, margin, 68, { align: 'right', width: contentWidth })
-        .text(`Due: ${invoice.due_date ? new Date(String(invoice.due_date)).toLocaleDateString() : 'N/A'}`, margin, 78, { align: 'right', width: contentWidth });
+      doc
+        .fontSize(8)
+        .font('Helvetica')
+        .text(
+          `Issue: ${invoice.issue_date ? new Date(String(invoice.issue_date)).toLocaleDateString() : 'N/A'}`,
+          margin,
+          68,
+          { align: 'right', width: contentWidth }
+        )
+        .text(
+          `Due: ${invoice.due_date ? new Date(String(invoice.due_date)).toLocaleDateString() : 'N/A'}`,
+          margin,
+          78,
+          { align: 'right', width: contentWidth }
+        );
 
       // Bill To section - REDUCED SIZE
       const billToY = 115;
-      doc.roundedRect(margin, billToY, contentWidth / 2 - 10, 85, 5)
+      doc
+        .roundedRect(margin, billToY, contentWidth / 2 - 10, 85, 5)
         .fillAndStroke(colors.light, colors.border);
 
-      doc.fillColor(colors.primary).fontSize(10).font('Helvetica-Bold')
+      doc
+        .fillColor(colors.primary)
+        .fontSize(10)
+        .font('Helvetica-Bold')
         .text('BILL TO', margin + 10, billToY + 10, { width: contentWidth / 2 - 30 });
 
       // Build customer info lines, skipping empty fields
@@ -210,7 +260,8 @@ export const invoiceController = {
       doc.fillColor(colors.dark).fontSize(9).font('Helvetica');
       let customerY = billToY + 28;
       customerLines.forEach((line, index) => {
-        if (index < 4) { // Max 4 lines to fit in the box
+        if (index < 4) {
+          // Max 4 lines to fit in the box
           doc.text(line, margin + 10, customerY, { width: contentWidth / 2 - 30, ellipsis: true });
           customerY += 13;
         }
@@ -219,37 +270,68 @@ export const invoiceController = {
       // Invoice Info section - REDUCED SIZE
       const infoX = margin + contentWidth / 2 + 10;
       const infoY = 115;
-      doc.roundedRect(infoX, infoY, contentWidth / 2 - 10, 85, 5)
+      doc
+        .roundedRect(infoX, infoY, contentWidth / 2 - 10, 85, 5)
         .fillAndStroke(colors.light, colors.border);
 
-      doc.fillColor(colors.primary).fontSize(10).font('Helvetica-Bold')
+      doc
+        .fillColor(colors.primary)
+        .fontSize(10)
+        .font('Helvetica-Bold')
         .text('INVOICE SUMMARY', infoX + 10, infoY + 10, { width: contentWidth / 2 - 30 });
 
-      doc.fillColor(colors.dark).fontSize(8).font('Helvetica')
+      doc
+        .fillColor(colors.dark)
+        .fontSize(8)
+        .font('Helvetica')
         .text(`Status: `, infoX + 10, infoY + 28, { continued: true, width: contentWidth / 2 - 30 })
         .font('Helvetica-Bold')
-        .fillColor((invoice.status === 'PAID') ? colors.success : (invoice.status === 'PARTIALLY_PAID') ? colors.warning : colors.danger)
+        .fillColor(
+          invoice.status === 'PAID'
+            ? colors.success
+            : invoice.status === 'PARTIALLY_PAID'
+              ? colors.warning
+              : colors.danger
+        )
         .text(invoice.status);
 
       // Show aggregated payment methods if any payments exist
-      const paymentMethodsText = payments.length > 0
-        ? [...new Set(payments.map((p) => p.payment_method as string))].join(', ')
-        : String(invoice.payment_method || 'CREDIT');
+      const paymentMethodsText =
+        payments.length > 0
+          ? [...new Set(payments.map((p) => p.payment_method as string))].join(', ')
+          : String(invoice.payment_method || 'CREDIT');
 
-      doc.fillColor(colors.dark).fontSize(8).font('Helvetica')
-        .text(`Payment Method: ${paymentMethodsText}`, infoX + 10, infoY + 41, { width: contentWidth / 2 - 30 })
-        .text(`Total: ${formatCurrency(invoice.total_amount || 0)}`, infoX + 10, infoY + 54, { width: contentWidth / 2 - 30 })
-        .text(`Paid: ${formatCurrency(invoice.amount_paid || 0)}`, infoX + 10, infoY + 67, { width: contentWidth / 2 - 30 });
+      doc
+        .fillColor(colors.dark)
+        .fontSize(8)
+        .font('Helvetica')
+        .text(`Payment Method: ${paymentMethodsText}`, infoX + 10, infoY + 41, {
+          width: contentWidth / 2 - 30,
+        })
+        .text(`Total: ${formatCurrency(invoice.total_amount || 0)}`, infoX + 10, infoY + 54, {
+          width: contentWidth / 2 - 30,
+        })
+        .text(`Paid: ${formatCurrency(invoice.amount_paid || 0)}`, infoX + 10, infoY + 67, {
+          width: contentWidth / 2 - 30,
+        });
 
       // Balance due with color
       const balanceDue = new Decimal(invoice.balance || 0);
       const balanceTextColor = balanceDue.toNumber() > 0 ? colors.danger : colors.success;
-      doc.fillColor(balanceTextColor).fontSize(8).font('Helvetica-Bold')
-        .text(`Balance: ${formatCurrency(balanceDue.toNumber())}`, infoX + 10, infoY + 80, { width: contentWidth / 2 - 30 });
+      doc
+        .fillColor(balanceTextColor)
+        .fontSize(8)
+        .font('Helvetica-Bold')
+        .text(`Balance: ${formatCurrency(balanceDue.toNumber())}`, infoX + 10, infoY + 80, {
+          width: contentWidth / 2 - 30,
+        });
 
       // Items table - START EARLIER
       const itemsY = 215;
-      doc.fillColor(colors.primary).fontSize(11).font('Helvetica-Bold')
+      doc
+        .fillColor(colors.primary)
+        .fontSize(11)
+        .font('Helvetica-Bold')
         .text('ITEMS', margin, itemsY);
 
       const tableTop = itemsY + 18;
@@ -258,9 +340,9 @@ export const invoiceController = {
       doc.rect(margin, tableTop, contentWidth, 25).fillAndStroke(colors.primary, colors.primary);
 
       const colWidths = [
-        contentWidth * 0.40, // Product - 40%
+        contentWidth * 0.4, // Product - 40%
         contentWidth * 0.15, // Quantity - 15%
-        contentWidth * 0.20, // Unit Price - 20%
+        contentWidth * 0.2, // Unit Price - 20%
         contentWidth * 0.25, // Line Total - 25%
       ];
 
@@ -288,13 +370,20 @@ export const invoiceController = {
 
         // Alternating row colors
         if (index % 2 === 0) {
-          doc.rect(margin, currentY, contentWidth, rowHeight).fillAndStroke(colors.light, colors.border);
+          doc
+            .rect(margin, currentY, contentWidth, rowHeight)
+            .fillAndStroke(colors.light, colors.border);
         }
 
         xPos = margin;
         doc.fillColor(colors.dark).fontSize(8).font('Helvetica');
 
-        const productDisplay = item.productName || item.productCode || item.sku || item.barcode || `Product #${item.productId || 'Unknown'}`;
+        const productDisplay =
+          item.productName ||
+          item.productCode ||
+          item.sku ||
+          item.barcode ||
+          `Product #${item.productId || 'Unknown'}`;
 
         const rowData = [
           productDisplay,
@@ -330,46 +419,66 @@ export const invoiceController = {
       const balance = new Decimal(invoice.balance || 0);
 
       doc.text('Subtotal:', summaryX, currentY, { width: summaryWidth / 2, align: 'left' });
-      doc.text(formatCurrency(subtotal.toNumber()), summaryX + summaryWidth / 2, currentY, { width: summaryWidth / 2, align: 'right' });
+      doc.text(formatCurrency(subtotal.toNumber()), summaryX + summaryWidth / 2, currentY, {
+        width: summaryWidth / 2,
+        align: 'right',
+      });
       currentY += 16;
 
       doc.text('Tax:', summaryX, currentY, { width: summaryWidth / 2, align: 'left' });
-      doc.text(formatCurrency(taxAmount.toNumber()), summaryX + summaryWidth / 2, currentY, { width: summaryWidth / 2, align: 'right' });
+      doc.text(formatCurrency(taxAmount.toNumber()), summaryX + summaryWidth / 2, currentY, {
+        width: summaryWidth / 2,
+        align: 'right',
+      });
       currentY += 16;
 
       doc.fontSize(11).font('Helvetica-Bold');
       doc.text('Total:', summaryX, currentY, { width: summaryWidth / 2, align: 'left' });
-      doc.text(formatCurrency(totalAmount.toNumber()), summaryX + summaryWidth / 2, currentY, { width: summaryWidth / 2, align: 'right' });
+      doc.text(formatCurrency(totalAmount.toNumber()), summaryX + summaryWidth / 2, currentY, {
+        width: summaryWidth / 2,
+        align: 'right',
+      });
       currentY += 20;
 
       doc.fontSize(9).font('Helvetica');
       doc.text('Amount Paid:', summaryX, currentY, { width: summaryWidth / 2, align: 'left' });
-      doc.text(formatCurrency(amountPaid.toNumber()), summaryX + summaryWidth / 2, currentY, { width: summaryWidth / 2, align: 'right' });
+      doc.text(formatCurrency(amountPaid.toNumber()), summaryX + summaryWidth / 2, currentY, {
+        width: summaryWidth / 2,
+        align: 'right',
+      });
       currentY += 16;
 
       const balanceColor = balance.toNumber() > 0 ? colors.danger : colors.success;
       doc.fontSize(11).font('Helvetica-Bold').fillColor(balanceColor);
       doc.text('Balance Due:', summaryX, currentY, { width: summaryWidth / 2, align: 'left' });
-      doc.text(formatCurrency(balance.toNumber()), summaryX + summaryWidth / 2, currentY, { width: summaryWidth / 2, align: 'right' });
+      doc.text(formatCurrency(balance.toNumber()), summaryX + summaryWidth / 2, currentY, {
+        width: summaryWidth / 2,
+        align: 'right',
+      });
 
       currentY += 30;
 
       // Payment History section
       if (payments.length > 0) {
-        doc.fillColor(colors.primary).fontSize(11).font('Helvetica-Bold')
+        doc
+          .fillColor(colors.primary)
+          .fontSize(11)
+          .font('Helvetica-Bold')
           .text('PAYMENT HISTORY', margin, currentY);
 
         const paymentTableTop = currentY + 18;
 
         // Table header
-        doc.rect(margin, paymentTableTop, contentWidth, 25).fillAndStroke(colors.primary, colors.primary);
+        doc
+          .rect(margin, paymentTableTop, contentWidth, 25)
+          .fillAndStroke(colors.primary, colors.primary);
 
         const payColWidths = [
-          contentWidth * 0.20, // Receipt
-          contentWidth * 0.20, // Date
-          contentWidth * 0.20, // Method
-          contentWidth * 0.20, // Amount
-          contentWidth * 0.20, // Reference
+          contentWidth * 0.2, // Receipt
+          contentWidth * 0.2, // Date
+          contentWidth * 0.2, // Method
+          contentWidth * 0.2, // Amount
+          contentWidth * 0.2, // Reference
         ];
 
         let xPos = margin;
@@ -396,7 +505,9 @@ export const invoiceController = {
 
           // Alternating row colors
           if (index % 2 === 0) {
-            doc.rect(margin, currentY, contentWidth, rowHeight).fillAndStroke(colors.light, colors.border);
+            doc
+              .rect(margin, currentY, contentWidth, rowHeight)
+              .fillAndStroke(colors.light, colors.border);
           }
 
           xPos = margin;
@@ -439,21 +550,64 @@ export const invoiceController = {
         doc.text(invoice.notes, margin, currentY + 12, { width: contentWidth, lineGap: 2 });
       }
 
+      // Payment Accounts section (from settings)
+      const invoiceAccounts = Array.isArray(settings.paymentAccounts)
+        ? settings.paymentAccounts.filter(
+            (a: { isActive: boolean; showOnInvoice: boolean }) => a.isActive && a.showOnInvoice
+          )
+        : [];
+
+      if (invoiceAccounts.length > 0) {
+        // Check if we need a new page
+        if (currentY > doc.page.height - 150) {
+          doc.addPage();
+          currentY = 50;
+        } else {
+          currentY += 25;
+        }
+
+        doc
+          .fillColor(colors.primary)
+          .fontSize(11)
+          .font('Helvetica-Bold')
+          .text('PAYMENT DETAILS', margin, currentY);
+        currentY += 18;
+
+        doc
+          .roundedRect(margin, currentY, contentWidth, 15 + invoiceAccounts.length * 38, 5)
+          .fillAndStroke(colors.light, colors.border);
+
+        currentY += 10;
+        for (const acc of invoiceAccounts) {
+          doc
+            .fillColor(colors.dark)
+            .fontSize(9)
+            .font('Helvetica-Bold')
+            .text(`${acc.provider}`, margin + 10, currentY, { width: contentWidth - 20 });
+          doc
+            .fontSize(8)
+            .font('Helvetica')
+            .text(
+              `${acc.accountName}  |  ${acc.accountNumber}${acc.branchOrCode ? '  |  ' + acc.branchOrCode : ''}`,
+              margin + 10,
+              currentY + 13,
+              { width: contentWidth - 20 }
+            );
+          currentY += 38;
+        }
+      }
+
       // Footer - AT BOTTOM OF PAGE
       const footerY = doc.page.height - 60;
       doc.fontSize(7).fillColor(colors.dark).font('Helvetica');
-      doc.text(
-        'Thank you for your business!',
-        margin,
-        footerY,
-        { align: 'center', width: contentWidth }
-      );
-      doc.text(
-        `Generated on ${new Date().toLocaleString()}`,
-        margin,
-        footerY + 12,
-        { align: 'center', width: contentWidth }
-      );
+      doc.text('Thank you for your business!', margin, footerY, {
+        align: 'center',
+        width: contentWidth,
+      });
+      doc.text(`Generated on ${new Date().toLocaleString()}`, margin, footerY + 12, {
+        align: 'center',
+        width: contentWidth,
+      });
 
       doc.end();
     } catch (error: unknown) {

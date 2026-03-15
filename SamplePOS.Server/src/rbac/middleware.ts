@@ -72,7 +72,11 @@ export function attachRbacService(req: Request, res: Response, next: NextFunctio
   next();
 }
 
-export async function loadAuthorizationContext(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function loadAuthorizationContext(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   if (!req.user?.id) {
     next();
     return;
@@ -91,7 +95,9 @@ export async function loadAuthorizationContext(req: Request, res: Response, next
     next();
   } catch (error) {
     // If RBAC tables don't exist, skip gracefully rather than blocking all routes
-    logger.warn('Failed to load authorization context (RBAC tables may not exist yet)', { error: (error as Error).message });
+    logger.warn('Failed to load authorization context (RBAC tables may not exist yet)', {
+      error: (error as Error).message,
+    });
     next();
   }
 }
@@ -112,10 +118,33 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
   ADMIN: () => true, // ADMIN has all permissions
   MANAGER: (key) => {
     const module = key.split('.')[0];
-    return ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'accounting'].includes(module);
+    return [
+      'sales',
+      'inventory',
+      'purchasing',
+      'customers',
+      'suppliers',
+      'reports',
+      'pos',
+      'accounting',
+      'banking',
+      'delivery',
+      'settings',
+    ].includes(module);
   },
   CASHIER: (key) => {
-    return ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'customers.create', 'inventory.read', 'suppliers.read'].includes(key);
+    return [
+      'pos.read',
+      'pos.create',
+      'sales.read',
+      'sales.create',
+      'customers.read',
+      'customers.create',
+      'inventory.read',
+      'suppliers.read',
+      'delivery.read',
+      'settings.read',
+    ].includes(key);
   },
   STAFF: (key) => key.endsWith('.read'),
 };
@@ -155,7 +184,7 @@ export function requirePermission(permissionKey: string, options?: RequirePermis
       return;
     }
 
-    let scopeType: string | null = options?.scopeType || null;
+    const scopeType: string | null = options?.scopeType || null;
     let scopeId: string | null = null;
 
     if (options?.scopeIdParam && req.params[options.scopeIdParam]) {
@@ -182,7 +211,9 @@ export function requirePermission(permissionKey: string, options?: RequirePermis
       // RBAC denied — check if user has ANY RBAC roles assigned.
       // If they don't, fall back to legacy role checking (transition period).
       if (legacyRoleGrantsPermission(req.user.role, permissionKey)) {
-        logger.debug(`RBAC: no RBAC roles for user=${req.user.id}, legacy role ${req.user.role} grants ${permissionKey}`);
+        logger.debug(
+          `RBAC: no RBAC roles for user=${req.user.id}, legacy role ${req.user.role} grants ${permissionKey}`
+        );
         next();
         return;
       }
@@ -191,14 +222,18 @@ export function requirePermission(permissionKey: string, options?: RequirePermis
       const ipAddress = req.ip || req.socket.remoteAddress || null;
       const userAgent = req.headers['user-agent'] || null;
 
-      await service.logPermissionDenied(
-        req.user.id,
-        permissionKey,
-        ipAddress ?? undefined,
-        userAgent ?? undefined
-      ).catch(() => { }); // Don't fail the request if audit logging fails
+      await service
+        .logPermissionDenied(
+          req.user.id,
+          permissionKey,
+          ipAddress ?? undefined,
+          userAgent ?? undefined
+        )
+        .catch(() => {}); // Don't fail the request if audit logging fails
 
-      logger.debug(`RBAC DENIED: user=${req.user.id} permission=${permissionKey} role=${req.user.role}`);
+      logger.debug(
+        `RBAC DENIED: user=${req.user.id} permission=${permissionKey} role=${req.user.role}`
+      );
       res.status(403).json({
         success: false,
         error: 'Insufficient permissions',
@@ -236,7 +271,10 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
     const service = resolveRbacService(req);
     if (!service) {
       // Legacy fallback
-      if (permissionKeys.some(key => legacyRoleGrantsPermission(req.user!.role, key))) { next(); return; }
+      if (permissionKeys.some((key) => legacyRoleGrantsPermission(req.user!.role, key))) {
+        next();
+        return;
+      }
       res.status(403).json({
         success: false,
         error: 'Insufficient permissions',
@@ -245,7 +283,7 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
       return;
     }
 
-    let scopeType: string | null = options?.scopeType || null;
+    const scopeType: string | null = options?.scopeType || null;
     let scopeId: string | null = null;
 
     if (options?.scopeIdParam && req.params[options.scopeIdParam]) {
@@ -272,7 +310,7 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
       }
 
       // RBAC denied — legacy fallback for users without RBAC roles
-      if (permissionKeys.some(key => legacyRoleGrantsPermission(req.user!.role, key))) {
+      if (permissionKeys.some((key) => legacyRoleGrantsPermission(req.user!.role, key))) {
         next();
         return;
       }
@@ -280,12 +318,14 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
       const ipAddress = req.ip || req.socket.remoteAddress || null;
       const userAgent = req.headers['user-agent'] || null;
 
-      await service.logPermissionDenied(
-        req.user.id,
-        permissionKeys.join(','),
-        ipAddress ?? undefined,
-        userAgent ?? undefined
-      ).catch(() => { });
+      await service
+        .logPermissionDenied(
+          req.user.id,
+          permissionKeys.join(','),
+          ipAddress ?? undefined,
+          userAgent ?? undefined
+        )
+        .catch(() => {});
 
       res.status(403).json({
         success: false,
@@ -294,8 +334,12 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
       });
     } catch (error) {
       const errMsg = (error as Error).message || '';
-      if (errMsg.includes('does not exist') && permissionKeys.some(key => legacyRoleGrantsPermission(req.user!.role, key))) {
-        next(); return;
+      if (
+        errMsg.includes('does not exist') &&
+        permissionKeys.some((key) => legacyRoleGrantsPermission(req.user!.role, key))
+      ) {
+        next();
+        return;
       }
       res.status(500).json({
         success: false,
@@ -305,7 +349,10 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
   };
 }
 
-export function requireAllPermissions(permissionKeys: string[], options?: RequirePermissionOptions) {
+export function requireAllPermissions(
+  permissionKeys: string[],
+  options?: RequirePermissionOptions
+) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user?.id) {
       res.status(401).json({
@@ -318,7 +365,10 @@ export function requireAllPermissions(permissionKeys: string[], options?: Requir
     const service = resolveRbacService(req);
     if (!service) {
       // Legacy fallback - all permissions must be granted by legacy role
-      if (permissionKeys.every(key => legacyRoleGrantsPermission(req.user!.role, key))) { next(); return; }
+      if (permissionKeys.every((key) => legacyRoleGrantsPermission(req.user!.role, key))) {
+        next();
+        return;
+      }
       res.status(403).json({
         success: false,
         error: 'Insufficient permissions',
@@ -327,7 +377,7 @@ export function requireAllPermissions(permissionKeys: string[], options?: Requir
       return;
     }
 
-    let scopeType: string | null = options?.scopeType || null;
+    const scopeType: string | null = options?.scopeType || null;
     let scopeId: string | null = null;
 
     if (options?.scopeIdParam && req.params[options.scopeIdParam]) {
@@ -349,7 +399,7 @@ export function requireAllPermissions(permissionKeys: string[], options?: Requir
 
         if (!hasPermission) {
           // Legacy fallback — check if all perms granted by legacy role
-          if (permissionKeys.every(key => legacyRoleGrantsPermission(req.user!.role, key))) {
+          if (permissionKeys.every((key) => legacyRoleGrantsPermission(req.user!.role, key))) {
             next();
             return;
           }
@@ -357,12 +407,14 @@ export function requireAllPermissions(permissionKeys: string[], options?: Requir
           const ipAddress = req.ip || req.socket.remoteAddress || null;
           const userAgent = req.headers['user-agent'] || null;
 
-          await service.logPermissionDenied(
-            req.user.id,
-            permissionKey,
-            ipAddress ?? undefined,
-            userAgent ?? undefined
-          ).catch(() => { });
+          await service
+            .logPermissionDenied(
+              req.user.id,
+              permissionKey,
+              ipAddress ?? undefined,
+              userAgent ?? undefined
+            )
+            .catch(() => {});
 
           res.status(403).json({
             success: false,
@@ -376,8 +428,12 @@ export function requireAllPermissions(permissionKeys: string[], options?: Requir
       next();
     } catch (error) {
       const errMsg = (error as Error).message || '';
-      if (errMsg.includes('does not exist') && permissionKeys.every(key => legacyRoleGrantsPermission(req.user!.role, key))) {
-        next(); return;
+      if (
+        errMsg.includes('does not exist') &&
+        permissionKeys.every((key) => legacyRoleGrantsPermission(req.user!.role, key))
+      ) {
+        next();
+        return;
       }
       res.status(500).json({
         success: false,

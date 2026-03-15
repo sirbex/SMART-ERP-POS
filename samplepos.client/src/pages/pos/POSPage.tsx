@@ -173,6 +173,16 @@ interface InvoiceSettingsData {
   companyName?: string;
   companyAddress?: string | null;
   companyPhone?: string | null;
+  paymentAccounts?: Array<{
+    type: string;
+    provider: string;
+    accountName: string;
+    accountNumber: string;
+    branchOrCode?: string;
+    isActive: boolean;
+    showOnReceipt: boolean;
+    showOnInvoice: boolean;
+  }>;
 }
 
 /** Shape of deposit balance data from API */
@@ -272,7 +282,7 @@ export default function POSPage() {
   const [showUomModal, setShowUomModal] = useState(false);
   const [uomModalItemIndex, setUomModalItemIndex] = useState<number>(-1);
   const [selectedUomIndex, setSelectedUomIndex] = useState<number>(0);
-  const cartRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const cartRowRefs = useRef<(HTMLElement | null)[]>([]);
   const uomButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const productSearchRef = useRef<POSProductSearchHandle>(null);
   const isSubmittingRef = useRef(false); // Immediate duplicate check
@@ -315,6 +325,7 @@ export default function POSPage() {
     companyName?: string;
     companyAddress?: string | null;
     companyPhone?: string | null;
+    paymentAccounts?: InvoiceSettingsData['paymentAccounts'];
   } | null>(null);
 
   // Quote state
@@ -386,6 +397,7 @@ export default function POSPage() {
             companyName: settingsData.companyName,
             companyAddress: settingsData.companyAddress,
             companyPhone: settingsData.companyPhone,
+            paymentAccounts: settingsData.paymentAccounts,
           });
         }
       } catch (error) {
@@ -2248,6 +2260,9 @@ export default function POSPage() {
           companyName: invoiceSettings?.companyName,
           companyAddress: invoiceSettings?.companyAddress || undefined,
           companyPhone: invoiceSettings?.companyPhone || undefined,
+          paymentAccounts: invoiceSettings?.paymentAccounts
+            ?.filter(a => a.isActive && a.showOnReceipt)
+            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
         });
         setLastSale({
           id: offlineId,
@@ -2335,6 +2350,9 @@ export default function POSPage() {
           companyName: invoiceSettings?.companyName,
           companyAddress: invoiceSettings?.companyAddress || undefined,
           companyPhone: invoiceSettings?.companyPhone || undefined,
+          paymentAccounts: invoiceSettings?.paymentAccounts
+            ?.filter(a => a.isActive && a.showOnReceipt)
+            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
         });
 
         // Clear cart and payment lines
@@ -2619,10 +2637,10 @@ export default function POSPage() {
       )}
       {/* Offline Mode Banner */}
       {!isOnline && (
-        <div className="px-4 py-2 bg-amber-500 text-white text-sm font-medium flex items-center justify-between">
+        <div className="px-3 sm:px-4 py-2 bg-amber-500 text-white text-sm font-medium flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-0">
           <div className="flex items-center gap-2">
             <span className="text-lg">⚠️</span>
-            <span>Offline Mode — Cash sales only. Sales will sync when you're back online.</span>
+            <span className="text-xs sm:text-sm">Offline Mode — Cash sales only. Sales sync when online.</span>
           </div>
           <div className="flex items-center gap-3 text-xs">
             {pendingCount > 0 && (
@@ -2642,7 +2660,7 @@ export default function POSPage() {
         inert={showPaymentModal || showReceiptModal ? true : undefined}
       >
         {/* Left: Product search - Full width on mobile, 1/4 on desktop */}
-        <section className="w-full lg:w-1/4 lg:min-w-[280px] bg-white border-b lg:border-b-0 lg:border-r p-3 sm:p-4 flex flex-col max-h-[30vh] lg:max-h-none overflow-y-auto lg:overflow-y-visible">
+        <section className="w-full lg:w-1/4 lg:min-w-[280px] bg-white border-b lg:border-b-0 lg:border-r p-3 sm:p-4 flex flex-col relative z-20 shrink-0 lg:max-h-none lg:overflow-y-visible">
           <POSProductSearch
             ref={productSearchRef}
             onSelect={handleAddProduct}
@@ -2651,8 +2669,101 @@ export default function POSPage() {
         </section>
 
         {/* Center: Line items - Scrollable cart */}
-        <section className="flex-1 p-3 sm:p-4 overflow-x-auto overflow-y-auto">
-          <div className="min-w-[600px]">
+        <section className="flex-1 p-2 sm:p-4 overflow-y-auto">
+          {/* Mobile card layout */}
+          <div className="md:hidden">
+            {items.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 bg-white rounded shadow">
+                No items in cart
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {items.map((item, idx) => (
+                  <div
+                    key={`mobile-${item.id}-${item.selectedUomId}-${idx}`}
+                    ref={(el) => { cartRowRefs.current[idx] = el; }}
+                    className={`bg-white rounded-lg shadow-sm border p-3 ${idx === focusedCartIndex ? 'ring-2 ring-blue-400' : ''}`}
+                    onClick={() => setFocusedCartIndex(idx)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-sm text-gray-900 truncate">
+                          {item.name}
+                          {item.productType === 'service' && <ServiceBadge />}
+                        </div>
+                        <div className="text-xs text-gray-500">SKU: {item.sku}</div>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setItems((prev) => prev.filter((_, i) => i !== idx)); }}
+                        className="text-red-500 hover:text-red-700 text-lg leading-none shrink-0 p-1"
+                        aria-label={`Remove ${item.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      {item.availableUoms && item.availableUoms.length > 1 ? (
+                        <select
+                          value={item.selectedUomId || ''}
+                          onChange={(e) => handleUomChange(idx, e.target.value)}
+                          className="border rounded px-2 py-1 text-xs focus:ring-2 focus:ring-blue-500 max-w-[80px]"
+                          aria-label={`Unit of measure for ${item.name}`}
+                        >
+                          {item.availableUoms.map((u) => (
+                            <option key={u.uomId} value={u.uomId}>{u.symbol || u.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-gray-500">{item.uom}</span>
+                      )}
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={item.quantity}
+                        onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
+                        onFocus={() => setFocusedCartIndex(idx)}
+                        className="w-16 border rounded px-2 py-1 text-right text-sm focus:ring-2 focus:ring-blue-500"
+                        aria-label={`Quantity for ${item.name}`}
+                      />
+                      <span className="text-xs text-gray-500">× {formatCurrency(item.unitPrice)}</span>
+                      <span className="ml-auto font-semibold text-sm">
+                        {formatCurrency(item.subtotal)}
+                      </span>
+                    </div>
+                    {item.discount && (
+                      <div className="flex items-center justify-between mt-1 text-xs">
+                        <span className="text-red-500">Discount: -{formatCurrency(item.discount.amount)}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRemoveDiscount('item', idx); }}
+                          className="text-red-500 hover:text-red-700 text-xs underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mt-1">
+                      <span className={`text-xs ${item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600'}`}>
+                        Margin: {item.marginPct.toFixed(1)}%
+                      </span>
+                      {!item.discount && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenDiscountDialog('item', idx); }}
+                          className="text-amber-600 hover:text-amber-800 text-xs px-1.5 py-0.5 rounded border border-amber-200"
+                          aria-label={`Add discount to ${item.name}`}
+                        >
+                          % Discount
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Desktop table layout */}
+          <div className="hidden md:block">
             <table className="w-full text-xs sm:text-sm border rounded shadow bg-white">
               <thead className="bg-gray-100">
                 <tr>
@@ -2876,40 +2987,40 @@ export default function POSPage() {
           </button>
 
           {/* Quick Actions — 2×2 colored grid */}
-          <div className="grid grid-cols-2 gap-2.5 mb-3">
+          <div className="grid grid-cols-4 sm:grid-cols-2 gap-1.5 sm:gap-2.5 mb-3">
             {/* Discount */}
             <button
               onClick={() => handleOpenDiscountDialog('cart')}
               disabled={items.length === 0}
-              className="flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-amber-50 to-amber-100 border border-amber-200 text-amber-800 text-sm font-semibold hover:from-amber-100 hover:to-amber-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-amber-50 to-amber-100 border border-amber-200 text-amber-800 text-xs sm:text-sm font-semibold hover:from-amber-100 hover:to-amber-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
               title="Apply Discount (Ctrl+D)"
             >
               <span className="text-lg">🏷️</span>
               <span>Discount</span>
-              <span className="text-[9px] font-normal text-amber-500">Ctrl+D</span>
+              <span className="hidden sm:block text-[9px] font-normal text-amber-500">Ctrl+D</span>
             </button>
 
             {/* Service Item */}
             <button
               onClick={() => setShowServiceItemDialog(true)}
-              className="flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-violet-50 to-violet-100 border border-violet-200 text-violet-800 text-sm font-semibold hover:from-violet-100 hover:to-violet-200 active:scale-[0.97] transition-all shadow-sm"
+              className="flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-violet-50 to-violet-100 border border-violet-200 text-violet-800 text-xs sm:text-sm font-semibold hover:from-violet-100 hover:to-violet-200 active:scale-[0.97] transition-all shadow-sm"
               title="Add Service / Non-Inventory Item (Ctrl+J)"
             >
               <span className="text-lg">🛠️</span>
               <span>Service</span>
-              <span className="text-[9px] font-normal text-violet-500">Ctrl+J</span>
+              <span className="hidden sm:block text-[9px] font-normal text-violet-500">Ctrl+J</span>
             </button>
 
             {/* Hold / Retrieve */}
             <button
               onClick={handleHoldRetrieveToggle}
               disabled={items.length === 0 && heldOrdersCount === 0}
-              className="relative flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-orange-50 to-orange-100 border border-orange-200 text-orange-800 text-sm font-semibold hover:from-orange-100 hover:to-orange-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-orange-50 to-orange-100 border border-orange-200 text-orange-800 text-xs sm:text-sm font-semibold hover:from-orange-100 hover:to-orange-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
               title={items.length > 0 ? 'Hold Cart (Ctrl+H)' : `Retrieve Holds (Ctrl+H)`}
             >
               <span className="text-lg">{items.length > 0 ? '💾' : '📦'}</span>
               <span>{items.length > 0 ? 'Hold' : 'Retrieve'}</span>
-              <span className="text-[9px] font-normal text-orange-500">Ctrl+H</span>
+              <span className="hidden sm:block text-[9px] font-normal text-orange-500">Ctrl+H</span>
               {heldOrdersCount > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-orange-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
                   {heldOrdersCount}
@@ -2921,12 +3032,12 @@ export default function POSPage() {
             <button
               onClick={handleQuoteToggle}
               disabled={items.length === 0 && quotesCount === 0}
-              className="relative flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-xl bg-gradient-to-b from-sky-50 to-sky-100 border border-sky-200 text-sky-800 text-sm font-semibold hover:from-sky-100 hover:to-sky-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-sky-50 to-sky-100 border border-sky-200 text-sky-800 text-xs sm:text-sm font-semibold hover:from-sky-100 hover:to-sky-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
               title={items.length > 0 ? 'Save Quote (Ctrl+Q)' : 'Load Quote (Ctrl+Q)'}
             >
               <span className="text-lg">{items.length > 0 ? '📝' : '📋'}</span>
               <span>{items.length > 0 ? 'Quote' : 'Load Quote'}</span>
-              <span className="text-[9px] font-normal text-sky-500">Ctrl+Q</span>
+              <span className="hidden sm:block text-[9px] font-normal text-sky-500">Ctrl+Q</span>
               {quotesCount > 0 && items.length === 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-sky-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
                   {quotesCount}

@@ -1,6 +1,30 @@
-export type PermissionModule = 'sales' | 'inventory' | 'accounting' | 'admin' | 'pos' | 'purchasing' | 'customers' | 'suppliers' | 'reports' | 'system';
+export type PermissionModule =
+  | 'sales'
+  | 'inventory'
+  | 'accounting'
+  | 'admin'
+  | 'pos'
+  | 'purchasing'
+  | 'customers'
+  | 'suppliers'
+  | 'reports'
+  | 'system'
+  | 'banking'
+  | 'delivery'
+  | 'settings';
 
-export type PermissionAction = 'read' | 'create' | 'update' | 'delete' | 'post' | 'approve' | 'void' | 'export' | 'import';
+export type PermissionAction =
+  | 'read'
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'post'
+  | 'approve'
+  | 'void'
+  | 'export'
+  | 'import'
+  | 'reconcile'
+  | 'manage';
 
 export interface Permission {
   key: string;

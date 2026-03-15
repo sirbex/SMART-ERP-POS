@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS invoice_settings (
   show_tax_breakdown BOOLEAN DEFAULT true,
   show_payment_instructions BOOLEAN DEFAULT true,
   
+  -- Payment Accounts (bank, mobile money, etc.)
+  payment_accounts JSONB NOT NULL DEFAULT '[]'::jsonb,
+
   -- Payment Instructions
   payment_instructions TEXT,
   

@@ -1,6 +1,11 @@
 import type { Permission, PermissionModule, PermissionAction } from './types.js';
 
-function p(key: string, module: PermissionModule, action: PermissionAction, description: string): Permission {
+function p(
+  key: string,
+  module: PermissionModule,
+  action: PermissionAction,
+  description: string
+): Permission {
   return { key, module, action, description };
 }
 
@@ -49,7 +54,12 @@ export const PERMISSIONS: Record<string, Permission> = {
   ACCOUNTING_UPDATE: p('accounting.update', 'accounting', 'update', 'Modify accounting records'),
   ACCOUNTING_DELETE: p('accounting.delete', 'accounting', 'delete', 'Delete accounting records'),
   ACCOUNTING_POST: p('accounting.post', 'accounting', 'post', 'Post journal entries'),
-  ACCOUNTING_APPROVE: p('accounting.approve', 'accounting', 'approve', 'Approve accounting transactions'),
+  ACCOUNTING_APPROVE: p(
+    'accounting.approve',
+    'accounting',
+    'approve',
+    'Approve accounting transactions'
+  ),
   ACCOUNTING_VOID: p('accounting.void', 'accounting', 'void', 'Void posted entries'),
   ACCOUNTING_EXPORT: p('accounting.export', 'accounting', 'export', 'Export accounting data'),
 
@@ -73,21 +83,58 @@ export const PERMISSIONS: Record<string, Permission> = {
   SYSTEM_ROLES_CREATE: p('system.roles_create', 'system', 'create', 'Create roles'),
   SYSTEM_ROLES_UPDATE: p('system.roles_update', 'system', 'update', 'Modify roles'),
   SYSTEM_ROLES_DELETE: p('system.roles_delete', 'system', 'delete', 'Delete roles'),
-  SYSTEM_PERMISSIONS_READ: p('system.permissions_read', 'system', 'read', 'View permissions catalog'),
+  SYSTEM_PERMISSIONS_READ: p(
+    'system.permissions_read',
+    'system',
+    'read',
+    'View permissions catalog'
+  ),
+
+  // Banking Module
+  BANKING_READ: p('banking.read', 'banking', 'read', 'View bank accounts and transactions'),
+  BANKING_CREATE: p('banking.create', 'banking', 'create', 'Create bank accounts and transactions'),
+  BANKING_UPDATE: p('banking.update', 'banking', 'update', 'Modify bank accounts and transactions'),
+  BANKING_DELETE: p('banking.delete', 'banking', 'delete', 'Delete bank transactions'),
+  BANKING_RECONCILE: p('banking.reconcile', 'banking', 'reconcile', 'Reconcile bank statements'),
+  BANKING_IMPORT: p('banking.import', 'banking', 'import', 'Import bank statements'),
+  BANKING_EXPORT: p('banking.export', 'banking', 'export', 'Export banking data'),
+
+  // Delivery Module
+  DELIVERY_READ: p('delivery.read', 'delivery', 'read', 'View delivery orders and routes'),
+  DELIVERY_CREATE: p('delivery.create', 'delivery', 'create', 'Create delivery orders'),
+  DELIVERY_UPDATE: p(
+    'delivery.update',
+    'delivery',
+    'update',
+    'Update delivery status and assign drivers'
+  ),
+  DELIVERY_DELETE: p('delivery.delete', 'delivery', 'delete', 'Delete delivery orders'),
+
+  // Settings Module
+  SETTINGS_READ: p('settings.read', 'settings', 'read', 'View application settings'),
+  SETTINGS_UPDATE: p('settings.update', 'settings', 'update', 'Modify application settings'),
+
+  // Inventory extended
+  INVENTORY_STOCKCOUNT: p(
+    'inventory.manage',
+    'inventory',
+    'manage',
+    'Manage physical stock counts'
+  ),
 } as const;
 
-export const PERMISSION_KEYS = Object.values(PERMISSIONS).map(p => p.key);
+export const PERMISSION_KEYS = Object.values(PERMISSIONS).map((p) => p.key);
 
 export function isValidPermissionKey(key: string): boolean {
   return PERMISSION_KEYS.includes(key);
 }
 
 export function getPermission(key: string): Permission | undefined {
-  return Object.values(PERMISSIONS).find(p => p.key === key);
+  return Object.values(PERMISSIONS).find((p) => p.key === key);
 }
 
 export function getPermissionsByModule(module: PermissionModule): Permission[] {
-  return Object.values(PERMISSIONS).filter(p => p.module === module);
+  return Object.values(PERMISSIONS).filter((p) => p.module === module);
 }
 
 export function getAllPermissions(): Permission[] {
