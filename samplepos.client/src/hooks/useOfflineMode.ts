@@ -325,7 +325,7 @@ export function useOfflineMode() {
     setSyncQueue((prev) =>
       prev.map((s) =>
         s.idempotencyKey === idempotencyKey &&
-        (s.status === 'FAILED' || s.status === 'REQUIRES_REVIEW')
+          (s.status === 'FAILED' || s.status === 'REQUIRES_REVIEW')
           ? { ...s, status: 'PENDING_SYNC' as const, syncError: undefined }
           : s
       )

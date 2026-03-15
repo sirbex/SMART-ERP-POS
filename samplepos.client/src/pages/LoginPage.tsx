@@ -21,29 +21,76 @@ interface LoginResponseData {
 }
 
 // ── Offline Login Utilities ──────────────────────────────────────
-const OFFLINE_CREDENTIAL_KEY = 'offline_login_credential';
+const OFFLINE_CREDENTIALS_KEY = 'offline_login_credentials';
+const MAX_OFFLINE_USERS = 10;
 
-async function hashCredential(email: string, password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(`${email.toLowerCase().trim()}:${password}`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+interface OfflineCachedUser {
+  email: string; // lowercase for matching
+  hash: string; // PBKDF2-derived key (hex)
+  salt: string; // per-user random salt (hex)
+  user: { id: string; email: string; fullName: string; role: UserRole };
+  cachedAt: number; // timestamp — evict oldest when over limit
 }
 
-/** Cache credential hash + user data after a successful online login */
+/** Derive a key using PBKDF2-SHA256 with 100k iterations */
+async function deriveKey(password: string, saltHex: string): Promise<string> {
+  const enc = new TextEncoder();
+  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' }, keyMaterial, 256);
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function randomSalt(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Cache credential for offline login — supports up to MAX_OFFLINE_USERS */
 export async function cacheLoginCredential(email: string, password: string, user: { id: string; email: string; fullName: string; role: UserRole }) {
-  const hash = await hashCredential(email, password);
-  localStorage.setItem(OFFLINE_CREDENTIAL_KEY, JSON.stringify({ hash, user }));
+  const normalEmail = email.toLowerCase().trim();
+  const salt = randomSalt();
+  const hash = await deriveKey(password, salt);
+
+  let credentials: OfflineCachedUser[] = [];
+  try {
+    credentials = JSON.parse(localStorage.getItem(OFFLINE_CREDENTIALS_KEY) || '[]');
+  } catch { /* corrupted — start fresh */ }
+
+  // Remove existing entry for this user (update it)
+  credentials = credentials.filter(c => c.email !== normalEmail);
+
+  // Add new entry
+  credentials.push({ email: normalEmail, hash, salt, user, cachedAt: Date.now() });
+
+  // Evict oldest if over limit
+  if (credentials.length > MAX_OFFLINE_USERS) {
+    credentials.sort((a, b) => b.cachedAt - a.cachedAt);
+    credentials = credentials.slice(0, MAX_OFFLINE_USERS);
+  }
+
+  localStorage.setItem(OFFLINE_CREDENTIALS_KEY, JSON.stringify(credentials));
 }
 
-/** Validate offline login against cached credential */
+/** Validate offline login against cached credentials (multi-user) */
 async function validateOfflineLogin(email: string, password: string): Promise<{ id: string; email: string; fullName: string; role: UserRole } | null> {
-  const cached = localStorage.getItem(OFFLINE_CREDENTIAL_KEY);
-  if (!cached) return null;
-  const { hash, user } = JSON.parse(cached);
-  const inputHash = await hashCredential(email, password);
-  return inputHash === hash ? user : null;
+  const normalEmail = email.toLowerCase().trim();
+  let credentials: OfflineCachedUser[] = [];
+  try {
+    credentials = JSON.parse(localStorage.getItem(OFFLINE_CREDENTIALS_KEY) || '[]');
+  } catch { return null; }
+
+  const entry = credentials.find(c => c.email === normalEmail);
+  if (!entry) return null;
+
+  const inputHash = await deriveKey(password, entry.salt);
+  return inputHash === entry.hash ? entry.user : null;
+}
+
+/** Generate a distinct offline session token */
+function generateOfflineToken(): string {
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `offline-session-${Date.now()}-${id}`;
 }
 
 export default function LoginPage() {
@@ -96,7 +143,7 @@ export default function LoginPage() {
         try {
           const offlineUser = await validateOfflineLogin(email, password);
           if (offlineUser) {
-            const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
+            const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             login(offlineUser, existingToken);
             navigate(from, { replace: true });
             return;
@@ -163,7 +210,7 @@ export default function LoginPage() {
         try {
           const offlineUser = await validateOfflineLogin(email, password);
           if (offlineUser) {
-            const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
+            const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             login(offlineUser, existingToken);
             navigate(from, { replace: true });
             return;
@@ -210,7 +257,7 @@ export default function LoginPage() {
     login(authUser, token, data.refreshToken, data.expiresIn);
     // Cache for offline login (email/password are still in component state)
     if (email && password) {
-      cacheLoginCredential(email, password, authUser).catch(() => {});
+      cacheLoginCredential(email, password, authUser).catch(() => { });
     }
     navigate(from, { replace: true });
   };
