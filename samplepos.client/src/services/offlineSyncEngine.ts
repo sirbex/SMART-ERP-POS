@@ -200,7 +200,33 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
             } catch (err: unknown) {
                 const axErr = err as AxiosError;
                 if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) break;
-                remaining.push(cust);
+
+                const status = axErr.response?.status;
+                const errMsg = (axErr.response?.data as Record<string, unknown>)?.error;
+                const isDuplicate = status === 409 ||
+                    (typeof errMsg === 'string' && (errMsg.includes('already exists') || errMsg.includes('duplicate')));
+
+                if (isDuplicate) {
+                    // Customer already on server — extract ID from error or search by name
+                    const idMatch = typeof errMsg === 'string' && errMsg.match(/id:\s*([0-9a-f-]{36})/);
+                    if (idMatch) {
+                        idMap.set(cust.id, idMatch[1]);
+                    } else {
+                        // Search by name to get the real ID
+                        try {
+                            const searchResp = await apiClient.get('customers/search', { params: { q: cust.name, limit: 1 } });
+                            const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
+                            if (found?.id) {
+                                idMap.set(cust.id, found.id);
+                            }
+                        } catch {
+                            // Search failed — still remove from queue to stop the loop
+                        }
+                    }
+                    // Don't re-queue — customer exists on server
+                } else {
+                    remaining.push(cust);
+                }
             }
         }
 

@@ -5,6 +5,7 @@ import * as customerRepository from './customerRepository.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
+import { ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 
 /**
@@ -129,10 +130,25 @@ export async function createCustomer(data: CreateCustomer): Promise<Customer> {
     creditLimit: data.creditLimit ? new Decimal(data.creditLimit).toNumber() : data.creditLimit,
   };
 
-  const customer = await customerRepository.createCustomer(customerData);
-  logger.info('Customer created successfully', { customerId: customer.id });
-
-  return customer;
+  try {
+    const customer = await customerRepository.createCustomer(customerData);
+    logger.info('Customer created successfully', { customerId: customer.id });
+    return customer;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // PG unique constraint violation → friendly 409 with existing customer ID
+    if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
+      // Try to find the existing customer so we can return their ID
+      const existing = data.email
+        ? await customerRepository.findCustomerByEmail(data.email)
+        : (await customerRepository.searchCustomers(data.name, 1))[0] ?? null;
+      const existingId = existing?.id ?? '';
+      throw new ConflictError(
+        `Customer already exists${existingId ? ` (id: ${existingId})` : ''}`
+      );
+    }
+    throw err;
+  }
 }
 
 export async function updateCustomer(id: string, data: UpdateCustomer): Promise<Customer> {
