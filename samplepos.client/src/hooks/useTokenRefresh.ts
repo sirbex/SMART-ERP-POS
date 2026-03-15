@@ -130,6 +130,15 @@ export function setupAxiosInterceptors() {
 
             // Check if token needs refresh
             if (isTokenExpired() && getRefreshToken()) {
+                // Skip refresh when offline — use existing token (server won't see it anyway)
+                if (!navigator.onLine) {
+                    const token = getAccessToken();
+                    if (token) {
+                        config.headers.Authorization = `Bearer ${token}`;
+                    }
+                    return config;
+                }
+
                 if (!isRefreshing) {
                     isRefreshing = true;
                     refreshPromise = refreshAccessToken()
@@ -142,9 +151,11 @@ export function setupAxiosInterceptors() {
                 try {
                     await refreshPromise;
                 } catch (error) {
-                    // If refresh fails, clear tokens and redirect to login
-                    clearTokens();
-                    window.location.href = '/login';
+                    // Only force logout if we're online — network errors while offline should not clear tokens
+                    if (navigator.onLine) {
+                        clearTokens();
+                        window.location.href = '/login';
+                    }
                     throw error;
                 }
             }
@@ -168,6 +179,11 @@ export function setupAxiosInterceptors() {
 
             // If 401 and not already retried, try to refresh
             if (error.response?.status === 401 && !originalRequest._retry) {
+                // Don't attempt refresh or force logout when offline
+                if (!navigator.onLine) {
+                    return Promise.reject(error);
+                }
+
                 originalRequest._retry = true;
 
                 const refreshToken = getRefreshToken();
@@ -182,9 +198,11 @@ export function setupAxiosInterceptors() {
                         }
                         return axios(originalRequest);
                     } catch (refreshError) {
-                        // Refresh failed - clear tokens and redirect
-                        clearTokens();
-                        window.location.href = '/login';
+                        // Only force logout if online
+                        if (navigator.onLine) {
+                            clearTokens();
+                            window.location.href = '/login';
+                        }
                         return Promise.reject(refreshError);
                     }
                 }

@@ -118,6 +118,11 @@ apiClient.interceptors.response.use(
 
     // Handle specific error cases
     if (error.response?.status === 401) {
+      // Don't clear tokens or redirect when offline — the 401 is expected
+      if (!navigator.onLine) {
+        return Promise.reject(error);
+      }
+
       // Unauthorized - clear token and redirect to login
       // Only redirect if we actually have auth data (prevents loops on initial page load)
       const hasAuthData = localStorage.getItem('auth_token') || localStorage.getItem('user');

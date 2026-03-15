@@ -31,6 +31,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  // Track online/offline state for idle timeout
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
 
   useEffect(() => {
     // Initialize authentication state from localStorage
@@ -127,7 +137,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Could integrate with a toast/notification system
       console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
     },
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && isOnline, // Don't idle-logout when offline
   });
 
   return (

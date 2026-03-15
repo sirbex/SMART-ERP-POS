@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../utils/api';
 import { TwoFactorVerifyModal } from '../components/auth/TwoFactorVerifyModal';
 import type { UserRole } from '../types';
-import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store } from 'lucide-react';
+import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff } from 'lucide-react';
 
 /** Shape returned by POST /auth/login inside `data.data` */
 interface LoginResponseData {
@@ -20,6 +20,32 @@ interface LoginResponseData {
   expiresIn?: number;
 }
 
+// ── Offline Login Utilities ──────────────────────────────────────
+const OFFLINE_CREDENTIAL_KEY = 'offline_login_credential';
+
+async function hashCredential(email: string, password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`${email.toLowerCase().trim()}:${password}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Cache credential hash + user data after a successful online login */
+export async function cacheLoginCredential(email: string, password: string, user: { id: string; email: string; fullName: string; role: UserRole }) {
+  const hash = await hashCredential(email, password);
+  localStorage.setItem(OFFLINE_CREDENTIAL_KEY, JSON.stringify({ hash, user }));
+}
+
+/** Validate offline login against cached credential */
+async function validateOfflineLogin(email: string, password: string): Promise<{ id: string; email: string; fullName: string; role: UserRole } | null> {
+  const cached = localStorage.getItem(OFFLINE_CREDENTIAL_KEY);
+  if (!cached) return null;
+  const { hash, user } = JSON.parse(cached);
+  const inputHash = await hashCredential(email, password);
+  return inputHash === hash ? user : null;
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,9 +54,18 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [requires2FA, setRequires2FA] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
 
   // Where to go after login — honours ProtectedRoute's "from" state
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
@@ -56,6 +91,20 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Offline login: validate against cached credentials
+      if (!navigator.onLine) {
+        const offlineUser = await validateOfflineLogin(email, password);
+        if (offlineUser) {
+          // Use the existing token if still in localStorage, or create a placeholder
+          const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
+          login(offlineUser, existingToken);
+          navigate(from, { replace: true });
+          return;
+        }
+        setError('Offline login failed. You must have logged in online at least once with these credentials.');
+        return;
+      }
+
       const response = await api.auth.login({ email, password });
 
       if (response.data.success && response.data.data) {
@@ -79,6 +128,8 @@ export default function LoginPage() {
         if (loginData.requires2FASetup) {
           const { user, token, accessToken, refreshToken, expiresIn } = loginData;
           login(user, accessToken || token, refreshToken, expiresIn);
+          // Cache for offline login
+          await cacheLoginCredential(email, password, user);
           navigate('/settings/security', {
             state: { message: '2FA setup is required for your role. Please set it up now.' }
           });
@@ -87,11 +138,23 @@ export default function LoginPage() {
 
         const { user, token, accessToken, refreshToken, expiresIn } = loginData;
         login(user, accessToken || token, refreshToken, expiresIn);
+        // Cache for offline login
+        await cacheLoginCredential(email, password, user);
         navigate(from, { replace: true });
       } else {
         setError(response.data.error || 'Login failed');
       }
     } catch (err: unknown) {
+      // If network error and we have cached credentials, try offline login
+      if (!navigator.onLine || (err instanceof Error && 'code' in err && (err as { code?: string }).code === 'ERR_NETWORK')) {
+        const offlineUser = await validateOfflineLogin(email, password);
+        if (offlineUser) {
+          const existingToken = localStorage.getItem('auth_token') || 'offline-session-token';
+          login(offlineUser, existingToken);
+          navigate(from, { replace: true });
+          return;
+        }
+      }
       if (err instanceof Error && 'response' in err) {
         const axiosErr = err as { response?: { data?: { error?: string } } };
         setError(axiosErr.response?.data?.error || 'Login failed. Please try again.');
@@ -173,6 +236,14 @@ export default function LoginPage() {
             <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <span>Your session expired due to inactivity. Please sign in again.</span>
+            </div>
+          )}
+
+          {/* Offline mode banner */}
+          {!isOnline && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg bg-orange-50 border border-orange-200 px-4 py-3 text-sm text-orange-800">
+              <WifiOff className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>You are offline. Sign in with your last used credentials to continue working.</span>
             </div>
           )}
 
