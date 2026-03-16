@@ -723,7 +723,10 @@ export const salesService = {
       // but sale_items don't exist yet at that point (race condition). This UPDATE
       // re-fires the trigger now that items are present, enabling correct GL posting.
       // The trigger has idempotency protection so it won't double-post.
-      await client.query('UPDATE sales SET updated_at = NOW() WHERE id = $1', [sale.id]);
+      await client.query(
+        "UPDATE sales SET notes = COALESCE(notes, '') WHERE id = $1",
+        [sale.id],
+      );
 
       // Deduct from cost layers AND inventory batches for each item
       for (const item of input.items) {
