@@ -48,6 +48,12 @@ async function proxyToAccountingAPI(req: express.Request, res: express.Response,
 
     if (axiosErr?.response) {
       res.status(axiosErr.response.status).json(axiosErr.response.data);
+    } else if (axiosErr?.code === 'ECONNREFUSED' || axiosErr?.code === 'ECONNABORTED') {
+      res.status(503).json({
+        success: false,
+        error:
+          'Accounting service is currently unavailable. The comprehensive accounting module requires the C# API to be running.',
+      });
     } else {
       res.status(500).json({
         success: false,

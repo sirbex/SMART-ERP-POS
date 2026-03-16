@@ -250,6 +250,88 @@ router.post(
   })
 );
 
+/**
+ * PUT /api/accounting/chart-of-accounts/:id
+ * Update an existing account
+ */
+const UpdateAccountSchema = z.object({
+  accountNumber: z.string().min(1).optional(),
+  accountName: z.string().min(1).optional(),
+  accountType: z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE']).optional(),
+  normalBalance: z.enum(['DEBIT', 'CREDIT']).optional(),
+  parentAccountId: z.string().uuid().optional().nullable(),
+  isPostingAccount: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  description: z.string().optional(),
+});
+
+router.put(
+  '/chart-of-accounts/:id',
+  requirePermission('accounting.update'),
+  asyncHandler(async (req, res) => {
+    const { id } = AccountIdParamSchema.parse(req.params);
+    const data = UpdateAccountSchema.parse(req.body);
+
+    const existing = await accountingRepository.getAccountById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Account not found' });
+    }
+
+    const updated = await accountingRepository.updateAccount(id, {
+      accountCode: data.accountNumber,
+      accountName: data.accountName,
+      accountType: data.accountType,
+      normalBalance: data.normalBalance,
+      parentAccountId: data.parentAccountId,
+      isPostingAccount: data.isPostingAccount,
+      isActive: data.isActive,
+    });
+
+    res.json({
+      success: true,
+      data: updated
+        ? {
+            id: updated.id,
+            accountNumber: updated.accountCode,
+            accountName: updated.accountName,
+            accountType: updated.accountType,
+            normalBalance: updated.normalBalance,
+            parentAccountId: updated.parentAccountId,
+            isPostingAccount: updated.isPostingAccount,
+            isActive: updated.isActive,
+          }
+        : null,
+    });
+  })
+);
+
+/**
+ * DELETE /api/accounting/chart-of-accounts/:id
+ * Delete (or deactivate) an account
+ */
+router.delete(
+  '/chart-of-accounts/:id',
+  requirePermission('accounting.delete'),
+  asyncHandler(async (req, res) => {
+    const { id } = AccountIdParamSchema.parse(req.params);
+
+    const existing = await accountingRepository.getAccountById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Account not found' });
+    }
+
+    const deleted = await accountingRepository.deleteAccount(id);
+    if (!deleted) {
+      return res.status(500).json({ success: false, error: 'Failed to delete account' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Account deleted successfully',
+    });
+  })
+);
+
 // =============================================================================
 // GENERAL LEDGER
 // =============================================================================

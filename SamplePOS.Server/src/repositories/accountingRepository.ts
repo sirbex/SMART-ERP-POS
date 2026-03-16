@@ -1,13 +1,13 @@
 /**
  * Accounting Repository
- * 
+ *
  * Provides database access for accounting data including:
  * - Chart of Accounts
  * - Journal Entries
  * - General Ledger
  * - Trial Balance calculations
  * - Financial Statement aggregations
- * 
+ *
  * ACCOUNTING PRINCIPLES:
  * - Double-entry bookkeeping: Every transaction has equal debits and credits
  * - Normal balances: Assets/Expenses = DEBIT, Liabilities/Equity/Revenue = CREDIT
@@ -36,7 +36,7 @@ export interface Account {
   level: number;
   isPostingAccount: boolean;
   isActive: boolean;
-  currentBalance?: string | number;  // Optional: returned from DB as string for precision
+  currentBalance?: string | number; // Optional: returned from DB as string for precision
 }
 
 export interface JournalEntry {
@@ -133,7 +133,10 @@ export interface LedgerFilters {
 /**
  * Get all accounts with optional filtering
  */
-export async function getAccounts(filters: AccountFilters = {}, dbPool?: pg.Pool): Promise<Account[]> {
+export async function getAccounts(
+  filters: AccountFilters = {},
+  dbPool?: pg.Pool
+): Promise<Account[]> {
   const pool = dbPool || globalPool;
   try {
     let query = `
@@ -196,7 +199,8 @@ export async function getAccounts(filters: AccountFilters = {}, dbPool?: pg.Pool
 export async function getAccountById(id: string, dbPool?: pg.Pool): Promise<Account | null> {
   const pool = dbPool || globalPool;
   try {
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       SELECT 
         "Id" as id,
         "AccountCode" as "accountCode",
@@ -209,7 +213,9 @@ export async function getAccountById(id: string, dbPool?: pg.Pool): Promise<Acco
         "IsActive" as "isActive"
       FROM accounts
       WHERE "Id" = $1
-    `, [id]);
+    `,
+      [id]
+    );
 
     return result.rows[0] || null;
   } catch (error) {
@@ -224,7 +230,8 @@ export async function getAccountById(id: string, dbPool?: pg.Pool): Promise<Acco
 export async function getAccountByCode(code: string, dbPool?: pg.Pool): Promise<Account | null> {
   const pool = dbPool || globalPool;
   try {
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       SELECT 
         "Id" as id,
         "AccountCode" as "accountCode",
@@ -237,7 +244,9 @@ export async function getAccountByCode(code: string, dbPool?: pg.Pool): Promise<
         "IsActive" as "isActive"
       FROM accounts
       WHERE "AccountCode" = $1
-    `, [code]);
+    `,
+      [code]
+    );
 
     return result.rows[0] || null;
   } catch (error) {
@@ -253,7 +262,8 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
   const pool = dbPool || globalPool;
   try {
     const id = uuidv4();
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       INSERT INTO accounts (
         "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
         "ParentAccountId", "Level", "IsPostingAccount", "IsActive"
@@ -268,21 +278,149 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
         "IsActive" as "isActive"
-    `, [
-      id,
-      data.accountCode,
-      data.accountName,
-      data.accountType,
-      data.normalBalance,
-      data.parentAccountId,
-      data.level,
-      data.isPostingAccount,
-      data.isActive
-    ]);
+    `,
+      [
+        id,
+        data.accountCode,
+        data.accountName,
+        data.accountType,
+        data.normalBalance,
+        data.parentAccountId,
+        data.level,
+        data.isPostingAccount,
+        data.isActive,
+      ]
+    );
 
     return result.rows[0];
   } catch (error) {
     logger.error('Error creating account', { error, data });
+    throw error;
+  }
+}
+
+/**
+ * Update an existing account
+ */
+export async function updateAccount(
+  id: string,
+  data: Partial<
+    Pick<
+      Account,
+      | 'accountCode'
+      | 'accountName'
+      | 'accountType'
+      | 'normalBalance'
+      | 'parentAccountId'
+      | 'isPostingAccount'
+      | 'isActive'
+    >
+  >,
+  dbPool?: pg.Pool
+): Promise<Account | null> {
+  const pool = dbPool || globalPool;
+  try {
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (data.accountCode !== undefined) {
+      setClauses.push(`"AccountCode" = $${paramIndex++}`);
+      params.push(data.accountCode);
+    }
+    if (data.accountName !== undefined) {
+      setClauses.push(`"AccountName" = $${paramIndex++}`);
+      params.push(data.accountName);
+    }
+    if (data.accountType !== undefined) {
+      setClauses.push(`"AccountType" = $${paramIndex++}`);
+      params.push(data.accountType);
+    }
+    if (data.normalBalance !== undefined) {
+      setClauses.push(`"NormalBalance" = $${paramIndex++}`);
+      params.push(data.normalBalance);
+    }
+    if (data.parentAccountId !== undefined) {
+      setClauses.push(`"ParentAccountId" = $${paramIndex++}`);
+      params.push(data.parentAccountId);
+    }
+    if (data.isPostingAccount !== undefined) {
+      setClauses.push(`"IsPostingAccount" = $${paramIndex++}`);
+      params.push(data.isPostingAccount);
+    }
+    if (data.isActive !== undefined) {
+      setClauses.push(`"IsActive" = $${paramIndex++}`);
+      params.push(data.isActive);
+    }
+
+    if (setClauses.length === 0) {
+      return getAccountById(id, pool);
+    }
+
+    params.push(id);
+    const result = await pool.query(
+      `
+      UPDATE accounts
+      SET ${setClauses.join(', ')}
+      WHERE "Id" = $${paramIndex}
+      RETURNING
+        "Id" as id,
+        "AccountCode" as "accountCode",
+        "AccountName" as "accountName",
+        "AccountType" as "accountType",
+        "NormalBalance" as "normalBalance",
+        "ParentAccountId" as "parentAccountId",
+        "Level" as level,
+        "IsPostingAccount" as "isPostingAccount",
+        "IsActive" as "isActive"
+    `,
+      params
+    );
+
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('Error updating account', { error, id, data });
+    throw error;
+  }
+}
+
+/**
+ * Delete an account (soft-delete by deactivating, or hard-delete if no GL entries)
+ */
+export async function deleteAccount(id: string, dbPool?: pg.Pool): Promise<boolean> {
+  const pool = dbPool || globalPool;
+  try {
+    // Check if account has journal entry lines
+    const usageCheck = await pool.query(
+      `
+      SELECT COUNT(*) as count FROM journal_entry_lines WHERE "AccountId" = $1
+    `,
+      [id]
+    );
+
+    const hasEntries = parseInt(usageCheck.rows[0].count, 10) > 0;
+
+    if (hasEntries) {
+      // Soft delete - deactivate instead
+      const result = await pool.query(
+        `
+        UPDATE accounts SET "IsActive" = false WHERE "Id" = $1
+      `,
+        [id]
+      );
+      return (result.rowCount ?? 0) > 0;
+    }
+
+    // Hard delete - no journal entries reference this account
+    const result = await pool.query(
+      `
+      DELETE FROM accounts WHERE "Id" = $1
+    `,
+      [id]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch (error) {
+    logger.error('Error deleting account', { error, id });
     throw error;
   }
 }
@@ -292,8 +430,8 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
 // =============================================================================
 
 export interface CreateLedgerTransactionData {
-  referenceType: string;  // 'SALE', 'PURCHASE', 'EXPENSE', 'ADJUSTMENT'
-  referenceId: string;    // The source entity UUID
+  referenceType: string; // 'SALE', 'PURCHASE', 'EXPENSE', 'ADJUSTMENT'
+  referenceId: string; // The source entity UUID
   referenceNumber: string; // Human-readable reference like SALE-2025-0001
   description: string;
   transactionDate: string;
@@ -310,52 +448,67 @@ export interface CreateLedgerTransactionData {
  * This writes to ledger_transactions and ledger_entries tables
  * which are read by the General Ledger page
  */
-export async function createLedgerTransaction(data: CreateLedgerTransactionData, dbPool?: pg.Pool): Promise<{ transactionId: string; transactionNumber: string }> {
+export async function createLedgerTransaction(
+  data: CreateLedgerTransactionData,
+  dbPool?: pg.Pool
+): Promise<{ transactionId: string; transactionNumber: string }> {
   const pool = dbPool || globalPool;
 
   // Validate double-entry: total debits must equal total credits
-  const totalDebits = data.lines.reduce((sum, line) =>
-    sum.plus(line.debitAmount), new Decimal(0)).toNumber();
-  const totalCredits = data.lines.reduce((sum, line) =>
-    sum.plus(line.creditAmount), new Decimal(0)).toNumber();
+  const totalDebits = data.lines
+    .reduce((sum, line) => sum.plus(line.debitAmount), new Decimal(0))
+    .toNumber();
+  const totalCredits = data.lines
+    .reduce((sum, line) => sum.plus(line.creditAmount), new Decimal(0))
+    .toNumber();
 
   if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
-    throw new Error(`Ledger transaction is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
+    throw new Error(
+      `Ledger transaction is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`
+    );
   }
 
   return UnitOfWork.run(pool, async (client) => {
     // Generate transaction number (auto-increment style)
-    const countResult = await client.query(`SELECT COUNT(*) + 1 as next_num FROM ledger_transactions`);
+    const countResult = await client.query(
+      `SELECT COUNT(*) + 1 as next_num FROM ledger_transactions`
+    );
     const nextNum = parseInt(countResult.rows[0].next_num);
     const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
     const transactionId = uuidv4();
 
     // Create ledger transaction header
-    await client.query(`
+    await client.query(
+      `
       INSERT INTO ledger_transactions (
         "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
         "ReferenceId", "ReferenceNumber", "Description",
         "TotalDebitAmount", "TotalCreditAmount", "Status"
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED')
-    `, [
-      transactionId,
-      transactionNumber,
-      data.transactionDate,
-      data.referenceType,
-      data.referenceId,
-      data.referenceNumber,
-      data.description,
-      totalDebits,
-      totalCredits
-    ]);
+    `,
+      [
+        transactionId,
+        transactionNumber,
+        data.transactionDate,
+        data.referenceType,
+        data.referenceId,
+        data.referenceNumber,
+        data.description,
+        totalDebits,
+        totalCredits,
+      ]
+    );
 
     // Create ledger entries
     let lineNumber = 1;
     for (const line of data.lines) {
       // Get account by code
-      const accountResult = await client.query(`
+      const accountResult = await client.query(
+        `
         SELECT "Id" FROM accounts WHERE "AccountCode" = $1
-      `, [line.accountCode]);
+      `,
+        [line.accountCode]
+      );
 
       if (accountResult.rows.length === 0) {
         throw new Error(`Account not found: ${line.accountCode}`);
@@ -366,22 +519,25 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
       const entryType = line.debitAmount > 0 ? 'DEBIT' : 'CREDIT';
       const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
 
-      await client.query(`
+      await client.query(
+        `
         INSERT INTO ledger_entries (
           "Id", "TransactionId", "AccountId", "EntryType", "Amount",
           "DebitAmount", "CreditAmount", "Description", "LineNumber", "CreatedAt"
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-      `, [
-        entryId,
-        transactionId,
-        accountId,
-        entryType,
-        amount,
-        line.debitAmount,
-        line.creditAmount,
-        line.description,
-        lineNumber++
-      ]);
+      `,
+        [
+          entryId,
+          transactionId,
+          accountId,
+          entryType,
+          amount,
+          line.debitAmount,
+          line.creditAmount,
+          line.description,
+          lineNumber++,
+        ]
+      );
     }
 
     logger.info('Created ledger transaction', {
@@ -389,7 +545,7 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
       transactionNumber,
       referenceNumber: data.referenceNumber,
       totalDebits,
-      totalCredits
+      totalCredits,
     });
 
     return { transactionId, transactionNumber };
@@ -404,25 +560,35 @@ export async function createLedgerTransaction(data: CreateLedgerTransactionData,
  * Create a journal entry with lines
  * Validates that debits = credits (double-entry principle)
  */
-export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: pg.Pool): Promise<JournalEntry> {
+export async function createJournalEntry(
+  data: CreateJournalEntryData,
+  dbPool?: pg.Pool
+): Promise<JournalEntry> {
   const pool = dbPool || globalPool;
 
   // Validate double-entry: total debits must equal total credits
-  const totalDebits = data.lines.reduce((sum, line) =>
-    sum.plus(line.debitAmount), new Decimal(0)).toNumber();
-  const totalCredits = data.lines.reduce((sum, line) =>
-    sum.plus(line.creditAmount), new Decimal(0)).toNumber();
+  const totalDebits = data.lines
+    .reduce((sum, line) => sum.plus(line.debitAmount), new Decimal(0))
+    .toNumber();
+  const totalCredits = data.lines
+    .reduce((sum, line) => sum.plus(line.creditAmount), new Decimal(0))
+    .toNumber();
 
   if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
-    throw new Error(`Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`);
+    throw new Error(
+      `Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`
+    );
   }
 
   return UnitOfWork.run(pool, async (client) => {
     // Check for idempotency - prevent duplicate entries
     if (data.idempotencyKey) {
-      const existing = await client.query(`
+      const existing = await client.query(
+        `
         SELECT "Id" FROM journal_entries WHERE "IdempotencyKey" = $1
-      `, [data.idempotencyKey]);
+      `,
+        [data.idempotencyKey]
+      );
 
       if (existing.rows.length > 0) {
         throw new Error(`Journal entry already exists for idempotency key: ${data.idempotencyKey}`);
@@ -433,7 +599,8 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
     const entryId = uuidv4();
     const transactionId = `JE-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    const entryResult = await client.query(`
+    const entryResult = await client.query(
+      `
       INSERT INTO journal_entries (
         "Id", "TransactionId", "Description", "EntryDate", "CreatedAt",
         "Status", "IdempotencyKey", "SourceEventType", "SourceEntityType"
@@ -448,15 +615,17 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
         "IdempotencyKey" as "idempotencyKey",
         "SourceEventType" as "sourceEventType",
         "SourceEntityType" as "sourceEntityType"
-    `, [
-      entryId,
-      transactionId,
-      data.description,
-      data.entryDate,
-      data.idempotencyKey,
-      data.sourceEventType,
-      data.sourceEntityType
-    ]);
+    `,
+      [
+        entryId,
+        transactionId,
+        data.description,
+        data.entryDate,
+        data.idempotencyKey,
+        data.sourceEventType,
+        data.sourceEntityType,
+      ]
+    );
 
     const journalEntry = entryResult.rows[0];
     journalEntry.lines = [];
@@ -464,9 +633,12 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
     // Create journal entry lines
     for (const line of data.lines) {
       // Get account by code
-      const accountResult = await client.query(`
+      const accountResult = await client.query(
+        `
         SELECT "Id" FROM accounts WHERE "AccountCode" = $1
-      `, [line.accountCode]);
+      `,
+        [line.accountCode]
+      );
 
       if (accountResult.rows.length === 0) {
         throw new Error(`Account not found: ${line.accountCode}`);
@@ -475,7 +647,8 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
       const accountId = accountResult.rows[0].Id;
       const lineId = uuidv4();
 
-      const lineResult = await client.query(`
+      const lineResult = await client.query(
+        `
         INSERT INTO journal_entry_lines (
           "Id", "JournalEntryId", "AccountId", "Description",
           "DebitAmount", "CreditAmount", "EntityType", "EntityId", "TransactionId"
@@ -489,17 +662,19 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
           "CreditAmount" as "creditAmount",
           "EntityType" as "entityType",
           "EntityId" as "entityId"
-      `, [
-        lineId,
-        entryId,
-        accountId,
-        line.description,
-        line.debitAmount,
-        line.creditAmount,
-        line.entityType || null,
-        line.entityId || null,
-        transactionId
-      ]);
+      `,
+        [
+          lineId,
+          entryId,
+          accountId,
+          line.description,
+          line.debitAmount,
+          line.creditAmount,
+          line.entityType || null,
+          line.entityId || null,
+          transactionId,
+        ]
+      );
 
       journalEntry.lines.push(lineResult.rows[0]);
     }
@@ -509,7 +684,7 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
       transactionId,
       description: data.description,
       totalDebits,
-      totalCredits
+      totalCredits,
     });
 
     return journalEntry;
@@ -519,10 +694,14 @@ export async function createJournalEntry(data: CreateJournalEntryData, dbPool?: 
 /**
  * Get journal entry by ID with all lines
  */
-export async function getJournalEntryById(id: string, dbPool?: pg.Pool): Promise<JournalEntry | null> {
+export async function getJournalEntryById(
+  id: string,
+  dbPool?: pg.Pool
+): Promise<JournalEntry | null> {
   const pool = dbPool || globalPool;
   try {
-    const entryResult = await pool.query(`
+    const entryResult = await pool.query(
+      `
       SELECT 
         "Id" as id,
         "TransactionId" as "transactionId",
@@ -535,7 +714,9 @@ export async function getJournalEntryById(id: string, dbPool?: pg.Pool): Promise
         "SourceEntityType" as "sourceEntityType"
       FROM journal_entries
       WHERE "Id" = $1
-    `, [id]);
+    `,
+      [id]
+    );
 
     if (entryResult.rows.length === 0) {
       return null;
@@ -544,7 +725,8 @@ export async function getJournalEntryById(id: string, dbPool?: pg.Pool): Promise
     const entry = entryResult.rows[0];
 
     // Get lines with account details
-    const linesResult = await pool.query(`
+    const linesResult = await pool.query(
+      `
       SELECT 
         jel."Id" as id,
         jel."JournalEntryId" as "journalEntryId",
@@ -560,7 +742,9 @@ export async function getJournalEntryById(id: string, dbPool?: pg.Pool): Promise
       JOIN accounts a ON jel."AccountId" = a."Id"
       WHERE jel."JournalEntryId" = $1
       ORDER BY jel."DebitAmount" DESC, jel."CreditAmount" DESC
-    `, [id]);
+    `,
+      [id]
+    );
 
     entry.lines = linesResult.rows;
     return entry;
@@ -578,7 +762,10 @@ export async function getJournalEntryById(id: string, dbPool?: pg.Pool): Promise
  * Get ledger entries with filtering and running balance calculation
  * Uses ledger_entries and ledger_transactions tables (C# API generated)
  */
-export async function getLedgerEntries(filters: LedgerFilters, dbPool?: pg.Pool): Promise<{
+export async function getLedgerEntries(
+  filters: LedgerFilters,
+  dbPool?: pg.Pool
+): Promise<{
   entries: LedgerEntry[];
   total: number;
 }> {
@@ -658,7 +845,7 @@ export async function getLedgerEntries(filters: LedgerFilters, dbPool?: pg.Pool)
       const balance = new Decimal(entry.debitAmount || 0).minus(entry.creditAmount || 0).toNumber();
       return {
         ...entry,
-        runningBalance: balance
+        runningBalance: balance,
       };
     });
 
@@ -673,7 +860,10 @@ export async function getLedgerEntries(filters: LedgerFilters, dbPool?: pg.Pool)
  * Get ledger transaction by ID with all entries
  * Queries ledger_transactions and ledger_entries tables
  */
-export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Promise<{
+export async function getLedgerTransactionById(
+  id: string,
+  dbPool?: pg.Pool
+): Promise<{
   id: string;
   transactionNumber: string;
   transactionDate: string;
@@ -699,7 +889,8 @@ export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Pr
   const pool = dbPool || globalPool;
   try {
     // Get the transaction
-    const txnResult = await pool.query(`
+    const txnResult = await pool.query(
+      `
       SELECT 
         "Id" as id,
         "TransactionNumber" as "transactionNumber",
@@ -715,7 +906,9 @@ export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Pr
         "CreatedById"::text as "createdBy"
       FROM ledger_transactions
       WHERE "Id" = $1
-    `, [id]);
+    `,
+      [id]
+    );
 
     if (txnResult.rows.length === 0) {
       return null;
@@ -724,7 +917,8 @@ export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Pr
     const txn = txnResult.rows[0];
 
     // Get entries with account details
-    const entriesResult = await pool.query(`
+    const entriesResult = await pool.query(
+      `
       SELECT 
         le."Id" as id,
         le."AccountId" as "accountId",
@@ -737,11 +931,13 @@ export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Pr
       JOIN accounts a ON le."AccountId" = a."Id"
       WHERE le."TransactionId" = $1
       ORDER BY le."DebitAmount" DESC, le."CreditAmount" DESC
-    `, [id]);
+    `,
+      [id]
+    );
 
     return {
       ...txn,
-      entries: entriesResult.rows
+      entries: entriesResult.rows,
     };
   } catch (error) {
     logger.error('Error fetching ledger transaction', { error, id });
@@ -757,7 +953,11 @@ export async function getLedgerTransactionById(id: string, dbPool?: pg.Pool): Pr
  * Calculate trial balance as of a given date
  * Returns account balances ensuring debits = credits
  */
-export async function getTrialBalance(asOfDate: string, includeZeroBalances: boolean = false, dbPool?: pg.Pool): Promise<{
+export async function getTrialBalance(
+  asOfDate: string,
+  includeZeroBalances: boolean = false,
+  dbPool?: pg.Pool
+): Promise<{
   asOfDate: string;
   generatedAt: string;
   accounts: TrialBalanceAccount[];
@@ -819,11 +1019,11 @@ export async function getTrialBalance(asOfDate: string, includeZeroBalances: boo
     `;
 
     const result = await pool.query(query, [asOfDate]);
-    const accounts = result.rows.map(row => ({
+    const accounts = result.rows.map((row) => ({
       ...row,
       debitBalance: Money.parseDb(row.debitBalance).toNumber(),
       creditBalance: Money.parseDb(row.creditBalance).toNumber(),
-      netBalance: Money.parseDb(row.netBalance).toNumber()
+      netBalance: Money.parseDb(row.netBalance).toNumber(),
     }));
 
     // Calculate totals using Money for decimal-safe arithmetic
@@ -845,8 +1045,8 @@ export async function getTrialBalance(asOfDate: string, includeZeroBalances: boo
       totals: {
         totalDebits: totalDebitsNum,
         totalCredits: totalCreditsNum,
-        isBalanced: difference.lessThan(0.01)
-      }
+        isBalanced: difference.lessThan(0.01),
+      },
     };
   } catch (error) {
     logger.error('Error calculating trial balance', { error, asOfDate });
@@ -862,7 +1062,10 @@ export async function getTrialBalance(asOfDate: string, includeZeroBalances: boo
  * Generate Balance Sheet from actual account balances
  * Balance Sheet: Assets = Liabilities + Equity
  */
-export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promise<{
+export async function getBalanceSheet(
+  asOfDate: string,
+  dbPool?: pg.Pool
+): Promise<{
   companyName: string;
   reportDate: string;
   generatedAt: string;
@@ -934,7 +1137,7 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
       const item = {
         accountCode: row.accountCode,
         accountName: row.accountName,
-        amount: balance
+        amount: balance,
       };
 
       if (row.accountType === 'ASSET') {
@@ -953,12 +1156,13 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
     }
 
     // Calculate totals (simplified - in real world would separate current/non-current)
-    const totalAssets = assets.reduce((sum, a) =>
-      sum.plus(a.amount), new Decimal(0)).toNumber();
-    const totalLiabilities = liabilities.reduce((sum, l) =>
-      sum.plus(l.amount), new Decimal(0)).toNumber();
-    const equityTotal = equityItems.reduce((sum, e) =>
-      sum.plus(e.amount), new Decimal(0)).toNumber();
+    const totalAssets = assets.reduce((sum, a) => sum.plus(a.amount), new Decimal(0)).toNumber();
+    const totalLiabilities = liabilities
+      .reduce((sum, l) => sum.plus(l.amount), new Decimal(0))
+      .toNumber();
+    const equityTotal = equityItems
+      .reduce((sum, e) => sum.plus(e.amount), new Decimal(0))
+      .toNumber();
     const totalEquity = new Decimal(equityTotal).plus(retainedEarnings).toNumber();
 
     return {
@@ -966,29 +1170,37 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
       reportDate: asOfDate,
       generatedAt: new Date().toISOString(),
       assets: {
-        currentAssets: assets.filter(a => a.accountCode.startsWith('1')),
-        fixedAssets: assets.filter(a => !a.accountCode.startsWith('1')),
-        totalCurrentAssets: assets.filter(a => a.accountCode.startsWith('1'))
-          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0)).toNumber(),
-        totalFixedAssets: assets.filter(a => !a.accountCode.startsWith('1'))
-          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0)).toNumber(),
-        totalAssets
+        currentAssets: assets.filter((a) => a.accountCode.startsWith('1')),
+        fixedAssets: assets.filter((a) => !a.accountCode.startsWith('1')),
+        totalCurrentAssets: assets
+          .filter((a) => a.accountCode.startsWith('1'))
+          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0))
+          .toNumber(),
+        totalFixedAssets: assets
+          .filter((a) => !a.accountCode.startsWith('1'))
+          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0))
+          .toNumber(),
+        totalAssets,
       },
       liabilities: {
-        currentLiabilities: liabilities.filter(l => l.accountCode.startsWith('2')),
-        longTermLiabilities: liabilities.filter(l => !l.accountCode.startsWith('2')),
-        totalCurrentLiabilities: liabilities.filter(l => l.accountCode.startsWith('2'))
-          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0)).toNumber(),
-        totalLongTermLiabilities: liabilities.filter(l => !l.accountCode.startsWith('2'))
-          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0)).toNumber(),
-        totalLiabilities
+        currentLiabilities: liabilities.filter((l) => l.accountCode.startsWith('2')),
+        longTermLiabilities: liabilities.filter((l) => !l.accountCode.startsWith('2')),
+        totalCurrentLiabilities: liabilities
+          .filter((l) => l.accountCode.startsWith('2'))
+          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0))
+          .toNumber(),
+        totalLongTermLiabilities: liabilities
+          .filter((l) => !l.accountCode.startsWith('2'))
+          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0))
+          .toNumber(),
+        totalLiabilities,
       },
       equity: {
         items: equityItems,
         retainedEarnings,
-        totalEquity
+        totalEquity,
       },
-      totalLiabilitiesAndEquity: new Decimal(totalLiabilities).plus(totalEquity).toNumber()
+      totalLiabilitiesAndEquity: new Decimal(totalLiabilities).plus(totalEquity).toNumber(),
     };
   } catch (error) {
     logger.error('Error generating balance sheet', { error, asOfDate });
@@ -999,7 +1211,11 @@ export async function getBalanceSheet(asOfDate: string, dbPool?: pg.Pool): Promi
 /**
  * Generate Income Statement from actual revenue/expense account balances
  */
-export async function getIncomeStatement(startDate: string, endDate: string, dbPool?: pg.Pool): Promise<{
+export async function getIncomeStatement(
+  startDate: string,
+  endDate: string,
+  dbPool?: pg.Pool
+): Promise<{
   companyName: string;
   periodStart: string;
   periodEnd: string;
@@ -1075,7 +1291,7 @@ export async function getIncomeStatement(startDate: string, endDate: string, dbP
       const item = {
         accountCode: row.accountCode,
         accountName: row.accountName,
-        amount: balance
+        amount: balance,
       };
 
       if (row.accountType === 'REVENUE') {
@@ -1092,14 +1308,16 @@ export async function getIncomeStatement(startDate: string, endDate: string, dbP
       }
     }
 
-    const totalRevenueD = revenue.reduce((sum, r) =>
-      sum.plus(r.amount), new Decimal(0));
-    const totalCOGSD = cogs.reduce((sum, c) =>
-      sum.plus(c.amount), new Decimal(0));
-    const totalOperatingExpensesD = operatingExpenses.reduce((sum, e) =>
-      sum.plus(e.amount), new Decimal(0));
-    const totalOtherExpensesD = otherExpenses.reduce((sum, e) =>
-      sum.plus(e.amount), new Decimal(0));
+    const totalRevenueD = revenue.reduce((sum, r) => sum.plus(r.amount), new Decimal(0));
+    const totalCOGSD = cogs.reduce((sum, c) => sum.plus(c.amount), new Decimal(0));
+    const totalOperatingExpensesD = operatingExpenses.reduce(
+      (sum, e) => sum.plus(e.amount),
+      new Decimal(0)
+    );
+    const totalOtherExpensesD = otherExpenses.reduce(
+      (sum, e) => sum.plus(e.amount),
+      new Decimal(0)
+    );
 
     const grossProfitD = totalRevenueD.minus(totalCOGSD);
     const operatingIncomeD = grossProfitD.minus(totalOperatingExpensesD);
@@ -1132,26 +1350,26 @@ export async function getIncomeStatement(startDate: string, endDate: string, dbP
       generatedAt: new Date().toISOString(),
       revenue: {
         items: revenue,
-        totalRevenue
+        totalRevenue,
       },
       costOfGoodsSold: {
         items: cogs,
-        totalCOGS
+        totalCOGS,
       },
       grossProfit,
       operatingExpenses: {
         items: operatingExpenses,
-        totalOperatingExpenses
+        totalOperatingExpenses,
       },
       operatingIncome,
       otherExpenses: {
         items: otherExpenses,
-        totalOtherExpenses
+        totalOtherExpenses,
       },
       netIncome,
       grossProfitMargin,
       operatingMargin,
-      netProfitMargin
+      netProfitMargin,
     };
   } catch (error) {
     logger.error('Error generating income statement', { error, startDate, endDate });
@@ -1165,6 +1383,8 @@ export default {
   getAccountById,
   getAccountByCode,
   createAccount,
+  updateAccount,
+  deleteAccount,
   // Journal Entries
   createJournalEntry,
   getJournalEntryById,
@@ -1174,5 +1394,5 @@ export default {
   // Financial Reports
   getTrialBalance,
   getBalanceSheet,
-  getIncomeStatement
+  getIncomeStatement,
 };
