@@ -2,24 +2,24 @@
   "name": "SMART-ERP POS",
   "short_name": "POS",
   "description": "Enterprise Point of Sale System with offline support",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f172a",
   "theme_color": "#3b82f6",
   "icons": [
     {
-      "src": "./pos-icon-192.svg",
+      "src": "/pos-icon-192.svg",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "./vite.svg",
+      "src": "/pos-icon-192.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "maskable"
     }
   ],
   "categories": [
