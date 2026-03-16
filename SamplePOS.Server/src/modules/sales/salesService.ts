@@ -19,6 +19,7 @@ import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/bus
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import type { SaleData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
   batchFetchProductUoms,
@@ -719,14 +720,34 @@ export const salesService = {
       // Create sale items
       const items = await salesRepository.addSaleItems(client, itemsWithCosts);
 
-      // Re-trigger GL posting: the trg_post_sale_to_ledger trigger fires on INSERT
-      // but sale_items don't exist yet at that point (race condition). This UPDATE
-      // re-fires the trigger now that items are present, enabling correct GL posting.
-      // The trigger has idempotency protection so it won't double-post.
-      await client.query(
-        "UPDATE sales SET notes = COALESCE(notes, '') WHERE id = $1",
-        [sale.id],
-      );
+      // GL POSTING: Application-layer double-entry (replaces database trigger)
+      // Post AFTER items exist so revenue/COGS split is accurate.
+      try {
+        await glEntryService.recordSaleToGL({
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          saleDate: sale.saleDate || new Date().toLocaleDateString('en-CA'),
+          totalAmount: sale.totalAmount,
+          costAmount: sale.totalCost || 0,
+          paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
+          amountPaid: sale.amountPaid ?? sale.totalAmount,
+          taxAmount: sale.taxAmount || 0,
+          customerId: sale.customerId || undefined,
+          saleItems: itemsWithCosts.map(item => ({
+            productType: item.productId?.startsWith('custom_') ? 'service' as const : 'inventory' as const,
+            totalPrice: item.lineTotal,
+            unitCost: item.costPrice || 0,
+            quantity: item.quantity,
+          })),
+        });
+      } catch (glError: unknown) {
+        logger.error('GL posting failed for sale — transaction will rollback', {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+        throw glError;
+      }
 
       // Deduct from cost layers AND inventory batches for each item
       for (const item of input.items) {
@@ -1583,12 +1604,8 @@ export const salesService = {
         warnings: warnings.length > 0 ? warnings : undefined,
       };
 
-      // ============================================================
-      // GL POSTING: Handled by database trigger (trg_post_sale_to_ledger)
-      // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
-      // This ensures atomicity - if sale exists, GL entry exists
-      // DO NOT add glEntryService calls here - it causes duplicate entries
-      // ============================================================
+      // GL POSTING: Done above via glEntryService.recordSaleToGL()
+      // (Database GL triggers disabled — application-layer posting is single source of truth)
 
       // ============================================================
       // DELIVERY NOTE: Created manually via Delivery > "From Sale" UI.
@@ -2048,6 +2065,23 @@ export const salesService = {
         voidReason,
         approvedById
       );
+
+      // GL POSTING: Reverse the original sale GL entry
+      try {
+        await glEntryService.recordSaleVoidToGL({
+          saleId,
+          saleNumber: sale.sale_number,
+          voidDate: new Date().toLocaleDateString('en-CA'),
+          voidReason: voidReason || 'No reason provided',
+        });
+      } catch (glError: unknown) {
+        logger.error('GL void reversal failed — sale void will still proceed', {
+          saleId,
+          saleNumber: sale.sale_number,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+        // Allow void to proceed even if GL reversal fails (can be reconciled later)
+      }
 
       await client.query('COMMIT');
 

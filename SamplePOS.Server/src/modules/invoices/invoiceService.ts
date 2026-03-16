@@ -8,6 +8,7 @@ import * as depositsService from '../deposits/depositsService.js';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import * as glEntryService from '../../services/glEntryService.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
 interface PaymentLineRow {
@@ -335,11 +336,10 @@ export const invoiceService = {
     });
 
     // ============================================================
-    // GL POSTING: Handled by database triggers
-    // - fn_sync_invoice_ar_balance: Updates customer AR balance
-    // - fn_sync_invoice_payment: Posts payment GL entries
-    // These triggers fire on INSERT/UPDATE ensuring atomicity.
-    // DO NOT add manual GL posting here - it would cause duplicates.
+    // GL POSTING: NOT needed for invoice creation.
+    // The sale GL (recordSaleToGL) already posted DR AR / CR Revenue
+    // for the credit portion. The invoice is a tracking document only.
+    // Invoice *payments* post GL via recordInvoicePaymentToGL below.
     // ============================================================
 
     // DELIVERY INTEGRATION: Auto-create delivery order for invoice if customer needs delivery
@@ -675,111 +675,35 @@ export const invoiceService = {
         });
       }
 
-      // ============================================================
-      // POST-PAYMENT INTEGRITY VERIFICATION
-      // Verify GL was posted correctly before committing.
-      // The trigger fires within this transaction, so we can check.
-      // ============================================================
-      if (input.paymentMethod !== 'DEPOSIT') {
-        const glCheck = await client.query(
-          `SELECT COUNT(*) as gl_count
-           FROM ledger_transactions 
-           WHERE "ReferenceType" = 'INVOICE_PAYMENT' AND "ReferenceId" = $1
-             AND "Status" = 'POSTED'`,
-          [payment.id]
-        );
-        const glCount = parseInt(glCheck.rows[0].gl_count, 10);
-
-        if (glCount === 0) {
-          // GL trigger didn't fire or was skipped — check if it should have been skipped
-          const arCheck = await client.query(
-            `SELECT EXISTS (
-               SELECT 1 FROM ledger_entries le 
-               JOIN accounts a ON a."Id" = le."AccountId"
-               WHERE le."EntityId" = $1
-                 AND le."EntityType" = 'INVOICE'
-                 AND a."AccountCode" = '1200'
-                 AND le."DebitAmount" > 0
-             ) as has_ar`,
-            [invoiceId]
-          );
-
-          if (arCheck.rows[0].has_ar) {
-            // Invoice has AR entries but GL wasn't posted — this is a bug
-            await client.query('ROLLBACK');
-            throw new Error(
-              `GL INTEGRITY VIOLATION: Invoice payment ${payment.receipt_number} was not posted to GL. ` +
-              `Invoice ${inv.invoice_number} has AR entries that must be cleared. ` +
-              `Transaction rolled back to prevent AR discrepancy.`
-            );
-          }
-          // If no AR entry exists, the trigger correctly skipped GL posting
-          logger.info('Invoice payment GL correctly skipped (no AR entry to clear)', {
-            paymentId: payment.id,
-            receiptNumber: payment.receipt_number,
-          });
-        } else if (glCount > 1) {
-          // Multiple GL entries for same payment — duplicate prevention failed
-          await client.query('ROLLBACK');
-          throw new Error(
-            `GL INTEGRITY VIOLATION: Invoice payment ${payment.receipt_number} was posted ${glCount} times. ` +
-            `Transaction rolled back to prevent duplicate GL entries.`
-          );
-        }
-
-        // Verify GL entry is balanced (DR = CR)
-        if (glCount === 1) {
-          const balanceCheck = await client.query(
-            `SELECT SUM(le."DebitAmount") as total_dr, SUM(le."CreditAmount") as total_cr
-             FROM ledger_entries le
-             JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-             WHERE lt."ReferenceType" = 'INVOICE_PAYMENT' AND lt."ReferenceId" = $1`,
-            [payment.id]
-          );
-          const totalDr = Money.parseDb(balanceCheck.rows[0].total_dr).toNumber();
-          const totalCr = Money.parseDb(balanceCheck.rows[0].total_cr).toNumber();
-
-          if (Math.abs(totalDr - totalCr) > 0.01) {
-            await client.query('ROLLBACK');
-            throw new Error(
-              `GL BALANCE VIOLATION: Payment ${payment.receipt_number} GL entry is imbalanced. ` +
-              `DR=${totalDr}, CR=${totalCr}. Transaction rolled back.`
-            );
-          }
-
-          // Verify GL amount matches payment amount
-          if (Math.abs(totalDr - input.amount) > 0.01) {
-            await client.query('ROLLBACK');
-            throw new Error(
-              `GL AMOUNT MISMATCH: Payment ${payment.receipt_number} amount=${input.amount} but GL DR=${totalDr}. ` +
-              `Transaction rolled back to prevent reconciliation discrepancy.`
-            );
-          }
-        }
-      }
-
       await client.query('COMMIT');
 
       // ============================================================
-      // GL POSTING: Handled by DB trigger trg_post_invoice_payment_to_ledger
-      // The trigger fires on INSERT to invoice_payments (within transaction)
-      // and posts: DR Cash/Card/Bank | CR Accounts Receivable
-      //
-      // DO NOT add explicit recordCustomerPaymentToGL() calls here —
-      // it would cause DOUBLE GL posting since the trigger uses
-      // ReferenceType='INVOICE_PAYMENT' and explicit code uses
-      // ReferenceType='CUSTOMER_PAYMENT', bypassing each other's
-      // idempotency checks.
-      //
-      // The trigger has proper error handling (failures abort the
-      // transaction, preventing payments without GL entries).
-      //
-      // Post-commit verification is done above to catch:
-      // - Missing GL entries (trigger skipped unexpectedly)
-      // - Duplicate GL entries (idempotency check failed)
-      // - Imbalanced GL entries (DR != CR)
-      // - Amount mismatches (GL amount != payment amount)
+      // GL POSTING: Record invoice payment via glEntryService
+      // DR Cash/Card/Bank | CR Accounts Receivable
+      // (DEPOSIT payments are skipped inside recordInvoicePaymentToGL)
       // ============================================================
+      try {
+        const paymentDateStr = (input.paymentDate instanceof Date)
+          ? input.paymentDate.toLocaleDateString('en-CA')
+          : new Date().toLocaleDateString('en-CA');
+
+        await glEntryService.recordInvoicePaymentToGL({
+          paymentId: payment.id,
+          receiptNumber: payment.receipt_number,
+          paymentDate: paymentDateStr,
+          amount: input.amount,
+          paymentMethod: input.paymentMethod,
+          invoiceId: invoiceId,
+          invoiceNumber: inv.invoice_number,
+        });
+      } catch (glError) {
+        // Non-blocking: payment is committed, GL failure is logged
+        logger.error('GL posting failed for invoice payment (non-blocking)', {
+          paymentId: payment.id,
+          receiptNumber: payment.receipt_number,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+      }
 
       logger.info('Invoice payment committed with GL verification', {
         invoiceId,

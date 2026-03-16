@@ -7,6 +7,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import * as supplierPaymentRepository from './supplierPaymentRepository.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 
@@ -98,7 +99,7 @@ export async function createSupplierPayment(
     data: CreateSupplierPaymentInput,
     userId?: string
 ) {
-    return UnitOfWork.run(pool, async (client) => {
+    const receiptData = await UnitOfWork.run(pool, async (client) => {
 
         // Use Decimal.js for precise amount handling
         const paymentAmount = new Decimal(data.amount);
@@ -282,60 +283,34 @@ export async function createSupplierPayment(
             invoicesAffected: allocations.length
         });
 
-        // ============================================================
-        // POST-PAYMENT GL INTEGRITY VERIFICATION
-        // Verify the DB trigger posted GL correctly before committing
-        // ============================================================
-        const glCheck = await client.query(
-            `SELECT COUNT(*) as gl_count
-             FROM ledger_transactions 
-             WHERE "ReferenceType" = 'SUPPLIER_PAYMENT' AND "ReferenceId" = $1
-               AND "Status" = 'POSTED'`,
-            [payment.id]
-        );
-        const glCount = parseInt(glCheck.rows[0].gl_count, 10);
-
-        if (glCount === 0) {
-            throw new Error(
-                `GL INTEGRITY VIOLATION: Supplier payment ${payment.paymentNumber} was not posted to GL. ` +
-                `Transaction rolled back to prevent AP discrepancy.`
-            );
-        }
-
-        if (glCount > 1) {
-            throw new Error(
-                `GL INTEGRITY VIOLATION: Supplier payment ${payment.paymentNumber} was posted ${glCount} times. ` +
-                `Transaction rolled back to prevent duplicate GL entries.`
-            );
-        }
-
-        // Verify GL entry balance and amount
-        const balanceCheck = await client.query(
-            `SELECT SUM(le."DebitAmount") as total_dr, SUM(le."CreditAmount") as total_cr
-             FROM ledger_entries le
-             JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-             WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT' AND lt."ReferenceId" = $1`,
-            [payment.id]
-        );
-        const totalDr = new Decimal(balanceCheck.rows[0].total_dr || '0');
-        const totalCr = new Decimal(balanceCheck.rows[0].total_cr || '0');
-
-        if (totalDr.minus(totalCr).abs().greaterThan('0.01')) {
-            throw new Error(
-                `GL BALANCE VIOLATION: Supplier payment ${payment.paymentNumber} GL is imbalanced. ` +
-                `DR=${totalDr.toFixed(2)}, CR=${totalCr.toFixed(2)}. Transaction rolled back.`
-            );
-        }
-
-        if (totalDr.minus(paymentAmount).abs().greaterThan('0.01')) {
-            throw new Error(
-                `GL AMOUNT MISMATCH: Supplier payment ${payment.paymentNumber} amount=${paymentAmount.toNumber()} ` +
-                `but GL DR=${totalDr.toFixed(2)}. Transaction rolled back.`
-            );
-        }
+        // GL POSTING: Done after UnitOfWork via glEntryService.recordSupplierPaymentToGL()
 
         return receiptData;
     });
+
+    // ============================================================
+    // GL POSTING: Record supplier payment to ledger
+    // DR Accounts Payable (2100)  /  CR Cash or Bank
+    // ============================================================
+    try {
+        await glEntryService.recordSupplierPaymentToGL({
+            paymentId: receiptData.payment.id,
+            paymentNumber: receiptData.payment.paymentNumber,
+            paymentDate: data.paymentDate,
+            amount: receiptData.payment.amount,
+            paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK',
+            supplierId: data.supplierId,
+            supplierName: receiptData.supplier.name,
+        });
+    } catch (glError) {
+        logger.error('GL posting failed for supplier payment (non-fatal)', {
+            paymentId: receiptData.payment.id,
+            paymentNumber: receiptData.payment.paymentNumber,
+            error: glError,
+        });
+    }
+
+    return receiptData;
 }
 
 export async function updateSupplierPayment(

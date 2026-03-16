@@ -739,15 +739,49 @@ export const goodsReceiptService = {
     });
 
     // ============================================================
-    // GL POSTING: Handled by database trigger (trg_post_goods_receipt_to_ledger)
-    // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
-    // This ensures atomicity - if GR exists, GL entry exists
-    // DO NOT add glEntryService calls here - it causes duplicate entries
+    // GL POSTING: Application-layer double-entry (replaces database trigger)
+    // Post goods receipt: DR Inventory (1300), CR Accounts Payable (2100)
+    // Runs AFTER transaction commits to use finalized data.
     // ============================================================
-
     // Reload completed GR outside transaction
     const finalized = await goodsReceiptRepository.getGRById(pool, id);
     if (!finalized) throw new Error(`Goods receipt ${id} not found after finalization`);
+
+    // Calculate total value from finalized items (exclude bonus items)
+    const grTotalValue = finalized.items.reduce((sum: Decimal, item: GoodsReceiptItem) => {
+      if (item.isBonus) return sum;
+      const qty = new Decimal(String(item.receivedQuantity ?? 0));
+      const cost = new Decimal(String(item.unitCost ?? 0));
+      return sum.plus(qty.times(cost));
+    }, new Decimal(0));
+    const grTotalNum = Money.toNumber(grTotalValue);
+
+    if (grTotalNum > 0) {
+      try {
+        // Get supplier name for GL description
+        const supplierRes = await pool.query(
+          'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
+          [finalized.gr.supplierId]
+        );
+        const supplierName = supplierRes.rows[0]?.CompanyName || 'Unknown Supplier';
+
+        await glEntryService.recordGoodsReceiptToGL({
+          grId: id,
+          grNumber: finalized.gr.grNumber || id,
+          grDate: finalized.gr.receivedDate || new Date().toLocaleDateString('en-CA'),
+          totalAmount: grTotalNum,
+          supplierId: finalized.gr.supplierId || '',
+          supplierName,
+          poNumber: finalized.gr.purchaseOrderId || undefined,
+        });
+      } catch (glError: unknown) {
+        logger.error('GL posting failed for goods receipt (non-fatal)', {
+          grId: id,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+        // Don't fail GR finalization if GL posting fails — can be reconciled later
+      }
+    }
     return {
       gr: finalized.gr,
       items: finalized.items,

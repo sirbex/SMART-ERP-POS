@@ -7,6 +7,7 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import * as depositsRepository from './depositsRepository.js';
 import { findCustomerById } from '../customers/customerRepository.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 
@@ -130,7 +131,31 @@ export async function createDeposit(
         amount: depositRow.amount
     });
 
-    return normalizeDeposit(depositRow);
+    const deposit = normalizeDeposit(depositRow);
+
+    // ============================================================
+    // GL POSTING: Record customer deposit to ledger
+    // DR Cash/Bank  /  CR Customer Deposits (2200)
+    // ============================================================
+    try {
+        await glEntryService.recordCustomerDepositToGL({
+            depositId: deposit.id,
+            depositNumber: deposit.depositNumber,
+            depositDate: deposit.createdAt.split('T')[0],
+            amount: deposit.amount,
+            paymentMethod: deposit.paymentMethod,
+            customerId: input.customerId,
+            customerName: customer?.name || 'Unknown',
+        });
+    } catch (glError) {
+        logger.error('GL posting failed for customer deposit (non-fatal)', {
+            depositId: deposit.id,
+            depositNumber: deposit.depositNumber,
+            error: glError,
+        });
+    }
+
+    return deposit;
 }
 
 /**

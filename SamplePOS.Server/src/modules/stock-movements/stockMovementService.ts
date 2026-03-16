@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { MovementType, MANUAL_MOVEMENT_TYPES, MovementFilters } from './types.js';
 import * as stockMovementRepository from './stockMovementRepository.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
 
@@ -61,6 +62,42 @@ export async function recordMovement(
     movementType: data.movementType,
     quantity: quantityDecimal.toString(),
   });
+
+  // ============================================================
+  // GL POSTING: Record stock movement to ledger
+  // Only for ADJUSTMENT_IN, ADJUSTMENT_OUT, DAMAGE, EXPIRY
+  // RETURN movements do not get GL entries here (handled elsewhere)
+  // ============================================================
+  const glMovementTypes = ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY'] as const;
+  if (glMovementTypes.includes(data.movementType as typeof glMovementTypes[number])) {
+    try {
+      const movementValue = new Decimal(Math.abs(result.quantity))
+        .times(new Decimal(result.unitCost || 0))
+        .toNumber();
+
+      // Get product name for GL description
+      const productResult = await pool.query(
+        'SELECT name FROM products WHERE id = $1',
+        [data.productId]
+      );
+      const productName = productResult.rows[0]?.name || 'Unknown';
+
+      await glEntryService.recordStockMovementToGL({
+        movementId: result.id,
+        movementNumber: result.movementNumber,
+        movementDate: new Date().toLocaleDateString('en-CA'),
+        movementType: data.movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
+        movementValue,
+        productName,
+      });
+    } catch (glError) {
+      logger.error('GL posting failed for stock movement (non-fatal)', {
+        movementId: result.id,
+        movementNumber: result.movementNumber,
+        error: glError,
+      });
+    }
+  }
 
   return result;
 }

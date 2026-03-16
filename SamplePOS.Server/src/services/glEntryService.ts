@@ -62,6 +62,9 @@ export const AccountCodes = {
   // Revenue - Delivery
   DELIVERY_REVENUE: '4500',
 
+  // Revenue - Stock Overages
+  STOCK_OVERAGE_INCOME: '4110',
+
   // Operating Expenses
   SALARIES: '6000',
   RENT: '6100',
@@ -71,7 +74,12 @@ export const AccountCodes = {
   DEPRECIATION: '6500',
   INSURANCE: '6600',
   DELIVERY_EXPENSE: '6750',
-  GENERAL_EXPENSE: '6900'
+  GENERAL_EXPENSE: '6900',
+
+  // Inventory Loss Expenses
+  SHRINKAGE: '5110',
+  DAMAGE: '5120',
+  EXPIRY: '5130',
 };
 
 // =============================================================================
@@ -1000,6 +1008,518 @@ export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData): 
   }
 }
 
+// =============================================================================
+// SALE VOID (REVERSAL) JOURNAL ENTRIES
+// =============================================================================
+
+export interface SaleVoidData {
+  saleId: string;
+  saleNumber: string;
+  voidDate: string;
+  voidReason: string;
+}
+
+/**
+ * Reverse a completed sale's GL entries when the sale is voided.
+ *
+ * Uses AccountingCore.reverseTransaction() which creates an exact mirror entry
+ * (swaps debits/credits) and marks the original as REVERSED.
+ */
+export async function recordSaleVoidToGL(data: SaleVoidData): Promise<void> {
+  try {
+    // Find the original SALE transaction
+    const { pool: globalPool } = await import('../db/pool.js');
+    const existing = await globalPool.query(
+      `SELECT "Id" FROM ledger_transactions
+       WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE
+       LIMIT 1`,
+      [data.saleId]
+    );
+
+    if (existing.rows.length === 0) {
+      logger.warn('No GL transaction found for voided sale — nothing to reverse', {
+        saleId: data.saleId,
+        saleNumber: data.saleNumber,
+      });
+      return; // No GL entry to reverse (sale may never have been posted)
+    }
+
+    const originalTransactionId = existing.rows[0].Id;
+
+    await AccountingCore.reverseTransaction({
+      originalTransactionId,
+      reversalDate: data.voidDate,
+      reason: `VOID: Sale ${data.saleNumber} — ${data.voidReason}`,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `SALE_VOID-${data.saleId}`,
+    });
+
+    logger.info('Recorded sale void reversal to GL', {
+      saleId: data.saleId,
+      saleNumber: data.saleNumber,
+      originalTransactionId,
+    });
+  } catch (error: unknown) {
+    if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+      logger.info('Sale GL already reversed (idempotent)', { saleId: data.saleId });
+      return;
+    }
+    logger.error('Failed to record sale void to GL', { error, data });
+    throw new Error(`GL reversal failed for voided sale ${data.saleNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// CUSTOMER DEPOSIT JOURNAL ENTRIES
+// =============================================================================
+
+export interface CustomerDepositData {
+  depositId: string;
+  depositNumber: string;
+  depositDate: string;
+  amount: number;
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER';
+  customerId: string;
+  customerName: string;
+}
+
+/**
+ * Record a customer deposit in the general ledger
+ *
+ * Journal entry:
+ *   DR Cash / Bank (1010/1030)  amount
+ *   CR Customer Deposits (2200) amount   (liability until applied to sale)
+ */
+export async function recordCustomerDepositToGL(deposit: CustomerDepositData): Promise<void> {
+  try {
+    let debitAccountCode: string;
+    switch (deposit.paymentMethod) {
+      case 'BANK_TRANSFER':
+        debitAccountCode = AccountCodes.CHECKING_ACCOUNT;
+        break;
+      case 'CARD':
+        debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+        break;
+      default:
+        debitAccountCode = AccountCodes.CASH;
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate: deposit.depositDate,
+      description: `Customer Deposit: ${deposit.customerName} — ${deposit.depositNumber}`,
+      referenceType: 'CUSTOMER_DEPOSIT',
+      referenceId: deposit.depositId,
+      referenceNumber: deposit.depositNumber,
+      lines: [
+        {
+          accountCode: debitAccountCode,
+          description: `Deposit received — ${deposit.depositNumber}`,
+          debitAmount: deposit.amount,
+          creditAmount: 0,
+          entityType: 'customer',
+          entityId: deposit.customerId,
+        },
+        {
+          accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+          description: `Customer deposit liability — ${deposit.depositNumber}`,
+          debitAmount: 0,
+          creditAmount: deposit.amount,
+          entityType: 'customer',
+          entityId: deposit.customerId,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `CUSTOMER_DEPOSIT-${deposit.depositId}`,
+    });
+
+    logger.info('Recorded customer deposit to GL', {
+      depositId: deposit.depositId,
+      amount: deposit.amount,
+      customerId: deposit.customerId,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record customer deposit to GL', { error, deposit });
+    throw new Error(`GL posting failed for customer deposit ${deposit.depositNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// CUSTOMER INVOICE JOURNAL ENTRIES
+// =============================================================================
+
+export interface CustomerInvoiceData {
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  totalAmount: number;
+  customerId: string;
+  customerName: string;
+}
+
+/**
+ * Record a customer invoice in the general ledger
+ *
+ * Journal entry (when invoice is issued / transitions from Draft):
+ *   DR Accounts Receivable (1200) totalAmount
+ *   CR Sales Revenue (4000)       totalAmount
+ */
+export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData): Promise<void> {
+  try {
+    await AccountingCore.createJournalEntry({
+      entryDate: invoice.invoiceDate,
+      description: `Customer Invoice: ${invoice.invoiceNumber}`,
+      referenceType: 'INVOICE',
+      referenceId: invoice.invoiceId,
+      referenceNumber: invoice.invoiceNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+          description: `Invoice ${invoice.invoiceNumber} — ${invoice.customerName}`,
+          debitAmount: invoice.totalAmount,
+          creditAmount: 0,
+          entityType: 'customer',
+          entityId: invoice.customerId,
+        },
+        {
+          accountCode: AccountCodes.SALES_REVENUE,
+          description: `Revenue — Invoice ${invoice.invoiceNumber}`,
+          debitAmount: 0,
+          creditAmount: invoice.totalAmount,
+          entityType: 'customer',
+          entityId: invoice.customerId,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `INVOICE-${invoice.invoiceId}`,
+    });
+
+    logger.info('Recorded customer invoice to GL', {
+      invoiceId: invoice.invoiceId,
+      invoiceNumber: invoice.invoiceNumber,
+      totalAmount: invoice.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record customer invoice to GL', { error, invoice });
+    throw new Error(`GL posting failed for invoice ${invoice.invoiceNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// INVOICE PAYMENT JOURNAL ENTRIES
+// =============================================================================
+
+export interface InvoicePaymentData {
+  paymentId: string;
+  receiptNumber: string;
+  paymentDate: string;
+  amount: number;
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
+  invoiceId: string;
+  invoiceNumber: string;
+}
+
+/**
+ * Record an invoice payment in the general ledger
+ *
+ * Journal entry:
+ *   DR Cash / Bank (1010/1030)    amount
+ *   CR Accounts Receivable (1200) amount
+ *
+ * DEPOSIT payments are skipped (already posted via deposit lifecycle).
+ */
+export async function recordInvoicePaymentToGL(payment: InvoicePaymentData): Promise<void> {
+  try {
+    // Deposit payments: money already received via deposit, no Cash DR needed
+    if (payment.paymentMethod === 'DEPOSIT') {
+      logger.info('Invoice payment via DEPOSIT — skipping GL (deposit already posted)', {
+        receiptNumber: payment.receiptNumber,
+      });
+      return;
+    }
+
+    let debitAccountCode: string;
+    switch (payment.paymentMethod) {
+      case 'BANK_TRANSFER':
+        debitAccountCode = AccountCodes.CHECKING_ACCOUNT;
+        break;
+      case 'CARD':
+        debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+        break;
+      case 'CREDIT':
+      case 'CASH':
+      default:
+        debitAccountCode = AccountCodes.CASH;
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate: payment.paymentDate,
+      description: `Invoice Payment: ${payment.receiptNumber} for ${payment.invoiceNumber}`,
+      referenceType: 'INVOICE_PAYMENT',
+      referenceId: payment.paymentId,
+      referenceNumber: payment.receiptNumber,
+      lines: [
+        {
+          accountCode: debitAccountCode,
+          description: `Cash received — ${payment.receiptNumber}`,
+          debitAmount: payment.amount,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+          description: `AR reduced — ${payment.receiptNumber}`,
+          debitAmount: 0,
+          creditAmount: payment.amount,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `INVOICE_PAYMENT-${payment.paymentId}`,
+    });
+
+    logger.info('Recorded invoice payment to GL', {
+      paymentId: payment.paymentId,
+      receiptNumber: payment.receiptNumber,
+      amount: payment.amount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record invoice payment to GL', { error, payment });
+    throw new Error(`GL posting failed for invoice payment ${payment.receiptNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// STOCK MOVEMENT JOURNAL ENTRIES (ADJUSTMENTS, DAMAGE, EXPIRY)
+// =============================================================================
+
+export interface StockMovementData {
+  movementId: string;
+  movementNumber: string;
+  movementDate: string;
+  movementType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY';
+  movementValue: number;     // quantity * unit_cost
+  productName?: string;
+}
+
+/**
+ * Record a manual stock movement in the general ledger.
+ * Only called for ADJUSTMENT_IN/OUT, DAMAGE, EXPIRY — NOT for SALE or GOODS_RECEIPT
+ * (those have their own posting functions).
+ *
+ * ADJUSTMENT_OUT / DAMAGE / EXPIRY (loss):
+ *   DR Shrinkage/Damage/Expiry (5110/5120/5130)  value
+ *   CR Inventory (1300)                           value
+ *
+ * ADJUSTMENT_IN (found stock):
+ *   DR Inventory (1300)                           value
+ *   CR Stock Overage Income (4110)                value
+ */
+export async function recordStockMovementToGL(movement: StockMovementData): Promise<void> {
+  try {
+    if (movement.movementValue <= 0) {
+      logger.debug('Skipping stock movement GL posting (zero value)', {
+        movementNumber: movement.movementNumber,
+      });
+      return;
+    }
+
+    const description = `Stock ${movement.movementType}: ${movement.productName ?? 'Unknown'} — ${movement.movementNumber}`;
+    let lines: JournalLine[];
+
+    if (movement.movementType === 'ADJUSTMENT_IN') {
+      lines = [
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory increase: ${movement.movementNumber}`,
+          debitAmount: movement.movementValue,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.STOCK_OVERAGE_INCOME,
+          description: `Stock overage: ${movement.movementNumber}`,
+          debitAmount: 0,
+          creditAmount: movement.movementValue,
+        },
+      ];
+    } else {
+      // ADJUSTMENT_OUT, DAMAGE, EXPIRY — loss entries
+      let expenseAccountCode: string;
+      switch (movement.movementType) {
+        case 'DAMAGE':
+          expenseAccountCode = AccountCodes.DAMAGE;
+          break;
+        case 'EXPIRY':
+          expenseAccountCode = AccountCodes.EXPIRY;
+          break;
+        default:
+          expenseAccountCode = AccountCodes.SHRINKAGE;
+      }
+
+      lines = [
+        {
+          accountCode: expenseAccountCode,
+          description,
+          debitAmount: movement.movementValue,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory reduction: ${movement.movementNumber}`,
+          debitAmount: 0,
+          creditAmount: movement.movementValue,
+        },
+      ];
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate: movement.movementDate,
+      description,
+      referenceType: 'STOCK_MOVEMENT',
+      referenceId: movement.movementId,
+      referenceNumber: movement.movementNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `STOCK_MOVEMENT-${movement.movementId}`,
+    });
+
+    logger.info('Recorded stock movement to GL', {
+      movementId: movement.movementId,
+      type: movement.movementType,
+      value: movement.movementValue,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record stock movement to GL', { error, movement });
+    throw new Error(`GL posting failed for stock movement ${movement.movementNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// EXPENSE APPROVAL JOURNAL ENTRIES (UNPAID EXPENSE → AP)
+// =============================================================================
+
+export interface ExpenseApprovalData {
+  expenseId: string;
+  expenseNumber: string;
+  expenseDate: string;
+  amount: number;
+  categoryCode: string;   // Maps to GL expense account via mapExpenseCategoryToAccount
+  description: string;
+  isPaidAtApproval: boolean;
+  paymentAccountId?: string;
+}
+
+/**
+ * Record expense approval in the general ledger.
+ *
+ * If paid at approval time:
+ *   DR Expense (6xxx)  amount
+ *   CR Cash (1010)     amount
+ *
+ * If unpaid at approval time:
+ *   DR Expense (6xxx)       amount
+ *   CR Accounts Payable (2100) amount
+ */
+export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData): Promise<void> {
+  try {
+    const expenseAccountCode = mapExpenseCategoryToAccount(expense.categoryCode);
+    const creditAccountCode = expense.isPaidAtApproval
+      ? AccountCodes.CASH
+      : AccountCodes.ACCOUNTS_PAYABLE;
+
+    await AccountingCore.createJournalEntry({
+      entryDate: expense.expenseDate,
+      description: `Expense: ${expense.description || expense.expenseNumber}`,
+      referenceType: 'EXPENSE',
+      referenceId: expense.expenseId,
+      referenceNumber: expense.expenseNumber,
+      lines: [
+        {
+          accountCode: expenseAccountCode,
+          description: `Expense: ${expense.description || expense.expenseNumber}`,
+          debitAmount: expense.amount,
+          creditAmount: 0,
+        },
+        {
+          accountCode: creditAccountCode,
+          description: `Expense recognition: ${expense.expenseNumber}`,
+          debitAmount: 0,
+          creditAmount: expense.amount,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `EXPENSE-${expense.expenseId}`,
+    });
+
+    logger.info('Recorded expense approval to GL', {
+      expenseId: expense.expenseId,
+      expenseNumber: expense.expenseNumber,
+      amount: expense.amount,
+      isPaid: expense.isPaidAtApproval,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record expense approval to GL', { error, expense });
+    throw new Error(`GL posting failed for expense ${expense.expenseNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// EXPENSE PAYMENT JOURNAL ENTRIES (CLEAR AP ON PAYMENT)
+// =============================================================================
+
+export interface ExpensePaymentData {
+  expenseId: string;
+  expenseNumber: string;
+  paymentDate: string;
+  amount: number;
+  paymentAccountCode?: string;  // Cash/bank account code (defaults to 1010)
+}
+
+/**
+ * Record expense payment clearing AP in the general ledger.
+ * Called when an already-approved (unpaid) expense is paid.
+ *
+ * Journal entry:
+ *   DR Accounts Payable (2100) amount
+ *   CR Cash / Bank (1010/1030) amount
+ */
+export async function recordExpensePaymentToGL(payment: ExpensePaymentData): Promise<void> {
+  try {
+    const creditAccountCode = payment.paymentAccountCode || AccountCodes.CASH;
+
+    await AccountingCore.createJournalEntry({
+      entryDate: payment.paymentDate,
+      description: `Payment for expense: ${payment.expenseNumber}`,
+      referenceType: 'EXPENSE_PAYMENT',
+      referenceId: payment.expenseId,
+      referenceNumber: payment.expenseNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+          description: `Clear AP for expense: ${payment.expenseNumber}`,
+          debitAmount: payment.amount,
+          creditAmount: 0,
+        },
+        {
+          accountCode: creditAccountCode,
+          description: `Payment for expense: ${payment.expenseNumber}`,
+          debitAmount: 0,
+          creditAmount: payment.amount,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `EXPENSE_PAYMENT-${payment.expenseId}`,
+    });
+
+    logger.info('Recorded expense payment to GL', {
+      expenseId: payment.expenseId,
+      expenseNumber: payment.expenseNumber,
+      amount: payment.amount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record expense payment to GL', { error, payment });
+    throw new Error(`GL posting failed for expense payment ${payment.expenseNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
 export default {
   AccountCodes,
   recordSaleToGL,
@@ -1009,5 +1529,12 @@ export default {
   recordSupplierPaymentToGL,
   recordStockAdjustmentToGL,
   recordDeliveryChargeToGL,
-  recordDeliveryCompletedToGL
+  recordDeliveryCompletedToGL,
+  recordSaleVoidToGL,
+  recordCustomerDepositToGL,
+  recordCustomerInvoiceToGL,
+  recordInvoicePaymentToGL,
+  recordStockMovementToGL,
+  recordExpenseApprovalToGL,
+  recordExpensePaymentToGL,
 };

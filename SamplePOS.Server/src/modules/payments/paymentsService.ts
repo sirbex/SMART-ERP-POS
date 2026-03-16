@@ -205,10 +205,9 @@ export const paymentsService = {
     };
 
     // ============================================================
-    // GL POSTING: Handled by database trigger (trg_post_customer_payment_to_ledger)
-    // The trigger fires on INSERT and posts to ledger_transactions
-    // This ensures atomicity - if payment exists, GL entry exists
-    // DO NOT add glEntryService calls here - it causes duplicate entries
+    // GL POSTING: NOT needed here. Sale GL is posted by salesService
+    // via recordSaleToGL(). These sale_payments records are just
+    // the payment breakdown detail — not independent financial events.
     // ============================================================
 
     return result;
@@ -228,7 +227,7 @@ export const paymentsService = {
       processedBy?: string;
     }
   ): Promise<{ newBalance: number; transactionId: string }> {
-    return UnitOfWork.run(pool, async (client) => {
+    const result = await UnitOfWork.run(pool, async (client) => {
       // Get current balance
       const currentBalance = await paymentsRepository.getCustomerBalance(client, input.customerId);
       const paymentAmount = new Decimal(input.amount);
@@ -254,6 +253,39 @@ export const paymentsService = {
         transactionId: transaction.id,
       };
     });
+
+    // ============================================================
+    // GL POSTING: Record customer payment reducing AR
+    // DR Cash/Card/Bank | CR Accounts Receivable
+    // ============================================================
+    try {
+      // Fetch customer name for GL description
+      const custRow = await pool.query(
+        'SELECT name FROM customers WHERE id = $1',
+        [input.customerId]
+      );
+      const customerName = (custRow.rows[0]?.name as string) || 'Unknown';
+
+      await glEntryService.recordCustomerPaymentToGL({
+        paymentId: result.transactionId,
+        paymentNumber: input.reference || `CPAY-${result.transactionId.slice(0, 8)}`,
+        paymentDate: new Date().toLocaleDateString('en-CA'),
+        amount: input.amount,
+        paymentMethod: (input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER') || 'CASH',
+        customerId: input.customerId,
+        customerName,
+        reducesAR: true,
+      });
+    } catch (glError) {
+      // Non-blocking: payment is committed, GL failure is logged
+      logger.error('GL posting failed for customer payment (non-blocking)', {
+        transactionId: result.transactionId,
+        customerId: input.customerId,
+        error: glError instanceof Error ? glError.message : String(glError),
+      });
+    }
+
+    return result;
   },
 
   /**

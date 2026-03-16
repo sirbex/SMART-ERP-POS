@@ -1,0 +1,1491 @@
+fn_post_customer_deposit_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_cash_account_id UUID;
+    v_deposit_account_id UUID;
+    v_customer_name TEXT;
+    v_existing_transaction UUID;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        -- IDEMPOTENCY CHECK
+        SELECT "Id" INTO v_existing_transaction
+        FROM ledger_transactions
+        WHERE "ReferenceType" = 'CUSTOMER_DEPOSIT' AND "ReferenceId" = NEW.id
+        LIMIT 1;
+        
+        IF v_existing_transaction IS NOT NULL THEN
+            RAISE NOTICE 'Customer deposit % already posted to GL, skipping', NEW.deposit_number;
+            RETURN NEW;
+        END IF;
+        
+        -- Get customer name
+        SELECT name INTO v_customer_name FROM customers WHERE id = NEW.customer_id;
+        
+        -- Get account IDs
+        SELECT "Id" INTO v_cash_account_id FROM accounts WHERE "AccountCode" = '1010';
+        SELECT "Id" INTO v_deposit_account_id FROM accounts WHERE "AccountCode" = '2200';
+        
+        IF v_cash_account_id IS NULL OR v_deposit_account_id IS NULL THEN
+            RAISE EXCEPTION 'GL accounts not found for deposit posting';
+        END IF;
+        
+        -- Generate transaction number
+        v_transaction_number := 'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+                                LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM '[0-9]+$') AS INTEGER)), 0) + 1 
+                                      FROM ledger_transactions)::TEXT, 6, '0');
+        v_transaction_id := gen_random_uuid();
+        
+        -- Create ledger transaction with idempotency key
+        INSERT INTO ledger_transactions (
+            "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+            "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+            "Status", "CreatedAt", "UpdatedAt", "IsReversed", "IdempotencyKey"
+        ) VALUES (
+            v_transaction_id,
+            v_transaction_number,
+            CURRENT_TIMESTAMP,
+            'CUSTOMER_DEPOSIT',
+            NEW.id,
+            NEW.deposit_number,
+            'Customer Deposit: ' || COALESCE(v_customer_name, 'Unknown') || ' - ' || NEW.deposit_number,
+            NEW.amount,
+            NEW.amount,
+            'POSTED',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            FALSE,
+            'CUSTOMER_DEPOSIT:' || NEW.id::TEXT
+        );
+        
+        -- DR Cash
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_cash_account_id, 'DEBIT',
+            NEW.amount, NEW.amount, 0,
+            'Deposit received - ' || NEW.deposit_number,
+            1, 'CUSTOMER_DEPOSIT', NEW.id::TEXT, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP
+        );
+        
+        -- CR Customer Deposits (liability)
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_deposit_account_id, 'CREDIT',
+            NEW.amount, 0, NEW.amount,
+            'Customer deposit liability - ' || NEW.deposit_number,
+            2, 'CUSTOMER_DEPOSIT', NEW.id::TEXT, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP
+        );
+        
+        RAISE NOTICE 'Posted customer deposit % to ledger as %', NEW.deposit_number, v_transaction_number;
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_customer_invoice_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_ar_account_id UUID;
+    v_revenue_account_id UUID;
+    v_line_number INTEGER := 0;
+    v_already_posted BOOLEAN := FALSE;
+BEGIN
+    -- Check if GL entry already exists for this invoice (prevent duplicate posting)
+    SELECT EXISTS (
+        SELECT 1 FROM ledger_entries 
+        WHERE "EntityType" = 'INVOICE' 
+          AND "EntityId" = NEW."Id"::TEXT
+          AND "EntryType" = 'DEBIT'
+    ) INTO v_already_posted;
+    
+    IF v_already_posted THEN
+        RAISE NOTICE 'Invoice % already has GL entries, skipping', NEW."InvoiceNumber";
+        RETURN NEW;
+    END IF;
+    
+    -- FIXED: Trigger on ANY status change from 'Draft' to an active status
+    -- Active statuses: 'Issued', 'Sent', 'Unpaid', 'PartiallyPaid', 'Paid', 'Overdue'
+    IF NEW."Status" NOT IN ('Draft', 'Cancelled', 'Void') AND 
+       (OLD."Status" IS NULL OR OLD."Status" = 'Draft') THEN
+        
+        -- Get account IDs
+        SELECT "Id" INTO v_ar_account_id FROM accounts WHERE "AccountCode" = '1200';
+        SELECT "Id" INTO v_revenue_account_id FROM accounts WHERE "AccountCode" = '4000';
+        
+        IF v_ar_account_id IS NULL THEN
+            RAISE EXCEPTION 'AR account (1200) not found - cannot post invoice GL entry';
+        END IF;
+        
+        IF v_revenue_account_id IS NULL THEN
+            -- Try alternative revenue accounts
+            SELECT "Id" INTO v_revenue_account_id FROM accounts WHERE "AccountCode" = '4100';
+            IF v_revenue_account_id IS NULL THEN
+                RAISE EXCEPTION 'Revenue account (4000 or 4100) not found - cannot post invoice GL entry';
+            END IF;
+        END IF;
+        
+        -- Generate transaction number
+        v_transaction_number := 'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+                                LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM '[0-9]+$') AS INTEGER)), 0) + 1 
+                                      FROM ledger_transactions)::TEXT, 6, '0');
+        v_transaction_id := gen_random_uuid();
+        
+        -- Create ledger transaction
+        INSERT INTO ledger_transactions (
+            "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+            "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+            "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+        ) VALUES (
+            v_transaction_id,
+            v_transaction_number,
+            CURRENT_TIMESTAMP,
+            'INVOICE',
+            NEW."Id",
+            NEW."InvoiceNumber",
+            'Customer Invoice: ' || NEW."InvoiceNumber",
+            NEW."TotalAmount",
+            NEW."TotalAmount",
+            'POSTED',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            FALSE
+        );
+        
+        -- DR Accounts Receivable (for full invoice amount - not amount paid)
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_ar_account_id, 'DEBIT',
+            NEW."TotalAmount", NEW."TotalAmount", 0, 
+            'Invoice ' || NEW."InvoiceNumber" || ' - ' || NEW."CustomerName",
+            v_line_number, 'INVOICE', NEW."Id"::TEXT, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP
+        );
+        
+        -- CR Revenue (for full invoice amount)
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_revenue_account_id, 'CREDIT',
+            NEW."TotalAmount", 0, NEW."TotalAmount",
+            'Revenue - Invoice ' || NEW."InvoiceNumber",
+            v_line_number, 'INVOICE', NEW."Id"::TEXT, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP
+        );
+        
+        -- Update account balances
+        UPDATE accounts 
+        SET "CurrentBalance" = COALESCE("CurrentBalance", 0) + NEW."TotalAmount"
+        WHERE "Id" = v_ar_account_id;
+        
+        UPDATE accounts 
+        SET "CurrentBalance" = COALESCE("CurrentBalance", 0) + NEW."TotalAmount"
+        WHERE "Id" = v_revenue_account_id;
+        
+        RAISE NOTICE 'Posted customer invoice % to ledger as % (status: %)', 
+                     NEW."InvoiceNumber", v_transaction_number, NEW."Status";
+    END IF;
+    
+    RETURN NEW;
+    -- NO EXCEPTION HANDLER - GL failures MUST abort transaction
+END;
+
+fn_post_customer_payment_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_cash_account_id UUID;
+    v_ar_account_id UUID;
+    v_customer_name TEXT;
+BEGIN
+    -- Get account IDs
+    SELECT "Id" INTO v_cash_account_id FROM accounts WHERE "AccountCode" = '1010';
+    SELECT "Id" INTO v_ar_account_id FROM accounts WHERE "AccountCode" = '1200';
+    
+    -- Get customer name
+    SELECT name INTO v_customer_name FROM customers WHERE id = NEW.customer_id;
+    
+    IF COALESCE(NEW.amount, 0) > 0 THEN
+        v_transaction_number := generate_ledger_transaction_number();
+        v_transaction_id := gen_random_uuid();
+        
+        -- Create ledger transaction
+        INSERT INTO ledger_transactions (
+            "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+            "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+            "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+        ) VALUES (
+            v_transaction_id,
+            v_transaction_number,
+            CURRENT_TIMESTAMP,
+            'CUSTOMER_PAYMENT',
+            NEW.id,
+            NEW.payment_number,
+            'Customer Payment: ' || COALESCE(v_customer_name, 'Unknown') || ' - ' || NEW.payment_number,
+            COALESCE(NEW.amount, 0),
+            COALESCE(NEW.amount, 0),
+            'POSTED',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            FALSE
+        );
+        
+        -- DR Cash
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_cash_account_id,
+            'DEBIT',
+            COALESCE(NEW.amount, 0),
+            COALESCE(NEW.amount, 0),
+            0,
+            'Payment received - ' || COALESCE(v_customer_name, 'Unknown'),
+            1,
+            'CUSTOMER_PAYMENT',
+            NEW.id::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- CR Accounts Receivable
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_ar_account_id,
+            'CREDIT',
+            COALESCE(NEW.amount, 0),
+            0,
+            COALESCE(NEW.amount, 0),
+            'AR reduced - ' || COALESCE(v_customer_name, 'Unknown'),
+            2,
+            'CUSTOMER_PAYMENT',
+            NEW.id::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- Account balances are now automatically updated by trg_sync_account_balance triggers
+        RAISE NOTICE 'Posted customer payment % to ledger as transaction %', NEW.payment_number, v_transaction_number;
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_deposit_application_to_ledger|||
+DECLARE
+    v_sale_payment_method TEXT;
+BEGIN
+    -- Only post on INSERT (new application)
+    IF TG_OP = 'INSERT' THEN
+        
+        -- Check if this sale was paid with DEPOSIT payment method
+        -- If so, the sale trigger already handled the GL posting
+        SELECT payment_method::TEXT INTO v_sale_payment_method
+        FROM sales WHERE id = NEW.sale_id;
+        
+        IF v_sale_payment_method = 'DEPOSIT' THEN
+            -- Skip GL posting - already handled by sale trigger
+            RAISE NOTICE 'Skipping deposit application GL for sale % - already posted by sale trigger', NEW.sale_id;
+            RETURN NEW;
+        END IF;
+        
+        -- For non-DEPOSIT sales (e.g., applying deposit to a CREDIT sale),
+        -- we would need the original logic here. But for now, just return.
+        -- This case is complex and rarely used.
+        RETURN NEW;
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_expense_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_expense_account_id UUID;
+    v_cash_account_id UUID;
+    v_ap_account_id UUID;
+    v_credit_account_id UUID;
+BEGIN
+    -- Get default accounts
+    SELECT "Id" INTO v_cash_account_id FROM accounts WHERE "AccountCode" = '1010';
+    SELECT "Id" INTO v_ap_account_id FROM accounts WHERE "AccountCode" = '2100';
+
+    -- ================================================================
+    -- PHASE 1: APPROVAL - Post expense recognition
+    -- When status changes to APPROVED, recognize the expense
+    -- ================================================================
+    IF NEW.status = 'APPROVED' AND (OLD.status IS NULL OR OLD.status != 'APPROVED') THEN
+
+        -- Prevent duplicate postings
+        IF EXISTS (SELECT 1 FROM ledger_transactions 
+                   WHERE "ReferenceType" = 'EXPENSE' AND "ReferenceId" = NEW.id) THEN
+            RAISE NOTICE 'Expense % already posted to ledger - skipping approval posting', NEW.expense_number;
+        ELSE
+            -- Get expense account (DEBIT side) from expense category mapping
+            IF NEW.category_id IS NOT NULL THEN
+                SELECT ec.account_id INTO v_expense_account_id
+                FROM expense_categories ec
+                WHERE ec.id = NEW.category_id AND ec.account_id IS NOT NULL;
+            END IF;
+
+            -- Fallback to default expense account if no category mapping
+            IF v_expense_account_id IS NULL THEN
+                SELECT "Id" INTO v_expense_account_id FROM accounts WHERE "AccountCode" = '6900';
+            END IF;
+
+            -- Determine credit account based on payment status at approval time
+            IF NEW.payment_status = 'PAID' THEN
+                -- Already paid at creation - credit cash/bank directly
+                IF NEW.payment_account_id IS NOT NULL THEN
+                    v_credit_account_id := NEW.payment_account_id;
+                ELSE
+                    v_credit_account_id := v_cash_account_id;
+                END IF;
+            ELSE
+                -- Unpaid at approval - credit Accounts Payable
+                v_credit_account_id := v_ap_account_id;
+            END IF;
+
+            IF COALESCE(NEW.amount, 0) > 0 THEN
+                v_transaction_number := generate_ledger_transaction_number();
+                v_transaction_id := gen_random_uuid();
+
+                -- Create ledger transaction
+                INSERT INTO ledger_transactions (
+                    "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+                    "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+                    "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+                ) VALUES (
+                    v_transaction_id,
+                    v_transaction_number,
+                    COALESCE(NEW.expense_date, CURRENT_DATE),
+                    'EXPENSE',
+                    NEW.id,
+                    NEW.expense_number,
+                    'Expense: ' || COALESCE(NEW.title, NEW.expense_number),
+                    COALESCE(NEW.amount, 0),
+                    COALESCE(NEW.amount, 0),
+                    'POSTED',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    FALSE
+                );
+
+                -- DEBIT: Expense account (increases expense)
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId",
+                    "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(), v_transaction_id, v_transaction_id, 1, v_expense_account_id,
+                    COALESCE(NEW.amount, 0), 0,
+                    'Expense: ' || COALESCE(NEW.title, NEW.expense_number),
+                    'DEBIT', COALESCE(NEW.amount, 0), CURRENT_TIMESTAMP
+                );
+
+                -- CREDIT: Cash/Bank (if paid) or AP (if unpaid)
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId",
+                    "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(), v_transaction_id, v_transaction_id, 2, v_credit_account_id,
+                    0, COALESCE(NEW.amount, 0),
+                    'Expense recognition: ' || NEW.expense_number,
+                    'CREDIT', COALESCE(NEW.amount, 0), CURRENT_TIMESTAMP
+                );
+
+                RAISE NOTICE 'Posted expense % approval to ledger (Debit: %, Credit: %)', 
+                    NEW.expense_number, v_expense_account_id, v_credit_account_id;
+            END IF;
+        END IF;
+    END IF;
+
+    -- ================================================================
+    -- PHASE 2: PAYMENT - Clear AP when expense is marked as paid
+    -- When payment_status changes to PAID on an already-approved expense
+    -- Post: DR Accounts Payable, CR Cash/Bank
+    -- ================================================================
+    IF NEW.status = 'APPROVED' AND OLD.status = 'APPROVED' 
+       AND NEW.payment_status = 'PAID' 
+       AND (OLD.payment_status IS NULL OR OLD.payment_status != 'PAID') THEN
+
+        -- Prevent duplicate payment postings
+        IF EXISTS (SELECT 1 FROM ledger_transactions 
+                   WHERE "ReferenceType" = 'EXPENSE_PAYMENT' AND "ReferenceId" = NEW.id) THEN
+            RAISE NOTICE 'Expense payment % already posted to ledger - skipping', NEW.expense_number;
+        ELSE
+            -- Determine which cash/bank account to credit
+            IF NEW.payment_account_id IS NOT NULL THEN
+                v_credit_account_id := NEW.payment_account_id;
+            ELSE
+                v_credit_account_id := v_cash_account_id;
+            END IF;
+
+            IF COALESCE(NEW.amount, 0) > 0 THEN
+                v_transaction_number := generate_ledger_transaction_number();
+                v_transaction_id := gen_random_uuid();
+
+                -- Create ledger transaction for payment
+                INSERT INTO ledger_transactions (
+                    "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+                    "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+                    "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+                ) VALUES (
+                    v_transaction_id,
+                    v_transaction_number,
+                    CURRENT_DATE,
+                    'EXPENSE_PAYMENT',
+                    NEW.id,
+                    NEW.expense_number,
+                    'Payment for expense: ' || COALESCE(NEW.title, NEW.expense_number),
+                    COALESCE(NEW.amount, 0),
+                    COALESCE(NEW.amount, 0),
+                    'POSTED',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    FALSE
+                );
+
+                -- DEBIT: Accounts Payable (clear the liability)
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId",
+                    "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(), v_transaction_id, v_transaction_id, 1, v_ap_account_id,
+                    COALESCE(NEW.amount, 0), 0,
+                    'Clear AP for expense: ' || NEW.expense_number,
+                    'DEBIT', COALESCE(NEW.amount, 0), CURRENT_TIMESTAMP
+                );
+
+                -- CREDIT: Cash/Bank (reduce cash)
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId",
+                    "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(), v_transaction_id, v_transaction_id, 2, v_credit_account_id,
+                    0, COALESCE(NEW.amount, 0),
+                    'Payment for expense: ' || NEW.expense_number,
+                    'CREDIT', COALESCE(NEW.amount, 0), CURRENT_TIMESTAMP
+                );
+
+                RAISE NOTICE 'Posted expense payment % to ledger (Debit AP: %, Credit Cash: %)', 
+                    NEW.expense_number, v_ap_account_id, v_credit_account_id;
+            END IF;
+        END IF;
+    END IF;
+
+    -- ================================================================
+    -- PHASE 2 ALT: When status changes to PAID (via markExpensePaid)
+    -- This handles the legacy flow where status goes APPROVED -> PAID
+    -- ================================================================
+    IF NEW.status = 'PAID' AND OLD.status = 'APPROVED' THEN
+        -- Update payment_status to PAID if not already
+        -- (This is handled by the service, but we check here as backup)
+        
+        -- Check if payment GL entry already exists
+        IF NOT EXISTS (SELECT 1 FROM ledger_transactions 
+                       WHERE "ReferenceType" = 'EXPENSE_PAYMENT' AND "ReferenceId" = NEW.id) THEN
+            
+            -- Determine which cash/bank account to credit
+            IF NEW.payment_account_id IS NOT NULL THEN
+                v_credit_account_id := NEW.payment_account_id;
+            ELSE
+                v_credit_account_id := v_cash_account_id;
+            END IF;
+
+            IF COALESCE(NEW.amount, 0) > 0 THEN
+                v_transaction_number := generate_ledger_transaction_number();
+                v_transaction_id := gen_random_uuid();
+
+                -- Create ledger transaction for payment
+                INSERT INTO ledger_transactions (
+                    "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+                    "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+                    "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+                ) VALUES (
+                    v_transaction_id,
+                    v_transaction_number,
+                    CURRENT_DATE,
+                    'EXPENSE_PAYMENT',
+                    NEW.id,
+                    NEW.expense_number,
+                    'Payment for expense: ' || COALESCE(NEW.title, NEW.expense_number),
+                    COALESCE(NEW.amount, 0),
+                    COALESCE(NEW.amount, 0),
+                    'POSTED',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    FALSE
+                );
+
+                -- DEBIT: Accounts Payable (clear the liability)
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId",
+                    "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(), v_transaction_id, v_transaction_id, 1, v_ap_account_id,
+                    COALESCE(NEW.amount, 0), 0,
+                    'Clear AP for expense: ' || NEW.expense_number,
+                    'DEBIT', COALESCE(NEW.amount, 0), CURRENT_TIMESTAMP
+                );
+
+                -- CREDIT: Cash/Bank (reduce cash)
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId",
+                    "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(), v_transaction_id, v_transaction_id, 2, v_credit_account_id,
+                    0, COALESCE(NEW.amount, 0),
+                    'Payment for expense: ' || NEW.expense_number,
+                    'CREDIT', COALESCE(NEW.amount, 0), CURRENT_TIMESTAMP
+                );
+
+                RAISE NOTICE 'Posted expense payment % to ledger via status change (Debit AP: %, Credit Cash: %)', 
+                    NEW.expense_number, v_ap_account_id, v_credit_account_id;
+            END IF;
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+
+fn_post_goods_receipt_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number VARCHAR(50);
+    v_inventory_account_id UUID;
+    v_ap_account_id UUID;
+    v_total_value NUMERIC(18,6);
+    v_description TEXT;
+    v_po_number VARCHAR(50);
+BEGIN
+    -- Only post when status changes to COMPLETED
+    IF NEW.status = 'COMPLETED' AND (OLD.status IS NULL OR OLD.status != 'COMPLETED') THEN
+        
+        -- Get total value from the goods receipt
+        v_total_value := COALESCE(NEW.total_value, 0);
+        
+        -- Skip if no value
+        IF v_total_value <= 0 THEN
+            RAISE NOTICE 'Skipping GL posting for GR %: zero value', NEW.receipt_number;
+            RETURN NEW;
+        END IF;
+        
+        -- Get the Inventory account (1300)
+        SELECT "Id" INTO v_inventory_account_id
+        FROM accounts
+        WHERE "AccountCode" = '1300' AND "IsActive" = true;
+        
+        IF v_inventory_account_id IS NULL THEN
+            RAISE EXCEPTION 'Inventory account (1300) not found';
+        END IF;
+        
+        -- Get the Accounts Payable account (2100)
+        SELECT "Id" INTO v_ap_account_id
+        FROM accounts
+        WHERE "AccountCode" = '2100' AND "IsActive" = true;
+        
+        IF v_ap_account_id IS NULL THEN
+            RAISE EXCEPTION 'Accounts Payable account (2100) not found';
+        END IF;
+        
+        -- Get PO number if available
+        SELECT po.order_number INTO v_po_number
+        FROM purchase_orders po
+        WHERE po.id = NEW.purchase_order_id;
+        
+        -- Build description
+        v_description := 'Goods Receipt: ' || NEW.receipt_number;
+        IF v_po_number IS NOT NULL THEN
+            v_description := v_description || ' (PO: ' || v_po_number || ')';
+        END IF;
+        
+        -- Generate transaction number
+        SELECT 'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+               LPAD((COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 9) AS INTEGER)), 0) + 1)::TEXT, 6, '0')
+        INTO v_transaction_number
+        FROM ledger_transactions
+        WHERE "TransactionNumber" LIKE 'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%';
+        
+        -- Create ledger transaction (with all required NOT NULL columns)
+        INSERT INTO ledger_transactions (
+            "Id",
+            "TransactionNumber",
+            "TransactionDate",
+            "Description",
+            "ReferenceType",
+            "ReferenceId",
+            "ReferenceNumber",
+            "TotalDebitAmount",
+            "TotalCreditAmount",
+            "Status",
+            "CreatedAt",
+            "UpdatedAt",
+            "IsReversed",
+            "CreatedById"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_number,
+            CURRENT_TIMESTAMP,
+            v_description,
+            'GOODS_RECEIPT',
+            NEW.id,
+            NEW.receipt_number,
+            v_total_value,
+            v_total_value,
+            'POSTED',
+            NOW(),
+            NOW(),
+            false,
+            NEW.received_by_id
+        )
+        RETURNING "Id" INTO v_transaction_id;
+        
+        -- DEBIT: Inventory (1300) - Asset increases
+        INSERT INTO ledger_entries (
+            "Id",
+            "TransactionId",
+            "AccountId",
+            "EntryType",
+            "Amount",
+            "DebitAmount",
+            "CreditAmount",
+            "Description",
+            "LineNumber",
+            "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_inventory_account_id,
+            'DEBIT',
+            v_total_value,
+            v_total_value,
+            0,
+            v_description,
+            1,
+            NOW()
+        );
+        
+        -- CREDIT: Accounts Payable (2100) - Liability increases
+        INSERT INTO ledger_entries (
+            "Id",
+            "TransactionId",
+            "AccountId",
+            "EntryType",
+            "Amount",
+            "DebitAmount",
+            "CreditAmount",
+            "Description",
+            "LineNumber",
+            "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_ap_account_id,
+            'CREDIT',
+            v_total_value,
+            0,
+            v_total_value,
+            v_description,
+            2,
+            NOW()
+        );
+        
+        -- Update account balances
+        -- Inventory is DEBIT normal - increase balance
+        UPDATE accounts
+        SET "CurrentBalance" = "CurrentBalance" + v_total_value
+        WHERE "Id" = v_inventory_account_id;
+        
+        -- AP is CREDIT normal - increase balance (stored as positive)
+        UPDATE accounts
+        SET "CurrentBalance" = "CurrentBalance" + v_total_value
+        WHERE "Id" = v_ap_account_id;
+        
+        RAISE NOTICE 'Posted GL entry for Goods Receipt %: value = %', NEW.receipt_number, v_total_value;
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_invoice_payment_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_debit_account_id UUID;
+    v_ar_account_id UUID;
+    v_invoice_number TEXT;
+    v_sale_payment_method TEXT;
+    v_invoice_has_ar_entry BOOLEAN;
+    v_line_number INTEGER := 0;
+    v_idempotency_key TEXT;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        -- Build idempotency key FIRST (matches glEntryService pattern)
+        v_idempotency_key := 'INVOICE_PAYMENT-' || NEW.id::TEXT;
+        
+        -- COMPREHENSIVE IDEMPOTENCY CHECK
+        IF EXISTS (
+            SELECT 1 FROM ledger_transactions 
+            WHERE ("ReferenceType" = 'INVOICE_PAYMENT' AND "ReferenceId" = NEW.id)
+               OR "IdempotencyKey" = v_idempotency_key
+        ) THEN
+            RAISE NOTICE 'Invoice payment % already posted to GL - skipping (idempotent)', NEW.receipt_number;
+            RETURN NEW;
+        END IF;
+        
+        -- Get invoice details and check if linked to a sale
+        SELECT i."InvoiceNumber", s.payment_method::text
+        INTO v_invoice_number, v_sale_payment_method
+        FROM invoices i 
+        LEFT JOIN sales s ON s.id = i."SaleId"
+        WHERE i."Id" = NEW.invoice_id;
+        
+        -- Check if invoice has AR debit entries
+        SELECT EXISTS (
+            SELECT 1 FROM ledger_entries le 
+            JOIN accounts a ON a."Id" = le."AccountId"
+            WHERE le."EntityId" = NEW.invoice_id::TEXT
+              AND le."EntityType" = 'INVOICE'
+              AND a."AccountCode" = '1200'
+              AND le."DebitAmount" > 0
+        ) INTO v_invoice_has_ar_entry;
+        
+        -- FIXED: Only skip if CASH sale AND invoice does NOT have AR entry
+        IF v_sale_payment_method = 'CASH' AND NOT v_invoice_has_ar_entry THEN
+            RAISE NOTICE 'Invoice payment % for CASH sale without AR entry - skipping GL', NEW.receipt_number;
+            RETURN NEW;
+        END IF;
+        
+        -- DEPOSIT payments: money already received via deposit, no Cash DR needed
+        IF NEW.payment_method = 'DEPOSIT' THEN
+            RAISE NOTICE 'Invoice payment % via DEPOSIT - skipping GL (deposit already posted)', NEW.receipt_number;
+            RETURN NEW;
+        END IF;
+        
+        -- Get account IDs based on payment method
+        -- FIX: Cast to text to prevent enum comparison errors with non-enum values like 'CHECK'
+        CASE NEW.payment_method::text
+            WHEN 'CASH' THEN 
+                SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1010';
+                IF v_debit_account_id IS NULL THEN
+                    SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1000';
+                END IF;
+            WHEN 'BANK_TRANSFER' THEN 
+                SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1030';
+            WHEN 'CHECK' THEN 
+                SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1030';
+            WHEN 'CARD' THEN 
+                SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1030';
+            WHEN 'MOBILE_MONEY' THEN 
+                SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1010';
+                IF v_debit_account_id IS NULL THEN
+                    SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1000';
+                END IF;
+            ELSE 
+                SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1010';
+                IF v_debit_account_id IS NULL THEN
+                    SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1000';
+                END IF;
+        END CASE;
+        
+        SELECT "Id" INTO v_ar_account_id FROM accounts WHERE "AccountCode" = '1200';
+        
+        IF v_debit_account_id IS NULL THEN
+            RAISE EXCEPTION 'Cash/Bank account not found for invoice payment GL posting';
+        END IF;
+        
+        IF v_ar_account_id IS NULL THEN
+            RAISE EXCEPTION 'AR account (1200) not found for invoice payment GL posting';
+        END IF;
+        
+        -- Generate transaction number
+        v_transaction_number := 'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+                                 LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM '[0-9]+$') AS INTEGER)), 0) + 1 
+                                       FROM ledger_transactions)::TEXT, 6, '0');
+        v_transaction_id := gen_random_uuid();
+        
+        -- Create ledger transaction WITH IdempotencyKey
+        INSERT INTO ledger_transactions (
+            "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+            "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+            "Status", "CreatedAt", "UpdatedAt", "IsReversed", "IdempotencyKey"
+        ) VALUES (
+            v_transaction_id,
+            v_transaction_number,
+            CURRENT_TIMESTAMP,
+            'INVOICE_PAYMENT',
+            NEW.id,
+            NEW.receipt_number,
+            'Invoice Payment: ' || NEW.receipt_number || ' for ' || v_invoice_number,
+            NEW.amount,
+            NEW.amount,
+            'POSTED',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            FALSE,
+            v_idempotency_key
+        );
+        
+        -- DR Cash/Bank
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_debit_account_id, 'DEBIT',
+            NEW.amount, NEW.amount, 0,
+            'Cash received - ' || NEW.receipt_number,
+            v_line_number, 'INVOICE_PAYMENT', NEW.id::TEXT, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP
+        );
+        
+        -- CR Accounts Receivable
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_ar_account_id, 'CREDIT',
+            NEW.amount, 0, NEW.amount,
+            'AR reduced - ' || NEW.receipt_number,
+            v_line_number, 'INVOICE_PAYMENT', NEW.id::TEXT, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP
+        );
+        
+        RAISE NOTICE 'Posted invoice payment % to ledger as % (key: %)', NEW.receipt_number, v_transaction_number, v_idempotency_key;
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_sale_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_debit_account_id UUID;
+    v_revenue_account_id UUID;
+    v_service_revenue_account_id UUID;
+    v_cogs_account_id UUID;
+    v_inventory_account_id UUID;
+    v_tax_payable_account_id UUID;
+    v_line_number INTEGER := 0;
+    v_inventory_revenue NUMERIC := 0;
+    v_service_revenue NUMERIC := 0;
+    v_inventory_cost NUMERIC := 0;
+    v_sale_items_count INTEGER := 0;
+    v_tax_amount NUMERIC := 0;
+BEGIN
+    -- Only post if status is COMPLETED
+    IF NEW.status != 'COMPLETED' THEN
+        RETURN NEW;
+    END IF;
+    
+    -- Check if sale_items exist - don't post without items
+    SELECT COUNT(*) INTO v_sale_items_count FROM sale_items WHERE sale_id = NEW.id;
+
+    IF v_sale_items_count = 0 THEN
+        RAISE NOTICE 'Sale % has no items yet - skipping GL posting until items are added', NEW.sale_number;
+        RETURN NEW;
+    END IF;
+    
+    -- Prevent duplicate postings using idempotency check
+    IF EXISTS (SELECT 1 FROM ledger_transactions 
+               WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = NEW.id) THEN
+        RAISE NOTICE 'Sale % already posted to ledger - skipping duplicate', NEW.sale_number;
+        RETURN NEW;
+    END IF;
+    
+    -- Get account IDs
+    SELECT "Id" INTO v_debit_account_id FROM accounts WHERE "AccountCode" = '1010'; -- Cash
+    SELECT "Id" INTO v_revenue_account_id FROM accounts WHERE "AccountCode" = '4000'; -- Sales Revenue (inventory)
+    SELECT "Id" INTO v_service_revenue_account_id FROM accounts WHERE "AccountCode" = '4100'; -- Service Revenue
+    SELECT "Id" INTO v_cogs_account_id FROM accounts WHERE "AccountCode" = '5000'; -- COGS
+    SELECT "Id" INTO v_inventory_account_id FROM accounts WHERE "AccountCode" = '1300'; -- Inventory
+    SELECT "Id" INTO v_tax_payable_account_id FROM accounts WHERE "AccountCode" = '2300'; -- Tax Payable
+    
+    IF v_debit_account_id IS NULL OR v_revenue_account_id IS NULL OR v_service_revenue_account_id IS NULL THEN
+        RAISE EXCEPTION 'Required GL accounts not found (1010, 4000, 4100)';
+    END IF;
+    
+    -- CALCULATE REVENUE AND COST SPLIT BY PRODUCT TYPE
+    SELECT 
+        COALESCE(SUM(CASE WHEN is_service = false THEN total_price ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN is_service = true THEN total_price ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN is_service = false THEN unit_cost * quantity ELSE 0 END), 0)
+    INTO v_inventory_revenue, v_service_revenue, v_inventory_cost
+    FROM sale_items
+    WHERE sale_id = NEW.id;
+    
+    -- Get tax amount from the sale record
+    v_tax_amount := COALESCE(NEW.tax_amount, 0);
+    
+    RAISE NOTICE 'Posted sale % to ledger: inventory_rev=%, service_rev=%, cogs=%, tax=%', 
+        NEW.sale_number, v_inventory_revenue, v_service_revenue, v_inventory_cost, v_tax_amount;
+    
+    -- Generate transaction number
+    v_transaction_number := generate_ledger_transaction_number();
+    v_transaction_id := gen_random_uuid();
+    
+    -- Create ledger transaction
+    INSERT INTO ledger_transactions (
+        "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+        "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+        "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+    ) VALUES (
+        v_transaction_id,
+        v_transaction_number,
+        COALESCE(NEW.sale_date, CURRENT_DATE),
+        'SALE',
+        NEW.id,
+        NEW.sale_number,
+        'Sale: ' || NEW.sale_number,
+        COALESCE(NEW.total_amount, 0) + v_inventory_cost,
+        COALESCE(NEW.total_amount, 0) + v_inventory_cost,
+        'POSTED',
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP,
+        FALSE
+    );
+    
+    -- DEBIT: Cash/AR (depending on payment method)
+    v_line_number := v_line_number + 1;
+    INSERT INTO ledger_entries (
+        "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", 
+        "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+    ) VALUES (
+        gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_debit_account_id,
+        COALESCE(NEW.total_amount, 0), 0,
+        'Cash received from sale ' || NEW.sale_number,
+        'DEBIT', COALESCE(NEW.total_amount, 0), CURRENT_TIMESTAMP
+    );
+    
+    -- CREDIT: Sales Revenue (Inventory items only) - Account 4000
+    IF v_inventory_revenue > 0 THEN
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", 
+            "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_revenue_account_id,
+            0, v_inventory_revenue,
+            'Revenue from inventory sale ' || NEW.sale_number,
+            'CREDIT', v_inventory_revenue, CURRENT_TIMESTAMP
+        );
+    END IF;
+    
+    -- CREDIT: Service Revenue (Service items only) - Account 4100
+    IF v_service_revenue > 0 THEN
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", 
+            "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_service_revenue_account_id,
+            0, v_service_revenue,
+            'Revenue from service sale ' || NEW.sale_number,
+            'CREDIT', v_service_revenue, CURRENT_TIMESTAMP
+        );
+    END IF;
+    
+    -- CREDIT: Tax Payable (Account 2300) - Tax collected on sale
+    IF v_tax_amount > 0 AND v_tax_payable_account_id IS NOT NULL THEN
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", 
+            "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_tax_payable_account_id,
+            0, v_tax_amount,
+            'Tax collected on sale ' || NEW.sale_number,
+            'CREDIT', v_tax_amount, CURRENT_TIMESTAMP
+        );
+    END IF;
+    
+    -- DEBIT: COGS (Inventory items only, NOT service items)
+    -- CREDIT: Inventory (Inventory items only, NOT service items)
+    IF v_inventory_cost > 0 THEN
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", 
+            "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_cogs_account_id,
+            v_inventory_cost, 0,
+            'Cost of goods sold - ' || NEW.sale_number,
+            'DEBIT', v_inventory_cost, CURRENT_TIMESTAMP
+        );
+        
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "LineNumber", "AccountId", 
+            "DebitAmount", "CreditAmount", "Description", "EntryType", "Amount", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(), v_transaction_id, v_transaction_id, v_line_number, v_inventory_account_id,
+            0, v_inventory_cost,
+            'Inventory reduction - ' || NEW.sale_number,
+            'CREDIT', v_inventory_cost, CURRENT_TIMESTAMP
+        );
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_sale_void_to_ledger|||
+DECLARE
+    v_original_transaction_id UUID;
+    v_reversal_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_entry RECORD;
+    v_line_number INTEGER := 0;
+BEGIN
+    -- Only trigger when voided_at is set
+    IF NEW.voided_at IS NOT NULL AND OLD.voided_at IS NULL THEN
+        
+        -- Find original ledger transaction
+        SELECT "Id" INTO v_original_transaction_id
+        FROM ledger_transactions
+        WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = NEW.id AND "IsReversed" = FALSE
+        LIMIT 1;
+        
+        IF v_original_transaction_id IS NOT NULL THEN
+            -- Generate reversal transaction
+            v_transaction_number := generate_ledger_transaction_number();
+            v_reversal_transaction_id := gen_random_uuid();
+            
+            -- Create reversal ledger transaction
+            INSERT INTO ledger_transactions (
+                "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+                "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+                "Status", "CreatedAt", "UpdatedAt", "IsReversed", "OriginalTransactionId"
+            ) VALUES (
+                v_reversal_transaction_id,
+                v_transaction_number,
+                CURRENT_TIMESTAMP,
+                'SALE_VOID',
+                NEW.id,
+                NEW.sale_number,
+                'VOID: Sale ' || NEW.sale_number || ' - ' || COALESCE(NEW.void_reason, 'No reason'),
+                COALESCE(NEW.total_amount, 0) + COALESCE(NEW.total_cost, 0),
+                COALESCE(NEW.total_amount, 0) + COALESCE(NEW.total_cost, 0),
+                'POSTED',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP,
+                FALSE,
+                v_original_transaction_id
+            );
+            
+            -- Reverse each original entry (swap debits and credits)
+            FOR v_entry IN 
+                SELECT * FROM ledger_entries WHERE "LedgerTransactionId" = v_original_transaction_id
+            LOOP
+                v_line_number := v_line_number + 1;
+                INSERT INTO ledger_entries (
+                    "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+                    "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+                    "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+                ) VALUES (
+                    gen_random_uuid(),
+                    v_reversal_transaction_id,
+                    v_reversal_transaction_id,
+                    v_entry."AccountId",
+                    CASE WHEN v_entry."EntryType" = 'DEBIT' THEN 'CREDIT' ELSE 'DEBIT' END,
+                    v_entry."Amount",
+                    v_entry."CreditAmount", -- Swap
+                    v_entry."DebitAmount",  -- Swap
+                    'REVERSAL: ' || v_entry."Description",
+                    v_line_number,
+                    v_entry."EntityType",
+                    v_entry."EntityId",
+                    CURRENT_TIMESTAMP,
+                    0,
+                    CURRENT_TIMESTAMP
+                );
+                -- Account balances are automatically updated by trg_sync_account_balance triggers
+            END LOOP;
+            
+            -- Mark original transaction as reversed
+            UPDATE ledger_transactions 
+            SET "IsReversed" = TRUE, "ReversalTransactionId" = v_reversal_transaction_id, "ReversedAt" = CURRENT_TIMESTAMP
+            WHERE "Id" = v_original_transaction_id;
+            
+            RAISE NOTICE 'Posted void reversal for sale % as transaction %', NEW.sale_number, v_transaction_number;
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+
+fn_post_stock_movement_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_inventory_account_id UUID;
+    v_adjustment_account_id UUID;
+    v_line_number INTEGER := 0;
+    v_product_name TEXT;
+    v_movement_value NUMERIC;
+    v_description TEXT;
+BEGIN
+    -- Only post for adjustment-type movements (not SALE or GOODS_RECEIPT - those have their own triggers)
+    IF NEW.movement_type NOT IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY') THEN
+        RETURN NEW;
+    END IF;
+    
+    -- Calculate movement value
+    v_movement_value := COALESCE(NEW.quantity * COALESCE(NEW.unit_cost, 0), 0);
+    
+    -- Skip if no value (avoid zero-value entries)
+    IF v_movement_value <= 0 THEN
+        RAISE WARNING 'Skipping GL posting for stock movement % - zero or negative value', NEW.movement_number;
+        RETURN NEW;
+    END IF;
+    
+    -- Get product name for description
+    SELECT name INTO v_product_name FROM products WHERE id = NEW.product_id;
+    v_description := 'Stock ' || NEW.movement_type || ': ' || COALESCE(v_product_name, 'Unknown') || ' - ' || NEW.movement_number;
+    
+    -- Get account IDs
+    SELECT "Id" INTO v_inventory_account_id FROM accounts WHERE "AccountCode" = '1300';
+    
+    IF v_inventory_account_id IS NULL THEN
+        RAISE EXCEPTION 'Inventory account 1300 not found - cannot post stock movement';
+    END IF;
+    
+    -- Determine which adjustment account to use based on movement type
+    CASE NEW.movement_type
+        WHEN 'ADJUSTMENT_OUT' THEN
+            SELECT "Id" INTO v_adjustment_account_id FROM accounts WHERE "AccountCode" = '5110'; -- Shrinkage
+        WHEN 'DAMAGE' THEN
+            SELECT "Id" INTO v_adjustment_account_id FROM accounts WHERE "AccountCode" = '5120'; -- Damage
+        WHEN 'EXPIRY' THEN
+            SELECT "Id" INTO v_adjustment_account_id FROM accounts WHERE "AccountCode" = '5130'; -- Expiry
+        WHEN 'ADJUSTMENT_IN' THEN
+            SELECT "Id" INTO v_adjustment_account_id FROM accounts WHERE "AccountCode" = '4110'; -- Overage
+        ELSE
+            SELECT "Id" INTO v_adjustment_account_id FROM accounts WHERE "AccountCode" = '5110'; -- Default to shrinkage
+    END CASE;
+    
+    IF v_adjustment_account_id IS NULL THEN
+        RAISE WARNING 'Adjustment account not found for movement type % - skipping GL posting', NEW.movement_type;
+        RETURN NEW;
+    END IF;
+    
+    -- Generate transaction number
+    v_transaction_number := COALESCE(
+        (SELECT generate_ledger_transaction_number()),
+        'LT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+        LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM '[0-9]+$') AS INTEGER)), 0) + 1 
+              FROM ledger_transactions)::TEXT, 6, '0')
+    );
+    v_transaction_id := gen_random_uuid();
+    
+    -- Create ledger transaction
+    INSERT INTO ledger_transactions (
+        "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+        "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+        "Status", "CreatedAt", "UpdatedAt", "IsReversed"
+    ) VALUES (
+        v_transaction_id,
+        v_transaction_number,
+        CURRENT_TIMESTAMP,
+        'STOCK_MOVEMENT',
+        NEW.id,
+        NEW.movement_number,
+        v_description,
+        v_movement_value,
+        v_movement_value,
+        'POSTED',
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP,
+        FALSE
+    );
+    
+    -- Post entries based on movement type
+    IF NEW.movement_type IN ('ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY') THEN
+        -- SHRINKAGE/LOSS: DR Expense, CR Inventory
+        
+        -- Entry 1: DR Expense (Shrinkage/Damage/Expiry)
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_adjustment_account_id,
+            'DEBIT',
+            v_movement_value,
+            v_movement_value,
+            0,
+            v_description,
+            v_line_number,
+            'STOCK_MOVEMENT',
+            NEW.id::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- Update expense account balance (debit increases expense)
+        UPDATE accounts 
+        SET "CurrentBalance" = "CurrentBalance" + v_movement_value,
+            "UpdatedAt" = CURRENT_TIMESTAMP
+        WHERE "Id" = v_adjustment_account_id;
+        
+        -- Entry 2: CR Inventory (reduce asset)
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_inventory_account_id,
+            'CREDIT',
+            v_movement_value,
+            0,
+            v_movement_value,
+            v_description,
+            v_line_number,
+            'STOCK_MOVEMENT',
+            NEW.id::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- Update inventory account balance (credit decreases asset)
+        UPDATE accounts 
+        SET "CurrentBalance" = "CurrentBalance" - v_movement_value,
+            "UpdatedAt" = CURRENT_TIMESTAMP
+        WHERE "Id" = v_inventory_account_id;
+        
+    ELSIF NEW.movement_type = 'ADJUSTMENT_IN' THEN
+        -- OVERAGE/GAIN: DR Inventory, CR Revenue
+        
+        -- Entry 1: DR Inventory (increase asset)
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_inventory_account_id,
+            'DEBIT',
+            v_movement_value,
+            v_movement_value,
+            0,
+            v_description,
+            v_line_number,
+            'STOCK_MOVEMENT',
+            NEW.id::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- Update inventory account balance (debit increases asset)
+        UPDATE accounts 
+        SET "CurrentBalance" = "CurrentBalance" + v_movement_value,
+            "UpdatedAt" = CURRENT_TIMESTAMP
+        WHERE "Id" = v_inventory_account_id;
+        
+        -- Entry 2: CR Overage Revenue
+        v_line_number := v_line_number + 1;
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_adjustment_account_id,
+            'CREDIT',
+            v_movement_value,
+            0,
+            v_movement_value,
+            v_description,
+            v_line_number,
+            'STOCK_MOVEMENT',
+            NEW.id::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- Update overage account balance (credit increases revenue)
+        UPDATE accounts 
+        SET "CurrentBalance" = "CurrentBalance" + v_movement_value,
+            "UpdatedAt" = CURRENT_TIMESTAMP
+        WHERE "Id" = v_adjustment_account_id;
+    END IF;
+    
+    RAISE NOTICE 'Posted GL entry for stock movement %: % = %', NEW.movement_number, NEW.movement_type, v_movement_value;
+    
+    RETURN NEW;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'Failed to post stock movement to GL: % - %', SQLERRM, NEW.movement_number;
+        RETURN NEW; -- Don't fail the movement, just log warning
+END;
+
+fn_post_supplier_payment_to_ledger|||
+DECLARE
+    v_transaction_id UUID;
+    v_transaction_number TEXT;
+    v_credit_account_id UUID;
+    v_credit_account_code TEXT;
+    v_ap_account_id UUID;
+    v_supplier_name TEXT;
+    v_idempotency_key TEXT;
+BEGIN
+    -- Build idempotency key FIRST
+    v_idempotency_key := 'SUPPLIER_PAYMENT-' || NEW."Id"::TEXT;
+    
+    -- COMPREHENSIVE IDEMPOTENCY CHECK
+    IF EXISTS (
+        SELECT 1 FROM ledger_transactions 
+        WHERE ("ReferenceType" = 'SUPPLIER_PAYMENT' AND "ReferenceId" = NEW."Id")
+           OR "IdempotencyKey" = v_idempotency_key
+    ) THEN
+        RAISE NOTICE 'Supplier payment % already posted to GL - skipping (idempotent)', NEW."PaymentNumber";
+        RETURN NEW;
+    END IF;
+
+    -- Get A/P account ID
+    SELECT "Id" INTO v_ap_account_id FROM accounts WHERE "AccountCode" = '2100';
+    
+    -- Determine credit account based on payment method
+    CASE UPPER(COALESCE(NEW."PaymentMethod", 'CASH'))
+        WHEN 'CASH' THEN
+            v_credit_account_code := '1010';
+        WHEN 'BANK_TRANSFER' THEN
+            v_credit_account_code := '1030';
+        WHEN 'CHECK' THEN
+            v_credit_account_code := '1030';
+        WHEN 'CARD' THEN
+            v_credit_account_code := '1030';
+        ELSE
+            v_credit_account_code := '1010';
+    END CASE;
+    
+    SELECT "Id" INTO v_credit_account_id FROM accounts WHERE "AccountCode" = v_credit_account_code;
+    
+    IF v_credit_account_id IS NULL THEN
+        SELECT "Id" INTO v_credit_account_id FROM accounts WHERE "AccountCode" = '1010';
+        v_credit_account_code := '1010';
+    END IF;
+    
+    SELECT "CompanyName" INTO v_supplier_name FROM suppliers WHERE "Id" = NEW."SupplierId";
+    
+    IF COALESCE(NEW."Amount", 0) > 0 THEN
+        v_transaction_number := generate_ledger_transaction_number();
+        v_transaction_id := gen_random_uuid();
+        
+        -- Create ledger transaction WITH IdempotencyKey
+        INSERT INTO ledger_transactions (
+            "Id", "TransactionNumber", "TransactionDate", "ReferenceType", "ReferenceId",
+            "ReferenceNumber", "Description", "TotalDebitAmount", "TotalCreditAmount",
+            "Status", "CreatedAt", "UpdatedAt", "IsReversed", "IdempotencyKey"
+        ) VALUES (
+            v_transaction_id,
+            v_transaction_number,
+            CURRENT_TIMESTAMP,
+            'SUPPLIER_PAYMENT',
+            NEW."Id",
+            NEW."PaymentNumber",
+            'Supplier Payment (' || NEW."PaymentMethod" || '): ' || COALESCE(v_supplier_name, 'Unknown') || ' - ' || NEW."PaymentNumber",
+            COALESCE(NEW."Amount", 0),
+            COALESCE(NEW."Amount", 0),
+            'POSTED',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            FALSE,
+            v_idempotency_key
+        );
+        
+        -- DR Accounts Payable (reduce liability)
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_ap_account_id,
+            'DEBIT',
+            COALESCE(NEW."Amount", 0),
+            COALESCE(NEW."Amount", 0),
+            0,
+            'AP reduced - ' || COALESCE(v_supplier_name, 'Unknown'),
+            1,
+            'SUPPLIER_PAYMENT',
+            NEW."Id"::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        -- CR Cash/Bank
+        INSERT INTO ledger_entries (
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType",
+            "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "RunningBalance", "CreatedAt"
+        ) VALUES (
+            gen_random_uuid(),
+            v_transaction_id,
+            v_transaction_id,
+            v_credit_account_id,
+            'CREDIT',
+            COALESCE(NEW."Amount", 0),
+            0,
+            COALESCE(NEW."Amount", 0),
+            'Bank/Cash paid - ' || COALESCE(v_supplier_name, 'Unknown'),
+            2,
+            'SUPPLIER_PAYMENT',
+            NEW."Id"::TEXT,
+            CURRENT_TIMESTAMP,
+            0,
+            CURRENT_TIMESTAMP
+        );
+        
+        RAISE NOTICE 'Posted supplier payment % to GL as % (key: %)', NEW."PaymentNumber", v_transaction_number, v_idempotency_key;
+    END IF;
+    
+    RETURN NEW;
+    -- NO EXCEPTION HANDLER - GL failures MUST abort transaction
+END;
+

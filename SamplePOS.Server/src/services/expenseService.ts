@@ -193,6 +193,36 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
       return updated;
     });
 
+    // ============================================================
+    // GL POSTING: Record expense recognition on approval
+    // DR Expense (6xxx)  /  CR Cash (if paid) or AP (if unpaid)
+    // ============================================================
+    try {
+      // Check if expense was already paid at creation time
+      const paymentStatusResult = await globalPool.query(
+        'SELECT payment_status FROM expenses WHERE id = $1',
+        [id]
+      );
+      const isPaidAtApproval = paymentStatusResult.rows[0]?.payment_status === 'PAID';
+
+      await glEntryService.recordExpenseApprovalToGL({
+        expenseId: id,
+        expenseNumber: existingExpense.expenseNumber,
+        expenseDate: existingExpense.expenseDate,
+        amount: existingExpense.amount,
+        categoryCode: existingExpense.categoryCode || existingExpense.category || 'GENERAL',
+        description: existingExpense.title || existingExpense.expenseNumber,
+        isPaidAtApproval,
+      });
+    } catch (glError) {
+      logger.error('GL posting failed for expense approval (non-fatal)', {
+        expenseId: id,
+        expenseNumber: existingExpense.expenseNumber,
+        error: glError,
+      });
+      // Non-fatal: approval succeeds, GL can be reconciled later
+    }
+
     return expense;
   } catch (error) {
     logger.error('Error in expense service approveExpense', { error, id, approverId, comments });
@@ -306,10 +336,10 @@ export const markExpensePaid = async (
       const updated = await expenseRepository.updateExpense(id, updateData, client);
 
       // ============================================================
-      // GL POSTING: Handled by database trigger (trg_post_expense_to_ledger)
-      // The trigger fires on INSERT/UPDATE and posts to ledger_transactions
-      // This ensures atomicity - if expense exists, GL entry exists
-      // DO NOT add glEntryService calls here - it causes duplicate entries
+      // GL POSTING: Clear AP when approved expense is paid
+      // DR Accounts Payable (2100) / CR Cash or Bank
+      // Only post if expense was NOT already paid at approval
+      // (if it was, the approval GL already credited Cash directly)
       // ============================================================
 
       // ============================================================
@@ -338,6 +368,40 @@ export const markExpensePaid = async (
 
       return updated;
     });
+
+    // ============================================================
+    // GL POSTING: Clear AP when approved expense is paid
+    // DR AP (2100) / CR Cash or Bank — only if approval credited AP
+    // ============================================================
+    try {
+      // Resolve payment account code from UUID
+      let paymentAccountCode: string | undefined;
+      if (paymentAccountId) {
+        const acctResult = await globalPool.query(
+          'SELECT "AccountCode" FROM accounts WHERE "Id" = $1',
+          [paymentAccountId]
+        );
+        if (acctResult.rows.length > 0) {
+          paymentAccountCode = acctResult.rows[0].AccountCode;
+        }
+      }
+
+      const paymentDate = (paymentData.paymentDate || new Date().toLocaleDateString('en-CA'));
+
+      await glEntryService.recordExpensePaymentToGL({
+        expenseId: id,
+        expenseNumber: existingExpense.expenseNumber,
+        amount: existingExpense.amount,
+        paymentDate,
+        paymentAccountCode,
+      });
+    } catch (glError) {
+      logger.error('GL posting failed for expense payment (non-fatal)', {
+        expenseId: id,
+        expenseNumber: existingExpense.expenseNumber,
+        error: glError,
+      });
+    }
 
     return updatedExpense;
   } catch (error) {
