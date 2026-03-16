@@ -44,7 +44,7 @@ const target = env.ASPNETCORE_HTTPS_PORT ? `https://localhost:${env.ASPNETCORE_H
 // https://vitejs.dev/config/
 export default defineConfig({
     plugins: [plugin()],
-    base: './', // Set base path to relative for proper asset loading
+    base: '/', // Absolute path so assets resolve from root on all routes
     resolve: {
         alias: {
             '@': fileURLToPath(new URL('./src', import.meta.url)),

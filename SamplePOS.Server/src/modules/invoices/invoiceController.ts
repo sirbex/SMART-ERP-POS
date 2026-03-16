@@ -553,8 +553,8 @@ export const invoiceController = {
       // Payment Accounts section (from settings)
       const invoiceAccounts = Array.isArray(settings.paymentAccounts)
         ? settings.paymentAccounts.filter(
-            (a: { isActive: boolean; showOnInvoice: boolean }) => a.isActive && a.showOnInvoice
-          )
+          (a: { isActive: boolean; showOnInvoice: boolean }) => a.isActive && a.showOnInvoice
+        )
         : [];
 
       if (invoiceAccounts.length > 0) {

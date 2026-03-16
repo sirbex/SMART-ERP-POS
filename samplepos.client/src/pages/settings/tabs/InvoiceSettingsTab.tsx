@@ -685,9 +685,8 @@ export default function InvoiceSettingsTab() {
                     /* Display Mode */
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${
-                          account.type === 'BANK' ? 'bg-indigo-500' : account.type === 'MOBILE_MONEY' ? 'bg-yellow-500' : 'bg-green-500'
-                        }`}>
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold ${account.type === 'BANK' ? 'bg-indigo-500' : account.type === 'MOBILE_MONEY' ? 'bg-yellow-500' : 'bg-green-500'
+                          }`}>
                           {account.type === 'BANK' ? '🏦' : account.type === 'MOBILE_MONEY' ? '📱' : '💳'}
                         </div>
                         <div>
