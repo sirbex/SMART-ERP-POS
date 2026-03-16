@@ -5,33 +5,39 @@ import { FileText, TrendingUp, TrendingDown, Users, Package, RefreshCw, CheckCir
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 
+// Auth helper for fetch calls
+const authHeaders = (): HeadersInit => {
+    const token = localStorage.getItem('auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 // API functions
 const fetchProfitLoss = async (dateFrom: string, dateTo: string) => {
-    const response = await fetch(`/api/erp-accounting/reports/profit-loss?dateFrom=${dateFrom}&dateTo=${dateTo}`);
+    const response = await fetch(`/api/erp-accounting/reports/profit-loss?dateFrom=${dateFrom}&dateTo=${dateTo}`, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch P&L report');
     return response.json();
 };
 
 const fetchPLByCustomer = async (dateFrom: string, dateTo: string) => {
-    const response = await fetch(`/api/erp-accounting/reports/profit-loss/by-customer?dateFrom=${dateFrom}&dateTo=${dateTo}`);
+    const response = await fetch(`/api/erp-accounting/reports/profit-loss/by-customer?dateFrom=${dateFrom}&dateTo=${dateTo}`, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch P&L by customer');
     return response.json();
 };
 
 const fetchPLByProduct = async (dateFrom: string, dateTo: string) => {
-    const response = await fetch(`/api/erp-accounting/reports/profit-loss/by-product?dateFrom=${dateFrom}&dateTo=${dateTo}`);
+    const response = await fetch(`/api/erp-accounting/reports/profit-loss/by-product?dateFrom=${dateFrom}&dateTo=${dateTo}`, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch P&L by product');
     return response.json();
 };
 
 const fetchPLVerification = async () => {
-    const response = await fetch('/api/erp-accounting/reports/profit-loss/verify');
+    const response = await fetch('/api/erp-accounting/reports/profit-loss/verify', { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to verify P&L');
     return response.json();
 };
 
 const fetchComparativePL = async (periods: number) => {
-    const response = await fetch(`/api/erp-accounting/reports/profit-loss/comparative?periods=${periods}`);
+    const response = await fetch(`/api/erp-accounting/reports/profit-loss/comparative?periods=${periods}`, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch comparative P&L');
     return response.json();
 };

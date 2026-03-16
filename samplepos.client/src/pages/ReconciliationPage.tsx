@@ -12,12 +12,18 @@ import {
     DialogTitle,
 } from '../components/ui/dialog';
 
+// Auth helper for fetch calls
+const authHeaders = (): HeadersInit => {
+    const token = localStorage.getItem('auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 // API functions
 const fetchReconciliationSummary = async (asOfDate?: string) => {
     const url = asOfDate
         ? `/api/erp-accounting/reconciliation/summary?asOfDate=${asOfDate}`
         : '/api/erp-accounting/reconciliation/summary';
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch reconciliation summary');
     return response.json();
 };
@@ -26,7 +32,7 @@ const fetchAccountReconciliation = async (account: string, asOfDate?: string) =>
     const url = asOfDate
         ? `/api/erp-accounting/reconciliation/${account}?asOfDate=${asOfDate}`
         : `/api/erp-accounting/reconciliation/${account}`;
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: authHeaders() });
     if (!response.ok) throw new Error(`Failed to fetch ${account} reconciliation`);
     return response.json();
 };
@@ -35,13 +41,13 @@ const fetchDiscrepancyDetails = async (accountCode: string, asOfDate?: string) =
     const url = asOfDate
         ? `/api/erp-accounting/reconciliation/${accountCode}/discrepancies?asOfDate=${asOfDate}`
         : `/api/erp-accounting/reconciliation/${accountCode}/discrepancies`;
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch discrepancy details');
     return response.json();
 };
 
 const fetchActiveAccounts = async (): Promise<ChartAccount[]> => {
-    const response = await fetch('/api/accounting/chart-of-accounts?isPostingAccount=true&isActive=true');
+    const response = await fetch('/api/accounting/chart-of-accounts?isPostingAccount=true&isActive=true', { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch accounts');
     const data = await response.json();
     return data.data || [];

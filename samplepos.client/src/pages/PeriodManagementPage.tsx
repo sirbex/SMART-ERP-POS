@@ -2,10 +2,16 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, History, X } from 'lucide-react';
 
+// Auth helper for fetch calls
+const authHeaders = (): HeadersInit => {
+    const token = localStorage.getItem('auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 // API functions
 const fetchPeriods = async (year?: number) => {
     const url = year ? `/api/erp-accounting/periods?year=${year}` : '/api/erp-accounting/periods';
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch periods');
     return response.json();
 };
@@ -13,7 +19,7 @@ const fetchPeriods = async (year?: number) => {
 const closePeriod = async ({ year, month, notes }: { year: number; month: number; notes?: string }) => {
     const response = await fetch('/api/erp-accounting/periods/close', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ year, month, notes })
     });
     if (!response.ok) {
@@ -26,7 +32,7 @@ const closePeriod = async ({ year, month, notes }: { year: number; month: number
 const reopenPeriod = async ({ year, month, reason }: { year: number; month: number; reason: string }) => {
     const response = await fetch('/api/erp-accounting/periods/reopen', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ year, month, reason })
     });
     if (!response.ok) {
@@ -39,7 +45,7 @@ const reopenPeriod = async ({ year, month, reason }: { year: number; month: numb
 const lockPeriod = async ({ year, month }: { year: number; month: number }) => {
     const response = await fetch('/api/erp-accounting/periods/lock', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ year, month })
     });
     if (!response.ok) {
@@ -50,7 +56,7 @@ const lockPeriod = async ({ year, month }: { year: number; month: number }) => {
 };
 
 const fetchPeriodHistory = async (year: number, month: number) => {
-    const response = await fetch(`/api/erp-accounting/periods/${year}/${month}/history`);
+    const response = await fetch(`/api/erp-accounting/periods/${year}/${month}/history`, { headers: authHeaders() });
     if (!response.ok) throw new Error('Failed to fetch period history');
     return response.json();
 };
