@@ -302,7 +302,9 @@ export const salesService = {
           | 'FIFO'
           | 'AVCO'
           | 'STANDARD';
-        const originalPrice = Money.toNumber(Money.parse(productData.selling_price || String(item.unitPrice)));
+        const originalPrice = Money.toNumber(
+          Money.parse(productData.selling_price || String(item.unitPrice))
+        );
 
         // BR-SAL-004: Validate minimum price
         await SalesBusinessRules.validateMinimumPrice(client, item.productId, item.unitPrice);
@@ -449,16 +451,16 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-          ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+            ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-          ?.filter((line) => line.paymentMethod === 'CREDIT')
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+            ?.filter((line) => line.paymentMethod === 'CREDIT')
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(0);
 
@@ -717,6 +719,12 @@ export const salesService = {
       // Create sale items
       const items = await salesRepository.addSaleItems(client, itemsWithCosts);
 
+      // Re-trigger GL posting: the trg_post_sale_to_ledger trigger fires on INSERT
+      // but sale_items don't exist yet at that point (race condition). This UPDATE
+      // re-fires the trigger now that items are present, enabling correct GL posting.
+      // The trigger has idempotency protection so it won't double-post.
+      await client.query('UPDATE sales SET updated_at = NOW() WHERE id = $1', [sale.id]);
+
       // Deduct from cost layers AND inventory batches for each item
       for (const item of input.items) {
         // Skip custom items - they don't have inventory or cost layers
@@ -909,8 +917,8 @@ export const salesService = {
 
           throw new BusinessError(
             `Not enough stock for "${item.productName}". ` +
-            `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
-            `Short by: ${remainingQty.toFixed(2)}.`,
+              `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+              `Short by: ${remainingQty.toFixed(2)}.`,
             errorCode,
             {
               product: item.productName,
@@ -1425,7 +1433,10 @@ export const salesService = {
           effectivePaymentMethod !== 'CASH' &&
           effectivePaymentMethod !== 'CREDIT'
         ) {
-          pendingBankPayments.push({ amount: Money.toNumber(actualTotalAmount), paymentMethod: effectivePaymentMethod });
+          pendingBankPayments.push({
+            amount: Money.toNumber(actualTotalAmount),
+            paymentMethod: effectivePaymentMethod,
+          });
         }
 
         // Process each payment individually — track failures separately
