@@ -4,7 +4,7 @@
 -- GL posting has been migrated from database triggers to application layer
 -- (glEntryService.ts → AccountingCore.createJournalEntry → ledger_transactions)
 --
--- This migration drops the 11 GL posting triggers that are now handled by:
+-- This migration drops the 12 GL posting triggers that are now handled by:
 --   - salesService.ts → recordSaleToGL, recordSaleVoidToGL
 --   - goodsReceiptService.ts → recordGoodsReceiptToGL
 --   - expenseService.ts → recordExpenseApprovalToGL, recordExpensePaymentToGL
@@ -15,7 +15,6 @@
 --   - paymentsService.ts → recordCustomerPaymentToGL
 --
 -- KEPT triggers:
---   - trg_post_supplier_invoice_to_ledger (not yet wired to app layer)
 --   - trg_assert_gl_balance (validation guard)
 --   - trg_cost_layer_gl_failsafe (cost layer guard)
 --   - trg_enforce_period_ledger_entries (period locking)
@@ -62,6 +61,12 @@ DROP TRIGGER IF EXISTS trg_post_deposit_application_to_ledger ON pos_deposit_app
 
 -- 11. Stock movement GL posting (stock_movements table)
 DROP TRIGGER IF EXISTS trg_post_stock_movement_to_ledger ON stock_movements;
+
+-- 12. Supplier invoice GL posting (supplier_invoices table)
+-- NOTE: This trigger was dead code - condition required Status='Received'/'Approved'
+-- but the app only uses 'Pending'/'PartiallyPaid'/'Paid'. GR finalization already
+-- handles DR Inventory, CR AP via recordGoodsReceiptToGL(). No replacement needed.
+DROP TRIGGER IF EXISTS trg_post_supplier_invoice_to_ledger ON supplier_invoices;
 
 COMMIT;
 
