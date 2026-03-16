@@ -94,6 +94,8 @@ services:
       - "443:443"
     volumes:
       - ./nginx/deploy.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
       - nginx_logs:/var/log/nginx
     depends_on:
       - frontend
@@ -110,6 +112,7 @@ volumes:
   postgres_data:
   redis_data:
   nginx_logs:
+  certbot_webroot:
 
 networks:
   app-network:
