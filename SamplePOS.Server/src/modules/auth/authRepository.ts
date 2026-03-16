@@ -37,7 +37,7 @@ export async function findUserByEmail(pool: Pool, email: string): Promise<UserRe
     `SELECT 
       id, email, password_hash as "passwordHash", full_name as "fullName", role, is_active as "isActive",
       created_at as "createdAt", updated_at as "updatedAt"
-    FROM users WHERE email = $1`,
+    FROM users WHERE LOWER(email) = LOWER($1)`,
     [email]
   );
   return result.rows[0] || null;
