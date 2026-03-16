@@ -6,6 +6,7 @@
 
 import type pg from 'pg';
 import bcrypt from 'bcrypt';
+import { execSync } from 'child_process';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from './tenantRepository.js';
 import { normalizeTenant, PLAN_LIMITS } from '../../../../shared/types/tenant.js';
@@ -97,7 +98,7 @@ export const tenantService = {
         databasePort,
       });
 
-      await this.runSchemaSetup(tenantPool);
+      await this.runSchemaSetup(tenantPool, databaseName);
 
       // 5. Seed the admin user
       await this.seedAdminUser(tenantPool, {
@@ -323,281 +324,71 @@ export const tenantService = {
 
   /**
    * Run the full schema setup on a new tenant database.
-   * Executes the core schema that every tenant needs.
+   * Clones the schema from the master pos_system database using pg_dump,
+   * excluding platform-only tables (tenants, super_admins, etc.).
+   * This ensures every tenant gets the exact same schema as the main DB.
    */
-  async runSchemaSetup(tenantPool: pg.Pool): Promise<void> {
-    const client = await tenantPool.connect();
+  async runSchemaSetup(tenantPool: pg.Pool, databaseName: string): Promise<void> {
+    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbPort = process.env.DB_PORT || '5432';
+    const dbUser = process.env.DB_USER || 'postgres';
+    const dbPassword = process.env.DB_PASSWORD || 'password';
+    const masterDbName = process.env.DB_NAME || 'pos_system';
+
+    // Platform-only tables that should NOT be cloned to tenants
+    const excludeTables = [
+      'tenants',
+      'super_admins',
+      'tenant_api_keys',
+      'tenant_audit_log',
+      'sync_ledger',
+      'billing_events',
+      'schema_migrations',
+      '__EFMigrationsHistory',
+    ];
+
+    const excludeArgs = excludeTables
+      .map((t) => `--exclude-table=${t}`)
+      .join(' ');
+
+    // pg_dump --schema-only exports CREATE TABLE, indexes, constraints, enums, etc.
+    const pgDumpCmd =
+      `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `--schema-only --no-owner --no-privileges ${excludeArgs} ${masterDbName}`;
+
+    // psql applies the schema to the new tenant database
+    const psqlCmd =
+      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `-d ${databaseName} -v ON_ERROR_STOP=0`;
+
+    const fullCmd = `${pgDumpCmd} | ${psqlCmd}`;
+
     try {
-      await client.query('BEGIN');
+      logger.info(`Cloning schema from ${masterDbName} → ${databaseName}`);
 
-      // Core tables that every tenant needs
-      // This is a condensed version of the initial schema
-      await client.query(`
-        -- Users
-        CREATE TABLE IF NOT EXISTS users (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          email VARCHAR(255) UNIQUE NOT NULL,
-          password_hash VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255) NOT NULL,
-          role VARCHAR(20) NOT NULL DEFAULT 'CASHIER'
-            CHECK (role IN ('ADMIN', 'MANAGER', 'CASHIER', 'STAFF')),
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          last_login_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
+      execSync(fullCmd, {
+        encoding: 'utf-8',
+        timeout: 60_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-        -- Products
-        CREATE TABLE IF NOT EXISTS products (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          product_number VARCHAR(50) UNIQUE,
-          name VARCHAR(255) NOT NULL,
-          description TEXT,
-          sku VARCHAR(100),
-          barcode VARCHAR(100),
-          category VARCHAR(100),
-          price NUMERIC(15,2) NOT NULL DEFAULT 0,
-          cost_price NUMERIC(15,2) NOT NULL DEFAULT 0,
-          stock_quantity NUMERIC(15,4) NOT NULL DEFAULT 0,
-          reorder_level NUMERIC(15,4) NOT NULL DEFAULT 0,
-          base_uom VARCHAR(50) DEFAULT 'PCS',
-          track_expiry BOOLEAN NOT NULL DEFAULT false,
-          is_taxable BOOLEAN NOT NULL DEFAULT false,
-          tax_rate NUMERIC(5,2) DEFAULT 0,
-          is_service BOOLEAN NOT NULL DEFAULT false,
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
+      logger.info(`Tenant schema cloned successfully: ${databaseName}`);
+    } catch (error: unknown) {
+      // pg_dump with ON_ERROR_STOP=0 tolerates "already exists" warnings.
+      // Only treat it as fatal if the tenant DB has zero tables afterward.
+      const { rows } = await tenantPool.query(
+        `SELECT count(*)::int AS cnt FROM information_schema.tables WHERE table_schema = 'public'`
+      );
+      const tableCount = rows[0]?.cnt ?? 0;
 
-        -- Customers
-        CREATE TABLE IF NOT EXISTS customers (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          name VARCHAR(255) NOT NULL,
-          email VARCHAR(255),
-          phone VARCHAR(50),
-          address TEXT,
-          customer_group VARCHAR(50),
-          credit_limit NUMERIC(15,2) DEFAULT 0,
-          balance NUMERIC(15,2) DEFAULT 0,
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
+      if (tableCount < 10) {
+        logger.error(`Schema clone failed — only ${tableCount} tables created`, { error });
+        throw new Error(`Schema clone failed for ${databaseName}: only ${tableCount} tables`);
+      }
 
-        -- Suppliers
-        CREATE TABLE IF NOT EXISTS suppliers (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          name VARCHAR(255) NOT NULL,
-          email VARCHAR(255),
-          phone VARCHAR(50),
-          address TEXT,
-          contact_person VARCHAR(255),
-          balance NUMERIC(15,2) DEFAULT 0,
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        -- Sales
-        CREATE TABLE IF NOT EXISTS sales (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          sale_number VARCHAR(50) UNIQUE NOT NULL,
-          customer_id UUID REFERENCES customers(id),
-          cashier_id UUID NOT NULL REFERENCES users(id),
-          sale_date DATE NOT NULL DEFAULT CURRENT_DATE,
-          subtotal NUMERIC(15,2) NOT NULL DEFAULT 0,
-          tax_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          discount_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          total_cost NUMERIC(15,2) NOT NULL DEFAULT 0,
-          profit NUMERIC(15,2) NOT NULL DEFAULT 0,
-          payment_method VARCHAR(30) NOT NULL DEFAULT 'CASH',
-          amount_paid NUMERIC(15,2) NOT NULL DEFAULT 0,
-          change_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
-          notes TEXT,
-          voided_at TIMESTAMPTZ,
-          voided_by UUID REFERENCES users(id),
-          void_reason TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sales_sale_number ON sales(sale_number);
-        CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date);
-        CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
-
-        -- Sale Items
-        CREATE TABLE IF NOT EXISTS sale_items (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          sale_id UUID NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-          product_id UUID REFERENCES products(id),
-          product_name VARCHAR(255) NOT NULL,
-          quantity NUMERIC(15,4) NOT NULL,
-          unit_price NUMERIC(15,2) NOT NULL,
-          cost_price NUMERIC(15,2) NOT NULL DEFAULT 0,
-          discount_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          tax_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          total_amount NUMERIC(15,2) NOT NULL,
-          uom_id UUID,
-          uom_conversion_factor NUMERIC(15,6) DEFAULT 1,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
-
-        -- Chart of Accounts
-        CREATE TABLE IF NOT EXISTS chart_of_accounts (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          account_code VARCHAR(20) UNIQUE NOT NULL,
-          account_name VARCHAR(255) NOT NULL,
-          account_type VARCHAR(30) NOT NULL,
-          parent_id UUID REFERENCES chart_of_accounts(id),
-          is_active BOOLEAN NOT NULL DEFAULT true,
-          is_system BOOLEAN NOT NULL DEFAULT false,
-          description TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        -- Ledger Entries (General Ledger)
-        CREATE TABLE IF NOT EXISTS ledger_entries (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
-          account_id UUID NOT NULL REFERENCES chart_of_accounts(id),
-          debit NUMERIC(15,2) NOT NULL DEFAULT 0,
-          credit NUMERIC(15,2) NOT NULL DEFAULT 0,
-          description TEXT,
-          reference_type VARCHAR(50),
-          reference_id UUID,
-          created_by UUID REFERENCES users(id),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger_entries(account_id);
-        CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger_entries(entry_date);
-        CREATE INDEX IF NOT EXISTS idx_ledger_reference ON ledger_entries(reference_type, reference_id);
-
-        -- Invoices
-        CREATE TABLE IF NOT EXISTS invoices (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          invoice_number VARCHAR(50) UNIQUE NOT NULL,
-          sale_id UUID REFERENCES sales(id),
-          customer_id UUID REFERENCES customers(id),
-          invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
-          due_date DATE,
-          subtotal NUMERIC(15,2) NOT NULL DEFAULT 0,
-          tax_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          amount_paid NUMERIC(15,2) NOT NULL DEFAULT 0,
-          status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
-          notes TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        -- Purchase Orders
-        CREATE TABLE IF NOT EXISTS purchase_orders (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          po_number VARCHAR(50) UNIQUE NOT NULL,
-          supplier_id UUID NOT NULL REFERENCES suppliers(id),
-          order_date DATE NOT NULL DEFAULT CURRENT_DATE,
-          expected_date DATE,
-          status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
-          subtotal NUMERIC(15,2) NOT NULL DEFAULT 0,
-          tax_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
-          notes TEXT,
-          created_by UUID REFERENCES users(id),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        -- Purchase Order Items
-        CREATE TABLE IF NOT EXISTS purchase_order_items (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          purchase_order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
-          product_id UUID NOT NULL REFERENCES products(id),
-          quantity NUMERIC(15,4) NOT NULL,
-          unit_price NUMERIC(15,2) NOT NULL,
-          total_amount NUMERIC(15,2) NOT NULL,
-          received_quantity NUMERIC(15,4) NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        -- Inventory Batches
-        CREATE TABLE IF NOT EXISTS inventory_batches (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          product_id UUID NOT NULL REFERENCES products(id),
-          batch_number VARCHAR(100),
-          expiry_date DATE,
-          quantity NUMERIC(15,4) NOT NULL DEFAULT 0,
-          remaining_quantity NUMERIC(15,4) NOT NULL DEFAULT 0,
-          cost_price NUMERIC(15,2) NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_batches_product ON inventory_batches(product_id);
-        CREATE INDEX IF NOT EXISTS idx_batches_expiry ON inventory_batches(product_id, expiry_date, remaining_quantity);
-
-        -- Stock Movements
-        CREATE TABLE IF NOT EXISTS stock_movements (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          product_id UUID NOT NULL REFERENCES products(id),
-          movement_type VARCHAR(30) NOT NULL,
-          quantity NUMERIC(15,4) NOT NULL,
-          reference_type VARCHAR(50),
-          reference_id UUID,
-          batch_id UUID REFERENCES inventory_batches(id),
-          notes TEXT,
-          created_by UUID REFERENCES users(id),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
-
-        -- Audit Log
-        CREATE TABLE IF NOT EXISTS audit_log (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID REFERENCES users(id),
-          action VARCHAR(100) NOT NULL,
-          entity_type VARCHAR(50),
-          entity_id UUID,
-          old_values JSONB,
-          new_values JSONB,
-          ip_address VARCHAR(45),
-          user_agent TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
-
-        -- System Settings
-        CREATE TABLE IF NOT EXISTS system_settings (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          key VARCHAR(100) UNIQUE NOT NULL,
-          value TEXT,
-          category VARCHAR(50),
-          description TEXT,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        -- Sync metadata (for edge nodes)
-        CREATE TABLE IF NOT EXISTS sync_metadata (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          entity_type VARCHAR(50) NOT NULL,
-          entity_id UUID NOT NULL,
-          version BIGINT NOT NULL DEFAULT 1,
-          last_modified_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          synced_at TIMESTAMPTZ,
-          UNIQUE(entity_type, entity_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_sync_metadata_entity ON sync_metadata(entity_type, entity_id);
-        CREATE INDEX IF NOT EXISTS idx_sync_metadata_modified ON sync_metadata(last_modified_at);
-      `);
-
-      await client.query('COMMIT');
-      logger.info('Tenant schema setup complete');
-
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+      // Some warnings are normal (e.g., duplicate enum types) — log and continue
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn(`Schema clone completed with warnings (${tableCount} tables created): ${msg}`);
     }
   },
 
