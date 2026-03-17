@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import * as service from './uomService.js';
 import { NotFoundError, asyncHandler } from '../../middleware/errorHandler.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 const CreateMasterUomSchema = z.object({
   name: z.string().min(1, 'UoM name is required').max(100),
@@ -13,7 +14,9 @@ const UpdateMasterUomSchema = CreateMasterUomSchema.partial();
 
 const UomIdParamSchema = z.object({ uomId: z.string().uuid('UoM ID must be a valid UUID') });
 const ProductIdParamSchema = z.object({ id: z.string().uuid('Product ID must be a valid UUID') });
-const ProductUomIdParamSchema = z.object({ productUomId: z.string().uuid('Product UoM ID must be a valid UUID') });
+const ProductUomIdParamSchema = z.object({
+  productUomId: z.string().uuid('Product UoM ID must be a valid UUID'),
+});
 
 const AddProductUomSchema = z.object({
   uomId: z.string().uuid('UoM ID must be a valid UUID'),
@@ -41,26 +44,30 @@ const UpdateProductUomSchema = z.object({
 // Master UoM CRUD
 // ---------------------------------------------------------------------------
 
-export const listUoms = asyncHandler(async (_req, res) => {
-  const data = await service.listMasterUoms();
+export const listUoms = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
+  const data = await service.listMasterUoms(pool);
   res.json({ success: true, data });
 });
 
 export const createUom = asyncHandler(async (req, res) => {
-  const data = await service.createMasterUom(CreateMasterUomSchema.parse(req.body));
+  const pool = req.tenantPool || globalPool;
+  const data = await service.createMasterUom(CreateMasterUomSchema.parse(req.body), pool);
   res.json({ success: true, data });
 });
 
 export const updateUom = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { uomId: id } = UomIdParamSchema.parse(req.params);
-  const data = await service.updateMasterUom(id, UpdateMasterUomSchema.parse(req.body));
+  const data = await service.updateMasterUom(id, UpdateMasterUomSchema.parse(req.body), pool);
   if (!data) throw new NotFoundError('UoM');
   res.json({ success: true, data });
 });
 
 export const deleteUom = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { uomId: id } = UomIdParamSchema.parse(req.params);
-  const ok = await service.deleteMasterUom(id);
+  const ok = await service.deleteMasterUom(id, pool);
   if (!ok) throw new NotFoundError('UoM');
   res.json({ success: true, data: ok });
 });
@@ -70,12 +77,14 @@ export const deleteUom = asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 
 export const getProductUoms = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id: productId } = ProductIdParamSchema.parse(req.params);
-  const data = await service.getProductUoms(productId);
+  const data = await service.getProductUoms(productId, pool);
   res.json({ success: true, data });
 });
 
 export const addProductUom = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const validated = AddProductUomSchema.parse(req.body);
   // Normalize payload keys and sanitize to only allowed fields
   const normalized = {
@@ -91,20 +100,23 @@ export const addProductUom = asyncHandler(async (req, res) => {
 
   // Build audit context
   const user = req.user;
-  const auditContext = user ? {
-    userId: user.id,
-    userName: user.fullName,
-    userRole: user.role,
-    ipAddress: req.ip || req.socket.remoteAddress,
-    userAgent: req.headers['user-agent'],
-    sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-  } : undefined;
+  const auditContext = user
+    ? {
+        userId: user.id,
+        userName: user.fullName,
+        userRole: user.role,
+        ipAddress: req.ip || req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+      }
+    : undefined;
 
-  const data = await service.addProductUom(normalized, auditContext);
+  const data = await service.addProductUom(normalized, auditContext, pool);
   res.json({ success: true, data });
 });
 
 export const updateProductUom = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { productUomId: id } = ProductUomIdParamSchema.parse(req.params);
   const validated = UpdateProductUomSchema.parse(req.body);
 
@@ -133,21 +145,24 @@ export const updateProductUom = asyncHandler(async (req, res) => {
 
   // Build audit context
   const user = req.user;
-  const auditContext = user ? {
-    userId: user.id,
-    userName: user.fullName,
-    userRole: user.role,
-    ipAddress: req.ip || req.socket.remoteAddress,
-    userAgent: req.headers['user-agent'],
-    sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-  } : undefined;
+  const auditContext = user
+    ? {
+        userId: user.id,
+        userName: user.fullName,
+        userRole: user.role,
+        ipAddress: req.ip || req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+      }
+    : undefined;
 
-  const data = await service.updateProductUom(id, normalized, auditContext);
+  const data = await service.updateProductUom(id, normalized, auditContext, pool);
   res.json({ success: true, data });
 });
 
 export const deleteProductUom = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { productUomId: id } = ProductUomIdParamSchema.parse(req.params);
-  const ok = await service.removeProductUom(id);
+  const ok = await service.removeProductUom(id, pool);
   res.json({ success: true, data: ok });
 });

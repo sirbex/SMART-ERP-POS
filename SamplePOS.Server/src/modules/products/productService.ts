@@ -16,7 +16,8 @@ import logger from '../../utils/logger.js';
 export async function getAllProducts(
   page: number = 1,
   limit: number = 50,
-  includeUoms: boolean = false
+  includeUoms: boolean = false,
+  dbPool?: pg.Pool
 ): Promise<{
   data: Product[];
   pagination: {
@@ -28,8 +29,8 @@ export async function getAllProducts(
 }> {
   const offset = (page - 1) * limit;
   const [products, total] = await Promise.all([
-    productRepository.findAllProducts(limit, offset),
-    productRepository.countProducts(),
+    productRepository.findAllProducts(limit, offset, dbPool),
+    productRepository.countProducts(dbPool),
   ]);
 
   // If includeUoms is true, fetch UoMs for each product
@@ -38,7 +39,7 @@ export async function getAllProducts(
     productsWithUoms = await Promise.all(
       products.map(async (product) => {
         if (!product.id) return product;
-        const uoms = await uomRepository.listProductUoms(product.id);
+        const uoms = await uomRepository.listProductUoms(product.id, dbPool);
         return {
           ...product,
           productUoms: uoms,
@@ -58,8 +59,8 @@ export async function getAllProducts(
   };
 }
 
-export async function getProductById(id: string): Promise<Product> {
-  const product = await productRepository.findProductById(id);
+export async function getProductById(id: string, dbPool?: pg.Pool): Promise<Product> {
+  const product = await productRepository.findProductById(id, dbPool);
 
   if (!product) {
     throw new Error(`Product with ID ${id} not found`);
@@ -72,15 +73,15 @@ export async function getProductById(id: string): Promise<Product> {
  * Get product with UoM details and conversion methods
  * Use this when you need UoM-aware operations
  */
-export async function getProductWithUom(id: string): Promise<ProductWithUom> {
-  const product = await productRepository.findProductById(id);
+export async function getProductWithUom(id: string, dbPool?: pg.Pool): Promise<ProductWithUom> {
+  const product = await productRepository.findProductById(id, dbPool);
 
   if (!product) {
     throw new Error(`Product with ID ${id} not found`);
   }
 
   // Fetch UoMs for this product
-  const uoms = await uomRepository.listProductUoms(id);
+  const uoms = await uomRepository.listProductUoms(id, dbPool);
 
   return new ProductWithUom(product, uoms);
 }
@@ -93,9 +94,10 @@ export async function convertQuantity(
   productId: string,
   quantity: number,
   fromUomId: string,
-  toUomId: string
+  toUomId: string,
+  dbPool?: pg.Pool
 ): Promise<{ quantity: string; fromUom: string; toUom: string }> {
-  const productWithUom = await getProductWithUom(productId);
+  const productWithUom = await getProductWithUom(productId, dbPool);
 
   const convertedQty = productWithUom.convertBetweenUoms(quantity, fromUomId, toUomId);
 
@@ -114,19 +116,19 @@ export async function convertQuantity(
  * @param data - Product creation data (validated by Zod schema)
  * @returns Created product with generated product_number
  * @throws Error if SKU already exists or validation fails
- * 
+ *
  * Business Rules:
  * - BR-PRC-001: Cost price must be non-negative
  * - BR-PRC-002: Selling price must be non-negative
  * - BR-INV-005: Reorder level must be non-negative
  * - Selling price should be >= cost price (warning logged if violated)
- * 
+ *
  * Transaction: Wraps product creation and UoM setup in atomic transaction
  */
 export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Promise<Product> {
   const pool = dbPool || globalPool;
   // Business rule: Check if SKU already exists
-  const existing = await productRepository.findProductBySku(data.sku);
+  const existing = await productRepository.findProductBySku(data.sku, pool);
   if (existing) {
     throw new Error(`Product with SKU ${data.sku} already exists`);
   }
@@ -167,7 +169,7 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
 
   // BR-INV-005: Validate reorder level (if provided)
   if (data.reorderLevel !== undefined && data.reorderLevel !== null) {
-    const maxStock = (data as Record<string, unknown>).maxStock as number || null;
+    const maxStock = ((data as Record<string, unknown>).maxStock as number) || null;
     InventoryBusinessRules.validateReorderLevel(data.reorderLevel, maxStock);
     logger.info('BR-INV-005: Reorder level validation passed', {
       sku: data.sku,
@@ -185,31 +187,35 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
 
   // Transaction: Create product atomically
   return UnitOfWork.run(pool, async (client) => {
-    const product = await productRepository.createProduct(productData);
+    const product = await productRepository.createProduct(productData, pool);
 
     // If product has UoM data, create it within the transaction
     // (UoM creation would be added here if needed)
 
     logger.info('Product created successfully (transaction committed)', {
       productId: product.id,
-      sku: product.sku
+      sku: product.sku,
     });
 
     return product;
   });
 }
 
-export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product> {
+export async function updateProduct(
+  id: string,
+  data: UpdateProduct,
+  dbPool?: pg.Pool
+): Promise<Product> {
   const pool = dbPool || globalPool;
   // Check product exists
-  const existing = await productRepository.findProductById(id);
+  const existing = await productRepository.findProductById(id, pool);
   if (!existing) {
     throw new Error(`Product with ID ${id} not found`);
   }
 
   // Business rule: Check SKU uniqueness if being updated
   if (data.sku && data.sku !== existing.sku) {
-    const skuExists = await productRepository.findProductBySku(data.sku);
+    const skuExists = await productRepository.findProductBySku(data.sku, pool);
     if (skuExists) {
       throw new Error(`Product with SKU ${data.sku} already exists`);
     }
@@ -254,7 +260,10 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
 
   // BR-INV-005: Validate reorder level (if provided)
   if (data.reorderLevel !== undefined && data.reorderLevel !== null) {
-    const maxStock = (data as Record<string, unknown>).maxStock as number || (existing as Record<string, unknown>).maxStock as number || null;
+    const maxStock =
+      ((data as Record<string, unknown>).maxStock as number) ||
+      ((existing as Record<string, unknown>).maxStock as number) ||
+      null;
     InventoryBusinessRules.validateReorderLevel(data.reorderLevel, maxStock);
     logger.info('BR-INV-005: Reorder level validation passed', {
       productId: id,
@@ -272,7 +281,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
 
   // Transaction: Update product atomically
   return UnitOfWork.run(pool, async (client) => {
-    const updated = await productRepository.updateProduct(id, updateData);
+    const updated = await productRepository.updateProduct(id, updateData, pool);
 
     if (!updated) {
       throw new Error(`Failed to update product with ID ${id}`);
@@ -287,13 +296,13 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   });
 }
 
-export async function deleteProduct(id: string): Promise<void> {
-  const product = await productRepository.findProductById(id);
+export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<void> {
+  const product = await productRepository.findProductById(id, dbPool);
   if (!product) {
     throw new Error(`Product with ID ${id} not found`);
   }
 
-  const success = await productRepository.deleteProduct(id);
+  const success = await productRepository.deleteProduct(id, dbPool);
   if (!success) {
     throw new Error(`Failed to delete product with ID ${id}`);
   }

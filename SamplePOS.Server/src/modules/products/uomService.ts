@@ -8,30 +8,34 @@ import type { AuditContext } from '../../../../shared/types/audit.js';
 import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 
-export async function listMasterUoms() {
-  return repo.listUoms();
+export async function listMasterUoms(dbPool?: pg.Pool) {
+  return repo.listUoms(dbPool);
 }
 
-export async function createMasterUom(input: unknown) {
+export async function createMasterUom(input: unknown, dbPool?: pg.Pool) {
   const data = UomSchema.parse(input);
-  return repo.createUom({ name: data.name, symbol: data.symbol ?? null, type: data.type });
+  return repo.createUom({ name: data.name, symbol: data.symbol ?? null, type: data.type }, dbPool);
 }
 
-export async function updateMasterUom(id: string, input: unknown) {
+export async function updateMasterUom(id: string, input: unknown, dbPool?: pg.Pool) {
   const data = UomSchema.partial().parse(input);
-  return repo.updateUom(id, {
-    name: data.name,
-    symbol: data.symbol,
-    type: data.type,
-  });
+  return repo.updateUom(
+    id,
+    {
+      name: data.name,
+      symbol: data.symbol,
+      type: data.type,
+    },
+    dbPool
+  );
 }
 
-export async function deleteMasterUom(id: string) {
-  return repo.deleteUom(id);
+export async function deleteMasterUom(id: string, dbPool?: pg.Pool) {
+  return repo.deleteUom(id, dbPool);
 }
 
-export async function getProductUoms(productId: string) {
-  return repo.listProductUoms(productId);
+export async function getProductUoms(productId: string, dbPool?: pg.Pool) {
+  return repo.listProductUoms(productId, dbPool);
 }
 
 export async function addProductUom(input: unknown, auditContext?: AuditContext, dbPool?: pg.Pool) {
@@ -39,25 +43,28 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
   const data = ProductUomSchema.parse(input);
 
   if (data.isDefault) {
-    await repo.unsetDefaultForProduct(data.productId);
+    await repo.unsetDefaultForProduct(data.productId, dbPool);
   }
 
-  const result = await repo.createProductUom({
-    productId: data.productId,
-    uomId: data.uomId,
-    conversionFactor: data.conversionFactor,
-    barcode: data.barcode ?? null,
-    isDefault: data.isDefault ?? false,
-    priceOverride: data.priceOverride ?? null,
-    costOverride: data.costOverride ?? null,
-  });
+  const result = await repo.createProductUom(
+    {
+      productId: data.productId,
+      uomId: data.uomId,
+      conversionFactor: data.conversionFactor,
+      barcode: data.barcode ?? null,
+      isDefault: data.isDefault ?? false,
+      priceOverride: data.priceOverride ?? null,
+      costOverride: data.costOverride ?? null,
+    },
+    dbPool
+  );
 
   // Log price override if set
   if (data.priceOverride !== null && data.priceOverride !== undefined && auditContext) {
     try {
       // Get product and UOM details for logging
-      const productUoms = await repo.listProductUoms(data.productId);
-      const uom = productUoms.find(pu => pu.uomId === data.uomId);
+      const productUoms = await repo.listProductUoms(data.productId, dbPool);
+      const uom = productUoms.find((pu) => pu.uomId === data.uomId);
 
       // Get product details
       const productResult = await pool.query(
@@ -94,21 +101,30 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
   return result;
 }
 
-export async function updateProductUom(id: string, payload: unknown, auditContext?: AuditContext) {
+export async function updateProductUom(
+  id: string,
+  payload: unknown,
+  auditContext?: AuditContext,
+  dbPool?: pg.Pool
+) {
   // Use the update-specific schema that doesn't require productId/uomId
   const parsed = ProductUomUpdateSchema.parse(payload);
 
-  const result = await repo.updateProductUom(id, {
-    barcode: parsed.barcode,
-    conversionFactor: parsed.conversionFactor,
-    isDefault: parsed.isDefault,
-    priceOverride: parsed.priceOverride,
-    costOverride: parsed.costOverride,
-  });
+  const result = await repo.updateProductUom(
+    id,
+    {
+      barcode: parsed.barcode,
+      conversionFactor: parsed.conversionFactor,
+      isDefault: parsed.isDefault,
+      priceOverride: parsed.priceOverride,
+      costOverride: parsed.costOverride,
+    },
+    dbPool
+  );
 
   return result;
 }
 
-export async function removeProductUom(id: string) {
-  return repo.deleteProductUom(id);
+export async function removeProductUom(id: string, dbPool?: pg.Pool) {
+  return repo.deleteProductUom(id, dbPool);
 }

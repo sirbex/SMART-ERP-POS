@@ -1,6 +1,7 @@
 // Product History Service - business logic aggregation
 
 import Decimal from 'decimal.js';
+import type pg from 'pg';
 import { productHistoryRepository } from './productHistoryRepository.js';
 import * as productRepository from './productRepository.js';
 import type {
@@ -19,7 +20,8 @@ export interface HistoryServiceFilters {
 export const productHistoryService = {
   async getProductHistory(
     productId: string,
-    filters: HistoryServiceFilters = {}
+    filters: HistoryServiceFilters = {},
+    dbPool?: pg.Pool
   ): Promise<{
     items: ProductHistoryItem[];
     summary: ProductHistorySummary;
@@ -29,18 +31,19 @@ export const productHistoryService = {
     const limit = filters.limit && filters.limit > 0 ? Math.min(filters.limit, 200) : 100;
 
     // Fetch product for costing method
-    const product = await productRepository.findProductById(productId);
+    const product = await productRepository.findProductById(productId, dbPool);
     if (!product) {
       throw new Error(`Product ${productId} not found`);
     }
 
     // Fetch all event types (filter by type later if provided)
     const [grRows, saleRows, moveRows] = await Promise.all([
-      productHistoryRepository.getGoodsReceiptEvents(productId, filters),
-      productHistoryRepository.getSaleEvents(productId, filters),
+      productHistoryRepository.getGoodsReceiptEvents(productId, filters, dbPool),
+      productHistoryRepository.getSaleEvents(productId, filters, dbPool),
       productHistoryRepository.getStockMovementEvents(
         productId,
-        filters.type ? { ...filters, type: filters.type } : filters
+        filters.type ? { ...filters, type: filters.type } : filters,
+        dbPool
       ),
     ]);
 

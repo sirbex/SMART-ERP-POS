@@ -9,13 +9,23 @@ import * as productService from './productService.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 import { normalizeResponse } from '../../utils/caseConverter.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 
 const ListProductsQuerySchema = z.object({
-  page: z.string().optional().transform(v => v ? parseInt(v) : 1),
-  limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
-  includeUoms: z.string().optional().transform(v => v === 'true'),
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v) : 1)),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v) : 50)),
+  includeUoms: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
 });
 
 const ConvertQuantitySchema = z.object({
@@ -44,9 +54,10 @@ interface AuthRequest extends Request {
 }
 
 export const getProducts = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { page, limit, includeUoms } = ListProductsQuerySchema.parse(req.query);
 
-  const result = await productService.getAllProducts(page, limit, includeUoms);
+  const result = await productService.getAllProducts(page, limit, includeUoms, pool);
 
   res.json({
     success: true,
@@ -56,17 +67,18 @@ export const getProducts = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getProduct = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
   const includeUoms = req.query.includeUoms === 'true';
 
   if (includeUoms) {
-    const productWithUom = await productService.getProductWithUom(id);
+    const productWithUom = await productService.getProductWithUom(id, pool);
     res.json({
       success: true,
       data: normalizeResponse(productWithUom.toJSON()),
     });
   } else {
-    const product = await productService.getProductById(id);
+    const product = await productService.getProductById(id, pool);
     res.json({
       success: true,
       data: normalizeResponse(product),
@@ -80,15 +92,11 @@ export const getProduct = asyncHandler(async (req: Request, res: Response) => {
  * Body: { quantity, fromUomId, toUomId }
  */
 export const convertProductQuantity = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
   const { quantity, fromUomId, toUomId } = ConvertQuantitySchema.parse(req.body);
 
-  const result = await productService.convertQuantity(
-    id,
-    quantity,
-    fromUomId,
-    toUomId
-  );
+  const result = await productService.convertQuantity(id, quantity, fromUomId, toUomId, pool);
 
   res.json({
     success: true,
@@ -97,10 +105,11 @@ export const convertProductQuantity = asyncHandler(async (req: Request, res: Res
 });
 
 export const createProduct = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const authReq = req as AuthRequest;
   const validatedData = CreateProductSchema.parse(req.body);
 
-  const product = await productService.createProduct(validatedData);
+  const product = await productService.createProduct(validatedData, pool);
 
   // Log audit trail (non-fatal)
   try {
@@ -113,7 +122,6 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
     };
 
     const { logProductCreated } = await import('../audit/auditService.js');
-    const { pool } = await import('../../db/pool.js');
     if (product.id) {
       await logProductCreated(
         pool,
@@ -140,10 +148,11 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const validatedData = UpdateProductSchema.parse(req.body);
 
-  const product = await productService.updateProduct(id, validatedData);
+  const product = await productService.updateProduct(id, validatedData, pool);
 
   res.json({
     success: true,
@@ -153,15 +162,17 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const getProductSupplierPrices = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
-  const prices = await supplierProductPriceRepository.getSupplierPricesForProduct(id);
+  const prices = await supplierProductPriceRepository.getSupplierPricesForProduct(id, pool);
   res.json({ success: true, data: prices });
 });
 
 export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
 
-  await productService.deleteProduct(id);
+  await productService.deleteProduct(id, pool);
 
   res.json({
     success: true,

@@ -12,18 +12,28 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const PaginationQuerySchema = z.object({
-  page: z.string().optional().transform(v => v ? parseInt(v) : 1),
-  limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v) : 1)),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v) : 50)),
 });
 const SearchQuerySchema = z.object({
   q: z.string().optional().default(''),
-  limit: z.string().optional().transform(v => v ? parseInt(v) : 20),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v) : 20)),
 });
 
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { page, limit } = PaginationQuerySchema.parse(req.query);
 
-  const result = await customerService.getAllCustomers(page, limit);
+  const result = await customerService.getAllCustomers(page, limit, pool);
 
   res.json({
     success: true,
@@ -33,8 +43,9 @@ export const getCustomers = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
-  const customer = await customerService.getCustomerById(id);
+  const customer = await customerService.getCustomerById(id, pool);
 
   res.json({
     success: true,
@@ -43,8 +54,9 @@ export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getCustomerByNumber = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { customerNumber } = req.params;
-  const customer = await customerService.getCustomerByNumber(customerNumber);
+  const customer = await customerService.getCustomerByNumber(customerNumber, pool);
 
   res.json({
     success: true,
@@ -53,9 +65,10 @@ export const getCustomerByNumber = asyncHandler(async (req: Request, res: Respon
 });
 
 export const searchCustomers = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { q: searchTerm, limit } = SearchQuerySchema.parse(req.query);
 
-  const customers = await customerService.searchCustomers(searchTerm, limit);
+  const customers = await customerService.searchCustomers(searchTerm, limit, pool);
 
   res.json({
     success: true,
@@ -64,8 +77,9 @@ export const searchCustomers = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const createCustomer = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const validatedData = CreateCustomerSchema.parse(req.body);
-  const customer = await customerService.createCustomer(validatedData);
+  const customer = await customerService.createCustomer(validatedData, pool);
 
   // Log audit trail (non-fatal)
   try {
@@ -78,7 +92,6 @@ export const createCustomer = asyncHandler(async (req: Request, res: Response) =
     };
 
     const { logCustomerCreated } = await import('../audit/auditService.js');
-    const pool = req.tenantPool || globalPool;
     await logCustomerCreated(
       pool,
       customer.id,
@@ -102,9 +115,10 @@ export const createCustomer = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const updateCustomer = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const validatedData = UpdateCustomerSchema.parse(req.body);
-  const customer = await customerService.updateCustomer(id, validatedData);
+  const customer = await customerService.updateCustomer(id, validatedData, pool);
 
   res.json({
     success: true,
@@ -134,7 +148,11 @@ export const toggleCustomerActive = asyncHandler(async (req: Request, res: Respo
 
   const parsed = ToggleSchema.parse(req.body);
 
-  const updatedCustomer = await customerService.toggleCustomerActive(id, parsed.isActive);
+  const updatedCustomer = await customerService.toggleCustomerActive(
+    id,
+    parsed.isActive,
+    req.tenantPool || globalPool
+  );
 
   res.json({
     success: true,
@@ -151,7 +169,12 @@ export const getCustomerSales = asyncHandler(async (req: Request, res: Response)
   const { id } = UuidParamSchema.parse(req.params);
   const { page, limit } = PaginationQuerySchema.parse(req.query);
 
-  const result = await customerService.getCustomerSales(id, page, limit);
+  const result = await customerService.getCustomerSales(
+    id,
+    page,
+    limit,
+    req.tenantPool || globalPool
+  );
 
   res.json({
     success: true,
@@ -161,10 +184,11 @@ export const getCustomerSales = asyncHandler(async (req: Request, res: Response)
 });
 
 export const getCustomerTransactions = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
   const { page, limit } = PaginationQuerySchema.parse(req.query);
 
-  const result = await customerService.getCustomerTransactions(id, page, limit);
+  const result = await customerService.getCustomerTransactions(id, page, limit, pool);
 
   res.json({
     success: true,
@@ -174,8 +198,9 @@ export const getCustomerTransactions = asyncHandler(async (req: Request, res: Re
 });
 
 export const getCustomerSummary = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
-  const summary = await customerService.getCustomerSummary(id);
+  const summary = await customerService.getCustomerSummary(id, pool);
 
   res.json({
     success: true,
@@ -192,8 +217,14 @@ export const getCustomerStatement = asyncHandler(async (req: Request, res: Respo
   const QuerySchema = z.object({
     start: z.string().datetime().optional(),
     end: z.string().datetime().optional(),
-    page: z.string().optional().transform((v) => (v ? parseInt(v) : 1)),
-    limit: z.string().optional().transform((v) => (v ? parseInt(v) : 100)),
+    page: z
+      .string()
+      .optional()
+      .transform((v) => (v ? parseInt(v) : 1)),
+    limit: z
+      .string()
+      .optional()
+      .transform((v) => (v ? parseInt(v) : 100)),
   });
   const q = QuerySchema.parse(req.query);
 
@@ -202,7 +233,8 @@ export const getCustomerStatement = asyncHandler(async (req: Request, res: Respo
     q.start ? new Date(q.start) : undefined,
     q.end ? new Date(q.end) : undefined,
     q.page,
-    q.limit
+    q.limit,
+    req.tenantPool || globalPool
   );
 
   res.json({ success: true, data: statement });
@@ -213,6 +245,7 @@ export const getCustomerStatement = asyncHandler(async (req: Request, res: Respo
  * GET /api/customers/:id/statement/export.csv?start=ISO&end=ISO
  */
 export const exportCustomerStatementCsv = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const QuerySchema = z.object({
     start: z.string().datetime().optional(),
@@ -226,7 +259,8 @@ export const exportCustomerStatementCsv = asyncHandler(async (req: Request, res:
     q.start ? new Date(q.start) : undefined,
     q.end ? new Date(q.end) : undefined,
     1,
-    100000
+    100000,
+    pool
   );
 
   const filename = `customer-statement-${id}-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -244,7 +278,9 @@ export const exportCustomerStatementCsv = asyncHandler(async (req: Request, res:
       e.debit?.toString() ?? '0',
       e.credit?.toString() ?? '0',
       e.balanceAfter?.toString() ?? '0',
-    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',');
+    ]
+      .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+      .join(',');
     lines.push(row);
   }
 
@@ -268,11 +304,12 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     q.start ? new Date(q.start) : undefined,
     q.end ? new Date(q.end) : undefined,
     1,
-    100000
+    100000,
+    req.tenantPool || globalPool
   );
 
   // Get customer name for better filename
-  const customer = await customerService.getCustomerById(id);
+  const customer = await customerService.getCustomerById(id, req.tenantPool || globalPool);
 
   // Get company settings
   const settings = await getSettings(req.tenantPool || globalPool);
@@ -287,36 +324,41 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     margin: 40,
     size: 'A4',
     bufferPages: true,
-    autoFirstPage: true
+    autoFirstPage: true,
   });
 
   doc.pipe(res);
 
   // Color palette
   const colors = {
-    primary: '#2563eb',      // Blue
-    secondary: '#7c3aed',    // Purple
-    success: '#10b981',      // Green
-    danger: '#ef4444',       // Red
-    warning: '#f59e0b',      // Amber
-    info: '#06b6d4',         // Cyan
-    dark: '#1f2937',         // Dark gray
-    light: '#f9fafb',        // Light gray
-    border: '#e5e7eb'        // Border gray
+    primary: '#2563eb', // Blue
+    secondary: '#7c3aed', // Purple
+    success: '#10b981', // Green
+    danger: '#ef4444', // Red
+    warning: '#f59e0b', // Amber
+    info: '#06b6d4', // Cyan
+    dark: '#1f2937', // Dark gray
+    light: '#f9fafb', // Light gray
+    border: '#e5e7eb', // Border gray
   };
 
   // Page dimensions
   const pageWidth = doc.page.width;
   const margin = 40;
-  const contentWidth = pageWidth - (margin * 2);
+  const contentWidth = pageWidth - margin * 2;
 
   // Gradient Header Background - taller to fit company info
   doc.rect(0, 0, pageWidth, 120).fill(colors.primary);
 
   // Company Header with white text
-  doc.fillColor('#ffffff')
-    .fontSize(24).font('Helvetica-Bold')
-    .text(settings.companyName || 'SMART ERP', margin, 18, { align: 'center', width: contentWidth });
+  doc
+    .fillColor('#ffffff')
+    .fontSize(24)
+    .font('Helvetica-Bold')
+    .text(settings.companyName || 'SMART ERP', margin, 18, {
+      align: 'center',
+      width: contentWidth,
+    });
 
   // Company contact info
   const contactParts: string[] = [];
@@ -325,40 +367,79 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   if (settings.companyEmail) contactParts.push(settings.companyEmail);
   if (settings.companyTin) contactParts.push(`TIN: ${settings.companyTin}`);
 
-  doc.fontSize(9).font('Helvetica')
+  doc
+    .fontSize(9)
+    .font('Helvetica')
     .text(contactParts.join('  •  '), margin, 45, { align: 'center', width: contentWidth });
 
-  doc.fontSize(14).font('Helvetica-Bold')
+  doc
+    .fontSize(14)
+    .font('Helvetica-Bold')
     .text('Customer Account Statement', margin, 65, { align: 'center', width: contentWidth });
 
-  doc.fontSize(9).font('Helvetica')
-    .text(`Generated: ${new Date().toLocaleString()}`, margin, 90, { align: 'center', width: contentWidth });
+  doc
+    .fontSize(9)
+    .font('Helvetica')
+    .text(`Generated: ${new Date().toLocaleString()}`, margin, 90, {
+      align: 'center',
+      width: contentWidth,
+    });
 
   doc.y = 130;
 
   // Customer Info Card
   const cardY = doc.y;
-  doc.roundedRect(margin, cardY, contentWidth / 2 - 5, 90, 5).fillAndStroke(colors.light, colors.border);
+  doc
+    .roundedRect(margin, cardY, contentWidth / 2 - 5, 90, 5)
+    .fillAndStroke(colors.light, colors.border);
 
-  doc.fillColor(colors.primary).fontSize(11).font('Helvetica-Bold')
+  doc
+    .fillColor(colors.primary)
+    .fontSize(11)
+    .font('Helvetica-Bold')
     .text('CUSTOMER INFORMATION', margin + 10, cardY + 10, { width: contentWidth / 2 - 25 });
 
-  doc.fillColor(colors.dark).fontSize(9).font('Helvetica')
+  doc
+    .fillColor(colors.dark)
+    .fontSize(9)
+    .font('Helvetica')
     .text(`${customer?.name || 'N/A'}`, margin + 10, cardY + 28, { width: contentWidth / 2 - 25 })
     .text(`ID: ${id.slice(0, 13)}...`, margin + 10, cardY + 43)
     .text(`Email: ${customer?.email || 'N/A'}`, margin + 10, cardY + 58)
     .text(`Phone: ${customer?.phone || 'N/A'}`, margin + 10, cardY + 73);
 
   // Period Info Card
-  doc.roundedRect(margin + contentWidth / 2 + 5, cardY, contentWidth / 2 - 5, 90, 5).fillAndStroke(colors.light, colors.border);
+  doc
+    .roundedRect(margin + contentWidth / 2 + 5, cardY, contentWidth / 2 - 5, 90, 5)
+    .fillAndStroke(colors.light, colors.border);
 
-  doc.fillColor(colors.primary).fontSize(11).font('Helvetica-Bold')
-    .text('STATEMENT PERIOD', margin + contentWidth / 2 + 15, cardY + 10, { width: contentWidth / 2 - 25 });
+  doc
+    .fillColor(colors.primary)
+    .fontSize(11)
+    .font('Helvetica-Bold')
+    .text('STATEMENT PERIOD', margin + contentWidth / 2 + 15, cardY + 10, {
+      width: contentWidth / 2 - 25,
+    });
 
-  doc.fillColor(colors.dark).fontSize(9).font('Helvetica')
-    .text(`From: ${new Date(statement.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`, margin + contentWidth / 2 + 15, cardY + 30)
-    .text(`To: ${new Date(statement.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`, margin + contentWidth / 2 + 15, cardY + 48)
-    .text(`Duration: ${Math.ceil((new Date(statement.periodEnd).getTime() - new Date(statement.periodStart).getTime()) / (1000 * 60 * 60 * 24))} days`, margin + contentWidth / 2 + 15, cardY + 66);
+  doc
+    .fillColor(colors.dark)
+    .fontSize(9)
+    .font('Helvetica')
+    .text(
+      `From: ${new Date(statement.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+      margin + contentWidth / 2 + 15,
+      cardY + 30
+    )
+    .text(
+      `To: ${new Date(statement.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+      margin + contentWidth / 2 + 15,
+      cardY + 48
+    )
+    .text(
+      `Duration: ${Math.ceil((new Date(statement.periodEnd).getTime() - new Date(statement.periodStart).getTime()) / (1000 * 60 * 60 * 24))} days`,
+      margin + contentWidth / 2 + 15,
+      cardY + 66
+    );
 
   doc.y = cardY + 100;
   doc.moveDown(0.8);
@@ -368,27 +449,41 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   const cardWidth = (contentWidth - 20) / 2;
 
   // Opening Balance Card
-  doc.roundedRect(margin, balanceY, cardWidth, 70, 8)
-    .fillAndStroke(colors.info, colors.info);
+  doc.roundedRect(margin, balanceY, cardWidth, 70, 8).fillAndStroke(colors.info, colors.info);
 
-  doc.fillColor('#ffffff').fontSize(10).font('Helvetica')
+  doc
+    .fillColor('#ffffff')
+    .fontSize(10)
+    .font('Helvetica')
     .text('Opening Balance', margin + 15, balanceY + 15, { width: cardWidth - 30 });
 
-  doc.fontSize(22).font('Helvetica-Bold')
-    .text(formatCurrency(Number(statement.openingBalance)), margin + 15, balanceY + 35, { width: cardWidth - 30 });
+  doc
+    .fontSize(22)
+    .font('Helvetica-Bold')
+    .text(formatCurrency(Number(statement.openingBalance)), margin + 15, balanceY + 35, {
+      width: cardWidth - 30,
+    });
 
   // Closing Balance Card
   const closingBalance = Number(statement.closingBalance);
   const balanceColor = closingBalance >= 0 ? colors.success : colors.danger;
 
-  doc.roundedRect(margin + cardWidth + 20, balanceY, cardWidth, 70, 8)
+  doc
+    .roundedRect(margin + cardWidth + 20, balanceY, cardWidth, 70, 8)
     .fillAndStroke(balanceColor, balanceColor);
 
-  doc.fillColor('#ffffff').fontSize(10).font('Helvetica')
+  doc
+    .fillColor('#ffffff')
+    .fontSize(10)
+    .font('Helvetica')
     .text('Closing Balance', margin + cardWidth + 35, balanceY + 15, { width: cardWidth - 30 });
 
-  doc.fontSize(22).font('Helvetica-Bold')
-    .text(formatCurrency(closingBalance), margin + cardWidth + 35, balanceY + 35, { width: cardWidth - 30 });
+  doc
+    .fontSize(22)
+    .font('Helvetica-Bold')
+    .text(formatCurrency(closingBalance), margin + cardWidth + 35, balanceY + 35, {
+      width: cardWidth - 30,
+    });
 
   doc.y = balanceY + 80;
   doc.moveDown(0.8);
@@ -401,19 +496,18 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
 
   // Proportional column widths that fit page width
   const colWidths = [
-    tableWidth * 0.14,  // Date - 14%
-    tableWidth * 0.10,  // Type - 10%
-    tableWidth * 0.12,  // Ref - 12%
-    tableWidth * 0.28,  // Description - 28%
-    tableWidth * 0.12,  // Debit - 12%
-    tableWidth * 0.12,  // Credit - 12%
-    tableWidth * 0.12   // Balance - 12%
+    tableWidth * 0.14, // Date - 14%
+    tableWidth * 0.1, // Type - 10%
+    tableWidth * 0.12, // Ref - 12%
+    tableWidth * 0.28, // Description - 28%
+    tableWidth * 0.12, // Debit - 12%
+    tableWidth * 0.12, // Credit - 12%
+    tableWidth * 0.12, // Balance - 12%
   ];
   const rowHeight = 22;
 
   // Table header with gradient
-  doc.rect(tableLeft, tableTop, tableWidth, rowHeight)
-    .fill(colors.primary);
+  doc.rect(tableLeft, tableTop, tableWidth, rowHeight).fill(colors.primary);
 
   let x = tableLeft + 5;
   doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
@@ -421,7 +515,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     const align = i >= 4 ? 'right' : 'left';
     doc.text(header, x, tableTop + 7, {
       width: colWidths[i] - 10,
-      align
+      align,
     });
     x += colWidths[i];
   });
@@ -446,7 +540,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
         const align = i >= 4 ? 'right' : 'left';
         doc.text(header, x, currentY + 7, {
           width: colWidths[i] - 10,
-          align
+          align,
         });
         x += colWidths[i];
       });
@@ -461,25 +555,30 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     // Row data with better formatting
     x = tableLeft + 5;
     const rowData = [
-      new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }),
+      new Date(entry.date).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: '2-digit',
+      }),
       entry.type,
       (entry.reference || '-').slice(0, 15),
       (entry.description || '-').slice(0, 35),
       entry.debit ? formatCurrency(Number(entry.debit)) : '-',
       entry.credit ? formatCurrency(Number(entry.credit)) : '-',
-      formatCurrency(Number(entry.balanceAfter || 0))
+      formatCurrency(Number(entry.balanceAfter || 0)),
     ];
 
     doc.fillColor(colors.dark);
     rowData.forEach((data, i) => {
       const align = i >= 4 ? 'right' : 'left';
-      const textColor = i === 6 ? (Number(entry.balanceAfter) >= 0 ? colors.success : colors.danger) : colors.dark;
+      const textColor =
+        i === 6 ? (Number(entry.balanceAfter) >= 0 ? colors.success : colors.danger) : colors.dark;
       doc.fillColor(textColor);
 
       doc.text(data, x, currentY + 7, {
         width: colWidths[i] - 10,
         align,
-        ellipsis: true
+        ellipsis: true,
       });
       x += colWidths[i];
     });
@@ -504,8 +603,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   const totalsY = doc.y;
   const totalsColor = netChange >= 0 ? colors.success : colors.danger;
 
-  doc.rect(tableLeft, totalsY, tableWidth, rowHeight + 4)
-    .fill(totalsColor);
+  doc.rect(tableLeft, totalsY, tableWidth, rowHeight + 4).fill(totalsColor);
 
   doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold');
   x = tableLeft + 5;
@@ -516,11 +614,20 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
 
   doc.text('TOTALS', x, totalsY + 8, { width: colWidths[3] - 10, align: 'right' });
   x += colWidths[3];
-  doc.text(formatCurrency(totalDebits), x, totalsY + 8, { width: colWidths[4] - 10, align: 'right' });
+  doc.text(formatCurrency(totalDebits), x, totalsY + 8, {
+    width: colWidths[4] - 10,
+    align: 'right',
+  });
   x += colWidths[4];
-  doc.text(formatCurrency(totalCredits), x, totalsY + 8, { width: colWidths[5] - 10, align: 'right' });
+  doc.text(formatCurrency(totalCredits), x, totalsY + 8, {
+    width: colWidths[5] - 10,
+    align: 'right',
+  });
   x += colWidths[5];
-  doc.text(formatCurrency(Math.abs(netChange)), x, totalsY + 8, { width: colWidths[6] - 10, align: 'right' });
+  doc.text(formatCurrency(Math.abs(netChange)), x, totalsY + 8, {
+    width: colWidths[6] - 10,
+    align: 'right',
+  });
 
   doc.y = totalsY + rowHeight + 10;
 
@@ -533,7 +640,10 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   }
 
   // Summary section title
-  doc.fillColor(colors.primary).fontSize(14).font('Helvetica-Bold')
+  doc
+    .fillColor(colors.primary)
+    .fontSize(14)
+    .font('Helvetica-Bold')
     .text('STATEMENT SUMMARY', tableLeft, currentY, { width: contentWidth, align: 'center' });
 
   currentY += 25;
@@ -542,33 +652,57 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   const summaryCardWidth = (contentWidth - 20) / 3;
 
   // Card 1: Entries
-  doc.roundedRect(tableLeft, currentY, summaryCardWidth - 5, 65, 5)
+  doc
+    .roundedRect(tableLeft, currentY, summaryCardWidth - 5, 65, 5)
     .fillAndStroke(colors.info, colors.info);
-  doc.fillColor('#ffffff').fontSize(9).font('Helvetica')
+  doc
+    .fillColor('#ffffff')
+    .fontSize(9)
+    .font('Helvetica')
     .text('Total Entries', tableLeft + 10, currentY + 12, { width: summaryCardWidth - 25 });
-  doc.fontSize(24).font('Helvetica-Bold')
-    .text(statement.entries.length.toString(), tableLeft + 10, currentY + 30, { width: summaryCardWidth - 25 });
+  doc
+    .fontSize(24)
+    .font('Helvetica-Bold')
+    .text(statement.entries.length.toString(), tableLeft + 10, currentY + 30, {
+      width: summaryCardWidth - 25,
+    });
 
   // Card 2: Debits
-  doc.roundedRect(tableLeft + summaryCardWidth + 5, currentY, summaryCardWidth - 5, 65, 5)
+  doc
+    .roundedRect(tableLeft + summaryCardWidth + 5, currentY, summaryCardWidth - 5, 65, 5)
     .fillAndStroke(colors.warning, colors.warning);
-  doc.fillColor('#ffffff').fontSize(9).font('Helvetica')
-    .text('Total Debits', tableLeft + summaryCardWidth + 15, currentY + 12, { width: summaryCardWidth - 25 });
-  doc.fontSize(16).font('Helvetica-Bold')
+  doc
+    .fillColor('#ffffff')
+    .fontSize(9)
+    .font('Helvetica')
+    .text('Total Debits', tableLeft + summaryCardWidth + 15, currentY + 12, {
+      width: summaryCardWidth - 25,
+    });
+  doc
+    .fontSize(16)
+    .font('Helvetica-Bold')
     .text(formatCurrency(totalDebits), tableLeft + summaryCardWidth + 15, currentY + 33, {
       width: summaryCardWidth - 25,
-      ellipsis: true
+      ellipsis: true,
     });
 
   // Card 3: Credits
-  doc.roundedRect(tableLeft + (summaryCardWidth * 2) + 10, currentY, summaryCardWidth - 5, 65, 5)
+  doc
+    .roundedRect(tableLeft + summaryCardWidth * 2 + 10, currentY, summaryCardWidth - 5, 65, 5)
     .fillAndStroke(colors.secondary, colors.secondary);
-  doc.fillColor('#ffffff').fontSize(9).font('Helvetica')
-    .text('Total Credits', tableLeft + (summaryCardWidth * 2) + 20, currentY + 12, { width: summaryCardWidth - 25 });
-  doc.fontSize(16).font('Helvetica-Bold')
-    .text(formatCurrency(totalCredits), tableLeft + (summaryCardWidth * 2) + 20, currentY + 33, {
+  doc
+    .fillColor('#ffffff')
+    .fontSize(9)
+    .font('Helvetica')
+    .text('Total Credits', tableLeft + summaryCardWidth * 2 + 20, currentY + 12, {
       width: summaryCardWidth - 25,
-      ellipsis: true
+    });
+  doc
+    .fontSize(16)
+    .font('Helvetica-Bold')
+    .text(formatCurrency(totalCredits), tableLeft + summaryCardWidth * 2 + 20, currentY + 33, {
+      width: summaryCardWidth - 25,
+      ellipsis: true,
     });
 
   // Net change banner
@@ -576,13 +710,20 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   const netLabel = netChange >= 0 ? 'NET INCREASE' : 'NET DECREASE';
   const netBannerColor = netChange >= 0 ? colors.success : colors.danger;
 
-  doc.roundedRect(tableLeft, currentY, contentWidth, 50, 5)
+  doc
+    .roundedRect(tableLeft, currentY, contentWidth, 50, 5)
     .fillAndStroke(netBannerColor, netBannerColor);
 
-  doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold')
+  doc
+    .fillColor('#ffffff')
+    .fontSize(12)
+    .font('Helvetica-Bold')
     .text(netLabel, tableLeft + 20, currentY + 10, { width: contentWidth - 40 });
-  doc.fontSize(20)
-    .text(formatCurrency(Math.abs(netChange)), tableLeft + 20, currentY + 27, { width: contentWidth - 40 });
+  doc
+    .fontSize(20)
+    .text(formatCurrency(Math.abs(netChange)), tableLeft + 20, currentY + 27, {
+      width: contentWidth - 40,
+    });
 
   // Page numbering with styled footer
   const pageCount = doc.bufferedPageRange().count;
@@ -590,18 +731,22 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     doc.switchToPage(i);
 
     // Footer line
-    doc.moveTo(margin, 785).lineTo(pageWidth - margin, 785)
+    doc
+      .moveTo(margin, 785)
+      .lineTo(pageWidth - margin, 785)
       .stroke(colors.border);
 
     // Page number and branding
-    doc.fontSize(8).fillColor(colors.dark)
+    doc
+      .fontSize(8)
+      .fillColor(colors.dark)
       .text(`${settings.companyName || 'SMART ERP'} • Customer Statement`, margin, 790, {
         width: contentWidth / 2,
-        align: 'left'
+        align: 'left',
       })
       .text(`Page ${i + 1} of ${pageCount}`, margin + contentWidth / 2, 790, {
         width: contentWidth / 2,
-        align: 'right'
+        align: 'right',
       });
   }
 

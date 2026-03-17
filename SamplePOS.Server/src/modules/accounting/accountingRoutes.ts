@@ -20,6 +20,7 @@ import { Money } from '../../utils/money.js';
 import { getSettings } from '../settings/invoiceSettingsService.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { requirePermission } from '../../rbac/middleware.js';
+import { pool as globalPool } from '../../db/pool.js';
 
 // Zod schemas for accounting routes
 const ChartOfAccountsQuerySchema = z.object({
@@ -129,7 +130,7 @@ router.get(
       filters.search = query.search;
     }
 
-    const accounts = await accountingRepository.getAccounts(filters);
+    const accounts = await accountingRepository.getAccounts(filters, req.tenantPool || globalPool);
 
     // Transform to frontend format
     // For display purposes:
@@ -173,7 +174,7 @@ router.get(
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
     const { id } = AccountIdParamSchema.parse(req.params);
-    const account = await accountingRepository.getAccountById(id);
+    const account = await accountingRepository.getAccountById(id, req.tenantPool || globalPool);
 
     if (!account) {
       return res.status(404).json({
@@ -208,6 +209,7 @@ router.post(
   authenticate,
   requirePermission('accounting.create'),
   asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
     const {
       accountNumber,
       accountName,
@@ -220,22 +222,25 @@ router.post(
     // Determine level based on parent
     let level = 1;
     if (parentAccountId) {
-      const parent = await accountingRepository.getAccountById(parentAccountId);
+      const parent = await accountingRepository.getAccountById(parentAccountId, pool);
       if (parent) {
         level = parent.level + 1;
       }
     }
 
-    const account = await accountingRepository.createAccount({
-      accountCode: accountNumber,
-      accountName,
-      accountType,
-      normalBalance,
-      parentAccountId: parentAccountId || null,
-      level,
-      isPostingAccount: isPostingAccount !== false,
-      isActive: true,
-    });
+    const account = await accountingRepository.createAccount(
+      {
+        accountCode: accountNumber,
+        accountName,
+        accountType,
+        normalBalance,
+        parentAccountId: parentAccountId || null,
+        level,
+        isPostingAccount: isPostingAccount !== false,
+        isActive: true,
+      },
+      pool
+    );
 
     res.status(201).json({
       success: true,
@@ -269,23 +274,28 @@ router.put(
   '/chart-of-accounts/:id',
   requirePermission('accounting.update'),
   asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
     const { id } = AccountIdParamSchema.parse(req.params);
     const data = UpdateAccountSchema.parse(req.body);
 
-    const existing = await accountingRepository.getAccountById(id);
+    const existing = await accountingRepository.getAccountById(id, pool);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Account not found' });
     }
 
-    const updated = await accountingRepository.updateAccount(id, {
-      accountCode: data.accountNumber,
-      accountName: data.accountName,
-      accountType: data.accountType,
-      normalBalance: data.normalBalance,
-      parentAccountId: data.parentAccountId,
-      isPostingAccount: data.isPostingAccount,
-      isActive: data.isActive,
-    });
+    const updated = await accountingRepository.updateAccount(
+      id,
+      {
+        accountCode: data.accountNumber,
+        accountName: data.accountName,
+        accountType: data.accountType,
+        normalBalance: data.normalBalance,
+        parentAccountId: data.parentAccountId,
+        isPostingAccount: data.isPostingAccount,
+        isActive: data.isActive,
+      },
+      pool
+    );
 
     res.json({
       success: true,
@@ -313,14 +323,15 @@ router.delete(
   '/chart-of-accounts/:id',
   requirePermission('accounting.delete'),
   asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
     const { id } = AccountIdParamSchema.parse(req.params);
 
-    const existing = await accountingRepository.getAccountById(id);
+    const existing = await accountingRepository.getAccountById(id, pool);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Account not found' });
     }
 
-    const deleted = await accountingRepository.deleteAccount(id);
+    const deleted = await accountingRepository.deleteAccount(id, pool);
     if (!deleted) {
       return res.status(500).json({ success: false, error: 'Failed to delete account' });
     }
@@ -355,7 +366,10 @@ router.get(
       search: query.search,
     };
 
-    const { entries, total } = await accountingRepository.getLedgerEntries(filters);
+    const { entries, total } = await accountingRepository.getLedgerEntries(
+      filters,
+      req.tenantPool || globalPool
+    );
 
     res.json({
       success: true,
@@ -404,7 +418,10 @@ router.get(
       search: query.search,
     };
 
-    const { entries } = await accountingRepository.getLedgerEntries(filters);
+    const { entries } = await accountingRepository.getLedgerEntries(
+      filters,
+      req.tenantPool || globalPool
+    );
 
     // Build CSV content
     const headers = [
@@ -448,7 +465,7 @@ router.get(
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
     const { id } = AccountIdParamSchema.parse(req.params);
-    const entry = await accountingRepository.getJournalEntryById(id);
+    const entry = await accountingRepository.getJournalEntryById(id, req.tenantPool || globalPool);
 
     if (!entry) {
       return res.status(404).json({
@@ -476,7 +493,10 @@ router.get(
     const { transactionId } = TransactionIdParamSchema.parse(req.params);
 
     // First, try to find in ledger_transactions (backfilled data)
-    const ledgerTxn = await accountingRepository.getLedgerTransactionById(transactionId);
+    const ledgerTxn = await accountingRepository.getLedgerTransactionById(
+      transactionId,
+      req.tenantPool || globalPool
+    );
 
     if (ledgerTxn) {
       return res.json({
@@ -510,7 +530,10 @@ router.get(
     }
 
     // Fall back to journal_entries (original system)
-    const journalEntry = await accountingRepository.getJournalEntryById(transactionId);
+    const journalEntry = await accountingRepository.getJournalEntryById(
+      transactionId,
+      req.tenantPool || globalPool
+    );
 
     if (!journalEntry) {
       return res.status(404).json({
@@ -559,7 +582,11 @@ router.get(
     const asOfDate = query.asOfDate || new Date().toLocaleDateString('en-CA');
     const includeZeroBalances = query.includeZeroBalances === 'true';
 
-    const trialBalance = await accountingRepository.getTrialBalance(asOfDate, includeZeroBalances);
+    const trialBalance = await accountingRepository.getTrialBalance(
+      asOfDate,
+      includeZeroBalances,
+      req.tenantPool || globalPool
+    );
 
     res.json({
       success: true,
@@ -580,11 +607,11 @@ router.get(
   '/balance-sheet',
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
-    const pool = (await import('../../db/pool.js')).default;
+    const pool = req.tenantPool || globalPool;
     const query = DateQuerySchema.parse(req.query);
     const asOfDate = query.asOfDate || new Date().toLocaleDateString('en-CA');
 
-    const balanceSheet = await accountingRepository.getBalanceSheet(asOfDate);
+    const balanceSheet = await accountingRepository.getBalanceSheet(asOfDate, pool);
 
     // Get company name from settings
     const settings = await getSettings(pool);
@@ -609,7 +636,7 @@ router.get(
   '/income-statement',
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
-    const pool = (await import('../../db/pool.js')).default;
+    const pool = req.tenantPool || globalPool;
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -617,7 +644,7 @@ router.get(
     const startDate = query.startDate || firstDayOfMonth.toLocaleDateString('en-CA');
     const endDate = query.endDate || now.toLocaleDateString('en-CA');
 
-    const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate);
+    const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
 
     // Get company name from settings
     const settings = await getSettings(pool);
@@ -645,7 +672,7 @@ router.get(
   '/cash-flow',
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
-    const pool = (await import('../../db/pool.js')).default;
+    const pool = req.tenantPool || globalPool;
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -654,7 +681,7 @@ router.get(
     const endDate = query.endDate || now.toLocaleDateString('en-CA');
 
     // Get income statement for net income
-    const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate);
+    const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
 
     // Get cash movements by type from ledger entries
     const cashMovementsResult = await pool.query(
@@ -840,7 +867,7 @@ router.get(
   '/dashboard-summary',
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
-    const pool = (await import('../../db/pool.js')).default;
+    const pool = req.tenantPool || globalPool;
 
     // Fetch all dashboard data in parallel
     const [

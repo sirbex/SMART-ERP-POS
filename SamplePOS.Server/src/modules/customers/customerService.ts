@@ -1,6 +1,7 @@
 // Customers Service - Business Logic Layer
 
 import Decimal from 'decimal.js';
+import type pg from 'pg';
 import * as customerRepository from './customerRepository.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
@@ -13,19 +14,20 @@ import logger from '../../utils/logger.js';
  * @param page - Page number (1-indexed, default: 1)
  * @param limit - Results per page (default: 50, max: 100)
  * @returns Paginated customer list with total count
- * 
+ *
  * Features:
  * - Pagination support for large customer databases
  * - Includes active and inactive customers
  * - Returns totalPages for UI pagination controls
- * 
+ *
  * Performance:
  * - Uses LIMIT/OFFSET for efficient pagination
  * - Parallel count query for total records
  */
 export async function getAllCustomers(
   page: number = 1,
-  limit: number = 50
+  limit: number = 50,
+  dbPool?: pg.Pool
 ): Promise<{
   data: Customer[];
   pagination: {
@@ -37,8 +39,8 @@ export async function getAllCustomers(
 }> {
   const offset = (page - 1) * limit;
   const [customers, total] = await Promise.all([
-    customerRepository.findAllCustomers(limit, offset),
-    customerRepository.countCustomers(),
+    customerRepository.findAllCustomers(limit, offset, dbPool),
+    customerRepository.countCustomers(dbPool),
   ]);
 
   return {
@@ -52,8 +54,8 @@ export async function getAllCustomers(
   };
 }
 
-export async function getCustomerById(id: string): Promise<Customer> {
-  const customer = await customerRepository.findCustomerById(id);
+export async function getCustomerById(id: string, dbPool?: pg.Pool): Promise<Customer> {
+  const customer = await customerRepository.findCustomerById(id, dbPool);
 
   if (!customer) {
     throw new Error(`Customer with ID ${id} not found`);
@@ -62,8 +64,11 @@ export async function getCustomerById(id: string): Promise<Customer> {
   return customer;
 }
 
-export async function getCustomerByNumber(customerNumber: string): Promise<Customer> {
-  const customer = await customerRepository.findCustomerByNumber(customerNumber);
+export async function getCustomerByNumber(
+  customerNumber: string,
+  dbPool?: pg.Pool
+): Promise<Customer> {
+  const customer = await customerRepository.findCustomerByNumber(customerNumber, dbPool);
 
   if (!customer) {
     throw new Error(`Customer with number ${customerNumber} not found`);
@@ -72,12 +77,16 @@ export async function getCustomerByNumber(customerNumber: string): Promise<Custo
   return customer;
 }
 
-export async function searchCustomers(searchTerm: string, limit: number = 20): Promise<Customer[]> {
+export async function searchCustomers(
+  searchTerm: string,
+  limit: number = 20,
+  dbPool?: pg.Pool
+): Promise<Customer[]> {
   if (!searchTerm || searchTerm.trim().length === 0) {
     return [];
   }
 
-  return customerRepository.searchCustomers(searchTerm.trim(), limit);
+  return customerRepository.searchCustomers(searchTerm.trim(), limit, dbPool);
 }
 
 /**
@@ -85,27 +94,27 @@ export async function searchCustomers(searchTerm: string, limit: number = 20): P
  * @param data - Customer creation data (name, email, phone, credit settings)
  * @returns Created customer with auto-generated customer_number
  * @throws Error if email already exists or credit limit invalid
- * 
+ *
  * Business Rules:
  * - Email uniqueness (if provided)
  * - BR-SAL-003: Credit limit must be non-negative
  * - Auto-generates customer_number: CUST-YYYY-####
- * 
+ *
  * Credit Management:
  * - creditLimit: Maximum outstanding balance allowed
  * - balance: Current outstanding amount (starts at 0)
  * - Credit sales blocked when balance >= creditLimit
- * 
+ *
  * Field Validation:
  * - name: Required, 1-255 characters
  * - email: Optional, must be valid format
  * - phone: Optional, any format
  * - creditLimit: Optional, >= 0
  */
-export async function createCustomer(data: CreateCustomer): Promise<Customer> {
+export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool): Promise<Customer> {
   // Business rule: Check if email already exists (if provided)
   if (data.email) {
-    const existing = await customerRepository.findCustomerByEmail(data.email);
+    const existing = await customerRepository.findCustomerByEmail(data.email, dbPool);
     if (existing) {
       throw new Error(`Customer with email ${data.email} already exists`);
     }
@@ -131,7 +140,7 @@ export async function createCustomer(data: CreateCustomer): Promise<Customer> {
   };
 
   try {
-    const customer = await customerRepository.createCustomer(customerData);
+    const customer = await customerRepository.createCustomer(customerData, dbPool);
     logger.info('Customer created successfully', { customerId: customer.id });
     return customer;
   } catch (err: unknown) {
@@ -140,26 +149,28 @@ export async function createCustomer(data: CreateCustomer): Promise<Customer> {
     if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
       // Try to find the existing customer so we can return their ID
       const existing = data.email
-        ? await customerRepository.findCustomerByEmail(data.email)
-        : (await customerRepository.searchCustomers(data.name, 1))[0] ?? null;
+        ? await customerRepository.findCustomerByEmail(data.email, dbPool)
+        : ((await customerRepository.searchCustomers(data.name, 1, dbPool))[0] ?? null);
       const existingId = existing?.id ?? '';
-      throw new ConflictError(
-        `Customer already exists${existingId ? ` (id: ${existingId})` : ''}`
-      );
+      throw new ConflictError(`Customer already exists${existingId ? ` (id: ${existingId})` : ''}`);
     }
     throw err;
   }
 }
 
-export async function updateCustomer(id: string, data: UpdateCustomer): Promise<Customer> {
-  const existing = await customerRepository.findCustomerById(id);
+export async function updateCustomer(
+  id: string,
+  data: UpdateCustomer,
+  dbPool?: pg.Pool
+): Promise<Customer> {
+  const existing = await customerRepository.findCustomerById(id, dbPool);
   if (!existing) {
     throw new Error(`Customer with ID ${id} not found`);
   }
 
   // Business rule: Check email uniqueness if being updated
   if (data.email && data.email !== existing.email) {
-    const emailExists = await customerRepository.findCustomerByEmail(data.email);
+    const emailExists = await customerRepository.findCustomerByEmail(data.email, dbPool);
     if (emailExists) {
       throw new Error(`Customer with email ${data.email} already exists`);
     }
@@ -185,7 +196,7 @@ export async function updateCustomer(id: string, data: UpdateCustomer): Promise<
     creditLimit: data.creditLimit ? new Decimal(data.creditLimit).toNumber() : data.creditLimit,
   };
 
-  const updated = await customerRepository.updateCustomer(id, updateData);
+  const updated = await customerRepository.updateCustomer(id, updateData, dbPool);
 
   if (!updated) {
     throw new Error(`Failed to update customer with ID ${id}`);
@@ -195,8 +206,8 @@ export async function updateCustomer(id: string, data: UpdateCustomer): Promise<
   return updated;
 }
 
-export async function deleteCustomer(id: string): Promise<void> {
-  const customer = await customerRepository.findCustomerById(id);
+export async function deleteCustomer(id: string, dbPool?: pg.Pool): Promise<void> {
+  const customer = await customerRepository.findCustomerById(id, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${id} not found`);
   }
@@ -206,14 +217,18 @@ export async function deleteCustomer(id: string): Promise<void> {
     throw new Error(`Cannot delete customer with outstanding balance of ${customer.balance}`);
   }
 
-  const success = await customerRepository.deleteCustomer(id);
+  const success = await customerRepository.deleteCustomer(id, dbPool);
   if (!success) {
     throw new Error(`Failed to delete customer with ID ${id}`);
   }
 }
 
-export async function toggleCustomerActive(id: string, isActive: boolean): Promise<Customer> {
-  const customer = await customerRepository.findCustomerById(id);
+export async function toggleCustomerActive(
+  id: string,
+  isActive: boolean,
+  dbPool?: pg.Pool
+): Promise<Customer> {
+  const customer = await customerRepository.findCustomerById(id, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${id} not found`);
   }
@@ -223,7 +238,7 @@ export async function toggleCustomerActive(id: string, isActive: boolean): Promi
     throw new Error(`Cannot deactivate customer with outstanding balance of ${customer.balance}`);
   }
 
-  const updated = await customerRepository.toggleCustomerActive(id, isActive);
+  const updated = await customerRepository.toggleCustomerActive(id, isActive, dbPool);
   if (!updated) {
     throw new Error(`Failed to update customer status`);
   }
@@ -235,9 +250,10 @@ export async function toggleCustomerActive(id: string, isActive: boolean): Promi
 export async function adjustCustomerBalance(
   id: string,
   amount: number,
-  reason: string
+  reason: string,
+  dbPool?: pg.Pool
 ): Promise<Customer> {
-  const customer = await customerRepository.findCustomerById(id);
+  const customer = await customerRepository.findCustomerById(id, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${id} not found`);
   }
@@ -253,7 +269,7 @@ export async function adjustCustomerBalance(
   if (newBalance.lessThan(0) && newBalance.abs().greaterThan(creditLimitDecimal)) {
     throw new Error(
       `Transaction would exceed credit limit. Current: ${currentBalanceDecimal.toString()}, ` +
-      `Adjustment: ${amountDecimal.toString()}, Limit: ${creditLimitDecimal.toString()}`
+        `Adjustment: ${amountDecimal.toString()}, Limit: ${creditLimitDecimal.toString()}`
     );
   }
 
@@ -265,7 +281,11 @@ export async function adjustCustomerBalance(
     creditLimit: creditLimitDecimal.toString(),
   });
 
-  const updated = await customerRepository.updateCustomerBalance(id, amountDecimal.toNumber());
+  const updated = await customerRepository.updateCustomerBalance(
+    id,
+    amountDecimal.toNumber(),
+    dbPool
+  );
 
   if (!updated) {
     throw new Error(`Failed to update customer balance`);
@@ -286,17 +306,18 @@ export async function adjustCustomerBalance(
 export async function getCustomerSales(
   customerId: string,
   page: number = 1,
-  limit: number = 50
+  limit: number = 50,
+  dbPool?: pg.Pool
 ) {
-  const customer = await customerRepository.findCustomerById(customerId);
+  const customer = await customerRepository.findCustomerById(customerId, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${customerId} not found`);
   }
 
   const offset = (page - 1) * limit;
   const [sales, total] = await Promise.all([
-    customerRepository.findCustomerSales(customerId, limit, offset),
-    customerRepository.countCustomerSales(customerId),
+    customerRepository.findCustomerSales(customerId, limit, offset, dbPool),
+    customerRepository.countCustomerSales(customerId, dbPool),
   ]);
 
   return {
@@ -316,16 +337,22 @@ export async function getCustomerSales(
 export async function getCustomerTransactions(
   customerId: string,
   page: number = 1,
-  limit: number = 50
+  limit: number = 50,
+  dbPool?: pg.Pool
 ) {
-  const customer = await customerRepository.findCustomerById(customerId);
+  const customer = await customerRepository.findCustomerById(customerId, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${customerId} not found`);
   }
 
   const offset = (page - 1) * limit;
-  const transactions = await customerRepository.findCustomerTransactions(customerId, limit, offset);
-  const totalCount = await customerRepository.countCustomerTransactions(customerId);
+  const transactions = await customerRepository.findCustomerTransactions(
+    customerId,
+    limit,
+    offset,
+    dbPool
+  );
+  const totalCount = await customerRepository.countCustomerTransactions(customerId, dbPool);
 
   return {
     data: transactions,
@@ -341,13 +368,13 @@ export async function getCustomerTransactions(
 /**
  * Get customer summary statistics
  */
-export async function getCustomerSummary(customerId: string) {
-  const customer = await customerRepository.findCustomerById(customerId);
+export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool) {
+  const customer = await customerRepository.findCustomerById(customerId, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${customerId} not found`);
   }
 
-  return customerRepository.getCustomerSummary(customerId);
+  return customerRepository.getCustomerSummary(customerId, dbPool);
 }
 
 /**
@@ -359,9 +386,10 @@ export async function getCustomerStatement(
   start?: Date,
   end?: Date,
   page: number = 1,
-  limit: number = 100
+  limit: number = 100,
+  dbPool?: pg.Pool
 ) {
-  const customer = await customerRepository.findCustomerById(customerId);
+  const customer = await customerRepository.findCustomerById(customerId, dbPool);
   if (!customer) {
     throw new Error(`Customer with ID ${customerId} not found`);
   }
@@ -373,21 +401,23 @@ export async function getCustomerStatement(
     : new Date(periodEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   // Opening balance prior to period start (invoice ledger only)
-  const openingRaw = await customerRepository.getOpeningBalance(customerId, periodStart);
+  const openingRaw = await customerRepository.getOpeningBalance(customerId, periodStart, dbPool);
   let running = new Decimal(openingRaw);
 
   // Get invoice/liability entries (credit sales, payments, adjustments)
   const rawEntries = await customerRepository.getStatementEntries(
     customerId,
     periodStart,
-    periodEnd
+    periodEnd,
+    dbPool
   );
 
   // Get deposit activity
   const depositEntries = await customerRepository.getDepositEntries(
     customerId,
     periodStart,
-    periodEnd
+    periodEnd,
+    dbPool
   );
 
   // Convert deposit entries to statement format
@@ -443,7 +473,7 @@ export async function getCustomerStatement(
   const closingBalance = running.toNumber();
 
   // Get deposit summary
-  const depositSummary = await customerRepository.getCustomerDepositSummary(customerId);
+  const depositSummary = await customerRepository.getCustomerDepositSummary(customerId, dbPool);
 
   // Map deposit entries for the separate deposit section
   let depositRunning = new Decimal(0);
@@ -480,6 +510,6 @@ export async function getCustomerStatement(
     deposits: {
       summary: depositSummary,
       entries: mappedDeposits,
-    }
+    },
   };
 }
