@@ -2,7 +2,8 @@
 // File: SamplePOS.Server/src/modules/platform/tenantService.ts
 //
 // Handles tenant lifecycle: provisioning, suspension, plan changes.
-// Provisioning creates a new PostgreSQL database and runs the schema.
+// Provisioning uses PostgreSQL TEMPLATE database for instant, consistent cloning.
+// The template DB is refreshed from pos_system on startup and before each provision.
 
 import type pg from 'pg';
 import bcrypt from 'bcrypt';
@@ -13,6 +14,54 @@ import { normalizeTenant, PLAN_LIMITS } from '../../../../shared/types/tenant.js
 import type { Tenant, TenantDbRow, CreateTenantRequest, TenantUsage } from '../../../../shared/types/tenant.js';
 import { invalidateTenantCache } from '../../middleware/tenantMiddleware.js';
 import logger from '../../utils/logger.js';
+
+const TEMPLATE_DB_NAME = 'pos_template';
+
+// Tables that every tenant MUST have — provisioning fails if any are missing
+const CRITICAL_TABLES = [
+  'users',
+  'products',
+  'product_inventory',
+  'product_valuation',
+  'sales',
+  'sale_items',
+  'customers',
+  'suppliers',
+  'purchase_orders',
+  'purchase_order_items',
+  'goods_receipts',
+  'goods_receipt_items',
+  'inventory_batches',
+  'stock_movements',
+  'chart_of_accounts',
+  'accounts',
+  'ledger_entries',
+  'journal_entries',
+  'journal_entry_lines',
+  'invoices',
+  'invoice_line_items',
+  'audit_log',
+  'system_settings',
+  'uoms',
+  'product_uoms',
+  'refresh_tokens',
+  'user_sessions',
+  'cash_registers',
+  'cash_register_sessions',
+  'expenses',
+] as const;
+
+// Platform-only tables excluded from template
+const PLATFORM_TABLES = [
+  'tenants',
+  'super_admins',
+  'tenant_api_keys',
+  'tenant_audit_log',
+  'sync_ledger',
+  'billing_events',
+  'schema_migrations',
+  '__EFMigrationsHistory',
+];
 
 export const tenantService = {
   /**
@@ -86,10 +135,10 @@ export const tenantService = {
     });
 
     try {
-      // 3. Create the PostgreSQL database
-      await this.createDatabase(masterPool, databaseName);
+      // 3. Create the PostgreSQL database from template
+      await this.createDatabaseFromTemplate(masterPool, databaseName);
 
-      // 4. Run schema migrations on the new database
+      // 4. Connect to the new tenant DB and validate the cloned schema
       const tenantPool = connectionManager.getPool({
         tenantId: tenantRow.id,
         slug: input.slug,
@@ -98,7 +147,7 @@ export const tenantService = {
         databasePort,
       });
 
-      await this.runSchemaSetup(tenantPool, databaseName);
+      await this.validateTenantSchema(tenantPool, databaseName);
 
       // 5. Seed the admin user
       await this.seedAdminUser(tenantPool, {
@@ -269,15 +318,139 @@ export const tenantService = {
   },
 
   // ============================================================
-  // Database Management (Internal)
+  // Template Database Management
   // ============================================================
 
   /**
-   * Create a new PostgreSQL database for a tenant
+   * Ensure the template database exists and is up-to-date.
+   * Called on server startup and before each tenant provisioning.
+   *
+   * Uses pg_dump --schema-only from pos_system → pos_template.
+   * This is a one-time cost; subsequent tenant creates are instant via TEMPLATE.
    */
-  async createDatabase(masterPool: pg.Pool, databaseName: string): Promise<void> {
-    // Must use a raw connection (not pooled) for CREATE DATABASE
-    // Also cannot run CREATE DATABASE inside a transaction
+  async ensureTemplateDatabase(masterPool: pg.Pool): Promise<void> {
+    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbPort = process.env.DB_PORT || '5432';
+    const dbUser = process.env.DB_USER || 'postgres';
+    const dbPassword = process.env.DB_PASSWORD || 'password';
+    const masterDbName = process.env.DB_NAME || 'pos_system';
+
+    const client = await masterPool.connect();
+    try {
+      // Check if template already exists
+      const { rows } = await client.query(
+        `SELECT 1 FROM pg_database WHERE datname = $1`,
+        [TEMPLATE_DB_NAME]
+      );
+
+      if (rows.length > 0) {
+        // Template exists — check if master has newer migration version
+        // Compare table counts as a proxy for schema freshness
+        const masterCount = await client.query(
+          `SELECT count(*)::int AS cnt FROM information_schema.tables WHERE table_schema = 'public'`
+        );
+        const masterTableCount = masterCount.rows[0]?.cnt ?? 0;
+
+        // Verify template table count matches (use a separate connection)
+        let templateTableCount = 0;
+        try {
+          const templateResult = execSync(
+            `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+            { encoding: 'utf-8', timeout: 10_000 }
+          );
+          templateTableCount = parseInt(templateResult.trim(), 10) || 0;
+        } catch {
+          // If we can't query template, rebuild it
+          templateTableCount = 0;
+        }
+
+        // Allow small variance (platform tables are excluded from template)
+        const expectedDiff = PLATFORM_TABLES.length;
+        if (Math.abs(masterTableCount - templateTableCount) <= expectedDiff + 2) {
+          logger.info(`Template DB up-to-date (${templateTableCount} tables)`);
+          return;
+        }
+
+        logger.info(`Template DB stale (${templateTableCount} vs master ${masterTableCount}), rebuilding...`);
+
+        // Terminate any connections to template before dropping
+        await client.query(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+          [TEMPLATE_DB_NAME]
+        );
+        await client.query(`DROP DATABASE IF EXISTS ${TEMPLATE_DB_NAME}`);
+      }
+
+      // Create empty template database
+      await client.query(`CREATE DATABASE ${TEMPLATE_DB_NAME}`);
+      logger.info(`Created empty template database: ${TEMPLATE_DB_NAME}`);
+    } finally {
+      client.release();
+    }
+
+    // Clone schema from master into template using pg_dump | psql
+    const excludeArgs = PLATFORM_TABLES
+      .map((t) => `--exclude-table=${t}`)
+      .join(' ');
+
+    const pgDumpCmd =
+      `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `--schema-only --no-owner --no-privileges ${excludeArgs} ${masterDbName}`;
+    const psqlCmd =
+      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `-d ${TEMPLATE_DB_NAME} -v ON_ERROR_STOP=0`;
+
+    try {
+      execSync(`${pgDumpCmd} | ${psqlCmd}`, {
+        encoding: 'utf-8',
+        timeout: 60_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      logger.info(`Template database schema loaded from ${masterDbName}`);
+    } catch (error: unknown) {
+      // Check if enough tables were created despite warnings
+      let tableCount = 0;
+      try {
+        const result = execSync(
+          `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+          `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+          { encoding: 'utf-8', timeout: 10_000 }
+        );
+        tableCount = parseInt(result.trim(), 10) || 0;
+      } catch { /* ignore */ }
+
+      if (tableCount < CRITICAL_TABLES.length) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error(`Template DB creation failed (${tableCount} tables): ${msg}`);
+        // Drop the broken template so next attempt rebuilds
+        const dropClient = await masterPool.connect();
+        try {
+          await dropClient.query(`DROP DATABASE IF EXISTS ${TEMPLATE_DB_NAME}`);
+        } finally {
+          dropClient.release();
+        }
+        throw new Error(`Failed to create template database: only ${tableCount} tables`);
+      }
+
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn(`Template DB loaded with warnings (${tableCount} tables): ${msg}`);
+    }
+  },
+
+  // ============================================================
+  // Tenant Database Management
+  // ============================================================
+
+  /**
+   * Create a new tenant database using PostgreSQL TEMPLATE cloning.
+   * This is instant — PostgreSQL copies all tables, indexes, constraints,
+   * sequences, enums, and defaults in a single atomic operation.
+   *
+   * Falls back to pg_dump if template cloning fails.
+   */
+  async createDatabaseFromTemplate(masterPool: pg.Pool, databaseName: string): Promise<void> {
+    const safeName = databaseName.replace(/[^a-z0-9_]/gi, '');
     const client = await masterPool.connect();
     try {
       // Check if database already exists
@@ -285,26 +458,101 @@ export const tenantService = {
         `SELECT 1 FROM pg_database WHERE datname = $1`,
         [databaseName]
       );
-
       if (exists.rows.length > 0) {
         logger.warn(`Database ${databaseName} already exists, skipping creation`);
         return;
       }
 
-      // CREATE DATABASE cannot use parameterized queries — sanitize name
-      const safeName = databaseName.replace(/[^a-z0-9_]/gi, '');
-      await client.query(`CREATE DATABASE ${safeName}`);
-      logger.info(`Created database: ${safeName}`);
+      // Ensure template is up-to-date before cloning
+      await this.ensureTemplateDatabase(masterPool);
+
+      // Terminate any lingering connections to the template
+      await client.query(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+        [TEMPLATE_DB_NAME]
+      );
+
+      // Clone via TEMPLATE — instant, atomic, includes everything
+      await client.query(`CREATE DATABASE ${safeName} TEMPLATE ${TEMPLATE_DB_NAME}`);
+      logger.info(`Created tenant database from template: ${safeName}`);
+    } catch (error) {
+      // Fallback: create empty DB + pg_dump schema clone
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn(`Template clone failed, falling back to pg_dump: ${msg}`);
+      await this.createDatabaseFallback(masterPool, safeName);
     } finally {
       client.release();
     }
   },
 
   /**
+   * Fallback: create DB + clone schema via pg_dump (if TEMPLATE fails).
+   */
+  async createDatabaseFallback(masterPool: pg.Pool, databaseName: string): Promise<void> {
+    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbPort = process.env.DB_PORT || '5432';
+    const dbUser = process.env.DB_USER || 'postgres';
+    const dbPassword = process.env.DB_PASSWORD || 'password';
+    const masterDbName = process.env.DB_NAME || 'pos_system';
+
+    const client = await masterPool.connect();
+    try {
+      const exists = await client.query(
+        `SELECT 1 FROM pg_database WHERE datname = $1`,
+        [databaseName]
+      );
+      if (exists.rows.length === 0) {
+        await client.query(`CREATE DATABASE ${databaseName}`);
+      }
+    } finally {
+      client.release();
+    }
+
+    const excludeArgs = PLATFORM_TABLES
+      .map((t) => `--exclude-table=${t}`)
+      .join(' ');
+
+    const pgDumpCmd =
+      `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `--schema-only --no-owner --no-privileges ${excludeArgs} ${masterDbName}`;
+    const psqlCmd =
+      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `-d ${databaseName} -v ON_ERROR_STOP=0`;
+
+    execSync(`${pgDumpCmd} | ${psqlCmd}`, {
+      encoding: 'utf-8',
+      timeout: 60_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    logger.info(`Fallback schema clone completed for ${databaseName}`);
+  },
+
+  /**
+   * Validate that a newly created tenant DB has all critical tables.
+   */
+  async validateTenantSchema(tenantPool: pg.Pool, databaseName: string): Promise<void> {
+    const { rows } = await tenantPool.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
+    );
+    const existingTables = new Set(rows.map((r: { table_name: string }) => r.table_name));
+
+    const missingTables = CRITICAL_TABLES.filter((t) => !existingTables.has(t));
+    if (missingTables.length > 0) {
+      throw new Error(
+        `Tenant ${databaseName} is missing ${missingTables.length} critical tables: ${missingTables.join(', ')}`
+      );
+    }
+
+    logger.info(
+      `Tenant schema validated: ${existingTables.size} tables, all ${CRITICAL_TABLES.length} critical tables present`
+    );
+  },
+
+  /**
    * Drop a tenant database (destructive — use with caution)
    */
   async dropDatabase(masterPool: pg.Pool, databaseName: string): Promise<void> {
-    // Close any active connections to this database first
     const client = await masterPool.connect();
     try {
       const safeName = databaseName.replace(/[^a-z0-9_]/gi, '');
@@ -319,76 +567,6 @@ export const tenantService = {
       logger.info(`Dropped database: ${safeName}`);
     } finally {
       client.release();
-    }
-  },
-
-  /**
-   * Run the full schema setup on a new tenant database.
-   * Clones the schema from the master pos_system database using pg_dump,
-   * excluding platform-only tables (tenants, super_admins, etc.).
-   * This ensures every tenant gets the exact same schema as the main DB.
-   */
-  async runSchemaSetup(tenantPool: pg.Pool, databaseName: string): Promise<void> {
-    const dbHost = process.env.DB_HOST || 'localhost';
-    const dbPort = process.env.DB_PORT || '5432';
-    const dbUser = process.env.DB_USER || 'postgres';
-    const dbPassword = process.env.DB_PASSWORD || 'password';
-    const masterDbName = process.env.DB_NAME || 'pos_system';
-
-    // Platform-only tables that should NOT be cloned to tenants
-    const excludeTables = [
-      'tenants',
-      'super_admins',
-      'tenant_api_keys',
-      'tenant_audit_log',
-      'sync_ledger',
-      'billing_events',
-      'schema_migrations',
-      '__EFMigrationsHistory',
-    ];
-
-    const excludeArgs = excludeTables
-      .map((t) => `--exclude-table=${t}`)
-      .join(' ');
-
-    // pg_dump --schema-only exports CREATE TABLE, indexes, constraints, enums, etc.
-    const pgDumpCmd =
-      `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-      `--schema-only --no-owner --no-privileges ${excludeArgs} ${masterDbName}`;
-
-    // psql applies the schema to the new tenant database
-    const psqlCmd =
-      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-      `-d ${databaseName} -v ON_ERROR_STOP=0`;
-
-    const fullCmd = `${pgDumpCmd} | ${psqlCmd}`;
-
-    try {
-      logger.info(`Cloning schema from ${masterDbName} → ${databaseName}`);
-
-      execSync(fullCmd, {
-        encoding: 'utf-8',
-        timeout: 60_000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      logger.info(`Tenant schema cloned successfully: ${databaseName}`);
-    } catch (error: unknown) {
-      // pg_dump with ON_ERROR_STOP=0 tolerates "already exists" warnings.
-      // Only treat it as fatal if the tenant DB has zero tables afterward.
-      const { rows } = await tenantPool.query(
-        `SELECT count(*)::int AS cnt FROM information_schema.tables WHERE table_schema = 'public'`
-      );
-      const tableCount = rows[0]?.cnt ?? 0;
-
-      if (tableCount < 10) {
-        logger.error(`Schema clone failed — only ${tableCount} tables created`, { error });
-        throw new Error(`Schema clone failed for ${databaseName}: only ${tableCount} tables`);
-      }
-
-      // Some warnings are normal (e.g., duplicate enum types) — log and continue
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.warn(`Schema clone completed with warnings (${tableCount} tables created): ${msg}`);
     }
   },
 

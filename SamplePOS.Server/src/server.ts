@@ -322,6 +322,18 @@ async function startServer() {
 
     logger.info('Database connection successful');
 
+    // Pre-build tenant template database (non-blocking — failure just means
+    // first tenant provision will build it on demand)
+    try {
+      const { tenantService } = await import('./modules/platform/tenantService.js');
+      await tenantService.ensureTemplateDatabase(pool);
+      logger.info('Tenant template database ready');
+    } catch (err) {
+      logger.warn('Template DB pre-build skipped (will create on first tenant provision)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // Start Express server
     const server = app.listen(PORT, () => {
       console.log('');
