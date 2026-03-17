@@ -11,7 +11,12 @@ import { execSync } from 'child_process';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from './tenantRepository.js';
 import { normalizeTenant, PLAN_LIMITS } from '../../../../shared/types/tenant.js';
-import type { Tenant, TenantDbRow, CreateTenantRequest, TenantUsage } from '../../../../shared/types/tenant.js';
+import type {
+  Tenant,
+  TenantDbRow,
+  CreateTenantRequest,
+  TenantUsage,
+} from '../../../../shared/types/tenant.js';
 import { invalidateTenantCache } from '../../middleware/tenantMiddleware.js';
 import logger from '../../utils/logger.js';
 
@@ -33,7 +38,6 @@ const CRITICAL_TABLES = [
   'goods_receipt_items',
   'inventory_batches',
   'stock_movements',
-  'chart_of_accounts',
   'accounts',
   'ledger_entries',
   'journal_entries',
@@ -179,7 +183,6 @@ export const tenantService = {
       });
 
       return normalizeTenant(activated || tenantRow);
-
     } catch (error) {
       // Rollback: mark as failed, log error
       await tenantRepository.updateStatus(masterPool, tenantRow.id, 'DEACTIVATED');
@@ -193,17 +196,26 @@ export const tenantService = {
       try {
         await this.dropDatabase(masterPool, databaseName);
       } catch (dropErr) {
-        logger.error(`Failed to drop database after provisioning failure: ${databaseName}`, { error: dropErr });
+        logger.error(`Failed to drop database after provisioning failure: ${databaseName}`, {
+          error: dropErr,
+        });
       }
 
-      throw new Error(`Failed to provision tenant: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to provision tenant: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   },
 
   /**
    * Suspend a tenant (disable access but keep data)
    */
-  async suspendTenant(masterPool: pg.Pool, tenantId: string, actor: string, reason?: string): Promise<Tenant> {
+  async suspendTenant(
+    masterPool: pg.Pool,
+    tenantId: string,
+    actor: string,
+    reason?: string
+  ): Promise<Tenant> {
     const updated = await tenantRepository.updateStatus(masterPool, tenantId, 'SUSPENDED');
     if (!updated) throw new Error('Tenant not found');
 
@@ -219,7 +231,12 @@ export const tenantService = {
   /**
    * Deactivate a tenant (soft-delete: disable access, remove pool, keep data)
    */
-  async deactivateTenant(masterPool: pg.Pool, tenantId: string, actor: string, reason?: string): Promise<Tenant> {
+  async deactivateTenant(
+    masterPool: pg.Pool,
+    tenantId: string,
+    actor: string,
+    reason?: string
+  ): Promise<Tenant> {
     const updated = await tenantRepository.updateStatus(masterPool, tenantId, 'DEACTIVATED');
     if (!updated) throw new Error('Tenant not found');
 
@@ -299,9 +316,9 @@ export const tenantService = {
          WHERE sale_date >= date_trunc('month', CURRENT_DATE)
            AND status = 'COMPLETED'`
       ),
-      tenantPool.query(
-        `SELECT pg_database_size(current_database())::bigint as size_bytes`
-      ).catch(() => ({ rows: [{ size_bytes: 0 }] })),
+      tenantPool
+        .query(`SELECT pg_database_size(current_database())::bigint as size_bytes`)
+        .catch(() => ({ rows: [{ size_bytes: 0 }] })),
     ]);
 
     const sizeBytes = Number(dbSize.rows[0]?.size_bytes || 0);
@@ -338,10 +355,9 @@ export const tenantService = {
     const client = await masterPool.connect();
     try {
       // Check if template already exists
-      const { rows } = await client.query(
-        `SELECT 1 FROM pg_database WHERE datname = $1`,
-        [TEMPLATE_DB_NAME]
-      );
+      const { rows } = await client.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [
+        TEMPLATE_DB_NAME,
+      ]);
 
       if (rows.length > 0) {
         // Template exists — check if master has newer migration version
@@ -356,7 +372,7 @@ export const tenantService = {
         try {
           const templateResult = execSync(
             `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+              `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
             { encoding: 'utf-8', timeout: 10_000 }
           );
           templateTableCount = parseInt(templateResult.trim(), 10) || 0;
@@ -372,7 +388,9 @@ export const tenantService = {
           return;
         }
 
-        logger.info(`Template DB stale (${templateTableCount} vs master ${masterTableCount}), rebuilding...`);
+        logger.info(
+          `Template DB stale (${templateTableCount} vs master ${masterTableCount}), rebuilding...`
+        );
 
         // Terminate any connections to template before dropping
         await client.query(
@@ -390,9 +408,7 @@ export const tenantService = {
     }
 
     // Clone schema from master into template using pg_dump | psql
-    const excludeArgs = PLATFORM_TABLES
-      .map((t) => `--exclude-table=${t}`)
-      .join(' ');
+    const excludeArgs = PLATFORM_TABLES.map((t) => `--exclude-table=${t}`).join(' ');
 
     const pgDumpCmd =
       `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
@@ -408,17 +424,36 @@ export const tenantService = {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       logger.info(`Template database schema loaded from ${masterDbName}`);
+
+      // Also seed the accounts (chart of accounts) data into the template
+      // so every new tenant starts with the standard chart of accounts.
+      const pgDumpDataCmd =
+        `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        `--data-only --table=accounts --no-owner --no-privileges ${masterDbName}`;
+
+      try {
+        execSync(`${pgDumpDataCmd} | ${psqlCmd}`, {
+          encoding: 'utf-8',
+          timeout: 15_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        logger.info('Template seeded with chart of accounts data');
+      } catch {
+        logger.warn('Could not seed accounts data into template (non-fatal)');
+      }
     } catch (error: unknown) {
       // Check if enough tables were created despite warnings
       let tableCount = 0;
       try {
         const result = execSync(
           `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-          `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
           { encoding: 'utf-8', timeout: 10_000 }
         );
         tableCount = parseInt(result.trim(), 10) || 0;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       if (tableCount < CRITICAL_TABLES.length) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -454,10 +489,9 @@ export const tenantService = {
     const client = await masterPool.connect();
     try {
       // Check if database already exists
-      const exists = await client.query(
-        `SELECT 1 FROM pg_database WHERE datname = $1`,
-        [databaseName]
-      );
+      const exists = await client.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [
+        databaseName,
+      ]);
       if (exists.rows.length > 0) {
         logger.warn(`Database ${databaseName} already exists, skipping creation`);
         return;
@@ -497,10 +531,9 @@ export const tenantService = {
 
     const client = await masterPool.connect();
     try {
-      const exists = await client.query(
-        `SELECT 1 FROM pg_database WHERE datname = $1`,
-        [databaseName]
-      );
+      const exists = await client.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [
+        databaseName,
+      ]);
       if (exists.rows.length === 0) {
         await client.query(`CREATE DATABASE ${databaseName}`);
       }
@@ -508,9 +541,7 @@ export const tenantService = {
       client.release();
     }
 
-    const excludeArgs = PLATFORM_TABLES
-      .map((t) => `--exclude-table=${t}`)
-      .join(' ');
+    const excludeArgs = PLATFORM_TABLES.map((t) => `--exclude-table=${t}`).join(' ');
 
     const pgDumpCmd =
       `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
@@ -571,7 +602,8 @@ export const tenantService = {
   },
 
   /**
-   * Seed the initial admin user in a tenant database
+   * Seed the initial admin user in a tenant database.
+   * Uses user_number_seq for the auto-generated user number.
    */
   async seedAdminUser(
     tenantPool: pg.Pool,
@@ -580,8 +612,8 @@ export const tenantService = {
     const passwordHash = await bcrypt.hash(user.password, 12);
 
     await tenantPool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, is_active)
-       VALUES ($1, $2, $3, 'ADMIN', true)
+      `INSERT INTO users (email, password_hash, full_name, role, is_active, user_number)
+       VALUES ($1, $2, $3, 'ADMIN', true, 'USR-' || LPAD(nextval('user_number_seq')::TEXT, 4, '0'))
        ON CONFLICT (email) DO NOTHING`,
       [user.email, passwordHash, user.fullName]
     );
@@ -590,62 +622,73 @@ export const tenantService = {
   },
 
   /**
-   * Seed default system settings for a tenant
+   * Seed default system settings for a tenant.
+   * Uses the structured system_settings schema (not key/value).
    */
   async seedSystemSettings(
     tenantPool: pg.Pool,
     config: { companyName: string; currency: string; country: string; timezone: string }
   ): Promise<void> {
-    const settings = [
-      { key: 'company_name', value: config.companyName, category: 'company' },
-      { key: 'currency', value: config.currency, category: 'company' },
-      { key: 'country', value: config.country, category: 'company' },
-      { key: 'timezone', value: config.timezone, category: 'company' },
-      { key: 'tax_rate', value: '0.18', category: 'tax' },
-      { key: 'invoice_prefix', value: 'INV', category: 'invoicing' },
-      { key: 'sale_prefix', value: 'SALE', category: 'sales' },
-      { key: 'po_prefix', value: 'PO', category: 'purchasing' },
-    ];
+    // system_settings is a single-row structured table, not key/value
+    await tenantPool.query(
+      `INSERT INTO system_settings (business_name, currency_code, currency_symbol, timezone, default_tax_rate, tax_name)
+       VALUES ($1, $2, $3, $4, 18.00, 'VAT')
+       ON CONFLICT DO NOTHING`,
+      [
+        config.companyName,
+        config.currency,
+        config.currency === 'UGX' ? 'USh' : config.currency,
+        config.timezone,
+      ]
+    );
 
-    for (const s of settings) {
-      await tenantPool.query(
-        `INSERT INTO system_settings (key, value, category) VALUES ($1, $2, $3)
-         ON CONFLICT (key) DO NOTHING`,
-        [s.key, s.value, s.category]
-      );
+    // Accounts (chart of accounts) are pre-seeded in the template from master.
+    // Verify they exist; if not (fallback path), copy from master.
+    const { rows } = await tenantPool.query(`SELECT count(*)::int AS cnt FROM accounts`);
+    if ((rows[0]?.cnt ?? 0) === 0) {
+      logger.warn('Accounts not found in tenant — seeding from master via fallback');
+      await this.seedAccountsFromMaster(tenantPool);
     }
 
-    // Seed default chart of accounts
-    const accounts = [
-      { code: '1000', name: 'Cash', type: 'ASSET' },
-      { code: '1100', name: 'Accounts Receivable', type: 'ASSET' },
-      { code: '1200', name: 'Inventory', type: 'ASSET' },
-      { code: '1300', name: 'Bank Account', type: 'ASSET' },
-      { code: '2000', name: 'Accounts Payable', type: 'LIABILITY' },
-      { code: '2100', name: 'Tax Payable', type: 'LIABILITY' },
-      { code: '3000', name: 'Owner Equity', type: 'EQUITY' },
-      { code: '3100', name: 'Retained Earnings', type: 'EQUITY' },
-      { code: '4000', name: 'Sales Revenue', type: 'REVENUE' },
-      { code: '4100', name: 'Service Revenue', type: 'REVENUE' },
-      { code: '4500', name: 'Delivery Revenue', type: 'REVENUE' },
-      { code: '5000', name: 'Cost of Goods Sold', type: 'EXPENSE' },
-      { code: '5100', name: 'Purchase Expense', type: 'EXPENSE' },
-      { code: '6000', name: 'Operating Expenses', type: 'EXPENSE' },
-      { code: '6100', name: 'Salaries Expense', type: 'EXPENSE' },
-      { code: '6200', name: 'Rent Expense', type: 'EXPENSE' },
-      { code: '6300', name: 'Utilities Expense', type: 'EXPENSE' },
-      { code: '6750', name: 'Delivery Expense', type: 'EXPENSE' },
-    ];
+    logger.info('Seeded system settings');
+  },
 
-    for (const a of accounts) {
-      await tenantPool.query(
-        `INSERT INTO chart_of_accounts (account_code, account_name, account_type, is_system)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT (account_code) DO NOTHING`,
-        [a.code, a.name, a.type]
-      );
+  /**
+   * Copy chart of accounts from master DB into tenant.
+   * Only used as fallback when template didn't include accounts data.
+   */
+  async seedAccountsFromMaster(tenantPool: pg.Pool): Promise<void> {
+    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbPort = process.env.DB_PORT || '5432';
+    const dbUser = process.env.DB_USER || 'postgres';
+    const dbPassword = process.env.DB_PASSWORD || 'password';
+    const masterDbName = process.env.DB_NAME || 'pos_system';
+
+    // Get the tenant's database name from the pool config
+    const { rows: dbRows } = await tenantPool.query('SELECT current_database()');
+    const tenantDbName = dbRows[0]?.current_database;
+    if (!tenantDbName) {
+      logger.error('Could not determine tenant database name for accounts seed');
+      return;
     }
 
-    logger.info('Seeded system settings and chart of accounts');
+    try {
+      const dumpCmd =
+        `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        `--data-only --table=accounts --no-owner --no-privileges ${masterDbName}`;
+      const loadCmd =
+        `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        `-d ${tenantDbName} -v ON_ERROR_STOP=0`;
+
+      execSync(`${dumpCmd} | ${loadCmd}`, {
+        encoding: 'utf-8',
+        timeout: 15_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      logger.info('Seeded accounts from master database');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to seed accounts from master: ${msg}`);
+    }
   },
 };
