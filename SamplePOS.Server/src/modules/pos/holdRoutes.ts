@@ -49,7 +49,8 @@ export function createHoldRoutes(pool: Pool): Router {
         userId,
       };
 
-      const hold = await holdService.holdCart(pool, input);
+      const effectivePool = req.tenantPool || pool;
+      const hold = await holdService.holdCart(effectivePool, input);
 
       res.status(201).json({
         success: true,
@@ -82,7 +83,8 @@ export function createHoldRoutes(pool: Pool): Router {
 
       const terminalId = req.query.terminalId as string | undefined;
 
-      const holds = await holdService.listHolds(pool, {
+      const effectivePool = req.tenantPool || pool;
+      const holds = await holdService.listHolds(effectivePool, {
         userId,
         terminalId,
       });
@@ -109,7 +111,8 @@ export function createHoldRoutes(pool: Pool): Router {
       const { id } = req.params;
       const userId = req.user?.id;
 
-      const hold = await holdService.getHoldById(pool, id);
+      const effectivePool = req.tenantPool || pool;
+      const hold = await holdService.getHoldById(effectivePool, id);
 
       // Verify ownership (user can only load their own holds)
       if (hold.userId !== userId) {
@@ -142,7 +145,8 @@ export function createHoldRoutes(pool: Pool): Router {
       const userId = req.user?.id;
 
       // Verify ownership before deletion
-      const hold = await holdService.getHoldById(pool, id);
+      const effectivePool = req.tenantPool || pool;
+      const hold = await holdService.getHoldById(effectivePool, id);
 
       if (hold.userId !== userId) {
         return res.status(403).json({
@@ -151,7 +155,7 @@ export function createHoldRoutes(pool: Pool): Router {
         });
       }
 
-      await holdService.deleteHold(pool, id);
+      await holdService.deleteHold(effectivePool, id);
 
       res.json({
         success: true,

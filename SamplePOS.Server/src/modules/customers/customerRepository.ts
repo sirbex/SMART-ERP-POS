@@ -135,7 +135,7 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
   }
 
   if (fields.length === 0) {
-    return findCustomerById(id);
+    return findCustomerById(id, pool);
   }
 
   // Always bump version
@@ -573,7 +573,7 @@ export interface CustomerSummary {
 
 export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<CustomerSummary> {
   const pool = dbPool || globalPool;
-  const customer = await findCustomerById(customerId);
+  const customer = await findCustomerById(customerId, pool);
   if (!customer) {
     throw new Error(`Customer with ID ${customerId} not found`);
   }

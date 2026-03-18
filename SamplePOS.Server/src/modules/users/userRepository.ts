@@ -131,7 +131,7 @@ export async function updateUser(id: string, data: UpdateUser, dbPool?: DbClient
   }
 
   if (fields.length === 0) {
-    return findUserById(id);
+    return findUserById(id, pool);
   }
 
   fields.push(`updated_at = CURRENT_TIMESTAMP`);
