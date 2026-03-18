@@ -81,6 +81,9 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
         authenticate,
         requirePermission('pos.create'),
         asyncHandler(async (req, res) => {
+            // Use tenant pool when available (multi-tenant), fall back to factory pool
+            const dbPool = req.tenantPool || pool;
+
             // ── 1. Validate payload ──
             const validation = SyncPayloadSchema.safeParse(req.body);
             if (!validation.success) {
@@ -111,7 +114,7 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             }
 
             // ── 2. Idempotency check ──
-            const existing = await pool.query(
+            const existing = await dbPool.query(
                 `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
                 [idempotencyKey]
             );
@@ -136,7 +139,7 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             let cashRegisterSessionId: string | null = null;
 
             if (userId) {
-                const sessionRes = await pool.query(
+                const sessionRes = await dbPool.query(
                     `SELECT id FROM cash_register_sessions
              WHERE user_id = $1 AND status = 'OPEN'
              ORDER BY opened_at DESC LIMIT 1`,
@@ -177,7 +180,7 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             // so a concurrent duplicate triggers a PG unique violation
             // instead of a TOCTOU race.
             try {
-                const result = await salesService.createSale(pool, serviceInput);
+                const result = await salesService.createSale(dbPool, serviceInput);
 
                 logger.info(`[OfflineSync] Successfully synced offline sale ${offlineId} → ${result.sale.saleNumber}`);
 
@@ -195,7 +198,7 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
                 // ── Duplicate idempotency key (concurrent request already created this sale) ──
                 const pgErr = saleError as { code?: string; constraint?: string };
                 if (pgErr.code === '23505' && String(pgErr.constraint || errMsg).includes('idempotency_key')) {
-                    const dup = await pool.query(
+                    const dup = await dbPool.query(
                         `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
                         [idempotencyKey]
                     );
@@ -250,7 +253,8 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
         '/status',
         authenticate,
         asyncHandler(async (req, res) => {
-            const result = await pool.query(
+            const dbPool = req.tenantPool || pool;
+            const result = await dbPool.query(
                 `SELECT
             COUNT(*) FILTER (WHERE offline_id IS NOT NULL) AS total_offline,
             COUNT(*) FILTER (WHERE offline_id IS NOT NULL AND status = 'COMPLETED') AS synced
