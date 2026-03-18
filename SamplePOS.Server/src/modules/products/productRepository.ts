@@ -270,7 +270,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
 
   const hasChanges = masterFields.length > 0 || valFields.length > 0 || invFields.length > 0;
   if (!hasChanges) {
-    return findProductById(id);
+    return findProductById(id, pool);
   }
 
   // Execute updates (each only if there are fields to set)
@@ -310,7 +310,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   }
 
   // Return the full joined product
-  return findProductById(id);
+  return findProductById(id, pool);
 }
 
 export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<boolean> {
