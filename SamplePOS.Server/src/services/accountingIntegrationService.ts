@@ -32,6 +32,7 @@
 
 import { AccountingCore } from './accountingCore.js';
 import * as glEntryService from './glEntryService.js';
+import type pg from 'pg';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
 
@@ -212,7 +213,7 @@ export class AccountingIntegrationService {
     deliveryFee: number;
     fuelCost: number;
     deliveryDate: string;
-  }): Promise<{ success: boolean; error?: string }> {
+  }, pool?: pg.Pool): Promise<{ success: boolean; error?: string }> {
     try {
       await glEntryService.recordDeliveryChargeToGL({
         deliveryId: data.deliveryId,
@@ -220,7 +221,7 @@ export class AccountingIntegrationService {
         deliveryDate: data.deliveryDate,
         customerId: data.customerId,
         deliveryFee: data.deliveryFee
-      });
+      }, pool);
       return { success: true };
     } catch (error: unknown) {
       logger.error('Failed to record delivery charge', { error: (error instanceof Error ? error.message : String(error)), deliveryId: data.deliveryId });
@@ -240,14 +241,14 @@ export class AccountingIntegrationService {
       fuelCost: number;
       totalCost: number;
     };
-  }): Promise<{ success: boolean; error?: string }> {
+  }, pool?: pg.Pool): Promise<{ success: boolean; error?: string }> {
     try {
       await glEntryService.recordDeliveryCompletedToGL({
         deliveryId: data.deliveryId,
         deliveryNumber: data.deliveryNumber,
         completedAt: data.completedAt,
         totalCost: data.actualCosts.totalCost
-      });
+      }, pool);
       return { success: true };
     } catch (error: unknown) {
       logger.error('Failed to record delivery completion', { error: (error instanceof Error ? error.message : String(error)), deliveryId: data.deliveryId });

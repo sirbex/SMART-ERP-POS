@@ -443,10 +443,11 @@ export async function updateProductPrice(
  * Called after goods receipt finalization.
  * Both tier updates and product price update are atomic.
  */
-export async function onCostChange(productId: string): Promise<void> {
+export async function onCostChange(productId: string, dbPool?: pg.Pool): Promise<void> {
+  const pool = dbPool || globalPool;
   try {
     // Pricing tier updates + product price update in single transaction
-    await UnitOfWork.run<void>(globalPool, async (client) => {
+    await UnitOfWork.run<void>(pool, async (client) => {
       await updatePricingTiersWithClient(client, productId);
       await updateProductPrice(productId, client);
     });

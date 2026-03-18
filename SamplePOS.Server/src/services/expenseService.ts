@@ -6,15 +6,16 @@ import * as glEntryService from './glEntryService.js';
 import { BankingService } from './bankingService.js';
 import { pool as globalPool } from '../db/pool.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
-import { PoolClient } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 /**
  * Get expenses with filtering and pagination
  */
-export const getExpenses = async (filters: ExpenseFilters) => {
+export const getExpenses = async (filters: ExpenseFilters, pool?: Pool) => {
   try {
-    const expenses = await expenseRepository.getExpenses(filters);
-    const total = await expenseRepository.getExpenseCount(filters);
+    const dbPool = pool || globalPool;
+    const expenses = await expenseRepository.getExpenses(filters, dbPool);
+    const total = await expenseRepository.getExpenseCount(filters, dbPool);
 
     return {
       data: expenses,
@@ -34,9 +35,9 @@ export const getExpenses = async (filters: ExpenseFilters) => {
 /**
  * Get expense by ID
  */
-export const getExpenseById = async (id: string) => {
+export const getExpenseById = async (id: string, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpenseById(id);
+    return await expenseRepository.getExpenseById(id, pool || globalPool);
   } catch (error) {
     logger.error('Error in expense service getExpenseById', { error, id });
     throw new Error(`Failed to retrieve expense: ${(error as Error).message}`);
@@ -46,10 +47,11 @@ export const getExpenseById = async (id: string) => {
 /**
  * Create new expense
  */
-export const createExpense = async (data: CreateExpenseData) => {
+export const createExpense = async (data: CreateExpenseData, pool?: Pool) => {
   try {
+    const dbPool = pool || globalPool;
     // Generate expense number
-    const expenseNumber = await generateExpenseNumber();
+    const expenseNumber = await generateExpenseNumber(dbPool);
 
     const expenseData = {
       ...data,
@@ -58,7 +60,7 @@ export const createExpense = async (data: CreateExpenseData) => {
     };
 
     // Wrap create + approval in a single transaction
-    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+    const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       const created = await expenseRepository.createExpense(expenseData, client);
 
       // Create initial approval record if needed
@@ -79,10 +81,11 @@ export const createExpense = async (data: CreateExpenseData) => {
 /**
  * Update expense
  */
-export const updateExpense = async (id: string, data: UpdateExpenseData, userId: string) => {
+export const updateExpense = async (id: string, data: UpdateExpenseData, userId: string, pool?: Pool) => {
   try {
+    const dbPool = pool || globalPool;
     // Check if expense exists and is modifiable
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       return null;
     }
@@ -95,7 +98,7 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, userId:
       });
     }
 
-    return await expenseRepository.updateExpense(id, data);
+    return await expenseRepository.updateExpense(id, data, dbPool);
   } catch (error) {
     logger.error('Error in expense service updateExpense', { error, id, data, userId });
     throw error;
@@ -105,9 +108,10 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, userId:
 /**
  * Delete expense (soft delete)
  */
-export const deleteExpense = async (id: string, userId: string) => {
+export const deleteExpense = async (id: string, userId: string, pool?: Pool) => {
   try {
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const dbPool = pool || globalPool;
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       return false;
     }
@@ -120,7 +124,7 @@ export const deleteExpense = async (id: string, userId: string) => {
       });
     }
 
-    return await expenseRepository.deleteExpense(id);
+    return await expenseRepository.deleteExpense(id, dbPool);
   } catch (error) {
     logger.error('Error in expense service deleteExpense', { error, id, userId });
     throw error;
@@ -130,9 +134,10 @@ export const deleteExpense = async (id: string, userId: string) => {
 /**
  * Submit expense for approval (DRAFT -> PENDING_APPROVAL)
  */
-export const submitExpense = async (id: string, userId: string) => {
+export const submitExpense = async (id: string, userId: string, pool?: Pool) => {
   try {
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const dbPool = pool || globalPool;
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       throw new NotFoundError('Expense');
     }
@@ -147,7 +152,7 @@ export const submitExpense = async (id: string, userId: string) => {
     }
 
     // Update status to pending approval
-    const result = await expenseRepository.updateExpense(id, { status: 'PENDING_APPROVAL' });
+    const result = await expenseRepository.updateExpense(id, { status: 'PENDING_APPROVAL' }, dbPool);
     return result;
   } catch (error) {
     logger.error('Error in expense service submitExpense', { error, id, userId });
@@ -158,9 +163,10 @@ export const submitExpense = async (id: string, userId: string) => {
 /**
  * Approve expense
  */
-export const approveExpense = async (id: string, approverId: string, comments?: string) => {
+export const approveExpense = async (id: string, approverId: string, comments?: string, pool?: Pool) => {
   try {
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const dbPool = pool || globalPool;
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       return null;
     }
@@ -175,7 +181,7 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
     }
 
     // Wrap status update + approval record in a single transaction
-    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+    const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       // Update expense status
       const updated = await expenseRepository.updateExpense(
         id,
@@ -199,7 +205,7 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
     // ============================================================
     try {
       // Check if expense was already paid at creation time
-      const paymentStatusResult = await globalPool.query(
+      const paymentStatusResult = await dbPool.query(
         'SELECT payment_status FROM expenses WHERE id = $1',
         [id]
       );
@@ -213,7 +219,7 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
         categoryCode: existingExpense.categoryCode || existingExpense.category || 'GENERAL',
         description: existingExpense.title || existingExpense.expenseNumber,
         isPaidAtApproval,
-      });
+      }, dbPool);
     } catch (glError) {
       logger.error('GL posting failed for expense approval (non-fatal)', {
         expenseId: id,
@@ -233,9 +239,10 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
 /**
  * Reject expense
  */
-export const rejectExpense = async (id: string, rejectorId: string, reason: string) => {
+export const rejectExpense = async (id: string, rejectorId: string, reason: string, pool?: Pool) => {
   try {
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const dbPool = pool || globalPool;
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       return null;
     }
@@ -250,7 +257,7 @@ export const rejectExpense = async (id: string, rejectorId: string, reason: stri
     }
 
     // Wrap status update + approval record in a single transaction
-    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+    const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       // Update expense status
       const updated = await expenseRepository.updateExpense(
         id,
@@ -287,10 +294,12 @@ export const markExpensePaid = async (
     paymentReference?: string;
     notes?: string;
     paymentAccountId?: string;
-  }
+  },
+  pool?: Pool
 ) => {
   try {
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const dbPool = pool || globalPool;
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       return null;
     }
@@ -308,7 +317,7 @@ export const markExpensePaid = async (
     let paymentAccountId = paymentData.paymentAccountId;
     if (!paymentAccountId) {
       // Default to Cash account (1010)
-      const cashAccounts = await expenseRepository.getPaymentAccounts();
+      const cashAccounts = await expenseRepository.getPaymentAccounts(dbPool);
       const cashAccount = cashAccounts.find((a) => a.code === '1010');
       if (cashAccount) {
         paymentAccountId = cashAccount.id;
@@ -332,7 +341,7 @@ export const markExpensePaid = async (
     // CRITICAL: Wrap expense update + bank transaction in UnitOfWork
     // Prevents PAID expense with missing bank record
     // ============================================================
-    const updatedExpense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+    const updatedExpense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       const updated = await expenseRepository.updateExpense(id, updateData, client);
 
       // ============================================================
@@ -377,7 +386,7 @@ export const markExpensePaid = async (
       // Resolve payment account code from UUID
       let paymentAccountCode: string | undefined;
       if (paymentAccountId) {
-        const acctResult = await globalPool.query(
+        const acctResult = await dbPool.query(
           'SELECT "AccountCode" FROM accounts WHERE "Id" = $1',
           [paymentAccountId]
         );
@@ -394,7 +403,7 @@ export const markExpensePaid = async (
         amount: existingExpense.amount,
         paymentDate,
         paymentAccountCode,
-      });
+      }, dbPool);
     } catch (glError) {
       logger.error('GL posting failed for expense payment (non-fatal)', {
         expenseId: id,
@@ -413,9 +422,9 @@ export const markExpensePaid = async (
 /**
  * Get expense categories
  */
-export const getExpenseCategories = async () => {
+export const getExpenseCategories = async (pool?: Pool) => {
   try {
-    return await expenseRepository.getExpenseCategories();
+    return await expenseRepository.getExpenseCategories(pool || globalPool);
   } catch (error) {
     logger.error('Error in expense service getExpenseCategories', { error });
     throw new Error(`Failed to retrieve expense categories: ${(error as Error).message}`);
@@ -426,9 +435,9 @@ export const getExpenseCategories = async () => {
  * Get payment accounts (cash/bank accounts) for expense payment source
  * Returns accounts that can be used as the CREDIT side of expense journal entries
  */
-export const getPaymentAccounts = async () => {
+export const getPaymentAccounts = async (pool?: Pool) => {
   try {
-    return await expenseRepository.getPaymentAccounts();
+    return await expenseRepository.getPaymentAccounts(pool || globalPool);
   } catch (error) {
     logger.error('Error in expense service getPaymentAccounts', { error });
     throw new Error(`Failed to retrieve payment accounts: ${(error as Error).message}`);
@@ -442,17 +451,18 @@ export const createExpenseCategory = async (data: {
   name: string;
   code: string;
   description?: string;
-}) => {
+}, pool?: Pool) => {
   try {
+    const dbPool = pool || globalPool;
     // Check if category with same name or code exists
-    const existing = await expenseRepository.getExpenseCategoryByCode(data.code);
+    const existing = await expenseRepository.getExpenseCategoryByCode(data.code, dbPool);
     if (existing) {
       throw new BusinessError('Category with this code already exists', 'ERR_EXPENSE_007', {
         code: data.code,
       });
     }
 
-    return await expenseRepository.createExpenseCategory(data);
+    return await expenseRepository.createExpenseCategory(data, dbPool);
   } catch (error) {
     logger.error('Error in expense service createExpenseCategory', { error, data });
     throw error;
@@ -462,9 +472,9 @@ export const createExpenseCategory = async (data: {
 /**
  * Get expense documents
  */
-export const getExpenseDocuments = async (expenseId: string) => {
+export const getExpenseDocuments = async (expenseId: string, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpenseDocuments(expenseId);
+    return await expenseRepository.getExpenseDocuments(expenseId, pool || globalPool);
   } catch (error) {
     logger.error('Error in expense service getExpenseDocuments', { error, expenseId });
     throw new Error(`Failed to retrieve expense documents: ${(error as Error).message}`);
@@ -474,21 +484,22 @@ export const getExpenseDocuments = async (expenseId: string) => {
 /**
  * Delete expense document
  */
-export const deleteExpenseDocument = async (documentId: string, userId: string) => {
+export const deleteExpenseDocument = async (documentId: string, userId: string, pool?: Pool) => {
   try {
+    const dbPool = pool || globalPool;
     // Check if document exists and user has permission
-    const document = await expenseRepository.getExpenseDocumentById(documentId);
+    const document = await expenseRepository.getExpenseDocumentById(documentId, dbPool);
     if (!document) {
       return false;
     }
 
     // Check if user can delete this document (owns the expense or is admin)
-    const expense = await expenseRepository.getExpenseById(document.expense_id);
+    const expense = await expenseRepository.getExpenseById(document.expense_id, dbPool);
     if (!expense || expense.createdBy !== userId) {
       throw new BusinessError('Permission denied', 'ERR_EXPENSE_008', { documentId, userId });
     }
 
-    return await expenseRepository.deleteExpenseDocument(documentId);
+    return await expenseRepository.deleteExpenseDocument(documentId, dbPool);
   } catch (error) {
     logger.error('Error in expense service deleteExpenseDocument', { error, documentId, userId });
     throw error;
@@ -498,9 +509,9 @@ export const deleteExpenseDocument = async (documentId: string, userId: string) 
 /**
  * Generate expense number
  */
-const generateExpenseNumber = async (): Promise<string> => {
+const generateExpenseNumber = async (pool?: Pool): Promise<string> => {
   try {
-    const result = await expenseRepository.generateExpenseNumber();
+    const result = await expenseRepository.generateExpenseNumber(pool || globalPool);
     return result;
   } catch (error) {
     logger.error('Error generating expense number', { error });
@@ -516,9 +527,10 @@ const generateExpenseNumber = async (): Promise<string> => {
 /**
  * Submit expense for approval
  */
-export const submitForApproval = async (id: string, userId: string) => {
+export const submitForApproval = async (id: string, userId: string, pool?: Pool) => {
   try {
-    const existingExpense = await expenseRepository.getExpenseById(id);
+    const dbPool = pool || globalPool;
+    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
     if (!existingExpense) {
       return null;
     }
@@ -533,7 +545,7 @@ export const submitForApproval = async (id: string, userId: string) => {
     }
 
     // Wrap status update + approval record creation in a single transaction
-    const expense = await UnitOfWork.run(globalPool, async (client: PoolClient) => {
+    const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       // Update expense status
       const updated = await expenseRepository.updateExpense(
         id,
@@ -559,9 +571,9 @@ export const submitForApproval = async (id: string, userId: string) => {
 /**
  * Get expenses by category report
  */
-export const getExpensesByCategory = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpensesByCategory = async (filters: { startDate?: string; endDate?: string }, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpensesByCategory(filters);
+    return await expenseRepository.getExpensesByCategory(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expenseService getExpensesByCategory', { error, filters });
     throw new Error(`Failed to get expenses by category: ${(error as Error).message}`);
@@ -571,9 +583,9 @@ export const getExpensesByCategory = async (filters: { startDate?: string; endDa
 /**
  * Get expenses by vendor report
  */
-export const getExpensesByVendor = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpensesByVendor = async (filters: { startDate?: string; endDate?: string }, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpensesByVendor(filters);
+    return await expenseRepository.getExpensesByVendor(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expenseService getExpensesByVendor', { error, filters });
     throw new Error(`Failed to get expenses by vendor: ${(error as Error).message}`);
@@ -583,9 +595,9 @@ export const getExpensesByVendor = async (filters: { startDate?: string; endDate
 /**
  * Get expense trends
  */
-export const getExpenseTrends = async (filters: { startDate?: string; endDate?: string }) => {
+export const getExpenseTrends = async (filters: { startDate?: string; endDate?: string }, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpenseTrends(filters);
+    return await expenseRepository.getExpenseTrends(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expenseService getExpenseTrends', { error, filters });
     throw new Error(`Failed to get expense trends: ${(error as Error).message}`);
@@ -598,9 +610,9 @@ export const getExpenseTrends = async (filters: { startDate?: string; endDate?: 
 export const getExpensesByPaymentMethod = async (filters: {
   startDate?: string;
   endDate?: string;
-}) => {
+}, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpensesByPaymentMethod(filters);
+    return await expenseRepository.getExpensesByPaymentMethod(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expenseService getExpensesByPaymentMethod', { error, filters });
     throw new Error(`Failed to get expenses by payment method: ${(error as Error).message}`);
@@ -615,9 +627,9 @@ export const getExpensesForExport = async (filters: {
   endDate?: string;
   categoryId?: string;
   status?: string;
-}) => {
+}, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpensesForExport(filters);
+    return await expenseRepository.getExpensesForExport(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expenseService getExpensesForExport', { error, filters });
     throw new Error(`Failed to get expenses for export: ${(error as Error).message}`);
@@ -631,9 +643,9 @@ export const getExpenseSummary = async (filters: {
   startDate?: string;
   endDate?: string;
   categoryId?: string;
-}) => {
+}, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpenseSummary(filters);
+    return await expenseRepository.getExpenseSummary(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expense service getExpenseSummary', { error, filters });
     throw new Error(`Failed to retrieve expense summary: ${(error as Error).message}`);
@@ -646,10 +658,11 @@ export const getExpenseSummary = async (filters: {
 export const updateExpenseCategory = async (
   id: string,
   updateData: Record<string, unknown>,
-  userId: string
+  userId: string,
+  pool?: Pool
 ) => {
   try {
-    const category = await expenseRepository.updateExpenseCategory(id, updateData);
+    const category = await expenseRepository.updateExpenseCategory(id, updateData, pool || globalPool);
 
     if (category) {
       logger.info('Expense category updated', {
@@ -668,10 +681,11 @@ export const updateExpenseCategory = async (
 /**
  * Delete expense category
  */
-export const deleteExpenseCategory = async (id: string, userId: string) => {
+export const deleteExpenseCategory = async (id: string, userId: string, pool?: Pool) => {
   try {
+    const dbPool = pool || globalPool;
     // Check if category has associated expenses
-    const expenseCount = await expenseRepository.getExpenseCountByCategory(id);
+    const expenseCount = await expenseRepository.getExpenseCountByCategory(id, dbPool);
     if (expenseCount > 0) {
       throw new BusinessError(
         `Cannot delete category: ${expenseCount} expenses are associated with this category`,
@@ -680,7 +694,7 @@ export const deleteExpenseCategory = async (id: string, userId: string) => {
       );
     }
 
-    const deleted = await expenseRepository.deleteExpenseCategory(id);
+    const deleted = await expenseRepository.deleteExpenseCategory(id, dbPool);
 
     if (deleted) {
       logger.info('Expense category deleted', {

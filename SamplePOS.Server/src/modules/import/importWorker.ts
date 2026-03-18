@@ -20,6 +20,8 @@ import { Transform, type TransformCallback } from 'stream';
 import { pipeline } from 'stream/promises';
 import logger from '../../utils/logger.js';
 import { pool as globalPool } from '../../db/pool.js';
+import { connectionManager, type TenantPoolConfig } from '../../db/connectionManager.js';
+import type pg from 'pg';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as importRepo from './importRepository.js';
 import { cleanupJobFile } from './importService.js';
@@ -39,9 +41,12 @@ import type { ZodSchema } from 'zod';
 // Products: 19 fields × 500 = 9,500 params. Customers: 5 × 1,000 = 5,000. Suppliers: 10 × 500 = 5,000.
 function getChunkSize(entityType: ImportEntityType): number {
   switch (entityType) {
-    case 'PRODUCT': return 500;
-    case 'CUSTOMER': return 1000;
-    case 'SUPPLIER': return 500;
+    case 'PRODUCT':
+      return 500;
+    case 'CUSTOMER':
+      return 1000;
+    case 'SUPPLIER':
+      return 500;
   }
 }
 
@@ -59,6 +64,8 @@ interface ImportJobPayload {
   duplicateStrategy: DuplicateStrategy;
   filePath: string;
   userId: string;
+  // Tenant context for multi-tenant pool resolution
+  tenantPoolConfig?: TenantPoolConfig;
 }
 
 interface PendingError {
@@ -81,7 +88,8 @@ interface ChunkResult {
  * Process a CSV import job. Called by the Bull queue worker.
  */
 export async function processImportJob(payload: ImportJobPayload): Promise<void> {
-  const { jobId, entityType, duplicateStrategy, filePath } = payload;
+  const { jobId, entityType, duplicateStrategy, filePath, tenantPoolConfig } = payload;
+  const dbPool = tenantPoolConfig ? connectionManager.getPool(tenantPoolConfig) : globalPool;
   const log = logger.child({ module: 'importWorker', jobId, entityType });
 
   log.info('Starting CSV import job', { filePath, duplicateStrategy });
@@ -91,7 +99,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
     await stat(filePath);
   } catch {
     log.error('Import file not found', { filePath });
-    await importRepo.completeImportJob(jobId, 'FAILED', `File not found: ${filePath}`);
+    await importRepo.completeImportJob(jobId, 'FAILED', `File not found: ${filePath}`, dbPool);
     return;
   }
 
@@ -100,17 +108,17 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
   if (totalRows === 0) {
     log.warn('CSV file is empty or has only headers');
     // For empty files, still guard the status transition
-    const started = await importRepo.markJobProcessing(jobId, 0);
+    const started = await importRepo.markJobProcessing(jobId, 0, dbPool);
     if (!started) {
       log.warn('Job was cancelled before processing empty file');
       return;
     }
-    await importRepo.completeImportJob(jobId, 'COMPLETED', 'File was empty');
+    await importRepo.completeImportJob(jobId, 'COMPLETED', 'File was empty', dbPool);
     return;
   }
 
   // Atomically transition PENDING → PROCESSING (guards against cancelled jobs or duplicate workers)
-  const didStart = await importRepo.markJobProcessing(jobId, totalRows);
+  const didStart = await importRepo.markJobProcessing(jobId, totalRows, dbPool);
   if (!didStart) {
     log.warn('Job was cancelled or already picked up — aborting');
     return;
@@ -146,7 +154,10 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
   const validatingTransform = new Transform({
     objectMode: true,
     async transform(
-      infoRecord: { record: Record<string, string>; info: { index: number; columns: { name: string }[]; error?: unknown } },
+      infoRecord: {
+        record: Record<string, string>;
+        info: { index: number; columns: { name: string }[]; error?: unknown };
+      },
       _encoding: string,
       callback: TransformCallback
     ) {
@@ -164,7 +175,8 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
             importJobId: jobId,
             rowNumber: rowNum,
             rawData: record,
-            errorMessage: `Row has ${recordInfo.index} fields but header has ${recordInfo.columns.length} columns. ` +
+            errorMessage:
+              `Row has ${recordInfo.index} fields but header has ${recordInfo.columns.length} columns. ` +
               'Values containing commas (e.g., "1,000") must be quoted in CSV files.',
             errorType: 'VALIDATION',
           });
@@ -172,11 +184,11 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
           progress.rowsFailed++;
 
           if (pendingErrors.length >= ERROR_FLUSH_THRESHOLD) {
-            await importRepo.logImportErrors(pendingErrors);
+            await importRepo.logImportErrors(pendingErrors, dbPool);
             pendingErrors = [];
           }
           if (progress.rowsProcessed - lastProgressUpdateAt >= PROGRESS_UPDATE_INTERVAL) {
-            await importRepo.updateImportProgress(jobId, progress);
+            await importRepo.updateImportProgress(jobId, progress, dbPool);
             lastProgressUpdateAt = progress.rowsProcessed;
           }
           callback();
@@ -201,13 +213,13 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
           // Safety valve: flush errors when buffer gets large
           if (pendingErrors.length >= ERROR_FLUSH_THRESHOLD) {
-            await importRepo.logImportErrors(pendingErrors);
+            await importRepo.logImportErrors(pendingErrors, dbPool);
             pendingErrors = [];
           }
 
           // Periodic progress update
           if (progress.rowsProcessed - lastProgressUpdateAt >= PROGRESS_UPDATE_INTERVAL) {
-            await importRepo.updateImportProgress(jobId, progress);
+            await importRepo.updateImportProgress(jobId, progress, dbPool);
             lastProgressUpdateAt = progress.rowsProcessed;
           }
 
@@ -220,7 +232,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
         const parseResult = schema.safeParse(mapped);
         if (!parseResult.success) {
           const errorMsg = parseResult.error.issues
-            .map(i => `${i.path.join('.')}: ${i.message}`)
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
             .join('; ');
           pendingErrors.push({
             importJobId: jobId,
@@ -234,13 +246,13 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
           // Safety valve: flush errors when buffer gets large (prevents PG param overflow)
           if (pendingErrors.length >= ERROR_FLUSH_THRESHOLD) {
-            await importRepo.logImportErrors(pendingErrors);
+            await importRepo.logImportErrors(pendingErrors, dbPool);
             pendingErrors = [];
           }
 
           // Periodic progress update even without chunk flushes (prevents UI showing 0%)
           if (progress.rowsProcessed - lastProgressUpdateAt >= PROGRESS_UPDATE_INTERVAL) {
-            await importRepo.updateImportProgress(jobId, progress);
+            await importRepo.updateImportProgress(jobId, progress, dbPool);
             lastProgressUpdateAt = progress.rowsProcessed;
           }
 
@@ -255,8 +267,13 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
         // Flush chunk when full
         if (chunkBuffer.length >= chunkSize) {
           const result = await flushChunk(
-            chunkBuffer, chunkRowNumbers, entityType,
-            duplicateStrategy, jobId, pendingErrors
+            chunkBuffer,
+            chunkRowNumbers,
+            entityType,
+            duplicateStrategy,
+            jobId,
+            pendingErrors,
+            dbPool
           );
           progress.rowsProcessed += chunkBuffer.length;
           progress.rowsImported += result.inserted;
@@ -265,12 +282,12 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
           // Flush pending errors
           if (pendingErrors.length > 0) {
-            await importRepo.logImportErrors(pendingErrors);
+            await importRepo.logImportErrors(pendingErrors, dbPool);
             pendingErrors = [];
           }
 
           // Update job progress
-          await importRepo.updateImportProgress(jobId, progress);
+          await importRepo.updateImportProgress(jobId, progress, dbPool);
           lastProgressUpdateAt = progress.rowsProcessed;
 
           chunkBuffer = [];
@@ -293,7 +310,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
         // Safety valve: flush errors when buffer gets large
         if (pendingErrors.length >= ERROR_FLUSH_THRESHOLD) {
-          await importRepo.logImportErrors(pendingErrors);
+          await importRepo.logImportErrors(pendingErrors, dbPool);
           pendingErrors = [];
         }
 
@@ -305,26 +322,31 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
   try {
     // Stream the CSV file through the parser → validating transform
     const parser = parse({
-      columns: true,       // Use first row as header keys
+      columns: true, // Use first row as header keys
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
-      bom: true,           // Strip UTF-8 BOM from Excel-exported files
-      cast: false,          // Keep all values as strings; Zod handles coercion
-      info: true,           // Attach record info so we can detect extra columns
+      bom: true, // Strip UTF-8 BOM from Excel-exported files
+      cast: false, // Keep all values as strings; Zod handles coercion
+      info: true, // Attach record info so we can detect extra columns
     });
 
     await pipeline(
       createReadStream(filePath, { highWaterMark: 64 * 1024 }), // 64KB read chunks
       parser,
-      validatingTransform,
+      validatingTransform
     );
 
     // Flush remaining rows in the last partial chunk
     if (chunkBuffer.length > 0) {
       const result = await flushChunk(
-        chunkBuffer, chunkRowNumbers, entityType,
-        duplicateStrategy, jobId, pendingErrors
+        chunkBuffer,
+        chunkRowNumbers,
+        entityType,
+        duplicateStrategy,
+        jobId,
+        pendingErrors,
+        dbPool
       );
       progress.rowsProcessed += chunkBuffer.length;
       progress.rowsImported += result.inserted;
@@ -334,12 +356,12 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
     // Flush remaining errors
     if (pendingErrors.length > 0) {
-      await importRepo.logImportErrors(pendingErrors);
+      await importRepo.logImportErrors(pendingErrors, dbPool);
     }
 
     // Final progress update
-    await importRepo.updateImportProgress(jobId, progress);
-    await importRepo.completeImportJob(jobId, 'COMPLETED');
+    await importRepo.updateImportProgress(jobId, progress, dbPool);
+    await importRepo.completeImportJob(jobId, 'COMPLETED', undefined, dbPool);
 
     log.info('Import job completed', {
       rowsTotal: totalRows,
@@ -347,7 +369,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
     });
 
     // Clean up uploaded file after successful completion
-    await cleanupJobFile(jobId).catch(() => { });
+    await cleanupJobFile(jobId).catch(() => {});
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error('Import job failed', { error: msg });
@@ -369,10 +391,10 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
     // Flush any pending errors before marking failed
     if (pendingErrors.length > 0) {
-      await importRepo.logImportErrors(pendingErrors).catch(() => { });
+      await importRepo.logImportErrors(pendingErrors, dbPool).catch(() => {});
     }
-    await importRepo.updateImportProgress(jobId, progress).catch(() => { });
-    await importRepo.completeImportJob(jobId, 'FAILED', msg);
+    await importRepo.updateImportProgress(jobId, progress, dbPool).catch(() => {});
+    await importRepo.completeImportJob(jobId, 'FAILED', msg, dbPool);
 
     // Note: NOT cleaning up file on failure to allow retry
   }
@@ -390,14 +412,15 @@ async function flushChunk(
   entityType: ImportEntityType,
   duplicateStrategy: DuplicateStrategy,
   jobId: string,
-  pendingErrors: PendingError[]
+  pendingErrors: PendingError[],
+  dbPool: pg.Pool
 ): Promise<ChunkResult> {
   let failedCount = 0;
 
   try {
     // For FAIL strategy, pre-check for DB-level duplicates
     if (duplicateStrategy === 'FAIL') {
-      const existingDups = await checkExistingDuplicates(rows, entityType);
+      const existingDups = await checkExistingDuplicates(rows, entityType, dbPool);
       if (existingDups.size > 0) {
         // Separate duplicates from non-duplicates in a single pass
         const nonDupRows: Record<string, unknown>[] = [];
@@ -429,7 +452,7 @@ async function flushChunk(
     }
 
     // Execute bulk insert inside a transaction
-    const result = await UnitOfWork.run(globalPool, async (client) => {
+    const result = await UnitOfWork.run(dbPool, async (client) => {
       // Safety: cancel any single statement that takes > 60s (prevents indefinite hangs)
       await client.query("SET LOCAL statement_timeout = '60000'");
 
@@ -510,9 +533,14 @@ function mapCsvRow(
 function coerceValue(fieldName: string, value: string, entityType: ImportEntityType): unknown {
   // Numeric fields
   const numericFields = new Set([
-    'costPrice', 'sellingPrice', 'taxRate', 'reorderLevel',
-    'conversionFactor', 'minDaysBeforeExpirySale',
-    'creditLimit', 'quantityOnHand',
+    'costPrice',
+    'sellingPrice',
+    'taxRate',
+    'reorderLevel',
+    'conversionFactor',
+    'minDaysBeforeExpirySale',
+    'creditLimit',
+    'quantityOnHand',
   ]);
 
   if (numericFields.has(fieldName)) {
@@ -534,20 +562,47 @@ function coerceValue(fieldName: string, value: string, entityType: ImportEntityT
   // UOM alias normalisation — map common abbreviations to canonical enum values
   if (fieldName === 'unitOfMeasure') {
     const uomAliases: Record<string, string> = {
-      'EA': 'EACH', 'EACH': 'EACH', 'PC': 'PIECE', 'PCS': 'PIECE', 'PIECE': 'PIECE',
-      'BOX': 'BOX', 'BX': 'BOX', 'CTN': 'CARTON', 'CARTON': 'CARTON',
-      'KG': 'KG', 'KILO': 'KG', 'KILOGRAM': 'KG',
-      'L': 'LITER', 'LTR': 'LITER', 'LITER': 'LITER', 'LITRE': 'LITER',
-      'M': 'METER', 'MTR': 'METER', 'METER': 'METER', 'METRE': 'METER',
-      'BTL': 'BOTTLE', 'BOTTLE': 'BOTTLE',
-      'CRT': 'CRATE', 'CRATE': 'CRATE',
-      'DZ': 'DOZEN', 'DOZ': 'DOZEN', 'DOZEN': 'DOZEN',
-      'PKT': 'PACKET', 'PACKET': 'PACKET', 'PACK': 'PACK',
-      'SKT': 'SACHET', 'SACHET': 'SACHET',
-      'SCK': 'SACK', 'SACK': 'SACK',
-      'ST': 'STRIP', 'STRIP': 'STRIP',
-      'TB': 'TABLET', 'TAB': 'TABLET', 'TABLET': 'TABLET',
-      'TN': 'TIN', 'TIN': 'TIN',
+      EA: 'EACH',
+      EACH: 'EACH',
+      PC: 'PIECE',
+      PCS: 'PIECE',
+      PIECE: 'PIECE',
+      BOX: 'BOX',
+      BX: 'BOX',
+      CTN: 'CARTON',
+      CARTON: 'CARTON',
+      KG: 'KG',
+      KILO: 'KG',
+      KILOGRAM: 'KG',
+      L: 'LITER',
+      LTR: 'LITER',
+      LITER: 'LITER',
+      LITRE: 'LITER',
+      M: 'METER',
+      MTR: 'METER',
+      METER: 'METER',
+      METRE: 'METER',
+      BTL: 'BOTTLE',
+      BOTTLE: 'BOTTLE',
+      CRT: 'CRATE',
+      CRATE: 'CRATE',
+      DZ: 'DOZEN',
+      DOZ: 'DOZEN',
+      DOZEN: 'DOZEN',
+      PKT: 'PACKET',
+      PACKET: 'PACKET',
+      PACK: 'PACK',
+      SKT: 'SACHET',
+      SACHET: 'SACHET',
+      SCK: 'SACK',
+      SACK: 'SACK',
+      ST: 'STRIP',
+      STRIP: 'STRIP',
+      TB: 'TABLET',
+      TAB: 'TABLET',
+      TABLET: 'TABLET',
+      TN: 'TIN',
+      TIN: 'TIN',
     };
     return uomAliases[value.toUpperCase()] || value.toUpperCase();
   }
@@ -652,25 +707,26 @@ function getDedupeKey(row: Record<string, unknown>, entityType: ImportEntityType
  */
 async function checkExistingDuplicates(
   rows: Record<string, unknown>[],
-  entityType: ImportEntityType
+  entityType: ImportEntityType,
+  dbPool: pg.Pool
 ): Promise<Set<string>> {
   switch (entityType) {
     case 'PRODUCT': {
-      const skus = rows.map(r => String(r.sku || '')).filter(Boolean);
-      const existing = await importRepo.findExistingProductSkus(skus);
-      return new Set([...existing].map(s => s.toLowerCase()));
+      const skus = rows.map((r) => String(r.sku || '')).filter(Boolean);
+      const existing = await importRepo.findExistingProductSkus(skus, dbPool);
+      return new Set([...existing].map((s) => s.toLowerCase()));
     }
     case 'SUPPLIER': {
-      const names = rows.map(r => String(r.name || '')).filter(Boolean);
-      const existing = await importRepo.findExistingSupplierNames(names);
-      return new Set([...existing].map(s => s.toLowerCase()));
+      const names = rows.map((r) => String(r.name || '')).filter(Boolean);
+      const existing = await importRepo.findExistingSupplierNames(names, dbPool);
+      return new Set([...existing].map((s) => s.toLowerCase()));
     }
     case 'CUSTOMER': {
-      const keys = rows.map(r => ({
+      const keys = rows.map((r) => ({
         name: String(r.name || ''),
         email: r.email ? String(r.email) : null,
       }));
-      return importRepo.findExistingCustomerKeys(keys);
+      return importRepo.findExistingCustomerKeys(keys, dbPool);
     }
   }
 }
@@ -679,9 +735,12 @@ async function checkExistingDuplicates(
 
 function getZodSchema(entityType: ImportEntityType): ZodSchema {
   switch (entityType) {
-    case 'PRODUCT': return ProductCreateSchema;
-    case 'CUSTOMER': return CreateCustomerSchema;
-    case 'SUPPLIER': return CreateSupplierSchema;
+    case 'PRODUCT':
+      return ProductCreateSchema;
+    case 'CUSTOMER':
+      return CreateCustomerSchema;
+    case 'SUPPLIER':
+      return CreateSupplierSchema;
   }
 }
 

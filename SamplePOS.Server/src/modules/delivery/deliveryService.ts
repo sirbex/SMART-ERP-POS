@@ -6,7 +6,7 @@
  * RESPONSIBILITY: Business rules, validation, and coordination
  */
 
-import { PoolClient } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
@@ -46,7 +46,7 @@ import * as deliveryRepo from './deliveryRepository.js';
  * Safe to call for any delivery order — skips if fee is 0 or no customer.
  * Uses idempotency key so double-calls are harmless.
  */
-async function postDeliveryFeeToGL(deliveryOrder: DeliveryOrder): Promise<void> {
+async function postDeliveryFeeToGL(deliveryOrder: DeliveryOrder, pool?: Pool): Promise<void> {
   if (!(deliveryOrder.deliveryFee > 0) || !deliveryOrder.customerId) return;
 
   try {
@@ -57,7 +57,7 @@ async function postDeliveryFeeToGL(deliveryOrder: DeliveryOrder): Promise<void> 
       deliveryFee: deliveryOrder.deliveryFee,
       fuelCost: deliveryOrder.fuelCost || 0,
       deliveryDate: deliveryOrder.deliveryDate
-    });
+    }, pool);
 
     if (!accountingResult.success) {
       logger.error('CRITICAL: Delivery fee GL posting failed - REQUIRES MANUAL REMEDIATION', {
@@ -93,12 +93,14 @@ async function postDeliveryFeeToGL(deliveryOrder: DeliveryOrder): Promise<void> 
  */
 export async function createDeliveryOrder(
   data: CreateDeliveryOrderRequest,
-  auditContext?: AuditContext
+  auditContext?: AuditContext,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
-    const { deliveryOrderRow, itemRows, customerName, deliveryNumber } = await UnitOfWork.run(globalPool, async (client) => {
+    const dbPool = pool || globalPool;
+    const { deliveryOrderRow, itemRows, customerName, deliveryNumber } = await UnitOfWork.run(dbPool, async (client) => {
       // Generate delivery number
-      const deliveryNumber = await deliveryRepo.generateDeliveryNumber(globalPool);
+      const deliveryNumber = await deliveryRepo.generateDeliveryNumber(dbPool);
 
       // Validate customer exists if provided
       let customerName: string | undefined;
@@ -161,7 +163,7 @@ export async function createDeliveryOrder(
     }
 
     // ACCOUNTING INTEGRATION: Record delivery fee revenue (non-blocking, idempotent)
-    await postDeliveryFeeToGL(deliveryOrder);
+    await postDeliveryFeeToGL(deliveryOrder, dbPool);
 
     logger.info('Delivery order created successfully', {
       deliveryNumber,
@@ -182,25 +184,27 @@ export async function createDeliveryOrder(
  * Get delivery order by ID or delivery number
  */
 export async function getDeliveryOrder(
-  identifier: string
+  identifier: string,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
+    const dbPool = pool || globalPool;
     // Determine if identifier is UUID or delivery number
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
 
     const deliveryOrderRow = isUuid
-      ? await deliveryRepo.getDeliveryOrderById(globalPool, identifier)
-      : await deliveryRepo.getDeliveryOrderByNumber(globalPool, identifier);
+      ? await deliveryRepo.getDeliveryOrderById(dbPool, identifier)
+      : await deliveryRepo.getDeliveryOrderByNumber(dbPool, identifier);
 
     if (!deliveryOrderRow) {
       return { success: false, error: 'Delivery order not found' };
     }
 
     // Get delivery items
-    const itemRows = await deliveryRepo.getDeliveryItems(globalPool, deliveryOrderRow.id);
+    const itemRows = await deliveryRepo.getDeliveryItems(dbPool, deliveryOrderRow.id);
 
     // Get status history
-    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(globalPool, deliveryOrderRow.id);
+    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(dbPool, deliveryOrderRow.id);
 
     // Normalize response
     const deliveryOrder = normalizeDeliveryOrder(deliveryOrderRow);
@@ -221,17 +225,19 @@ export async function getDeliveryOrder(
  * Track delivery by tracking number (customer-facing)
  */
 export async function trackDelivery(
-  trackingNumber: string
+  trackingNumber: string,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
-    const deliveryOrderRow = await deliveryRepo.getDeliveryOrderByTrackingNumber(globalPool, trackingNumber);
+    const dbPool = pool || globalPool;
+    const deliveryOrderRow = await deliveryRepo.getDeliveryOrderByTrackingNumber(dbPool, trackingNumber);
 
     if (!deliveryOrderRow) {
       return { success: false, error: 'Tracking number not found' };
     }
 
     // Get status history for tracking
-    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(globalPool, deliveryOrderRow.id);
+    const statusHistory = await deliveryRepo.getDeliveryStatusHistory(dbPool, deliveryOrderRow.id);
 
     // Normalize the delivery order using the shared normalizer
     const order = normalizeDeliveryOrder(deliveryOrderRow);
@@ -258,15 +264,17 @@ export async function trackDelivery(
 export async function updateDeliveryStatus(
   identifier: string,
   data: UpdateDeliveryStatusRequest,
-  auditContext?: AuditContext
+  auditContext?: AuditContext,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
-    const { updatedRow, oldStatus } = await UnitOfWork.run(globalPool, async (client) => {
+    const dbPool = pool || globalPool;
+    const { updatedRow, oldStatus } = await UnitOfWork.run(dbPool, async (client) => {
       // Get current delivery order
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
       const currentRow = isUuid
-        ? await deliveryRepo.getDeliveryOrderById(globalPool, identifier)
-        : await deliveryRepo.getDeliveryOrderByNumber(globalPool, identifier);
+        ? await deliveryRepo.getDeliveryOrderById(dbPool, identifier)
+        : await deliveryRepo.getDeliveryOrderByNumber(dbPool, identifier);
 
       if (!currentRow) {
         throw new Error('Delivery order not found');
@@ -338,7 +346,7 @@ export async function updateDeliveryStatus(
             fuelCost: deliveryOrder.fuelCost || 0,
             totalCost: deliveryOrder.totalCost || deliveryOrder.deliveryFee
           }
-        });
+        }, dbPool);
 
         if (!accountingResult.success) {
           logger.error('CRITICAL: Delivery completion GL posting failed - REQUIRES MANUAL REMEDIATION', {
@@ -383,10 +391,12 @@ export async function updateDeliveryStatus(
 export async function assignDriver(
   deliveryOrderId: string,
   driverId: string,
-  auditContext?: AuditContext
+  auditContext?: AuditContext,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
-    const { updatedRow, driverFullName } = await UnitOfWork.run(globalPool, async (client) => {
+    const dbPool = pool || globalPool;
+    const { updatedRow, driverFullName } = await UnitOfWork.run(dbPool, async (client) => {
       // Validate driver exists and has delivery permissions
       const driverCheck = await client.query(`
         SELECT u.id, u.full_name, u.role
@@ -440,12 +450,14 @@ export async function assignDriver(
  * Search delivery orders with pagination and filters
  */
 export async function searchDeliveryOrders(
-  query: DeliveryOrderQuery
+  query: DeliveryOrderQuery,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: { orders: DeliveryOrder[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; error?: string }> {
   try {
+    const dbPool = pool || globalPool;
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const result = await deliveryRepo.searchDeliveryOrders(globalPool, query);
+    const result = await deliveryRepo.searchDeliveryOrders(dbPool, query);
 
     const orders = result.rows.map(normalizeDeliveryOrder);
 
@@ -482,10 +494,12 @@ export async function searchDeliveryOrders(
  */
 export async function createDeliveryRoute(
   data: CreateDeliveryRouteRequest,
-  auditContext?: AuditContext
+  auditContext?: AuditContext,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryRoute; error?: string }> {
   try {
-    const routeRow = await UnitOfWork.run(globalPool, async (client) => {
+    const dbPool = pool || globalPool;
+    const routeRow = await UnitOfWork.run(dbPool, async (client) => {
       // Validate all delivery orders exist and are assignable
       const deliveryCheck = await client.query(`
         SELECT id, delivery_number, status, delivery_address
@@ -559,17 +573,19 @@ export async function createDeliveryRoute(
  * Get delivery route with all deliveries
  */
 export async function getDeliveryRoute(
-  routeId: string
+  routeId: string,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryRoute; error?: string }> {
   try {
-    const routeRow = await deliveryRepo.getDeliveryRouteById(globalPool, routeId);
+    const dbPool = pool || globalPool;
+    const routeRow = await deliveryRepo.getDeliveryRouteById(dbPool, routeId);
 
     if (!routeRow) {
       return { success: false, error: 'Delivery route not found' };
     }
 
     // Get route deliveries
-    const routeDeliveries = await deliveryRepo.getRouteDeliveries(globalPool, routeId);
+    const routeDeliveries = await deliveryRepo.getRouteDeliveries(dbPool, routeId);
 
     const deliveryRoute = normalizeDeliveryRoute(routeRow);
     deliveryRoute.deliveries = routeDeliveries.map(normalizeRouteDelivery);
@@ -589,12 +605,14 @@ export async function getDeliveryRoute(
  * Search delivery routes with pagination
  */
 export async function searchDeliveryRoutes(
-  query: DeliveryRouteQuery
+  query: DeliveryRouteQuery,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: { routes: DeliveryRoute[]; pagination: { page: number; limit: number; total: number; totalPages: number } }; error?: string }> {
   try {
+    const dbPool = pool || globalPool;
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const result = await deliveryRepo.searchDeliveryRoutes(globalPool, query);
+    const result = await deliveryRepo.searchDeliveryRoutes(dbPool, query);
 
     const routes = result.rows.map(row => {
       const route = normalizeDeliveryRoute(row);
@@ -627,10 +645,11 @@ export async function searchDeliveryRoutes(
  */
 export async function getDeliveryAnalytics(
   dateFrom?: string,
-  dateTo?: string
+  dateTo?: string,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: Record<string, number>; error?: string }> {
   try {
-    const row = await deliveryRepo.getDeliveryAnalyticsSummary(globalPool, dateFrom, dateTo);
+    const row = await deliveryRepo.getDeliveryAnalyticsSummary(pool || globalPool, dateFrom, dateTo);
 
     return {
       success: true,
@@ -680,10 +699,12 @@ export interface CreateFromSaleInput {
 export async function createDeliveryFromSale(
   saleId: string,
   input: CreateFromSaleInput,
-  auditContext?: AuditContext
+  auditContext?: AuditContext,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: DeliveryOrder; error?: string }> {
   try {
-    const { deliveryOrderRow, itemRows, customerName, saleNumber, deliveryNumber, deliveryItemCount } = await UnitOfWork.run(globalPool, async (client) => {
+    const dbPool = pool || globalPool;
+    const { deliveryOrderRow, itemRows, customerName, saleNumber, deliveryNumber, deliveryItemCount } = await UnitOfWork.run(dbPool, async (client) => {
       // 1. Fetch sale with customer info
       const saleResult = await client.query(`
         SELECT s.id, s.sale_number, s.customer_id, s.status, s.total_amount,
@@ -741,7 +762,7 @@ export async function createDeliveryFromSale(
         throw new Error('Delivery address is required — provide one or add an address to the customer');
       }
 
-      const deliveryNumber = await deliveryRepo.generateDeliveryNumber(globalPool);
+      const deliveryNumber = await deliveryRepo.generateDeliveryNumber(dbPool);
 
       const deliveryItems = itemsResult.rows.map(row => ({
         productId: row.product_id,
@@ -791,7 +812,7 @@ export async function createDeliveryFromSale(
     deliveryOrder.customerName = customerName;
 
     // ACCOUNTING INTEGRATION: Record delivery fee revenue (non-blocking, idempotent)
-    await postDeliveryFeeToGL(deliveryOrder);
+    await postDeliveryFeeToGL(deliveryOrder, dbPool);
 
     logger.info('Delivery note created from sale (Tally-style)', {
       saleId,
@@ -814,10 +835,12 @@ export async function createDeliveryFromSale(
  * Used by the frontend to list sales available for delivery note creation.
  */
 export async function getDeliverableSales(
-  search?: string
+  search?: string,
+  pool?: Pool
 ): Promise<{ success: boolean; data?: Array<Record<string, unknown>>; error?: string }> {
   try {
-    const result = await globalPool.query(`
+    const dbPool = pool || globalPool;
+    const result = await dbPool.query(`
       SELECT s.id, s.sale_number, s.sale_date, s.total_amount, s.payment_method,
              c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone,
              c.address AS customer_address,

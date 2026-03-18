@@ -21,13 +21,19 @@ import logger from '../../utils/logger.js';
 import * as importService from './importService.js';
 import { ImportUploadSchema } from '../../../../shared/zod/importSchemas.js';
 import { asyncHandler, ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type { TenantPoolConfig } from '../../db/connectionManager.js';
 
 // ── Multer disk storage (CSV only, 100 MB limit) ─────────
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'imports');
 
 // Ensure directory exists at startup
-try { mkdirSync(UPLOAD_DIR, { recursive: true }); } catch { /* ignore */ }
+try {
+  mkdirSync(UPLOAD_DIR, { recursive: true });
+} catch {
+  /* ignore */
+}
 
 const storage = multer.diskStorage({
   destination: (_req: Request, _file: Express.Multer.File, cb) => {
@@ -108,7 +114,9 @@ function convertExcelToCsvIfNeeded(filePath: string, originalName: string): stri
     // Re-throw our own ValidationErrors as-is
     if (error instanceof ValidationError) throw error;
     const msg = error instanceof Error ? error.message : String(error);
-    throw new ValidationError(`Failed to read Excel file — file may be corrupt or password-protected: ${msg}`);
+    throw new ValidationError(
+      `Failed to read Excel file — file may be corrupt or password-protected: ${msg}`
+    );
   }
 }
 
@@ -117,10 +125,23 @@ export const uploadAndStartImport = asyncHandler(async (req: Request, res: Respo
     throw new ValidationError('No file uploaded. Field name must be "file".');
   }
 
+  const pool = req.tenantPool || globalPool;
+  const tenantPoolConfig: TenantPoolConfig | undefined = req.tenant
+    ? {
+        tenantId: req.tenant.id,
+        slug: req.tenant.slug,
+        databaseName: req.tenant.databaseName,
+        databaseHost: req.tenant.databaseHost,
+        databasePort: req.tenant.databasePort,
+      }
+    : undefined;
+
   // Validate body params (entityType, duplicateStrategy)
   const bodyResult = ImportUploadSchema.safeParse(req.body);
   if (!bodyResult.success) {
-    const errors = bodyResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+    const errors = bodyResult.error.issues
+      .map((i) => `${i.path.join('.')}: ${i.message}`)
+      .join('; ');
     throw new ValidationError(errors);
   }
 
@@ -139,14 +160,18 @@ export const uploadAndStartImport = asyncHandler(async (req: Request, res: Respo
     converted: csvPath !== req.file.path,
   });
 
-  const job = await importService.createImportJob({
-    entityType,
-    duplicateStrategy,
-    fileName: req.file.originalname,
-    filePath: csvPath,
-    fileSizeBytes: req.file.size,
-    userId,
-  });
+  const job = await importService.createImportJob(
+    {
+      entityType,
+      duplicateStrategy,
+      fileName: req.file.originalname,
+      filePath: csvPath,
+      fileSizeBytes: req.file.size,
+      userId,
+      tenantPoolConfig,
+    },
+    pool
+  );
 
   res.status(201).json({
     success: true,
@@ -163,14 +188,18 @@ export const uploadAndStartImport = asyncHandler(async (req: Request, res: Respo
  * GET /jobs — List import jobs (paginated)
  */
 export const listImportJobs = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const query = JobListQuerySchema.parse(req.query);
   const offset = (query.page - 1) * query.limit;
-  const result = await importService.listImportJobs({
-    entityType: query.entityType,
-    status: query.status,
-    limit: query.limit,
-    offset,
-  });
+  const result = await importService.listImportJobs(
+    {
+      entityType: query.entityType,
+      status: query.status,
+      limit: query.limit,
+      offset,
+    },
+    pool
+  );
 
   res.json({
     success: true,
@@ -187,8 +216,9 @@ export const listImportJobs = asyncHandler(async (req: Request, res: Response) =
  * GET /jobs/:id — Get single import job by ID or job number
  */
 export const getImportJob = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = JobIdParamSchema.parse(req.params);
-  const job = await importService.getImportJob(id);
+  const job = await importService.getImportJob(id, pool);
   if (!job) {
     throw new NotFoundError(`Import job not found: ${id}`);
   }
@@ -203,17 +233,18 @@ export const getImportJob = asyncHandler(async (req: Request, res: Response) => 
  * GET /jobs/:id/errors — Get errors for an import job (paginated)
  */
 export const getImportJobErrors = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = JobIdParamSchema.parse(req.params);
   const query = JobErrorsQuerySchema.parse(req.query);
 
   // Resolve to UUID if job number was passed
-  const job = await importService.getImportJob(id);
+  const job = await importService.getImportJob(id, pool);
   if (!job) {
     throw new NotFoundError(`Import job not found: ${id}`);
   }
 
   const offset = (query.page - 1) * query.limit;
-  const result = await importService.getImportJobErrors(job.id, query.limit, offset);
+  const result = await importService.getImportJobErrors(job.id, query.limit, offset, pool);
 
   res.json({
     success: true,
@@ -230,9 +261,10 @@ export const getImportJobErrors = asyncHandler(async (req: Request, res: Respons
  * GET /jobs/:id/errors/csv — Download all errors as CSV (streamed for large sets)
  */
 export const exportErrorsCsv = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = JobIdParamSchema.parse(req.params);
 
-  const job = await importService.getImportJob(id);
+  const job = await importService.getImportJob(id, pool);
   if (!job) {
     throw new NotFoundError(`Import job not found: ${id}`);
   }
@@ -250,18 +282,16 @@ export const exportErrorsCsv = asyncHandler(async (req: Request, res: Response) 
   let hasMore = true;
 
   while (hasMore) {
-    const { rows } = await importService.getImportJobErrors(job.id, PAGE_SIZE, offset);
+    const { rows } = await importService.getImportJobErrors(job.id, PAGE_SIZE, offset, pool);
     for (const err of rows) {
       const rawData = err.rawData ? JSON.stringify(err.rawData).replace(/"/g, '""') : '';
       // Strip newlines/carriage returns from error messages to prevent broken CSV rows
       const safeMessage = err.errorMessage.replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
       const safeRawData = rawData.replace(/[\r\n]+/g, ' ');
-      res.write([
-        String(err.rowNumber),
-        err.errorType,
-        `"${safeMessage}"`,
-        `"${safeRawData}"`,
-      ].join(',') + '\n');
+      res.write(
+        [String(err.rowNumber), err.errorType, `"${safeMessage}"`, `"${safeRawData}"`].join(',') +
+          '\n'
+      );
     }
     offset += PAGE_SIZE;
     hasMore = rows.length === PAGE_SIZE;
@@ -280,8 +310,9 @@ const EntityTypeParamSchema = z.object({
  * POST /jobs/:id/cancel — Cancel a PENDING import job
  */
 export const cancelImportJob = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = JobIdParamSchema.parse(req.params);
-  const job = await importService.cancelImportJob(id);
+  const job = await importService.cancelImportJob(id, pool);
 
   res.json({
     success: true,
@@ -294,8 +325,18 @@ export const cancelImportJob = asyncHandler(async (req: Request, res: Response) 
  * POST /jobs/:id/retry — Retry a FAILED import job
  */
 export const retryImportJob = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const tenantPoolConfig: TenantPoolConfig | undefined = req.tenant
+    ? {
+        tenantId: req.tenant.id,
+        slug: req.tenant.slug,
+        databaseName: req.tenant.databaseName,
+        databaseHost: req.tenant.databaseHost,
+        databasePort: req.tenant.databasePort,
+      }
+    : undefined;
   const { id } = JobIdParamSchema.parse(req.params);
-  const job = await importService.retryImportJob(id);
+  const job = await importService.retryImportJob(id, tenantPoolConfig, pool);
 
   res.json({
     success: true,

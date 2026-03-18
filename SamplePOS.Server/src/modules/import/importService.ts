@@ -14,6 +14,8 @@ import logger from '../../utils/logger.js';
 import { unlink, access } from 'fs/promises';
 import * as importRepo from './importRepository.js';
 import { NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
+import type { TenantPoolConfig } from '../../db/connectionManager.js';
+import type pg from 'pg';
 import {
   getTemplateHeaders,
   type ImportEntityType,
@@ -26,7 +28,15 @@ import {
 // We import dynamically to avoid circular dependency with server startup.
 let jobQueueInstance: {
   addJob: (queue: string, type: string, data: unknown) => Promise<unknown>;
-  getQueue?: (name: string) => { getWaiting: () => Promise<Array<{ data?: Record<string, unknown>; remove: () => Promise<void> }>> } | undefined;
+  getQueue?: (
+    name: string
+  ) =>
+    | {
+        getWaiting: () => Promise<
+          Array<{ data?: Record<string, unknown>; remove: () => Promise<void> }>
+        >;
+      }
+    | undefined;
 } | null = null;
 
 async function getJobQueue() {
@@ -46,26 +56,33 @@ export interface CreateImportJobInput {
   filePath: string;
   fileSizeBytes: number;
   userId: string;
+  tenantPoolConfig?: TenantPoolConfig;
 }
 
 /**
  * Create a new import job and enqueue it for background processing.
  * Returns the created job record.
  */
-export async function createImportJob(input: CreateImportJobInput): Promise<ImportJob> {
+export async function createImportJob(
+  input: CreateImportJobInput,
+  dbPool?: pg.Pool
+): Promise<ImportJob> {
   // Generate business ID
-  const jobNumber = await importRepo.generateJobNumber();
+  const jobNumber = await importRepo.generateJobNumber(dbPool);
 
   // Insert job record
-  const job = await importRepo.createImportJob({
-    jobNumber,
-    entityType: input.entityType,
-    fileName: input.fileName,
-    filePath: input.filePath,
-    fileSizeBytes: input.fileSizeBytes,
-    duplicateStrategy: input.duplicateStrategy,
-    userId: input.userId,
-  });
+  const job = await importRepo.createImportJob(
+    {
+      jobNumber,
+      entityType: input.entityType,
+      fileName: input.fileName,
+      filePath: input.filePath,
+      fileSizeBytes: input.fileSizeBytes,
+      duplicateStrategy: input.duplicateStrategy,
+      userId: input.userId,
+    },
+    dbPool
+  );
 
   // Enqueue Bull job for background processing
   try {
@@ -76,6 +93,7 @@ export async function createImportJob(input: CreateImportJobInput): Promise<Impo
       duplicateStrategy: input.duplicateStrategy,
       filePath: input.filePath,
       userId: input.userId,
+      tenantPoolConfig: input.tenantPoolConfig,
     });
 
     logger.info('Import job created and enqueued', {
@@ -89,7 +107,7 @@ export async function createImportJob(input: CreateImportJobInput): Promise<Impo
     // If queue enqueue fails, mark job as FAILED
     const msg = error instanceof Error ? error.message : String(error);
     logger.error('Failed to enqueue import job', { jobId: job.id, error: msg });
-    await importRepo.completeImportJob(job.id, 'FAILED', `Queue error: ${msg}`);
+    await importRepo.completeImportJob(job.id, 'FAILED', `Queue error: ${msg}`, dbPool);
     throw error;
   }
 
@@ -101,22 +119,32 @@ export async function createImportJob(input: CreateImportJobInput): Promise<Impo
 /**
  * Get import job by ID or job number.
  */
-export async function getImportJob(identifier: string): Promise<ImportJob | null> {
+export async function getImportJob(
+  identifier: string,
+  dbPool?: pg.Pool
+): Promise<ImportJob | null> {
   // UUID pattern check
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier);
   if (isUuid) {
-    return importRepo.findJobById(identifier);
+    return importRepo.findJobById(identifier, dbPool);
   }
-  return importRepo.findJobByNumber(identifier);
+  return importRepo.findJobByNumber(identifier, dbPool);
 }
 
 /**
  * List import jobs with optional filtering.
  */
 export async function listImportJobs(
-  filters: { userId?: string; entityType?: ImportEntityType; status?: string; limit?: number; offset?: number }
+  filters: {
+    userId?: string;
+    entityType?: ImportEntityType;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  },
+  dbPool?: pg.Pool
 ): Promise<{ rows: ImportJob[]; total: number }> {
-  return importRepo.listJobs(filters);
+  return importRepo.listJobs(filters, dbPool);
 }
 
 /**
@@ -125,9 +153,10 @@ export async function listImportJobs(
 export async function getImportJobErrors(
   jobId: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  dbPool?: pg.Pool
 ): Promise<{ rows: ImportJobError[]; total: number }> {
-  return importRepo.getJobErrors(jobId, limit, offset);
+  return importRepo.getJobErrors(jobId, limit, offset, dbPool);
 }
 
 // ── Cancel Job ────────────────────────────────────────────
@@ -136,16 +165,18 @@ export async function getImportJobErrors(
  * Cancel an import job. Only PENDING jobs can be cancelled.
  * Removes the Bull queue job if it hasn't started processing.
  */
-export async function cancelImportJob(identifier: string): Promise<ImportJob> {
-  const job = await getImportJob(identifier);
+export async function cancelImportJob(identifier: string, dbPool?: pg.Pool): Promise<ImportJob> {
+  const job = await getImportJob(identifier, dbPool);
   if (!job) throw new NotFoundError('Import job not found');
 
   if (job.status !== 'PENDING') {
-    throw new ValidationError(`Cannot cancel job in ${job.status} state — only PENDING jobs can be cancelled`);
+    throw new ValidationError(
+      `Cannot cancel job in ${job.status} state — only PENDING jobs can be cancelled`
+    );
   }
 
   // Atomic cancel — prevents race condition with worker pickup
-  const didCancel = await importRepo.atomicCancelJob(job.id);
+  const didCancel = await importRepo.atomicCancelJob(job.id, dbPool);
   if (!didCancel) {
     throw new ValidationError('Job status changed — it may have started processing');
   }
@@ -157,7 +188,9 @@ export async function cancelImportJob(identifier: string): Promise<ImportJob> {
     if (queue) {
       const waitingJobs = await queue.getWaiting();
       const bullJob = waitingJobs.find((j) => {
-        const payload = (j.data as Record<string, unknown>)?.payload as Record<string, unknown> | undefined;
+        const payload = (j.data as Record<string, unknown>)?.payload as
+          | Record<string, unknown>
+          | undefined;
         return payload?.jobId === job.id;
       });
       if (bullJob) await bullJob.remove();
@@ -172,7 +205,7 @@ export async function cancelImportJob(identifier: string): Promise<ImportJob> {
   logger.info('Import job cancelled', { jobId: job.id, jobNumber: job.jobNumber });
 
   // Re-fetch to return accurate DB state (completedAt is now set)
-  const updated = await importRepo.findJobById(job.id);
+  const updated = await importRepo.findJobById(job.id, dbPool);
   return updated ?? { ...job, status: 'CANCELLED' };
 }
 
@@ -181,16 +214,22 @@ export async function cancelImportJob(identifier: string): Promise<ImportJob> {
 /**
  * Retry a FAILED import job by reading the stored file path and re-enqueueing.
  */
-export async function retryImportJob(identifier: string): Promise<ImportJob> {
-  const job = await getImportJob(identifier);
+export async function retryImportJob(
+  identifier: string,
+  tenantPoolConfig?: TenantPoolConfig,
+  dbPool?: pg.Pool
+): Promise<ImportJob> {
+  const job = await getImportJob(identifier, dbPool);
   if (!job) throw new NotFoundError('Import job not found');
 
   if (job.status !== 'FAILED') {
-    throw new ValidationError(`Cannot retry job in ${job.status} state — only FAILED jobs can be retried`);
+    throw new ValidationError(
+      `Cannot retry job in ${job.status} state — only FAILED jobs can be retried`
+    );
   }
 
   // Get the file_path from DB (not exposed in ImportJob interface)
-  const filePath = await importRepo.getJobFilePath(job.id);
+  const filePath = await importRepo.getJobFilePath(job.id, dbPool);
   if (!filePath) {
     throw new ValidationError('CSV file path not found — file may have been cleaned up');
   }
@@ -203,13 +242,13 @@ export async function retryImportJob(identifier: string): Promise<ImportJob> {
   }
 
   // Atomic reset — prevents race condition where two concurrent retries both succeed
-  const didReset = await importRepo.resetJobForRetry(job.id);
+  const didReset = await importRepo.resetJobForRetry(job.id, dbPool);
   if (!didReset) {
     throw new ValidationError('Job status changed — another retry may already be in progress');
   }
 
   // Clear previous errors
-  await importRepo.deleteJobErrors(job.id);
+  await importRepo.deleteJobErrors(job.id, dbPool);
 
   // Re-enqueue
   const jq = await getJobQueue();
@@ -219,13 +258,24 @@ export async function retryImportJob(identifier: string): Promise<ImportJob> {
     duplicateStrategy: job.duplicateStrategy,
     filePath,
     userId: job.userId,
+    tenantPoolConfig,
   });
 
   logger.info('Import job retried', { jobId: job.id, jobNumber: job.jobNumber });
 
   // Re-fetch to return accurate DB state
-  const updated = await importRepo.findJobById(job.id);
-  return updated ?? { ...job, status: 'PENDING', rowsProcessed: 0, rowsImported: 0, rowsSkipped: 0, rowsFailed: 0, errorSummary: null };
+  const updated = await importRepo.findJobById(job.id, dbPool);
+  return (
+    updated ?? {
+      ...job,
+      status: 'PENDING',
+      rowsProcessed: 0,
+      rowsImported: 0,
+      rowsSkipped: 0,
+      rowsFailed: 0,
+      errorSummary: null,
+    }
+  );
 }
 
 // ── CSV Template ──────────────────────────────────────────
@@ -234,7 +284,10 @@ export async function retryImportJob(identifier: string): Promise<ImportJob> {
  * Generate a CSV template (header row only) for a given entity type.
  * Uses the canonical field names from the CSV field maps.
  */
-export function generateCsvTemplate(entityType: ImportEntityType): { headers: string[]; filename: string } {
+export function generateCsvTemplate(entityType: ImportEntityType): {
+  headers: string[];
+  filename: string;
+} {
   const headers = [...getTemplateHeaders(entityType)];
   const filename = `${entityType.toLowerCase()}-template.csv`;
   return { headers, filename };

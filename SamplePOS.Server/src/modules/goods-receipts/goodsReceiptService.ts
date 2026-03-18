@@ -69,23 +69,23 @@ export const goodsReceiptService = {
    * @param data - GR creation data (PO linkage, items with batches/expiry, receipt date)
    * @returns Created GR with items and auto-generated manual PO (if supplier provided)
    * @throws Error if validation fails or PO not found
-   * 
+   *
    * Receipt Modes:
    * - **From Purchase Order**: Link to existing PO, validate item references
    * - **Manual Receipt**: Auto-generate "manual" PO if supplierId provided (no PO reference)
-   * 
+   *
    * Business Rules:
    * - BR-INV-002: Received quantity must be positive
    * - BR-INV-005: Batch/expiry tracking for perishables
    * - Manual receipts auto-create PO with source='MANUAL' flag
-   * 
+   *
    * Transaction Flow:
    * 1. If manual (no PO), create auto-generated manual PO
    * 2. Create GR header with DRAFT status
    * 3. Validate and insert GR items with batch/expiry
    * 4. Link GR items to PO items (if applicable)
    * 5. Commit transaction atomically
-   * 
+   *
    * Note: GR remains DRAFT until finalize(), which updates inventory and cost layers
    */
   async createGR(
@@ -155,7 +155,7 @@ export const goodsReceiptService = {
       const itemsToInsert: CreateGRItemData[] = [];
 
       // ========== BATCH PRE-FETCH (N+1 elimination) ==========
-      const grProductIds = data.items.map(it => it.productId);
+      const grProductIds = data.items.map((it) => it.productId);
       const grProductsMap = await batchFetchProducts(client, grProductIds);
 
       for (const it of data.items) {
@@ -255,11 +255,7 @@ export const goodsReceiptService = {
           }
 
           // BR-INV-010: Check batch expiry sequence
-          await InventoryBusinessRules.validateBatchExpirySequence(
-            client,
-            it.productId,
-            expiry
-          );
+          await InventoryBusinessRules.validateBatchExpirySequence(client, it.productId, expiry);
         }
 
         // BR-PO-010: Validate batch number uniqueness
@@ -272,11 +268,7 @@ export const goodsReceiptService = {
         }
 
         // BR-INV-009: Check if receiving would exceed max stock
-        await InventoryBusinessRules.validateMaxStockLevel(
-          client,
-          it.productId,
-          receivedQty
-        );
+        await InventoryBusinessRules.validateMaxStockLevel(client, it.productId, receivedQty);
 
         itemsToInsert.push({
           goodsReceiptId: gr.id,
@@ -297,12 +289,12 @@ export const goodsReceiptService = {
         grId: gr.id,
         manualPOData: manualPO
           ? {
-            id: manualPO.id,
-            poNumber: manualPO.poNumber,
-            supplierId: manualPO.supplierId,
-            status: manualPO.status,
-            totalAmount: manualPO.totalAmount,
-          }
+              id: manualPO.id,
+              poNumber: manualPO.poNumber,
+              supplierId: manualPO.supplierId,
+              status: manualPO.status,
+              totalAmount: manualPO.totalAmount,
+            }
           : undefined,
       };
     });
@@ -329,10 +321,7 @@ export const goodsReceiptService = {
       const { gr, items } = grResult;
 
       // Lock the GR row to prevent double-finalization by concurrent requests
-      await client.query(
-        `SELECT id FROM goods_receipts WHERE id = $1 FOR UPDATE`,
-        [id]
-      );
+      await client.query(`SELECT id FROM goods_receipts WHERE id = $1 FOR UPDATE`, [id]);
 
       // High-level validations before side effects
       if (gr.status === 'COMPLETED') throw new Error('Goods receipt is already completed');
@@ -532,11 +521,7 @@ export const goodsReceiptService = {
             productId,
             productName,
           });
-          await goodsReceiptRepository.updatePOItemReceivedQuantity(
-            client,
-            poItemId,
-            receivedQty
-          );
+          await goodsReceiptRepository.updatePOItemReceivedQuantity(client, poItemId, receivedQty);
           logger.info('PO item received quantity updated successfully', { poItemId });
         } else {
           logger.warn('No PO item ID found for GR item', { productId, productName });
@@ -590,16 +575,9 @@ export const goodsReceiptService = {
       await goodsReceiptRepository.finalizeGR(client, id);
 
       // If PO fully received, mark completed
-      const fully = await goodsReceiptRepository.isPOFullyReceived(
-        client,
-        gr.purchaseOrderId
-      );
+      const fully = await goodsReceiptRepository.isPOFullyReceived(client, gr.purchaseOrderId);
       if (fully) {
-        await purchaseOrderRepository.updatePOStatus(
-          client,
-          gr.purchaseOrderId,
-          'COMPLETED'
-        );
+        await purchaseOrderRepository.updatePOStatus(client, gr.purchaseOrderId, 'COMPLETED');
       }
 
       // ============================================================
@@ -607,15 +585,12 @@ export const goodsReceiptService = {
       // This creates a payable in the supplier payments module
       // IDEMPOTENCY: Check if invoice already exists for this GR
       // ============================================================
-      const totalAmountDec = items.reduce(
-        (sum: Decimal, item: GoodsReceiptItem) => {
-          if (item.isBonus) return sum; // Bonus items are free, excluded from invoice
-          const qty = new Decimal(String(item.receivedQuantity ?? 0));
-          const cost = new Decimal(String(item.unitCost ?? 0));
-          return sum.plus(qty.times(cost));
-        },
-        new Decimal(0)
-      );
+      const totalAmountDec = items.reduce((sum: Decimal, item: GoodsReceiptItem) => {
+        if (item.isBonus) return sum; // Bonus items are free, excluded from invoice
+        const qty = new Decimal(String(item.receivedQuantity ?? 0));
+        const cost = new Decimal(String(item.unitCost ?? 0));
+        return sum.plus(qty.times(cost));
+      }, new Decimal(0));
       const totalAmount = Money.toNumber(totalAmountDec);
 
       if (totalAmount > 0 && supplierId) {
@@ -696,14 +671,17 @@ export const goodsReceiptService = {
               lineItemCount: invoiceLineItems.length,
             });
           } catch (invoiceError: unknown) {
-            const errMsg = invoiceError instanceof Error ? invoiceError.message : String(invoiceError);
+            const errMsg =
+              invoiceError instanceof Error ? invoiceError.message : String(invoiceError);
             logger.error('Failed to create supplier invoice from GR', {
               grId: id,
               error: errMsg,
             });
             // Don't fail the GR finalization if invoice creation fails
             // The invoice can be created manually
-            warnings.push(`Supplier invoice creation failed: ${errMsg}. AP tracking requires manual action.`);
+            warnings.push(
+              `Supplier invoice creation failed: ${errMsg}. AP tracking requires manual action.`
+            );
           }
         }
       }
@@ -715,7 +693,7 @@ export const goodsReceiptService = {
       for (const costData of costLayerData) {
         try {
           await costLayerService.createCostLayer(costData, undefined, client);
-          await pricingService.onCostChange(costData.productId);
+          await pricingService.onCostChange(costData.productId, pool);
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           // CRITICAL: Cost layer creation failed - GR exists but cost valuation incomplete
@@ -729,7 +707,9 @@ export const goodsReceiptService = {
             error: errMsg,
             remediation: 'Manually create cost layer via system management or re-process GR',
           });
-          warnings.push(`Cost layer creation failed for product ${costData.productId}: ${errMsg}. Manual remediation required.`);
+          warnings.push(
+            `Cost layer creation failed for product ${costData.productId}: ${errMsg}. Manual remediation required.`
+          );
           // Note: Not throwing - cost layer failure should not block GR
           // Missing cost layer affects costing, not inventory quantity
         }
@@ -794,7 +774,10 @@ export const goodsReceiptService = {
   },
 
   /** Get GR by ID */
-  async getGRById(pool: Pool, id: string): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
+  async getGRById(
+    pool: Pool,
+    id: string
+  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
     const result = await goodsReceiptRepository.getGRById(pool, id);
     if (!result) throw new Error(`Goods receipt ${id} not found`);
     return result;
@@ -849,9 +832,10 @@ export const goodsReceiptService = {
 
         // Check if unitCost is a UoM multiple of product base cost
         const productId = item.productId;
-        const productRes = await client.query('SELECT cost_price FROM product_valuation WHERE product_id = $1', [
-          productId,
-        ]);
+        const productRes = await client.query(
+          'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+          [productId]
+        );
         if (productRes.rows.length > 0) {
           const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
           if (baseCost > 0 && data.unitCost > 0) {
@@ -883,7 +867,10 @@ export const goodsReceiptService = {
   },
 
   /** Hydrate a DRAFT GR's items from its Purchase Order (for GRs created without items) */
-  async hydrateFromPO(pool: Pool, grId: string): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
+  async hydrateFromPO(
+    pool: Pool,
+    grId: string
+  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
     await UnitOfWork.run(pool, async (client) => {
       const grResult = await goodsReceiptRepository.getGRById(client, grId);
       if (!grResult) throw new Error(`Goods receipt ${grId} not found`);

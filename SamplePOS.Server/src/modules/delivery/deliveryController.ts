@@ -63,10 +63,11 @@ function buildAuditContext(req: Request): AuditContext {
  * Create new delivery order
  */
 export const createDeliveryOrder = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const validatedData = validateCreateDeliveryOrder(req.body);
   const auditContext = buildAuditContext(req);
 
-  const result = await deliveryService.createDeliveryOrder(validatedData, auditContext);
+  const result = await deliveryService.createDeliveryOrder(validatedData, auditContext, pool);
 
   if (result.success && result.data) {
     logger.info('Delivery order created via API', {
@@ -93,8 +94,9 @@ export const createDeliveryOrder = asyncHandler(async (req: Request, res: Respon
  * Get delivery order by ID or delivery number
  */
 export const getDeliveryOrder = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { identifier } = IdentifierParamSchema.parse(req.params);
-  const result = await deliveryService.getDeliveryOrder(identifier);
+  const result = await deliveryService.getDeliveryOrder(identifier, pool);
 
   if (result.success && result.data) {
     res.json({
@@ -114,8 +116,9 @@ export const getDeliveryOrder = asyncHandler(async (req: Request, res: Response)
  * Search delivery orders with filters and pagination
  */
 export const searchDeliveryOrders = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const query = DeliveryOrderQuerySchema.parse(req.query);
-  const result = await deliveryService.searchDeliveryOrders(query);
+  const result = await deliveryService.searchDeliveryOrders(query, pool);
 
   if (result.success && result.data) {
     res.json({
@@ -136,11 +139,12 @@ export const searchDeliveryOrders = asyncHandler(async (req: Request, res: Respo
  * Update delivery status with location tracking
  */
 export const updateDeliveryStatus = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { identifier } = req.params;
   const validatedData = validateDeliveryStatusUpdate(req.body);
   const auditContext = buildAuditContext(req);
 
-  const result = await deliveryService.updateDeliveryStatus(identifier, validatedData, auditContext);
+  const result = await deliveryService.updateDeliveryStatus(identifier, validatedData, auditContext, pool);
 
   if (result.success && result.data) {
     logger.info('Delivery status updated via API', {
@@ -168,11 +172,12 @@ export const updateDeliveryStatus = asyncHandler(async (req: Request, res: Respo
  * Assign driver to delivery order
  */
 export const assignDriver = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
   const { driverId } = AssignDriverBodySchema.parse(req.body);
 
   const auditContext = buildAuditContext(req);
-  const result = await deliveryService.assignDriver(id, driverId, auditContext);
+  const result = await deliveryService.assignDriver(id, driverId, auditContext, pool);
 
   if (result.success && result.data) {
     logger.info('Driver assigned via API', {
@@ -199,8 +204,9 @@ export const assignDriver = asyncHandler(async (req: Request, res: Response) => 
  * Public endpoint for customer delivery tracking
  */
 export const trackDelivery = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { trackingNumber } = TrackingNumberParamSchema.parse(req.params);
-  const result = await deliveryService.trackDelivery(trackingNumber);
+  const result = await deliveryService.trackDelivery(trackingNumber, pool);
 
   if (result.success && result.data) {
     res.json({
@@ -224,10 +230,11 @@ export const trackDelivery = asyncHandler(async (req: Request, res: Response) =>
  * Create delivery route with multiple deliveries
  */
 export const createDeliveryRoute = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const validatedData = validateCreateDeliveryRoute(req.body);
   const auditContext = buildAuditContext(req);
 
-  const result = await deliveryService.createDeliveryRoute(validatedData, auditContext);
+  const result = await deliveryService.createDeliveryRoute(validatedData, auditContext, pool);
 
   if (result.success && result.data) {
     logger.info('Delivery route created via API', {
@@ -255,8 +262,9 @@ export const createDeliveryRoute = asyncHandler(async (req: Request, res: Respon
  * Get delivery route with all deliveries
  */
 export const getDeliveryRoute = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
-  const result = await deliveryService.getDeliveryRoute(id);
+  const result = await deliveryService.getDeliveryRoute(id, pool);
 
   if (result.success && result.data) {
     res.json({
@@ -276,8 +284,9 @@ export const getDeliveryRoute = asyncHandler(async (req: Request, res: Response)
  * Search delivery routes with filters and pagination
  */
 export const searchDeliveryRoutes = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const query = DeliveryRouteQuerySchema.parse(req.query);
-  const result = await deliveryService.searchDeliveryRoutes(query);
+  const result = await deliveryService.searchDeliveryRoutes(query, pool);
 
   if (result.success && result.data) {
     res.json({
@@ -302,9 +311,10 @@ export const searchDeliveryRoutes = asyncHandler(async (req: Request, res: Respo
  * Get delivery performance summary
  */
 export const getDeliveryAnalytics = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { dateFrom, dateTo } = AnalyticsQuerySchema.parse(req.query);
 
-  const result = await deliveryService.getDeliveryAnalytics(dateFrom, dateTo);
+  const result = await deliveryService.getDeliveryAnalytics(dateFrom, dateTo, pool);
 
   if (result.success && result.data) {
     res.json({
@@ -328,6 +338,7 @@ export const getDeliveryAnalytics = asyncHandler(async (req: Request, res: Respo
  * Create delivery note from a completed sale (Tally-style)
  */
 export const createDeliveryFromSale = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { saleId } = SaleIdParamSchema.parse(req.params);
   const body = DeliveryFromSaleBodySchema.parse(req.body);
 
@@ -340,7 +351,7 @@ export const createDeliveryFromSale = asyncHandler(async (req: Request, res: Res
     specialInstructions: body.specialInstructions,
     deliveryFee: typeof body.deliveryFee === 'number' ? body.deliveryFee : 0,
     deliveryDate: body.deliveryDate,
-  }, auditContext);
+  }, auditContext, pool);
 
   if (result.success && result.data) {
     logger.info('Delivery created from sale via API', {
@@ -367,8 +378,9 @@ export const createDeliveryFromSale = asyncHandler(async (req: Request, res: Res
  * List completed sales that don't have an active delivery order
  */
 export const getDeliverableSales = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { search } = SearchQuerySchema.parse(req.query);
-  const result = await deliveryService.getDeliverableSales(search);
+  const result = await deliveryService.getDeliverableSales(search, pool);
 
   if (result.success) {
     res.json({
@@ -392,8 +404,9 @@ export const getDeliverableSales = asyncHandler(async (req: Request, res: Respon
  * Generate and download a delivery note PDF (no prices — logistics document only)
  */
 export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
   const { identifier } = IdentifierParamSchema.parse(req.params);
-  const result = await deliveryService.getDeliveryOrder(identifier);
+  const result = await deliveryService.getDeliveryOrder(identifier, pool);
 
   if (!result.success || !result.data) {
     res.status(404).json({ success: false, error: result.error || 'Delivery order not found' });
@@ -401,7 +414,6 @@ export const exportDeliveryNotePdf = asyncHandler(async (req: Request, res: Resp
   }
 
   const order = result.data;
-  const pool = req.tenantPool || globalPool;
   const settings = await getSettings(pool);
 
   // Look up sale number if order is linked to a sale

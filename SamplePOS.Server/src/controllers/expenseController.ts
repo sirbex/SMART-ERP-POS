@@ -1,5 +1,6 @@
 import { Request } from 'express';
 import * as expenseService from '../services/expenseService';
+import { pool as globalPool } from '../db/pool.js';
 import logger from '../utils/logger.js';
 import type { ExpenseDbRow, UpdateExpenseData } from '../types/expense';
 import { asyncHandler, AppError, NotFoundError, ValidationError, UnauthorizedError } from '../middleware/errorHandler.js';
@@ -29,6 +30,7 @@ function getUser(req: Request): AuthenticatedUser {
  * Get paginated list of expenses
  */
 export const getExpenses = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const {
     page = 1,
     limit = 20,
@@ -49,7 +51,7 @@ export const getExpenses = asyncHandler(async (req, res) => {
     search: search as string
   };
 
-  const result = await expenseService.getExpenses(filters);
+  const result = await expenseService.getExpenses(filters, pool);
 
   res.json({
     success: true,
@@ -61,8 +63,9 @@ export const getExpenses = asyncHandler(async (req, res) => {
  * Get expense by ID
  */
 export const getExpenseById = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
-  const expense = await expenseService.getExpenseById(id);
+  const expense = await expenseService.getExpenseById(id, pool);
   if (!expense) throw new NotFoundError('Expense');
 
   res.json({
@@ -75,6 +78,7 @@ export const getExpenseById = asyncHandler(async (req, res) => {
  * Create new expense
  */
 export const createExpense = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const user = getUser(req);
   if (!user.id) throw new UnauthorizedError('Authentication required to create expenses');
 
@@ -95,7 +99,7 @@ export const createExpense = asyncHandler(async (req, res) => {
     created_by: user.id
   };
 
-  const expense = await expenseService.createExpense(expenseData);
+  const expense = await expenseService.createExpense(expenseData, pool);
 
   logger.info('Expense created', {
     expenseId: expense.id,
@@ -115,6 +119,7 @@ export const createExpense = asyncHandler(async (req, res) => {
  * Update expense
  */
 export const updateExpense = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const user = getUser(req);
 
@@ -132,7 +137,7 @@ export const updateExpense = asyncHandler(async (req, res) => {
       receipt_number: undefined,
       notes: validated.notes,
     };
-    expense = await expenseService.updateExpense(id, updateData, user.id!);
+    expense = await expenseService.updateExpense(id, updateData, user.id!, pool);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message === 'Cannot modify expense in current status') {
@@ -155,12 +160,13 @@ export const updateExpense = asyncHandler(async (req, res) => {
  * Delete expense (soft delete)
  */
 export const deleteExpense = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const user = getUser(req);
 
   let result;
   try {
-    result = await expenseService.deleteExpense(id, user.id!);
+    result = await expenseService.deleteExpense(id, user.id!, pool);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message === 'Cannot delete expense in current status') {
@@ -182,6 +188,7 @@ export const deleteExpense = asyncHandler(async (req, res) => {
  * Submit expense for approval (DRAFT -> PENDING_APPROVAL)
  */
 export const submitExpense = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const user = getUser(req);
   const userId = user.id;
@@ -189,7 +196,7 @@ export const submitExpense = asyncHandler(async (req, res) => {
 
   let expense;
   try {
-    expense = await expenseService.submitExpense(id, userId);
+    expense = await expenseService.submitExpense(id, userId, pool);
   } catch (error) {
     if (error instanceof AppError) throw error;
     const msg = error instanceof Error ? error.message : String(error);
@@ -209,13 +216,14 @@ export const submitExpense = asyncHandler(async (req, res) => {
  * Approve expense
  */
 export const approveExpense = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const { comments } = ApproveExpenseSchema.parse(req.body);
   const user = getUser(req);
 
   let expense;
   try {
-    expense = await expenseService.approveExpense(id, user.id!, comments);
+    expense = await expenseService.approveExpense(id, user.id!, comments, pool);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message.includes('Cannot approve expense')) {
@@ -238,13 +246,14 @@ export const approveExpense = asyncHandler(async (req, res) => {
  * Reject expense
  */
 export const rejectExpense = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const { reason } = RejectExpenseSchema.parse(req.body);
   const user = getUser(req);
 
   let expense;
   try {
-    expense = await expenseService.rejectExpense(id, user.id!, reason ?? '');
+    expense = await expenseService.rejectExpense(id, user.id!, reason ?? '', pool);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message.includes('Cannot reject expense')) {
@@ -267,6 +276,7 @@ export const rejectExpense = asyncHandler(async (req, res) => {
  * Mark expense as paid
  */
 export const markExpensePaid = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const { payment_date, payment_reference, notes, payment_account_id } = MarkExpensePaidSchema.parse(req.body);
   const user = getUser(req);
@@ -278,7 +288,7 @@ export const markExpensePaid = asyncHandler(async (req, res) => {
       paymentReference: payment_reference,
       notes,
       paymentAccountId: payment_account_id ?? undefined
-    });
+    }, pool);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message.includes('Cannot mark expense as paid')) {
@@ -305,8 +315,9 @@ export const markExpensePaid = asyncHandler(async (req, res) => {
  * Get expense documents
  */
 export const getExpenseDocuments = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
-  const documents = await expenseService.getExpenseDocuments(id);
+  const documents = await expenseService.getExpenseDocuments(id, pool);
 
   res.json({
     success: true,
@@ -330,10 +341,11 @@ export const uploadExpenseDocument = asyncHandler(async (_req, res) => {
  * Delete expense document
  */
 export const deleteExpenseDocument = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id, docId } = req.params;
   const user = getUser(req);
 
-  const result = await expenseService.deleteExpenseDocument(docId, user.userId!);
+  const result = await expenseService.deleteExpenseDocument(docId, user.userId!, pool);
   if (!result) throw new NotFoundError('Document');
 
   logger.info('Expense document deleted', {
@@ -351,8 +363,9 @@ export const deleteExpenseDocument = asyncHandler(async (req, res) => {
 /**
  * Get all expense categories
  */
-export const getExpenseCategories = asyncHandler(async (_req, res) => {
-  const categories = await expenseService.getExpenseCategories();
+export const getExpenseCategories = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
+  const categories = await expenseService.getExpenseCategories(pool);
 
   res.json({
     success: true,
@@ -363,8 +376,9 @@ export const getExpenseCategories = asyncHandler(async (_req, res) => {
 /**
  * Get payment accounts (cash/bank accounts) for expense payment source
  */
-export const getPaymentAccounts = asyncHandler(async (_req, res) => {
-  const accounts = await expenseService.getPaymentAccounts();
+export const getPaymentAccounts = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
+  const accounts = await expenseService.getPaymentAccounts(pool);
 
   res.json({
     success: true,
@@ -376,8 +390,9 @@ export const getPaymentAccounts = asyncHandler(async (_req, res) => {
  * Create expense category
  */
 export const createExpenseCategory = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const categoryData = CreateExpenseCategorySchema.parse(req.body);
-  const category = await expenseService.createExpenseCategory(categoryData);
+  const category = await expenseService.createExpenseCategory(categoryData, pool);
   const user = getUser(req);
 
   logger.info('Expense category created', {
@@ -395,10 +410,11 @@ export const createExpenseCategory = asyncHandler(async (req, res) => {
  * Update expense category
  */
 export const updateExpenseCategory = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const user = getUser(req);
   const validated = UpdateExpenseCategorySchema.parse(req.body);
-  const category = await expenseService.updateExpenseCategory(id, validated, user.userId!);
+  const category = await expenseService.updateExpenseCategory(id, validated, user.userId!, pool);
   if (!category) throw new NotFoundError('Expense category');
 
   res.json({
@@ -412,9 +428,10 @@ export const updateExpenseCategory = asyncHandler(async (req, res) => {
  * Delete expense category
  */
 export const deleteExpenseCategory = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { id } = req.params;
   const user = getUser(req);
-  const deleted = await expenseService.deleteExpenseCategory(id, user.userId!);
+  const deleted = await expenseService.deleteExpenseCategory(id, user.userId!, pool);
   if (!deleted) throw new NotFoundError('Expense category');
 
   res.json({
@@ -427,13 +444,14 @@ export const deleteExpenseCategory = asyncHandler(async (req, res) => {
  * Get expense summary/statistics
  */
 export const getExpenseSummary = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { start_date, end_date, category_id } = req.query;
 
   const summary = await expenseService.getExpenseSummary({
     startDate: start_date as string,
     endDate: end_date as string,
     categoryId: category_id as string
-  });
+  }, pool);
 
   res.json({
     success: true,
@@ -445,12 +463,13 @@ export const getExpenseSummary = asyncHandler(async (req, res) => {
  * Get expenses by category report
  */
 export const getExpensesByCategory = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { start_date, end_date } = req.query;
 
   const report = await expenseService.getExpensesByCategory({
     startDate: start_date as string,
     endDate: end_date as string
-  });
+  }, pool);
 
   res.json({
     success: true,
@@ -462,12 +481,13 @@ export const getExpensesByCategory = asyncHandler(async (req, res) => {
  * Get expenses by vendor report
  */
 export const getExpensesByVendor = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { start_date, end_date } = req.query;
 
   const report = await expenseService.getExpensesByVendor({
     startDate: start_date as string,
     endDate: end_date as string
-  });
+  }, pool);
 
   res.json({
     success: true,
@@ -479,12 +499,13 @@ export const getExpensesByVendor = asyncHandler(async (req, res) => {
  * Get expense trends report
  */
 export const getExpenseTrends = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { start_date, end_date } = req.query;
 
   const report = await expenseService.getExpenseTrends({
     startDate: start_date as string,
     endDate: end_date as string
-  });
+  }, pool);
 
   res.json({
     success: true,
@@ -496,12 +517,13 @@ export const getExpenseTrends = asyncHandler(async (req, res) => {
  * Get expenses by payment method report
  */
 export const getExpensesByPaymentMethod = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { start_date, end_date } = req.query;
 
   const report = await expenseService.getExpensesByPaymentMethod({
     startDate: start_date as string,
     endDate: end_date as string
-  });
+  }, pool);
 
   res.json({
     success: true,
@@ -513,6 +535,7 @@ export const getExpensesByPaymentMethod = asyncHandler(async (req, res) => {
  * Export expenses to CSV
  */
 export const exportExpenses = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
   const { start_date, end_date, category_id, status } = req.query;
 
   const expenses = await expenseService.getExpensesForExport({
@@ -520,7 +543,7 @@ export const exportExpenses = asyncHandler(async (req, res) => {
     endDate: end_date as string,
     categoryId: category_id as string,
     status: status as string
-  });
+  }, pool);
 
   // Generate CSV
   const headers = ['ID', 'Title', 'Description', 'Amount', 'Date', 'Status', 'Payment Method', 'Payment Status', 'Vendor', 'Category', 'Category Code', 'Created By', 'Created At', 'Notes'];

@@ -26,7 +26,9 @@
  * - 5000: Cost of Goods Sold
  */
 
+import type pg from 'pg';
 import { AccountingCore, JournalLine, AccountingError } from './accountingCore.js';
+import { pool as globalPool } from '../db/pool.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
@@ -138,7 +140,7 @@ export interface SaleItemData {
  *   DR Cost of Goods Sold (5000)  inventoryCost
  *   CR Inventory (1300)           inventoryCost
  */
-export async function recordSaleToGL(sale: SaleData): Promise<void> {
+export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<void> {
   try {
     // Calculate amounts for proper GL posting using Money utility (decimal-safe)
     // For credit sales with partial payment, only AR should reflect unpaid portion
@@ -416,7 +418,7 @@ export async function recordSaleToGL(sale: SaleData): Promise<void> {
       lines: ledgerLines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SALE-${sale.saleId}`  // Deterministic key prevents duplicates
-    });
+    }, pool);
 
     logger.info('Recorded sale to GL', {
       saleId: sale.saleId,
@@ -472,7 +474,7 @@ export interface CustomerPaymentData {
  *   DR Cash (1010)                amount
  *   CR Customer Deposits (2200)   amount  (liability - customer prepayment)
  */
-export async function recordCustomerPaymentToGL(payment: CustomerPaymentData): Promise<void> {
+export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, pool?: pg.Pool): Promise<void> {
   try {
     // Determine debit account based on payment method
     let debitAccountCode: string;
@@ -528,7 +530,7 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData): P
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CUSTOMER_PAYMENT-${payment.paymentId}`
-    });
+    }, pool);
 
     logger.info('Recorded customer payment to GL', {
       paymentId: payment.paymentId,
@@ -568,7 +570,7 @@ export interface ExpenseData {
  *   DR Expense Account (6xxx) amount
  *   CR Cash (1010)            amount
  */
-export async function recordExpenseToGL(expense: ExpenseData): Promise<void> {
+export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): Promise<void> {
   try {
     // Map category to expense account code
     const expenseAccountCode = mapExpenseCategoryToAccount(expense.categoryCode);
@@ -613,7 +615,7 @@ export async function recordExpenseToGL(expense: ExpenseData): Promise<void> {
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE-${expense.expenseId}`
-    });
+    }, pool);
 
     logger.info('Recorded expense to GL', {
       expenseId: expense.expenseId,
@@ -681,7 +683,7 @@ export interface GoodsReceiptData {
  *   DR Inventory (1300)        totalAmount
  *   CR Accounts Payable (2100) totalAmount
  */
-export async function recordGoodsReceiptToGL(gr: GoodsReceiptData): Promise<void> {
+export async function recordGoodsReceiptToGL(gr: GoodsReceiptData, pool?: pg.Pool): Promise<void> {
   try {
     // Use AccountingCore for audit-safe, idempotent journal entry creation
     await AccountingCore.createJournalEntry({
@@ -710,7 +712,7 @@ export async function recordGoodsReceiptToGL(gr: GoodsReceiptData): Promise<void
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `GOODS_RECEIPT-${gr.grId}`
-    });
+    }, pool);
 
     logger.info('Recorded goods receipt to GL', {
       grId: gr.grId,
@@ -745,7 +747,7 @@ export interface SupplierPaymentData {
  *   DR Accounts Payable (2100) amount
  *   CR Cash/Bank (1010/1030)   amount
  */
-export async function recordSupplierPaymentToGL(payment: SupplierPaymentData): Promise<void> {
+export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, pool?: pg.Pool): Promise<void> {
   try {
     // Determine credit account based on payment method
     let creditAccountCode: string;
@@ -789,7 +791,7 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData): P
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_PAYMENT-${payment.paymentId}`
-    });
+    }, pool);
 
     logger.info('Recorded supplier payment to GL', {
       paymentId: payment.paymentId,
@@ -827,7 +829,7 @@ export interface StockAdjustmentData {
  *   DR Stock Adjustment Expense
  *   CR Inventory (1300)
  */
-export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData): Promise<void> {
+export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData, pool?: pg.Pool): Promise<void> {
   try {
     let lines: JournalLine[];
     if (adjustment.adjustmentType === 'INCREASE') {
@@ -873,7 +875,7 @@ export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData)
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `STOCK_ADJUSTMENT-${adjustment.adjustmentId}`
-    });
+    }, pool);
 
     logger.info('Recorded stock adjustment to GL', {
       adjustmentId: adjustment.adjustmentId,
@@ -913,7 +915,7 @@ export interface DeliveryCompletedData {
  *   DR Accounts Receivable (1200) deliveryFee
  *   CR Delivery Revenue    (4400) deliveryFee
  */
-export async function recordDeliveryChargeToGL(data: DeliveryChargeData): Promise<void> {
+export async function recordDeliveryChargeToGL(data: DeliveryChargeData, pool?: pg.Pool): Promise<void> {
   try {
     if (data.deliveryFee <= 0) {
       logger.debug('Skipping delivery charge GL posting (fee is zero)', { deliveryId: data.deliveryId });
@@ -944,7 +946,7 @@ export async function recordDeliveryChargeToGL(data: DeliveryChargeData): Promis
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DELIVERY_CHARGE-${data.deliveryId}`
-    });
+    }, pool);
 
     logger.info('Recorded delivery charge to GL', {
       deliveryId: data.deliveryId,
@@ -964,7 +966,7 @@ export async function recordDeliveryChargeToGL(data: DeliveryChargeData): Promis
  *   DR Delivery Expense (6850) totalCost
  *   CR Cash             (1010) totalCost
  */
-export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData): Promise<void> {
+export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData, pool?: pg.Pool): Promise<void> {
   try {
     if (data.totalCost <= 0) {
       logger.debug('Skipping delivery cost GL posting (cost is zero)', { deliveryId: data.deliveryId });
@@ -995,7 +997,7 @@ export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData): 
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DELIVERY_COST-${data.deliveryId}`
-    });
+    }, pool);
 
     logger.info('Recorded delivery cost to GL', {
       deliveryId: data.deliveryId,
@@ -1025,11 +1027,11 @@ export interface SaleVoidData {
  * Uses AccountingCore.reverseTransaction() which creates an exact mirror entry
  * (swaps debits/credits) and marks the original as REVERSED.
  */
-export async function recordSaleVoidToGL(data: SaleVoidData): Promise<void> {
+export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool): Promise<void> {
   try {
     // Find the original SALE transaction
-    const { pool: globalPool } = await import('../db/pool.js');
-    const existing = await globalPool.query(
+    const dbPool = pool || globalPool;
+    const existing = await dbPool.query(
       `SELECT "Id" FROM ledger_transactions
        WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = $1
          AND "IsReversed" = FALSE
@@ -1053,7 +1055,7 @@ export async function recordSaleVoidToGL(data: SaleVoidData): Promise<void> {
       reason: `VOID: Sale ${data.saleNumber} — ${data.voidReason}`,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SALE_VOID-${data.saleId}`,
-    });
+    }, pool);
 
     logger.info('Recorded sale void reversal to GL', {
       saleId: data.saleId,
@@ -1091,7 +1093,7 @@ export interface CustomerDepositData {
  *   DR Cash / Bank (1010/1030)  amount
  *   CR Customer Deposits (2200) amount   (liability until applied to sale)
  */
-export async function recordCustomerDepositToGL(deposit: CustomerDepositData): Promise<void> {
+export async function recordCustomerDepositToGL(deposit: CustomerDepositData, pool?: pg.Pool): Promise<void> {
   try {
     let debitAccountCode: string;
     switch (deposit.paymentMethod) {
@@ -1131,7 +1133,7 @@ export async function recordCustomerDepositToGL(deposit: CustomerDepositData): P
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CUSTOMER_DEPOSIT-${deposit.depositId}`,
-    });
+    }, pool);
 
     logger.info('Recorded customer deposit to GL', {
       depositId: deposit.depositId,
@@ -1164,7 +1166,7 @@ export interface CustomerInvoiceData {
  *   DR Accounts Receivable (1200) totalAmount
  *   CR Sales Revenue (4000)       totalAmount
  */
-export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData): Promise<void> {
+export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData, pool?: pg.Pool): Promise<void> {
   try {
     await AccountingCore.createJournalEntry({
       entryDate: invoice.invoiceDate,
@@ -1192,7 +1194,7 @@ export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData): P
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `INVOICE-${invoice.invoiceId}`,
-    });
+    }, pool);
 
     logger.info('Recorded customer invoice to GL', {
       invoiceId: invoice.invoiceId,
@@ -1228,7 +1230,7 @@ export interface InvoicePaymentData {
  *
  * DEPOSIT payments are skipped (already posted via deposit lifecycle).
  */
-export async function recordInvoicePaymentToGL(payment: InvoicePaymentData): Promise<void> {
+export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool?: pg.Pool): Promise<void> {
   try {
     // Deposit payments: money already received via deposit, no Cash DR needed
     if (payment.paymentMethod === 'DEPOSIT') {
@@ -1274,7 +1276,7 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData): Pro
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `INVOICE_PAYMENT-${payment.paymentId}`,
-    });
+    }, pool);
 
     logger.info('Recorded invoice payment to GL', {
       paymentId: payment.paymentId,
@@ -1313,7 +1315,7 @@ export interface StockMovementData {
  *   DR Inventory (1300)                           value
  *   CR Stock Overage Income (4110)                value
  */
-export async function recordStockMovementToGL(movement: StockMovementData): Promise<void> {
+export async function recordStockMovementToGL(movement: StockMovementData, pool?: pg.Pool): Promise<void> {
   try {
     if (movement.movementValue <= 0) {
       logger.debug('Skipping stock movement GL posting (zero value)', {
@@ -1379,7 +1381,7 @@ export async function recordStockMovementToGL(movement: StockMovementData): Prom
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `STOCK_MOVEMENT-${movement.movementId}`,
-    });
+    }, pool);
 
     logger.info('Recorded stock movement to GL', {
       movementId: movement.movementId,
@@ -1418,7 +1420,7 @@ export interface ExpenseApprovalData {
  *   DR Expense (6xxx)       amount
  *   CR Accounts Payable (2100) amount
  */
-export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData): Promise<void> {
+export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, pool?: pg.Pool): Promise<void> {
   try {
     const expenseAccountCode = mapExpenseCategoryToAccount(expense.categoryCode);
     const creditAccountCode = expense.isPaidAtApproval
@@ -1447,7 +1449,7 @@ export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData): P
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE-${expense.expenseId}`,
-    });
+    }, pool);
 
     logger.info('Recorded expense approval to GL', {
       expenseId: expense.expenseId,
@@ -1481,7 +1483,7 @@ export interface ExpensePaymentData {
  *   DR Accounts Payable (2100) amount
  *   CR Cash / Bank (1010/1030) amount
  */
-export async function recordExpensePaymentToGL(payment: ExpensePaymentData): Promise<void> {
+export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool?: pg.Pool): Promise<void> {
   try {
     const creditAccountCode = payment.paymentAccountCode || AccountCodes.CASH;
 
@@ -1507,7 +1509,7 @@ export async function recordExpensePaymentToGL(payment: ExpensePaymentData): Pro
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE_PAYMENT-${payment.expenseId}`,
-    });
+    }, pool);
 
     logger.info('Recorded expense payment to GL', {
       expenseId: payment.expenseId,
