@@ -32,6 +32,7 @@ import { Money } from '../utils/money.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../rbac/middleware.js';
+import { pool as globalPool } from '../db/pool.js';
 
 const router = Router();
 
@@ -99,7 +100,7 @@ const DateRangeSchema = z.object({
 
 // Attach pool from request context (set by parent router)
 function withServices(req: Request) {
-  const pool = req.app.get('pool') as Pool;
+  const pool = req.tenantPool || globalPool;
   return {
     journalService: getJournalEntryService(pool),
     periodService: getAccountingPeriodService(pool),
@@ -292,7 +293,7 @@ router.get(
       });
     }
 
-    const pool = req.app.get('pool');
+    const pool = req.tenantPool || globalPool;
     const result = await pool.query(`SELECT fn_is_period_open($1::DATE) as is_open`, [date]);
 
     return res.json({
@@ -489,7 +490,7 @@ router.get(
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
 
-    const pool = req.app.get('pool') as Pool;
+    const pool = req.tenantPool || globalPool;
 
     // Get detailed P&L by account
     const detailResult = await pool.query('SELECT * FROM fn_get_profit_loss($1::DATE, $2::DATE)', [
@@ -554,7 +555,7 @@ router.get(
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
 
-    const pool = req.app.get('pool') as Pool;
+    const pool = req.tenantPool || globalPool;
 
     const result = await pool.query(
       'SELECT * FROM fn_get_profit_loss_by_customer($1::DATE, $2::DATE)',
@@ -600,7 +601,7 @@ router.get(
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
 
-    const pool = req.app.get('pool') as Pool;
+    const pool = req.tenantPool || globalPool;
 
     const result = await pool.query(
       'SELECT * FROM fn_get_profit_loss_by_product($1::DATE, $2::DATE)',
@@ -670,7 +671,7 @@ router.get(
     const { periods = '3' } = req.query;
     const numPeriods = Math.min(12, Math.max(1, parseInt(periods as string) || 3));
 
-    const pool = req.app.get('pool') as Pool;
+    const pool = req.tenantPool || globalPool;
     const comparisons = [];
 
     const today = new Date();
