@@ -37,16 +37,28 @@ export default function RoleManagementPage() {
   const updateRole = useUpdateRole();
   const deleteRole = useDeleteRole();
 
+  // Derive a human-readable label from a permission key.
+  // For most modules the action alone is unique (e.g. sales.read → "read").
+  // For the system module, sub-resources produce duplicates, so we show
+  // "users: read", "roles: create", etc.
+  const permissionLabel = (perm: Permission): string => {
+    const parts = perm.key.split('.');
+    const actionPart = parts[1] || perm.action; // e.g. "users_read"
+    if (perm.module === 'system' && actionPart.includes('_')) {
+      const [sub, act] = actionPart.split('_');
+      return `${sub}: ${act}`;
+    }
+    return perm.action;
+  };
+
   // Group permissions by module
   const groupedPermissions = useMemo(() => {
-    console.log('[RoleManagementPage] permissions:', permissions);
     if (!permissions) return {};
     const grouped: Record<string, Permission[]> = {};
     for (const perm of permissions) {
       if (!grouped[perm.module]) grouped[perm.module] = [];
       grouped[perm.module].push(perm);
     }
-    console.log('[RoleManagementPage] groupedPermissions:', grouped);
     return grouped;
   }, [permissions]);
 
@@ -375,7 +387,9 @@ export default function RoleManagementPage() {
                                     disabled={selectedRole?.isSystemRole}
                                     className="rounded text-blue-600 focus:ring-blue-500"
                                   />
-                                  <span className="text-gray-700">{perm.action}</span>
+                                  <span className="text-gray-700" title={perm.description}>
+                                    {permissionLabel(perm)}
+                                  </span>
                                 </label>
                               ))}
                             </div>

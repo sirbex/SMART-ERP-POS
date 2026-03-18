@@ -14,7 +14,10 @@ export type PermissionModule =
   | 'customers'
   | 'suppliers'
   | 'reports'
-  | 'system';
+  | 'system'
+  | 'banking'
+  | 'delivery'
+  | 'settings';
 
 // Permission Action Types
 export type PermissionAction =
@@ -26,7 +29,9 @@ export type PermissionAction =
   | 'void'
   | 'export'
   | 'import'
-  | 'post';
+  | 'post'
+  | 'reconcile'
+  | 'manage';
 
 // Scope Types for multi-tenant permissions
 export type ScopeType = 'global' | 'organization' | 'branch' | 'warehouse';
