@@ -15,7 +15,7 @@ import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
 import { UomSelector } from '../../components/inventory/UomSelector';
-import { convertQtyToBase, convertCostToBase } from '../../utils/uom';
+import { computeUnitCost, convertQtyToBase, convertCostToBase } from '../../utils/uom';
 import { DatePicker } from '../../components/ui/date-picker';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -62,6 +62,7 @@ interface ProductUom {
   uomName?: string;
   conversionFactor: number | string;
   isDefault: boolean;
+  costOverride?: number | string | null;
 }
 
 /** Product with optional UoM data from API */
@@ -275,21 +276,22 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 
   // Add line item
   const addLineItem = (product: ProductWithUoms) => {
-    // Check if product has UoMs and auto-select the default one
+    // Odoo/SAP pattern: auto-select default purchase UOM, or first UOM with factor > 1
     const productUoms = product.product_uoms || product.productUoms || [];
-    const defaultUom = productUoms.find((u: ProductUom) => u.isDefault);
+    const defaultUom = productUoms.find((u: ProductUom) => u.isDefault) ||
+      productUoms.find((u: ProductUom) => parseFloat(String(u.conversionFactor || 1)) > 1);
 
     let initialCost = new Decimal(product.costPrice || 0).toFixed(2);
     let selectedUom = null;
 
-    // If there's a default UoM with factor > 1, use it and calculate its cost
+    // Cost = baseCost × factor (or costOverride if set)
     if (defaultUom && parseFloat(String(defaultUom.conversionFactor)) > 1) {
       selectedUom = defaultUom.id;
-      // Calculate UoM cost: baseCost × conversionFactor
-      const uomCost = new Decimal(product.costPrice || 0)
-        .mul(defaultUom.conversionFactor)
-        .toFixed(2);
-      initialCost = uomCost;
+      initialCost = computeUnitCost(
+        parseFloat(String(product.costPrice || 0)),
+        defaultUom.conversionFactor,
+        defaultUom.costOverride,
+      );
     }
 
     const newItem: POLineItem = {
