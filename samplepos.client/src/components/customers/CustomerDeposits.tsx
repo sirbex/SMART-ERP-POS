@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
-import { api } from '../../services/api';
+import { apiClient } from '../../utils/api';
 
 interface CustomerDeposit {
     id: string;
@@ -71,8 +71,8 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
 
         try {
             const [depositsResponse, summaryResponse] = await Promise.all([
-                api.get(`/deposits?customerId=${selectedCustomer}`),
-                api.get(`/deposits/customer/${selectedCustomer}/balance`)
+                apiClient.get(`deposits`, { params: { customerId: selectedCustomer } }),
+                apiClient.get(`deposits/customer/${selectedCustomer}/balance`)
             ]);
 
             if (depositsResponse.data?.success) {
@@ -116,7 +116,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
 
             setIsSaving(true);
 
-            const response = await api.post('/deposits', {
+            const response = await apiClient.post('deposits', {
                 customerId: selectedCustomer,
                 amount: amount,
                 paymentMethod: depositForm.paymentMethod,
@@ -155,7 +155,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
         }
 
         try {
-            const response = await api.post(`/deposits/${depositId}/refund`, {
+            const response = await apiClient.post(`deposits/${depositId}/refund`, {
                 reason: 'Customer requested refund'
             });
 

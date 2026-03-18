@@ -64,8 +64,8 @@ export interface ApiResponse<T = unknown> {
   alertSummary?: string;
 }
 
-// Create axios instance
-const apiClient: AxiosInstance = axios.create({
+// Create axios instance (exported for direct URL-based calls with full auth/refresh)
+export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: API_TIMEOUT,
   headers: {

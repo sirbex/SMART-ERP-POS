@@ -35,7 +35,8 @@ import {
 import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import toast from 'react-hot-toast';
-import { api, accountingApi, customersApi } from '../../services/api';
+import { apiClient } from '../../utils/api';
+import { accountingApi, customersApi } from '../../services/api';
 
 // Types based on existing C# API DTOs
 interface CustomerAccount {
@@ -208,8 +209,8 @@ const CustomerFinancialPage = () => {
             let depositBalance = 0;
             try {
                 const [depositsResponse, balanceResponse] = await Promise.all([
-                    api.get(`/deposits?customerId=${customer.id}`),
-                    api.get(`/deposits/customer/${customer.id}/balance`)
+                    apiClient.get(`deposits`, { params: { customerId: customer.id } }),
+                    apiClient.get(`deposits/customer/${customer.id}/balance`)
                 ]);
 
                 if (depositsResponse.data?.success && depositsResponse.data?.data?.deposits) {
@@ -287,7 +288,7 @@ const CustomerFinancialPage = () => {
 
             // Use Node.js API for deposits (Single Source of Truth)
             try {
-                const response = await api.post('/deposits', {
+                const response = await apiClient.post('deposits', {
                     customerId: depositForm.customerId,
                     amount: depositForm.amount,
                     paymentMethod: depositForm.paymentMethod,
