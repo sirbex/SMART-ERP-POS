@@ -46,6 +46,30 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
     await repo.unsetDefaultForProduct(data.productId, dbPool);
   }
 
+  // Safeguard: clear cost/price overrides that equal the base cost/price
+  // when factor > 1 — these are clearly erroneous (per-unit cost stored instead
+  // of UOM-adjusted cost). The frontend formula (baseCost × factor) will handle it.
+  let costOverride = data.costOverride ?? null;
+  let priceOverride = data.priceOverride ?? null;
+  if (data.conversionFactor > 1 && (costOverride !== null || priceOverride !== null)) {
+    const productResult = await pool.query(
+      'SELECT cost_price, selling_price FROM products WHERE id = $1',
+      [data.productId]
+    );
+    const product = productResult.rows[0];
+    if (product) {
+      const baseCost = parseFloat(product.cost_price || '0');
+      const basePrice = parseFloat(product.selling_price || '0');
+      // If override equals base cost, it was set incorrectly — clear it
+      if (costOverride !== null && Math.abs(costOverride - baseCost) < 0.01) {
+        costOverride = null;
+      }
+      if (priceOverride !== null && Math.abs(priceOverride - basePrice) < 0.01) {
+        priceOverride = null;
+      }
+    }
+  }
+
   const result = await repo.createProductUom(
     {
       productId: data.productId,
@@ -53,8 +77,8 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
       conversionFactor: data.conversionFactor,
       barcode: data.barcode ?? null,
       isDefault: data.isDefault ?? false,
-      priceOverride: data.priceOverride ?? null,
-      costOverride: data.costOverride ?? null,
+      priceOverride,
+      costOverride,
     },
     dbPool
   );

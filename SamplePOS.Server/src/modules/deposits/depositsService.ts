@@ -100,8 +100,8 @@ export async function createDeposit(
     pool: Pool,
     input: CreateDepositInput
 ): Promise<Deposit> {
-    // Validate customer exists
-    const customer = await findCustomerById(input.customerId);
+    // Validate customer exists (use tenant pool)
+    const customer = await findCustomerById(input.customerId, pool);
     if (!customer) {
         throw new Error(`Customer not found: ${input.customerId}`);
     }
@@ -146,7 +146,7 @@ export async function createDeposit(
             paymentMethod: deposit.paymentMethod,
             customerId: input.customerId,
             customerName: customer?.name || 'Unknown',
-        });
+        }, pool);
     } catch (glError) {
         logger.error('GL posting failed for customer deposit (non-fatal)', {
             depositId: deposit.id,
@@ -192,7 +192,7 @@ export async function getCustomerDepositBalance(
 
     if (!summary) {
         // Customer exists but no deposits
-        const customer = await findCustomerById(customerId);
+        const customer = await findCustomerById(customerId, pool);
         return {
             customerId,
             customerName: customer?.name || 'Unknown',
