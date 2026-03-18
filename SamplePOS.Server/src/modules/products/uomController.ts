@@ -102,13 +102,13 @@ export const addProductUom = asyncHandler(async (req, res) => {
   const user = req.user;
   const auditContext = user
     ? {
-        userId: user.id,
-        userName: user.fullName,
-        userRole: user.role,
-        ipAddress: req.ip || req.socket.remoteAddress,
-        userAgent: req.headers['user-agent'],
-        sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-      }
+      userId: user.id,
+      userName: user.fullName,
+      userRole: user.role,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+    }
     : undefined;
 
   const data = await service.addProductUom(normalized, auditContext, pool);
@@ -147,13 +147,13 @@ export const updateProductUom = asyncHandler(async (req, res) => {
   const user = req.user;
   const auditContext = user
     ? {
-        userId: user.id,
-        userName: user.fullName,
-        userRole: user.role,
-        ipAddress: req.ip || req.socket.remoteAddress,
-        userAgent: req.headers['user-agent'],
-        sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
-      }
+      userId: user.id,
+      userName: user.fullName,
+      userRole: user.role,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+    }
     : undefined;
 
   const data = await service.updateProductUom(id, normalized, auditContext, pool);

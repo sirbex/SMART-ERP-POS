@@ -269,7 +269,7 @@ export async function adjustCustomerBalance(
   if (newBalance.lessThan(0) && newBalance.abs().greaterThan(creditLimitDecimal)) {
     throw new Error(
       `Transaction would exceed credit limit. Current: ${currentBalanceDecimal.toString()}, ` +
-        `Adjustment: ${amountDecimal.toString()}, Limit: ${creditLimitDecimal.toString()}`
+      `Adjustment: ${amountDecimal.toString()}, Limit: ${creditLimitDecimal.toString()}`
     );
   }
 

@@ -301,15 +301,15 @@ router.put(
       success: true,
       data: updated
         ? {
-            id: updated.id,
-            accountNumber: updated.accountCode,
-            accountName: updated.accountName,
-            accountType: updated.accountType,
-            normalBalance: updated.normalBalance,
-            parentAccountId: updated.parentAccountId,
-            isPostingAccount: updated.isPostingAccount,
-            isActive: updated.isActive,
-          }
+          id: updated.id,
+          accountNumber: updated.accountCode,
+          accountName: updated.accountName,
+          accountType: updated.accountType,
+          normalBalance: updated.normalBalance,
+          parentAccountId: updated.parentAccountId,
+          isPostingAccount: updated.isPostingAccount,
+          isActive: updated.isActive,
+        }
         : null,
     });
   })

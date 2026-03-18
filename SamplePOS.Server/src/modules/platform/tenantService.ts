@@ -168,10 +168,30 @@ export const tenantService = {
         timezone: input.timezone || 'Africa/Kampala',
       });
 
-      // 7. Activate the tenant
+      // 7. Ensure RBAC + UOM data exists (fallback if template didn't include them)
+      const { rows: rbacCheck } = await tenantPool.query(
+        'SELECT count(*)::int AS cnt FROM rbac_roles'
+      );
+      if ((rbacCheck[0]?.cnt ?? 0) === 0) {
+        logger.info('RBAC roles missing — seeding defaults');
+        await this.seedDefaultRbac(tenantPool);
+      }
+
+      const { rows: uomCheck } = await tenantPool.query(
+        'SELECT count(*)::int AS cnt FROM uoms'
+      );
+      if ((uomCheck[0]?.cnt ?? 0) === 0) {
+        logger.info('UOMs missing — seeding defaults');
+        await this.seedDefaultUoms(tenantPool);
+      }
+
+      // 8. Assign admin user the Super Administrator RBAC role
+      await this.assignAdminRbacRole(tenantPool, input.ownerEmail);
+
+      // 9. Activate the tenant
       const activated = await tenantRepository.updateStatus(masterPool, tenantRow.id, 'ACTIVE');
 
-      // 8. Log the provisioning
+      // 10. Log the provisioning
       await tenantRepository.logAudit(masterPool, tenantRow.id, 'PROVISIONED', actor, {
         plan,
         databaseName,
@@ -372,7 +392,7 @@ export const tenantService = {
         try {
           const templateResult = execSync(
             `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-              `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
             { encoding: 'utf-8', timeout: 10_000 }
           );
           templateTableCount = parseInt(templateResult.trim(), 10) || 0;
@@ -425,21 +445,32 @@ export const tenantService = {
       });
       logger.info(`Template database schema loaded from ${masterDbName}`);
 
-      // Also seed the accounts (chart of accounts) data into the template
-      // so every new tenant starts with the standard chart of accounts.
-      const pgDumpDataCmd =
-        `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-        `--data-only --table=accounts --no-owner --no-privileges ${masterDbName}`;
+      // Seed essential reference data into template so every tenant starts ready.
+      // Like Odoo/SAP: template includes chart of accounts, UOMs, RBAC roles/permissions.
+      const seedTables = ['accounts', 'uoms'];
+      for (const table of seedTables) {
+        try {
+          const dumpDataCmd =
+            `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+            `--data-only --table=${table} --no-owner --no-privileges ${masterDbName}`;
+          execSync(`${dumpDataCmd} | ${psqlCmd}`, {
+            encoding: 'utf-8',
+            timeout: 15_000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          logger.info(`Template seeded with ${table} data`);
+        } catch {
+          logger.warn(`Could not seed ${table} data into template (non-fatal)`);
+        }
+      }
 
+      // Seed RBAC permissions catalog + default system roles (Super Admin, Admin, Manager, Cashier, Auditor)
+      // This mirrors what Odoo/SAP do: every tenant gets pre-configured roles out of the box.
       try {
-        execSync(`${pgDumpDataCmd} | ${psqlCmd}`, {
-          encoding: 'utf-8',
-          timeout: 15_000,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        logger.info('Template seeded with chart of accounts data');
+        this.seedTemplateRbac(dbHost, dbPort, dbUser, dbPassword);
+        logger.info('Template seeded with RBAC roles and permissions');
       } catch {
-        logger.warn('Could not seed accounts data into template (non-fatal)');
+        logger.warn('Could not seed RBAC data into template (non-fatal)');
       }
     } catch (error: unknown) {
       // Check if enough tables were created despite warnings
@@ -447,7 +478,7 @@ export const tenantService = {
       try {
         const result = execSync(
           `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+          `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
           { encoding: 'utf-8', timeout: 10_000 }
         );
         tableCount = parseInt(result.trim(), 10) || 0;
@@ -690,5 +721,328 @@ export const tenantService = {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to seed accounts from master: ${msg}`);
     }
+  },
+
+  /**
+   * Seed RBAC permissions catalog + default system roles into template DB.
+   * Every tenant gets: Super Administrator, Administrator, Manager, Cashier, Auditor roles.
+   * Like Odoo groups / SAP activity groups — pre-configured, ready-to-use.
+   */
+  seedTemplateRbac(dbHost: string, dbPort: string, dbUser: string, dbPassword: string): void {
+    const rbacSql = `
+      INSERT INTO rbac_permissions_catalog (key, module, action, description) VALUES
+        ('sales.read', 'sales', 'read', 'View sales transactions'),
+        ('sales.create', 'sales', 'create', 'Create new sales'),
+        ('sales.update', 'sales', 'update', 'Modify existing sales'),
+        ('sales.delete', 'sales', 'delete', 'Delete sales transactions'),
+        ('sales.void', 'sales', 'void', 'Void completed sales'),
+        ('sales.export', 'sales', 'export', 'Export sales data'),
+        ('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
+        ('inventory.read', 'inventory', 'read', 'View inventory levels'),
+        ('inventory.create', 'inventory', 'create', 'Create inventory items'),
+        ('inventory.update', 'inventory', 'update', 'Modify inventory items'),
+        ('inventory.delete', 'inventory', 'delete', 'Delete inventory items'),
+        ('inventory.import', 'inventory', 'import', 'Import inventory data'),
+        ('inventory.export', 'inventory', 'export', 'Export inventory data'),
+        ('inventory.approve', 'inventory', 'approve', 'Approve stock adjustments'),
+        ('pos.read', 'pos', 'read', 'Access point of sale'),
+        ('pos.create', 'pos', 'create', 'Process transactions'),
+        ('pos.void', 'pos', 'void', 'Void POS transactions'),
+        ('pos.approve', 'pos', 'approve', 'Approve POS overrides'),
+        ('purchasing.read', 'purchasing', 'read', 'View purchase orders'),
+        ('purchasing.create', 'purchasing', 'create', 'Create purchase orders'),
+        ('purchasing.update', 'purchasing', 'update', 'Modify purchase orders'),
+        ('purchasing.delete', 'purchasing', 'delete', 'Delete purchase orders'),
+        ('purchasing.approve', 'purchasing', 'approve', 'Approve purchase orders'),
+        ('purchasing.post', 'purchasing', 'post', 'Post goods receipts'),
+        ('customers.read', 'customers', 'read', 'View customers'),
+        ('customers.create', 'customers', 'create', 'Create customers'),
+        ('customers.update', 'customers', 'update', 'Modify customers'),
+        ('customers.delete', 'customers', 'delete', 'Delete customers'),
+        ('customers.export', 'customers', 'export', 'Export customer data'),
+        ('suppliers.read', 'suppliers', 'read', 'View suppliers'),
+        ('suppliers.create', 'suppliers', 'create', 'Create suppliers'),
+        ('suppliers.update', 'suppliers', 'update', 'Modify suppliers'),
+        ('suppliers.delete', 'suppliers', 'delete', 'Delete suppliers'),
+        ('accounting.read', 'accounting', 'read', 'View accounting data'),
+        ('accounting.create', 'accounting', 'create', 'Create journal entries'),
+        ('accounting.update', 'accounting', 'update', 'Modify accounting records'),
+        ('accounting.delete', 'accounting', 'delete', 'Delete accounting records'),
+        ('accounting.post', 'accounting', 'post', 'Post journal entries'),
+        ('accounting.approve', 'accounting', 'approve', 'Approve accounting transactions'),
+        ('accounting.void', 'accounting', 'void', 'Void posted entries'),
+        ('accounting.export', 'accounting', 'export', 'Export accounting data'),
+        ('reports.read', 'reports', 'read', 'View reports'),
+        ('reports.create', 'reports', 'create', 'Create custom reports'),
+        ('reports.export', 'reports', 'export', 'Export reports'),
+        ('admin.read', 'admin', 'read', 'View admin panel'),
+        ('admin.create', 'admin', 'create', 'Create admin resources'),
+        ('admin.update', 'admin', 'update', 'Modify admin settings'),
+        ('admin.delete', 'admin', 'delete', 'Delete admin resources'),
+        ('system.read', 'system', 'read', 'View system configuration'),
+        ('system.update', 'system', 'update', 'Modify system settings'),
+        ('system.audit_read', 'system', 'read', 'View audit logs'),
+        ('system.users_read', 'system', 'read', 'View users'),
+        ('system.users_create', 'system', 'create', 'Create users'),
+        ('system.users_update', 'system', 'update', 'Modify users'),
+        ('system.users_delete', 'system', 'delete', 'Delete users'),
+        ('system.roles_read', 'system', 'read', 'View roles'),
+        ('system.roles_create', 'system', 'create', 'Create roles'),
+        ('system.roles_update', 'system', 'update', 'Modify roles'),
+        ('system.roles_delete', 'system', 'delete', 'Delete roles'),
+        ('system.permissions_read', 'system', 'read', 'View permissions catalog')
+      ON CONFLICT (key) DO NOTHING;
+
+      DO $$
+      DECLARE
+        sys UUID := '00000000-0000-0000-0000-000000000001';
+        rid UUID;
+      BEGIN
+        -- Super Administrator (all permissions)
+        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+        VALUES ('Super Administrator', 'Full system access', true, sys, sys)
+        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+        RETURNING id INTO rid;
+        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+        SELECT rid, key, sys FROM rbac_permissions_catalog
+        ON CONFLICT DO NOTHING;
+
+        -- Administrator
+        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+        VALUES ('Administrator', 'Administrative access - user and role management', true, sys, sys)
+        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+        RETURNING id INTO rid;
+        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+        SELECT rid, key, sys FROM rbac_permissions_catalog
+        WHERE module IN ('system', 'admin', 'reports') OR action = 'read'
+        ON CONFLICT DO NOTHING;
+
+        -- Manager
+        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+        VALUES ('Manager', 'Operational management - sales, inventory, purchasing', true, sys, sys)
+        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+        RETURNING id INTO rid;
+        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+        SELECT rid, key, sys FROM rbac_permissions_catalog
+        WHERE module IN ('sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos')
+        ON CONFLICT DO NOTHING;
+
+        -- Cashier
+        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+        VALUES ('Cashier', 'Point of sale operations', true, sys, sys)
+        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+        RETURNING id INTO rid;
+        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+        SELECT rid, key, sys FROM rbac_permissions_catalog
+        WHERE key IN ('pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'inventory.read')
+        ON CONFLICT DO NOTHING;
+
+        -- Auditor
+        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+        VALUES ('Auditor', 'Read-only access for auditing purposes', true, sys, sys)
+        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+        RETURNING id INTO rid;
+        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+        SELECT rid, key, sys FROM rbac_permissions_catalog
+        WHERE action = 'read'
+        ON CONFLICT DO NOTHING;
+      END $$;
+    `;
+
+    const psqlCmd =
+      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `-d ${TEMPLATE_DB_NAME} -v ON_ERROR_STOP=0`;
+
+    execSync(`echo ${JSON.stringify(rbacSql)} | ${psqlCmd}`, {
+      encoding: 'utf-8',
+      timeout: 15_000,
+      shell: '/bin/sh',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  },
+
+  /**
+   * Seed default UOMs into a tenant when template didn't include them.
+   */
+  async seedDefaultUoms(tenantPool: pg.Pool): Promise<void> {
+    await tenantPool.query(`
+      INSERT INTO uoms (id, name, symbol, type) VALUES
+        (gen_random_uuid(), 'Each', 'EA', 'QUANTITY'),
+        (gen_random_uuid(), 'Box', 'BOX', 'QUANTITY'),
+        (gen_random_uuid(), 'Carton', 'CTN', 'QUANTITY'),
+        (gen_random_uuid(), 'Dozen', 'DZ', 'QUANTITY'),
+        (gen_random_uuid(), 'Kilogram', 'kg', 'QUANTITY'),
+        (gen_random_uuid(), 'Packet', 'PKT', 'QUANTITY'),
+        (gen_random_uuid(), 'Bottle', 'btl', 'QUANTITY'),
+        (gen_random_uuid(), 'Piece', 'pc', 'QUANTITY')
+      ON CONFLICT DO NOTHING
+    `);
+  },
+
+  /**
+   * Seed RBAC roles + permissions into a tenant DB directly (fallback when template lacks them).
+   */
+  async seedDefaultRbac(tenantPool: pg.Pool): Promise<void> {
+    const sysUser = '00000000-0000-0000-0000-000000000001';
+
+    // 1. Seed permissions catalog
+    await tenantPool.query(`
+      INSERT INTO rbac_permissions_catalog (key, module, action, description) VALUES
+        ('sales.read', 'sales', 'read', 'View sales transactions'),
+        ('sales.create', 'sales', 'create', 'Create new sales'),
+        ('sales.update', 'sales', 'update', 'Modify existing sales'),
+        ('sales.delete', 'sales', 'delete', 'Delete sales transactions'),
+        ('sales.void', 'sales', 'void', 'Void completed sales'),
+        ('sales.export', 'sales', 'export', 'Export sales data'),
+        ('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
+        ('inventory.read', 'inventory', 'read', 'View inventory levels'),
+        ('inventory.create', 'inventory', 'create', 'Create inventory items'),
+        ('inventory.update', 'inventory', 'update', 'Modify inventory items'),
+        ('inventory.delete', 'inventory', 'delete', 'Delete inventory items'),
+        ('inventory.import', 'inventory', 'import', 'Import inventory data'),
+        ('inventory.export', 'inventory', 'export', 'Export inventory data'),
+        ('inventory.approve', 'inventory', 'approve', 'Approve stock adjustments'),
+        ('pos.read', 'pos', 'read', 'Access point of sale'),
+        ('pos.create', 'pos', 'create', 'Process transactions'),
+        ('pos.void', 'pos', 'void', 'Void POS transactions'),
+        ('pos.approve', 'pos', 'approve', 'Approve POS overrides'),
+        ('purchasing.read', 'purchasing', 'read', 'View purchase orders'),
+        ('purchasing.create', 'purchasing', 'create', 'Create purchase orders'),
+        ('purchasing.update', 'purchasing', 'update', 'Modify purchase orders'),
+        ('purchasing.delete', 'purchasing', 'delete', 'Delete purchase orders'),
+        ('purchasing.approve', 'purchasing', 'approve', 'Approve purchase orders'),
+        ('purchasing.post', 'purchasing', 'post', 'Post goods receipts'),
+        ('customers.read', 'customers', 'read', 'View customers'),
+        ('customers.create', 'customers', 'create', 'Create customers'),
+        ('customers.update', 'customers', 'update', 'Modify customers'),
+        ('customers.delete', 'customers', 'delete', 'Delete customers'),
+        ('customers.export', 'customers', 'export', 'Export customer data'),
+        ('suppliers.read', 'suppliers', 'read', 'View suppliers'),
+        ('suppliers.create', 'suppliers', 'create', 'Create suppliers'),
+        ('suppliers.update', 'suppliers', 'update', 'Modify suppliers'),
+        ('suppliers.delete', 'suppliers', 'delete', 'Delete suppliers'),
+        ('accounting.read', 'accounting', 'read', 'View accounting data'),
+        ('accounting.create', 'accounting', 'create', 'Create journal entries'),
+        ('accounting.update', 'accounting', 'update', 'Modify accounting records'),
+        ('accounting.delete', 'accounting', 'delete', 'Delete accounting records'),
+        ('accounting.post', 'accounting', 'post', 'Post journal entries'),
+        ('accounting.approve', 'accounting', 'approve', 'Approve accounting transactions'),
+        ('accounting.void', 'accounting', 'void', 'Void posted entries'),
+        ('accounting.export', 'accounting', 'export', 'Export accounting data'),
+        ('reports.read', 'reports', 'read', 'View reports'),
+        ('reports.create', 'reports', 'create', 'Create custom reports'),
+        ('reports.export', 'reports', 'export', 'Export reports'),
+        ('admin.read', 'admin', 'read', 'View admin panel'),
+        ('admin.create', 'admin', 'create', 'Create admin resources'),
+        ('admin.update', 'admin', 'update', 'Modify admin settings'),
+        ('admin.delete', 'admin', 'delete', 'Delete admin resources'),
+        ('system.read', 'system', 'read', 'View system configuration'),
+        ('system.update', 'system', 'update', 'Modify system settings'),
+        ('system.audit_read', 'system', 'read', 'View audit logs'),
+        ('system.users_read', 'system', 'read', 'View users'),
+        ('system.users_create', 'system', 'create', 'Create users'),
+        ('system.users_update', 'system', 'update', 'Modify users'),
+        ('system.users_delete', 'system', 'delete', 'Delete users'),
+        ('system.roles_read', 'system', 'read', 'View roles'),
+        ('system.roles_create', 'system', 'create', 'Create roles'),
+        ('system.roles_update', 'system', 'update', 'Modify roles'),
+        ('system.roles_delete', 'system', 'delete', 'Delete roles'),
+        ('system.permissions_read', 'system', 'read', 'View permissions catalog')
+      ON CONFLICT (key) DO NOTHING
+    `);
+
+    // 2. Seed default roles
+    const roleConfigs = [
+      { name: 'Super Administrator', desc: 'Full system access', filter: () => true },
+      {
+        name: 'Administrator',
+        desc: 'Administrative access',
+        filter: (mod: string, act: string) =>
+          ['system', 'admin', 'reports'].includes(mod) || act === 'read',
+      },
+      {
+        name: 'Manager',
+        desc: 'Operational management',
+        filter: (mod: string) =>
+          ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos'].includes(mod),
+      },
+      {
+        name: 'Cashier',
+        desc: 'Point of sale operations',
+        filter: (_mod: string, _act: string, key: string) =>
+          ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'inventory.read'].includes(key),
+      },
+      {
+        name: 'Auditor',
+        desc: 'Read-only access',
+        filter: (_mod: string, act: string) => act === 'read',
+      },
+    ];
+
+    // Get all permissions
+    const { rows: perms } = await tenantPool.query(
+      'SELECT key, module, action FROM rbac_permissions_catalog'
+    );
+
+    for (const role of roleConfigs) {
+      const { rows: roleRows } = await tenantPool.query(
+        `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+         VALUES ($1, $2, true, $3, $3)
+         ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+         RETURNING id`,
+        [role.name, role.desc, sysUser]
+      );
+      const roleId = roleRows[0]?.id;
+      if (!roleId) continue;
+
+      const grantKeys = perms
+        .filter((p: { key: string; module: string; action: string }) => role.filter(p.module, p.action, p.key))
+        .map((p: { key: string }) => p.key);
+
+      for (const key of grantKeys) {
+        await tenantPool.query(
+          `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT DO NOTHING`,
+          [roleId, key, sysUser]
+        );
+      }
+    }
+  },
+
+  /**
+   * Assign the Super Administrator RBAC role to the admin user.
+   */
+  async assignAdminRbacRole(tenantPool: pg.Pool, adminEmail: string): Promise<void> {
+    const sysUser = '00000000-0000-0000-0000-000000000001';
+
+    // Get admin user ID
+    const { rows: userRows } = await tenantPool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [adminEmail]
+    );
+    const userId = userRows[0]?.id;
+    if (!userId) {
+      logger.warn(`Cannot assign RBAC role: admin user ${adminEmail} not found`);
+      return;
+    }
+
+    // Get Super Administrator role ID
+    const { rows: roleRows } = await tenantPool.query(
+      "SELECT id FROM rbac_roles WHERE name = 'Super Administrator'"
+    );
+    const roleId = roleRows[0]?.id;
+    if (!roleId) {
+      logger.warn('Cannot assign RBAC role: Super Administrator role not found');
+      return;
+    }
+
+    await tenantPool.query(
+      `INSERT INTO rbac_user_roles (user_id, role_id, scope_type, assigned_by, is_active)
+       VALUES ($1, $2, 'global', $3, true)
+       ON CONFLICT DO NOTHING`,
+      [userId, roleId, sysUser]
+    );
+    logger.info(`Assigned Super Administrator RBAC role to ${adminEmail}`);
   },
 };

@@ -21,76 +21,76 @@ const router = express.Router();
 // =============================================================================
 
 const CreateRegisterSchema = z.object({
-  name: z.string().min(1).max(100),
-  location: z.string().max(255).optional(),
+    name: z.string().min(1).max(100),
+    location: z.string().max(255).optional(),
 });
 
 const UpdateRegisterSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  location: z
-    .string()
-    .max(255)
-    .optional()
-    .nullable()
-    .transform((val) => val ?? undefined),
-  isActive: z.boolean().optional(),
+    name: z.string().min(1).max(100).optional(),
+    location: z
+        .string()
+        .max(255)
+        .optional()
+        .nullable()
+        .transform((val) => val ?? undefined),
+    isActive: z.boolean().optional(),
 });
 
 const OpenSessionSchema = z.object({
-  registerId: z.string().uuid(),
-  openingFloat: z.number().nonnegative(),
-  blindCountEnabled: z.boolean().optional().default(false), // QuickBooks/Odoo: hide expected
-  varianceThreshold: z.number().nonnegative().optional().default(0), // Auto-approve below this
+    registerId: z.string().uuid(),
+    openingFloat: z.number().nonnegative(),
+    blindCountEnabled: z.boolean().optional().default(false), // QuickBooks/Odoo: hide expected
+    varianceThreshold: z.number().nonnegative().optional().default(0), // Auto-approve below this
 });
 
 const CloseSessionSchema = z.object({
-  actualClosing: z.number().nonnegative(),
-  varianceReason: z.string().max(500).optional(),
-  notes: z.string().max(1000).optional(),
-  denominationBreakdown: z.record(z.string(), z.number()).optional(), // Cash by denomination
+    actualClosing: z.number().nonnegative(),
+    varianceReason: z.string().max(500).optional(),
+    notes: z.string().max(1000).optional(),
+    denominationBreakdown: z.record(z.string(), z.number()).optional(), // Cash by denomination
 });
 
 const RecordMovementSchema = z.object({
-  sessionId: z.string().uuid(),
-  movementType: z.enum([
-    'CASH_IN',
-    'CASH_IN_FLOAT',
-    'CASH_IN_PAYMENT',
-    'CASH_IN_OTHER',
-    'CASH_OUT',
-    'CASH_OUT_BANK',
-    'CASH_OUT_EXPENSE',
-    'CASH_OUT_OTHER',
-  ]),
-  amount: z.number().positive(),
-  reason: z.string().max(255).optional(),
-  approvedBy: z.string().uuid().optional(),
-  paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'OTHER']).optional(),
-  // For customer payments - link to invoice
-  invoiceId: z.string().uuid().optional(),
-  customerId: z.string().uuid().optional(),
-  // Enterprise: flexible metadata (expense_type, receipt_number, etc.)
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  // Offline safety: client-generated UUID for deduplication
-  clientUuid: z.string().uuid().optional(),
+    sessionId: z.string().uuid(),
+    movementType: z.enum([
+        'CASH_IN',
+        'CASH_IN_FLOAT',
+        'CASH_IN_PAYMENT',
+        'CASH_IN_OTHER',
+        'CASH_OUT',
+        'CASH_OUT_BANK',
+        'CASH_OUT_EXPENSE',
+        'CASH_OUT_OTHER',
+    ]),
+    amount: z.number().positive(),
+    reason: z.string().max(255).optional(),
+    approvedBy: z.string().uuid().optional(),
+    paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'OTHER']).optional(),
+    // For customer payments - link to invoice
+    invoiceId: z.string().uuid().optional(),
+    customerId: z.string().uuid().optional(),
+    // Enterprise: flexible metadata (expense_type, receipt_number, etc.)
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    // Offline safety: client-generated UUID for deduplication
+    clientUuid: z.string().uuid().optional(),
 });
 
 const SessionQuerySchema = z.object({
-  registerId: z.string().uuid().optional(),
-  userId: z.string().uuid().optional(),
-  status: z.enum(['OPEN', 'CLOSED', 'RECONCILED']).optional(),
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
-  limit: z.coerce.number().positive().max(100).optional(),
-  offset: z.coerce.number().nonnegative().optional(),
+    registerId: z.string().uuid().optional(),
+    userId: z.string().uuid().optional(),
+    status: z.enum(['OPEN', 'CLOSED', 'RECONCILED']).optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    limit: z.coerce.number().positive().max(100).optional(),
+    offset: z.coerce.number().nonnegative().optional(),
 });
 
 const UuidParamSchema = z.object({
-  id: z.string().uuid(),
+    id: z.string().uuid(),
 });
 
 const ApproveVarianceBodySchema = z.object({
-  notes: z.string().max(1000).optional(),
+    notes: z.string().max(1000).optional(),
 });
 
 // =============================================================================
@@ -98,14 +98,14 @@ const ApproveVarianceBodySchema = z.object({
 // =============================================================================
 
 router.get('/health', (_req, res) => {
-  res.json({
-    success: true,
-    data: {
-      status: 'healthy',
-      module: 'cash-register',
-      timestamp: new Date().toISOString(),
-    },
-  });
+    res.json({
+        success: true,
+        data: {
+            status: 'healthy',
+            module: 'cash-register',
+            timestamp: new Date().toISOString(),
+        },
+    });
 });
 
 // =============================================================================
@@ -118,42 +118,42 @@ router.get('/health', (_req, res) => {
  * Managers/admins see all registers; staff see active only (with session info)
  */
 router.get(
-  '/',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const user = req.user as { role: string };
-    const isManager = ['ADMIN', 'MANAGER'].includes(user.role);
+    '/',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const user = req.user as { role: string };
+        const isManager = ['ADMIN', 'MANAGER'].includes(user.role);
 
-    // Always include session status so the Open Register dialog knows availability
-    const registersWithStatus = await cashRegisterService.getRegistersWithStatus(pool);
+        // Always include session status so the Open Register dialog knows availability
+        const registersWithStatus = await cashRegisterService.getRegistersWithStatus(pool);
 
-    // Staff only see active registers (already filtered in query)
-    // Managers see all (need to include inactive too)
-    const registers = isManager ? await cashRegisterService.getAllRegisters(pool) : [];
+        // Staff only see active registers (already filtered in query)
+        // Managers see all (need to include inactive too)
+        const registers = isManager ? await cashRegisterService.getAllRegisters(pool) : [];
 
-    // Merge: for managers, enrich all registers with session info
-    if (isManager && registers.length > 0) {
-      const statusMap = new Map(registersWithStatus.map((r) => [r.id, r]));
-      const enriched = registers.map((reg) => {
-        const status = statusMap.get(reg.id);
-        return {
-          ...reg,
-          currentSessionId: status?.currentSessionId || null,
-          currentSessionNumber: status?.currentSessionNumber || null,
-          currentSessionUserId: status?.currentSessionUserId || null,
-          currentSessionUserName: status?.currentSessionUserName || null,
-          currentSessionOpenedAt: status?.currentSessionOpenedAt || null,
-        };
-      });
-      return res.json({ success: true, data: enriched });
-    }
+        // Merge: for managers, enrich all registers with session info
+        if (isManager && registers.length > 0) {
+            const statusMap = new Map(registersWithStatus.map((r) => [r.id, r]));
+            const enriched = registers.map((reg) => {
+                const status = statusMap.get(reg.id);
+                return {
+                    ...reg,
+                    currentSessionId: status?.currentSessionId || null,
+                    currentSessionNumber: status?.currentSessionNumber || null,
+                    currentSessionUserId: status?.currentSessionUserId || null,
+                    currentSessionUserName: status?.currentSessionUserName || null,
+                    currentSessionOpenedAt: status?.currentSessionOpenedAt || null,
+                };
+            });
+            return res.json({ success: true, data: enriched });
+        }
 
-    res.json({
-      success: true,
-      data: registersWithStatus,
-    });
-  })
+        res.json({
+            success: true,
+            data: registersWithStatus,
+        });
+    })
 );
 
 // =============================================================================
@@ -161,11 +161,11 @@ router.get(
 // =============================================================================
 
 const ZReportQuerySchema = z.object({
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
-  registerId: z.string().uuid().optional(),
-  limit: z.coerce.number().positive().max(100).optional(),
-  offset: z.coerce.number().nonnegative().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    registerId: z.string().uuid().optional(),
+    limit: z.coerce.number().positive().max(100).optional(),
+    offset: z.coerce.number().nonnegative().optional(),
 });
 
 /**
@@ -174,23 +174,23 @@ const ZReportQuerySchema = z.object({
  * NOTE: Must be defined before /:id to prevent Express matching 'z-reports' as :id param
  */
 router.get(
-  '/z-reports',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const filters = ZReportQuerySchema.parse(req.query);
-    const result = await cashRegisterService.getZReportHistory(filters, pool);
+    '/z-reports',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const filters = ZReportQuerySchema.parse(req.query);
+        const result = await cashRegisterService.getZReportHistory(filters, pool);
 
-    res.json({
-      success: true,
-      data: result.reports,
-      pagination: {
-        total: result.total,
-        limit: filters.limit || 50,
-        offset: filters.offset || 0,
-      },
-    });
-  })
+        res.json({
+            success: true,
+            data: result.reports,
+            pagination: {
+                total: result.total,
+                limit: filters.limit || 50,
+                offset: filters.offset || 0,
+            },
+        });
+    })
 );
 
 /**
@@ -198,25 +198,25 @@ router.get(
  * Get register by ID
  */
 router.get(
-  '/:id',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const register = await cashRegisterService.getRegisterById(id, pool);
+    '/:id',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const register = await cashRegisterService.getRegisterById(id, pool);
 
-    if (!register) {
-      return res.status(404).json({
-        success: false,
-        error: 'Register not found',
-      });
-    }
+        if (!register) {
+            return res.status(404).json({
+                success: false,
+                error: 'Register not found',
+            });
+        }
 
-    res.json({
-      success: true,
-      data: register,
-    });
-  })
+        res.json({
+            success: true,
+            data: register,
+        });
+    })
 );
 
 /**
@@ -224,22 +224,22 @@ router.get(
  * Create a new register (admin/manager only)
  */
 router.post(
-  '/',
-  authenticate,
-  requirePermission('pos.create'),
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const data = CreateRegisterSchema.parse(req.body);
-    const user = req.user as { id: string };
+    '/',
+    authenticate,
+    requirePermission('pos.create'),
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const data = CreateRegisterSchema.parse(req.body);
+        const user = req.user as { id: string };
 
-    const register = await cashRegisterService.createRegister(data, user.id, pool);
+        const register = await cashRegisterService.createRegister(data, user.id, pool);
 
-    res.status(201).json({
-      success: true,
-      data: register,
-      message: 'Register created successfully',
-    });
-  })
+        res.status(201).json({
+            success: true,
+            data: register,
+            message: 'Register created successfully',
+        });
+    })
 );
 
 /**
@@ -247,30 +247,30 @@ router.post(
  * Update a register (admin/manager only)
  */
 router.put(
-  '/:id',
-  authenticate,
-  requirePermission('pos.create'),
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const data = UpdateRegisterSchema.parse(req.body);
-    const user = req.user as { id: string };
+    '/:id',
+    authenticate,
+    requirePermission('pos.create'),
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const data = UpdateRegisterSchema.parse(req.body);
+        const user = req.user as { id: string };
 
-    const register = await cashRegisterService.updateRegister(id, data, user.id, pool);
+        const register = await cashRegisterService.updateRegister(id, data, user.id, pool);
 
-    if (!register) {
-      return res.status(404).json({
-        success: false,
-        error: 'Register not found',
-      });
-    }
+        if (!register) {
+            return res.status(404).json({
+                success: false,
+                error: 'Register not found',
+            });
+        }
 
-    res.json({
-      success: true,
-      data: register,
-      message: 'Register updated successfully',
-    });
-  })
+        res.json({
+            success: true,
+            data: register,
+            message: 'Register updated successfully',
+        });
+    })
 );
 
 // =============================================================================
@@ -282,18 +282,18 @@ router.put(
  * Get current user's open session
  */
 router.get(
-  '/sessions/current',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const user = req.user as { id: string };
-    const session = await cashRegisterService.getUserOpenSession(user.id, pool);
+    '/sessions/current',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const user = req.user as { id: string };
+        const session = await cashRegisterService.getUserOpenSession(user.id, pool);
 
-    res.json({
-      success: true,
-      data: session, // null if no open session
-    });
-  })
+        res.json({
+            success: true,
+            data: session, // null if no open session
+        });
+    })
 );
 
 /**
@@ -301,23 +301,23 @@ router.get(
  * Get sessions with filters
  */
 router.get(
-  '/sessions',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const filters = SessionQuerySchema.parse(req.query);
-    const result = await cashRegisterService.getSessions(filters, pool);
+    '/sessions',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const filters = SessionQuerySchema.parse(req.query);
+        const result = await cashRegisterService.getSessions(filters, pool);
 
-    res.json({
-      success: true,
-      data: result.sessions,
-      pagination: {
-        total: result.total,
-        limit: filters.limit || 50,
-        offset: filters.offset || 0,
-      },
-    });
-  })
+        res.json({
+            success: true,
+            data: result.sessions,
+            pagination: {
+                total: result.total,
+                limit: filters.limit || 50,
+                offset: filters.offset || 0,
+            },
+        });
+    })
 );
 
 /**
@@ -325,25 +325,25 @@ router.get(
  * Get session by ID
  */
 router.get(
-  '/sessions/:id',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const session = await cashRegisterService.getSessionById(id, pool);
+    '/sessions/:id',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const session = await cashRegisterService.getSessionById(id, pool);
 
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Session not found',
-      });
-    }
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                error: 'Session not found',
+            });
+        }
 
-    res.json({
-      success: true,
-      data: session,
-    });
-  })
+        res.json({
+            success: true,
+            data: session,
+        });
+    })
 );
 
 /**
@@ -351,25 +351,25 @@ router.get(
  * Get full session summary with movements
  */
 router.get(
-  '/sessions/:id/summary',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const summary = await cashRegisterService.getSessionSummary(id, pool);
+    '/sessions/:id/summary',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const summary = await cashRegisterService.getSessionSummary(id, pool);
 
-    if (!summary) {
-      return res.status(404).json({
-        success: false,
-        error: 'Session not found',
-      });
-    }
+        if (!summary) {
+            return res.status(404).json({
+                success: false,
+                error: 'Session not found',
+            });
+        }
 
-    res.json({
-      success: true,
-      data: summary,
-    });
-  })
+        res.json({
+            success: true,
+            data: summary,
+        });
+    })
 );
 
 /**
@@ -377,27 +377,27 @@ router.get(
  * Open a new register session
  */
 router.post(
-  '/sessions/open',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const data = OpenSessionSchema.parse(req.body);
-    const user = req.user as { id: string };
+    '/sessions/open',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const data = OpenSessionSchema.parse(req.body);
+        const user = req.user as { id: string };
 
-    const session = await cashRegisterService.openSession(
-      {
-        ...data,
-        userId: user.id,
-      },
-      pool
-    );
+        const session = await cashRegisterService.openSession(
+            {
+                ...data,
+                userId: user.id,
+            },
+            pool
+        );
 
-    res.status(201).json({
-      success: true,
-      data: session,
-      message: 'Session opened successfully',
-    });
-  })
+        res.status(201).json({
+            success: true,
+            data: session,
+            message: 'Session opened successfully',
+        });
+    })
 );
 
 /**
@@ -405,29 +405,29 @@ router.post(
  * Close a register session
  */
 router.post(
-  '/sessions/:id/close',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const data = CloseSessionSchema.parse(req.body);
-    const user = req.user as { id: string };
+    '/sessions/:id/close',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const data = CloseSessionSchema.parse(req.body);
+        const user = req.user as { id: string };
 
-    const session = await cashRegisterService.closeSession(
-      {
-        sessionId: id,
-        ...data,
-      },
-      user.id,
-      pool
-    );
+        const session = await cashRegisterService.closeSession(
+            {
+                sessionId: id,
+                ...data,
+            },
+            user.id,
+            pool
+        );
 
-    res.json({
-      success: true,
-      data: session,
-      message: 'Session closed successfully',
-    });
-  })
+        res.json({
+            success: true,
+            data: session,
+            message: 'Session closed successfully',
+        });
+    })
 );
 
 /**
@@ -435,41 +435,41 @@ router.post(
  * Reconcile a closed session (manager only)
  */
 router.post(
-  '/sessions/:id/reconcile',
-  authenticate,
-  requirePermission('pos.approve'),
-  async (req, res) => {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const { id } = UuidParamSchema.parse(req.params);
-      const user = req.user as { id: string };
-      const session = await cashRegisterService.reconcileSession(id, user.id, pool);
+    '/sessions/:id/reconcile',
+    authenticate,
+    requirePermission('pos.approve'),
+    async (req, res) => {
+        try {
+            const pool = req.tenantPool || globalPool;
+            const { id } = UuidParamSchema.parse(req.params);
+            const user = req.user as { id: string };
+            const session = await cashRegisterService.reconcileSession(id, user.id, pool);
 
-      res.json({
-        success: true,
-        data: session,
-        message: 'Session reconciled successfully',
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some((code) =>
-          (error instanceof Error ? error.message : String(error)).includes(code)
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+            res.json({
+                success: true,
+                data: session,
+                message: 'Session reconciled successfully',
+            });
+        } catch (error) {
+            if (
+                error instanceof Error &&
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some((code) =>
+                    (error instanceof Error ? error.message : String(error)).includes(code)
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
 
-      logger.error('Error reconciling session:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to reconcile session',
-      });
+            logger.error('Error reconciling session:', error);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to reconcile session',
+            });
+        }
     }
-  }
 );
 
 /**
@@ -478,41 +478,41 @@ router.post(
  * Used when a cashier left without closing, blocking the register
  */
 router.post(
-  '/sessions/:id/force-close',
-  authenticate,
-  requirePermission('pos.approve'),
-  async (req, res) => {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const { id } = UuidParamSchema.parse(req.params);
-      const user = req.user as { id: string };
-      const session = await cashRegisterService.forceCloseSession(id, user.id, pool);
+    '/sessions/:id/force-close',
+    authenticate,
+    requirePermission('pos.approve'),
+    async (req, res) => {
+        try {
+            const pool = req.tenantPool || globalPool;
+            const { id } = UuidParamSchema.parse(req.params);
+            const user = req.user as { id: string };
+            const session = await cashRegisterService.forceCloseSession(id, user.id, pool);
 
-      res.json({
-        success: true,
-        data: session,
-        message: 'Session force-closed successfully',
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some((code) =>
-          (error instanceof Error ? error.message : String(error)).includes(code)
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+            res.json({
+                success: true,
+                data: session,
+                message: 'Session force-closed successfully',
+            });
+        } catch (error) {
+            if (
+                error instanceof Error &&
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_OPEN'].some((code) =>
+                    (error instanceof Error ? error.message : String(error)).includes(code)
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
 
-      logger.error('Error force-closing session:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to force-close session',
-      });
+            logger.error('Error force-closing session:', error);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to force-close session',
+            });
+        }
     }
-  }
 );
 
 // =============================================================================
@@ -524,18 +524,18 @@ router.post(
  * Get movements for a session
  */
 router.get(
-  '/sessions/:id/movements',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const movements = await cashRegisterService.getSessionMovements(id, pool);
+    '/sessions/:id/movements',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const movements = await cashRegisterService.getSessionMovements(id, pool);
 
-    res.json({
-      success: true,
-      data: movements,
-    });
-  })
+        res.json({
+            success: true,
+            data: movements,
+        });
+    })
 );
 
 /**
@@ -543,40 +543,40 @@ router.get(
  * Record a cash movement (cash in/out)
  */
 router.post(
-  '/movements',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const data = RecordMovementSchema.parse(req.body);
-    const user = req.user as { id: string };
+    '/movements',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const data = RecordMovementSchema.parse(req.body);
+        const user = req.user as { id: string };
 
-    // For CASH_OUT types over a threshold, require approval
-    // (This is a simplified check - in production, use a configurable threshold)
-    const CASH_OUT_APPROVAL_THRESHOLD = 100000; // UGX
-    const isCashOutType = data.movementType.startsWith('CASH_OUT');
-    if (isCashOutType && data.amount > CASH_OUT_APPROVAL_THRESHOLD && !data.approvedBy) {
-      return res.status(400).json({
-        success: false,
-        error: `Cash out over ${CASH_OUT_APPROVAL_THRESHOLD.toLocaleString()} UGX requires manager approval`,
-      });
-    }
+        // For CASH_OUT types over a threshold, require approval
+        // (This is a simplified check - in production, use a configurable threshold)
+        const CASH_OUT_APPROVAL_THRESHOLD = 100000; // UGX
+        const isCashOutType = data.movementType.startsWith('CASH_OUT');
+        if (isCashOutType && data.amount > CASH_OUT_APPROVAL_THRESHOLD && !data.approvedBy) {
+            return res.status(400).json({
+                success: false,
+                error: `Cash out over ${CASH_OUT_APPROVAL_THRESHOLD.toLocaleString()} UGX requires manager approval`,
+            });
+        }
 
-    const movement = await cashRegisterService.recordMovement(
-      {
-        ...data,
-        userId: user.id,
-        metadata: data.metadata as Record<string, unknown> | undefined,
-        clientUuid: data.clientUuid,
-      },
-      pool
-    );
+        const movement = await cashRegisterService.recordMovement(
+            {
+                ...data,
+                userId: user.id,
+                metadata: data.metadata as Record<string, unknown> | undefined,
+                clientUuid: data.clientUuid,
+            },
+            pool
+        );
 
-    res.status(201).json({
-      success: true,
-      data: movement,
-      message: 'Movement recorded successfully',
-    });
-  })
+        res.status(201).json({
+            success: true,
+            data: movement,
+            message: 'Movement recorded successfully',
+        });
+    })
 );
 
 // =============================================================================
@@ -590,24 +590,24 @@ router.post(
  * QuickBooks/Odoo equivalent: Interim cash register report
  */
 router.get(
-  '/sessions/:id/x-report',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const report = await cashRegisterService.generateXReport(id, pool);
+    '/sessions/:id/x-report',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const report = await cashRegisterService.generateXReport(id, pool);
 
-    res.json({
-      success: true,
-      data: report,
-    });
-  })
+        res.json({
+            success: true,
+            data: report,
+        });
+    })
 );
 
 const ZReportSchema = z.object({
-  actualClosing: z.number().nonnegative(),
-  denominationBreakdown: z.record(z.string(), z.number()).optional(),
-  varianceReason: z.string().max(500).optional(),
+    actualClosing: z.number().nonnegative(),
+    denominationBreakdown: z.record(z.string(), z.number()).optional(),
+    varianceReason: z.string().max(500).optional(),
 });
 
 /**
@@ -617,29 +617,29 @@ const ZReportSchema = z.object({
  * QuickBooks/Odoo equivalent: End-of-day closing report
  */
 router.post(
-  '/sessions/:id/z-report',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const data = ZReportSchema.parse(req.body);
-    const user = req.user as { id: string };
+    '/sessions/:id/z-report',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const data = ZReportSchema.parse(req.body);
+        const user = req.user as { id: string };
 
-    const report = await cashRegisterService.generateZReport(
-      id,
-      data.actualClosing,
-      data.denominationBreakdown,
-      data.varianceReason,
-      user.id,
-      pool
-    );
+        const report = await cashRegisterService.generateZReport(
+            id,
+            data.actualClosing,
+            data.denominationBreakdown,
+            data.varianceReason,
+            user.id,
+            pool
+        );
 
-    res.json({
-      success: true,
-      data: report,
-      message: 'Z-Report generated and session closed',
-    });
-  })
+        res.json({
+            success: true,
+            data: report,
+            message: 'Z-Report generated and session closed',
+        });
+    })
 );
 
 /**
@@ -649,43 +649,43 @@ router.post(
  * QuickBooks/Odoo equivalent: Variance sign-off
  */
 router.post(
-  '/sessions/:id/approve-variance',
-  authenticate,
-  requirePermission('pos.approve'),
-  async (req, res) => {
-    try {
-      const pool = req.tenantPool || globalPool;
-      const { id } = UuidParamSchema.parse(req.params);
-      const user = req.user as { id: string };
-      const { notes } = ApproveVarianceBodySchema.parse(req.body);
+    '/sessions/:id/approve-variance',
+    authenticate,
+    requirePermission('pos.approve'),
+    async (req, res) => {
+        try {
+            const pool = req.tenantPool || globalPool;
+            const { id } = UuidParamSchema.parse(req.params);
+            const user = req.user as { id: string };
+            const { notes } = ApproveVarianceBodySchema.parse(req.body);
 
-      const session = await cashRegisterService.approveVariance(id, user.id, notes, pool);
+            const session = await cashRegisterService.approveVariance(id, user.id, notes, pool);
 
-      res.json({
-        success: true,
-        data: session,
-        message: 'Variance approved',
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some((code) =>
-          (error instanceof Error ? error.message : String(error)).includes(code)
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+            res.json({
+                success: true,
+                data: session,
+                message: 'Variance approved',
+            });
+        } catch (error) {
+            if (
+                error instanceof Error &&
+                ['SESSION_NOT_FOUND', 'SESSION_NOT_CLOSED'].some((code) =>
+                    (error instanceof Error ? error.message : String(error)).includes(code)
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
 
-      logger.error('Error approving variance:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to approve variance',
-      });
+            logger.error('Error approving variance:', error);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to approve variance',
+            });
+        }
     }
-  }
 );
 
 // =============================================================================
@@ -697,18 +697,18 @@ router.post(
  * Get reconciliation audit trail for a session
  */
 router.get(
-  '/sessions/:id/reconciliations',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const reconciliations = await cashRegisterService.getSessionReconciliations(id, pool);
+    '/sessions/:id/reconciliations',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const reconciliations = await cashRegisterService.getSessionReconciliations(id, pool);
 
-    res.json({
-      success: true,
-      data: reconciliations,
-    });
-  })
+        res.json({
+            success: true,
+            data: reconciliations,
+        });
+    })
 );
 
 // =============================================================================
@@ -720,25 +720,25 @@ router.get(
  * Get persisted Z-Report for a session (for reprint)
  */
 router.get(
-  '/sessions/:id/z-report-stored',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const pool = req.tenantPool || globalPool;
-    const { id } = UuidParamSchema.parse(req.params);
-    const report = await cashRegisterService.getStoredZReport(id, pool);
+    '/sessions/:id/z-report-stored',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        const report = await cashRegisterService.getStoredZReport(id, pool);
 
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        error: 'No Z-Report found for this session',
-      });
-    }
+        if (!report) {
+            return res.status(404).json({
+                success: false,
+                error: 'No Z-Report found for this session',
+            });
+        }
 
-    res.json({
-      success: true,
-      data: report,
-    });
-  })
+        res.json({
+            success: true,
+            data: report,
+        });
+    })
 );
 
 export default router;
