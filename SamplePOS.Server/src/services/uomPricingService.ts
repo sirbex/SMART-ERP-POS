@@ -34,7 +34,12 @@ export function applyAutoUomPricing(
 
   const computed = computeUomPrices({
     baseCost,
-    units: uoms.map((u) => ({ name: u.uomId, factor: u.conversionFactor })),
+    units: uoms.map((u) => ({
+      name: u.uomId,
+      factor: u.conversionFactor,
+      costOverride: u.costOverride,
+      priceOverride: u.priceOverride,
+    })),
     defaultMultiplier,
     currencyDecimals,
   });

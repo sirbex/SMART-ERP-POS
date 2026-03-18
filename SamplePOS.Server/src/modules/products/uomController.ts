@@ -6,8 +6,8 @@ import { pool as globalPool } from '../../db/pool.js';
 
 const CreateMasterUomSchema = z.object({
   name: z.string().min(1, 'UoM name is required').max(100),
-  abbreviation: z.string().min(1, 'Abbreviation is required').max(20),
-  category: z.string().optional(),
+  symbol: z.string().max(20).optional().nullable(),
+  type: z.enum(['QUANTITY', 'WEIGHT', 'VOLUME', 'LENGTH', 'AREA', 'TIME']).optional(),
 });
 
 const UpdateMasterUomSchema = CreateMasterUomSchema.partial();

@@ -147,7 +147,7 @@ export const inventoryRepository = {
                'conversionFactor', pu.conversion_factor,
                'isDefault', pu.is_default,
                'price', COALESCE(pu.price_override, pv.selling_price * pu.conversion_factor),
-               'cost', COALESCE(pu.cost_override, NULLIF(pv.average_cost, 0), pv.cost_price) * pu.conversion_factor
+               'cost', COALESCE(pu.cost_override, COALESCE(NULLIF(pv.average_cost, 0), pv.cost_price) * pu.conversion_factor)
              )
            )
            FROM product_uoms pu

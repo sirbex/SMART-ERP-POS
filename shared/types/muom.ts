@@ -32,6 +32,9 @@ export interface MuoMUnit {
 
   // If present, this price takes precedence over calculated price.
   priceOverride?: number | null;
+
+  // If present, this cost takes precedence over calculated cost (baseCost * factor).
+  costOverride?: number | null;
 }
 
 export interface ComputeUomPricesInput {

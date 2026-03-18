@@ -44,10 +44,13 @@ export function computeUomPrices(input: ComputeUomPricesInput): ComputeUomPrices
       throw new Error(`Invalid MUoM factor for ${u.name ?? u.uomId ?? 'uom'}: ${u.factor}`);
     }
 
-    const unitCost = baseCost.times(factor);
+    // Cost: use override if provided, otherwise derive from base
+    const unitCost = u.costOverride != null
+      ? new Decimal(u.costOverride)
+      : baseCost.times(factor);
 
-    // Apply override or multiplier
-  let sellingPrice: any;
+    // Price: use override or multiplier
+    let sellingPrice: Decimal;
     let usedMultiplier = new Decimal(1);
 
     if (u.priceOverride != null) {
