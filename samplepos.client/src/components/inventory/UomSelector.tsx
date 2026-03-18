@@ -14,6 +14,7 @@
  * - Converts quantities to base units for storage
  */
 
+import { useEffect, useMemo, useRef } from 'react';
 import { useProductWithUoms } from '../../hooks/useProductWithUoms';
 import { computeUnitCost } from '../../utils/uom';
 import Decimal from 'decimal.js';
@@ -43,12 +44,55 @@ export function UomSelector({
   className = '',
 }: UomSelectorProps) {
   const { data: productWithUoms } = useProductWithUoms(productId);
-  const uoms = productWithUoms?.uoms || [];
+  const uoms = useMemo(() => productWithUoms?.uoms || [], [productWithUoms]);
+
+  // Track whether we've already synced cost for the current selectedUomId
+  const syncedUomRef = useRef<string | null>(null);
+  // Keep a stable ref to onChange to avoid triggering useEffect on every render
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // Auto-sync cost when server data loads with a pre-selected UOM.
+  // This ensures the displayed cost always reflects the server-computed displayCost,
+  // even if the parent set the initial cost from incomplete list data.
+  useEffect(() => {
+    if (uoms.length === 0 || !selectedUomId) return;
+    // Only fire once per UOM selection to avoid infinite loops
+    if (syncedUomRef.current === selectedUomId) return;
+
+    const selected = uoms.find(u => u.id === selectedUomId);
+    if (!selected) return;
+
+    syncedUomRef.current = selectedUomId;
+
+    let newCostStr = String(selected.displayCost || '');
+    if (!newCostStr || newCostStr === '0') {
+      newCostStr = computeUnitCost(baseCost, selected.conversionFactor, selected.costOverride);
+    } else {
+      // Sanity check: if displayCost equals base cost but factor > 1, recalculate
+      const baseCostNum = parseFloat(baseCost?.toString() || '0');
+      const displayCost = parseFloat(newCostStr);
+      const factor = parseFloat(String(selected.conversionFactor || '1'));
+      if (factor > 1 && Math.abs(displayCost - baseCostNum) < 0.01) {
+        newCostStr = computeUnitCost(baseCostNum, factor, selected.costOverride);
+      }
+    }
+
+    onChangeRef.current({
+      uomId: selectedUomId,
+      newCost: new Decimal(parseFloat(newCostStr || '0')).toFixed(2),
+      conversionFactor: String(selected.conversionFactor),
+      uomName: selected.uomName,
+    });
+  }, [selectedUomId, uoms, baseCost]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     
-    if (!productWithUoms) return;
+    if (uoms.length === 0) return;
+
+    // Reset sync tracker so the effect can work for the new selection
+    syncedUomRef.current = value || null;
 
     // Handle clearing to Base UoM
     if (value === '') {
@@ -67,15 +111,15 @@ export function UomSelector({
     if (!selected) return;
 
     // Use pre-computed displayCost from server with fallback
-    let newCostStr = selected.displayCost;
-    if (!newCostStr || newCostStr === '') {
+    let newCostStr = String(selected.displayCost || '');
+    if (!newCostStr || newCostStr === '0') {
       // Fallback: compute cost = baseCost × factor, or override when provided
       newCostStr = computeUnitCost(baseCost, selected.conversionFactor, selected.costOverride);
     } else {
       // Sanity check: if displayCost equals base cost but factor > 1, recalculate
       const baseCostNum = parseFloat(baseCost?.toString() || '0');
       const displayCost = parseFloat(newCostStr);
-      const factor = parseFloat(selected.conversionFactor || '1');
+      const factor = parseFloat(String(selected.conversionFactor || '1'));
       
       if (factor > 1 && Math.abs(displayCost - baseCostNum) < 0.01) {
         newCostStr = computeUnitCost(baseCostNum, factor, selected.costOverride);
@@ -85,7 +129,7 @@ export function UomSelector({
     onChange({
       uomId: value,
       newCost: new Decimal(parseFloat(newCostStr || '0')).toFixed(2),
-      conversionFactor: selected.conversionFactor,
+      conversionFactor: String(selected.conversionFactor),
       uomName: selected.uomName,
     });
   };
