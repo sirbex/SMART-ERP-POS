@@ -386,6 +386,37 @@ async function startServer() {
 
       logger.info(`Server started on port ${PORT}`);
 
+      // Pre-warm connection pools for all active tenants to eliminate cold-start latency
+      (async () => {
+        try {
+          const masterPool = connectionManager.getMasterPool();
+          const { rows } = await masterPool.query<{
+            id: string;
+            slug: string;
+            database_name: string;
+            database_host: string;
+            database_port: number;
+          }>(
+            `SELECT id, slug, database_name, database_host, database_port
+             FROM tenants WHERE status = 'ACTIVE'`
+          );
+          for (const row of rows) {
+            connectionManager.preWarm({
+              tenantId: row.id,
+              slug: row.slug,
+              databaseName: row.database_name,
+              databaseHost: row.database_host,
+              databasePort: row.database_port,
+            });
+          }
+          logger.info(`Pre-warmed ${rows.length} active tenant pool(s)`);
+        } catch (err) {
+          logger.warn('Tenant pool pre-warm failed (non-fatal)', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      })();
+
       // Initialize self-learning demand forecast jobs (requires Redis)
       try {
         initDemandForecastJobs(pool);

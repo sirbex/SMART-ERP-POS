@@ -30,9 +30,25 @@ interface PoolEntry {
   connectionCount: number;
 }
 
+// ── Circuit Breaker ───────────────────────────────────────
+// Per-tenant health tracking: prevents cascading failures when a tenant DB is down.
+// States: CLOSED (healthy) → OPEN (failing, reject fast) → HALF_OPEN (probe one request)
+
+type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+interface CircuitBreakerEntry {
+  state: CircuitState;
+  failureCount: number;
+  lastFailureAt: number;
+  openedAt: number;
+}
+
+const CIRCUIT_FAILURE_THRESHOLD = 5; // consecutive failures before opening
+const CIRCUIT_COOLDOWN_MS = 30_000; // 30s before trying again (half-open)
+
 /**
  * ConnectionManager: manages per-tenant database connection pools
- * 
+ *
  * - Lazily creates pools on first access
  * - Caches pools for reuse
  * - Evicts idle pools after configurable timeout
@@ -40,11 +56,12 @@ interface PoolEntry {
  */
 class ConnectionManager {
   private pools: Map<string, PoolEntry> = new Map();
+  private circuits: Map<string, CircuitBreakerEntry> = new Map();
   private masterPool: pg.Pool | null = null;
   private evictionInterval: ReturnType<typeof setInterval> | null = null;
 
   // Configuration
-  private readonly maxPoolsPerInstance = 50;  // max concurrent tenant pools
+  private readonly maxPoolsPerInstance = 50; // max concurrent tenant pools
   private readonly poolIdleTimeoutMs = 10 * 60 * 1000; // 10 minutes
   private readonly evictionCheckIntervalMs = 60 * 1000; // check every minute
   private readonly defaultMaxConnections = 10; // per-tenant pool size
@@ -55,7 +72,9 @@ class ConnectionManager {
     this.dbUser = process.env.DB_USER || 'postgres';
     const dbPass = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD;
     if (!dbPass && process.env.NODE_ENV === 'production') {
-      console.error('FATAL: DB_PASSWORD environment variable is not set. Cannot start in production without it.');
+      console.error(
+        'FATAL: DB_PASSWORD environment variable is not set. Cannot start in production without it.'
+      );
       process.exit(1);
     }
     this.dbPassword = dbPass || 'password';
@@ -80,12 +99,12 @@ class ConnectionManager {
       const poolConfig = process.env.DATABASE_URL
         ? { connectionString: process.env.DATABASE_URL }
         : {
-          host: 'localhost',
-          port: 5432,
-          database: 'pos_system',
-          user: this.dbUser,
-          password: this.dbPassword,
-        };
+            host: 'localhost',
+            port: 5432,
+            database: 'pos_system',
+            user: this.dbUser,
+            password: this.dbPassword,
+          };
 
       this.masterPool = new Pool({
         ...poolConfig,
@@ -111,8 +130,26 @@ class ConnectionManager {
   /**
    * Get a connection pool for a specific tenant.
    * Creates the pool if it doesn't exist.
+   * Respects circuit breaker — rejects immediately if tenant DB is marked unhealthy.
    */
   getPool(config: TenantPoolConfig): pg.Pool {
+    // Circuit breaker: fast-fail if tenant DB is known to be down
+    const circuit = this.circuits.get(config.tenantId);
+    if (circuit && circuit.state === 'OPEN') {
+      const elapsed = Date.now() - circuit.openedAt;
+      if (elapsed < CIRCUIT_COOLDOWN_MS) {
+        throw new TenantUnavailableError(
+          config.slug,
+          Math.ceil((CIRCUIT_COOLDOWN_MS - elapsed) / 1000)
+        );
+      }
+      // Cooldown expired → transition to HALF_OPEN (allow one probe)
+      circuit.state = 'HALF_OPEN';
+      logger.info(`Circuit half-open for tenant [${config.slug}], allowing probe request`, {
+        tenantId: config.tenantId,
+      });
+    }
+
     const existing = this.pools.get(config.tenantId);
     if (existing) {
       existing.lastUsed = Date.now();
@@ -142,7 +179,10 @@ class ConnectionManager {
     });
 
     pool.on('error', (err) => {
-      logger.error(`Tenant pool error [${config.slug}]`, { tenantId: config.tenantId, error: err.message });
+      logger.error(`Tenant pool error [${config.slug}]`, {
+        tenantId: config.tenantId,
+        error: err.message,
+      });
     });
 
     const entry: PoolEntry = {
@@ -159,6 +199,68 @@ class ConnectionManager {
     });
 
     return pool;
+  }
+
+  // ── Circuit Breaker API ──────────────────────────────────
+
+  /**
+   * Record a successful query — resets the circuit to CLOSED.
+   */
+  recordSuccess(tenantId: string): void {
+    const circuit = this.circuits.get(tenantId);
+    if (circuit && circuit.state !== 'CLOSED') {
+      const entry = this.pools.get(tenantId);
+      logger.info(`Circuit closed for tenant [${entry?.config.slug ?? tenantId}] — DB recovered`, {
+        tenantId,
+        previousState: circuit.state,
+      });
+    }
+    this.circuits.delete(tenantId); // healthy → no entry needed
+  }
+
+  /**
+   * Record a connection/query failure — may trip the circuit to OPEN.
+   */
+  recordFailure(tenantId: string): void {
+    let circuit = this.circuits.get(tenantId);
+    if (!circuit) {
+      circuit = { state: 'CLOSED', failureCount: 0, lastFailureAt: 0, openedAt: 0 };
+      this.circuits.set(tenantId, circuit);
+    }
+
+    circuit.failureCount++;
+    circuit.lastFailureAt = Date.now();
+
+    if (circuit.state === 'HALF_OPEN' || circuit.failureCount >= CIRCUIT_FAILURE_THRESHOLD) {
+      circuit.state = 'OPEN';
+      circuit.openedAt = Date.now();
+      const entry = this.pools.get(tenantId);
+      logger.warn(
+        `Circuit OPEN for tenant [${entry?.config.slug ?? tenantId}] — fast-failing requests`,
+        {
+          tenantId,
+          failureCount: circuit.failureCount,
+          cooldownSec: CIRCUIT_COOLDOWN_MS / 1000,
+        }
+      );
+    }
+  }
+
+  /**
+   * Get circuit breaker state for a tenant (for health/status endpoints).
+   */
+  getCircuitState(tenantId: string): CircuitState {
+    return this.circuits.get(tenantId)?.state ?? 'CLOSED';
+  }
+
+  /**
+   * Pre-warm a tenant pool: creates the pool in advance so the first real
+   * request doesn't pay cold-start latency. Safe to call multiple times.
+   */
+  preWarm(config: TenantPoolConfig): void {
+    if (this.pools.has(config.tenantId)) return; // already warm
+    this.getPool(config); // creates and caches the pool
+    logger.info(`Pre-warmed tenant pool [${config.slug}]`, { tenantId: config.tenantId });
   }
 
   /**
@@ -191,7 +293,8 @@ class ConnectionManager {
    * Get status of all pools
    */
   getStatus(): { tenantId: string; slug: string; lastUsed: number; connectionCount: number }[] {
-    const entries: { tenantId: string; slug: string; lastUsed: number; connectionCount: number }[] = [];
+    const entries: { tenantId: string; slug: string; lastUsed: number; connectionCount: number }[] =
+      [];
     for (const [tenantId, entry] of this.pools) {
       entries.push({
         tenantId,
@@ -304,6 +407,22 @@ class ConnectionManager {
     this.pools.clear();
     this.masterPool = null;
     logger.info('All connection pools closed');
+  }
+}
+
+// ── Tenant Unavailable Error ──────────────────────────────
+// Thrown by circuit breaker when a tenant DB is known to be down.
+// Middleware catches this and returns 503.
+
+export class TenantUnavailableError extends Error {
+  public readonly retryAfterSec: number;
+  public readonly slug: string;
+
+  constructor(slug: string, retryAfterSec: number) {
+    super(`Tenant database [${slug}] is temporarily unavailable. Retry after ${retryAfterSec}s.`);
+    this.name = 'TenantUnavailableError';
+    this.slug = slug;
+    this.retryAfterSec = retryAfterSec;
   }
 }
 
