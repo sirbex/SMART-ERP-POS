@@ -19,6 +19,8 @@ import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
+import { pool as globalPool } from '../../db/pool.js';
+import type { Pool } from 'pg';
 
 const router = Router();
 
@@ -81,7 +83,8 @@ function sendError(res: Response, statusCode: number, message: string): void {
  */
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const result = await glValidationService.runFullIntegrityCheck();
+    const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
+    const result = await glValidationService.runFullIntegrityCheck(dbPool);
 
     // Defensive: Ensure result structure is valid
     if (!result || !result.results) {
@@ -151,7 +154,8 @@ router.get('/', async (_req: Request, res: Response) => {
  */
 router.get('/ar', async (_req: Request, res: Response) => {
   try {
-    const result = await glValidationService.checkARReconciliation();
+    const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
+    const result = await glValidationService.checkARReconciliation(dbPool);
 
     // Defensive: Ensure result is valid
     if (!result) {
@@ -185,7 +189,8 @@ router.get('/ar', async (_req: Request, res: Response) => {
  */
 router.get('/ap', async (_req: Request, res: Response) => {
   try {
-    const result = await glValidationService.checkAPReconciliation();
+    const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
+    const result = await glValidationService.checkAPReconciliation(dbPool);
 
     // Defensive: Ensure result is valid
     if (!result) {
@@ -220,7 +225,8 @@ router.get('/ap', async (_req: Request, res: Response) => {
  */
 router.get('/inventory', async (_req: Request, res: Response) => {
   try {
-    const result = await glValidationService.checkInventoryReconciliation();
+    const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
+    const result = await glValidationService.checkInventoryReconciliation(dbPool);
 
     // Defensive: Ensure result is valid
     if (!result) {
@@ -266,7 +272,10 @@ router.post(
       return sendError(res, 400, 'Invalid sale ID format. Must be a valid UUID.');
     }
 
-    const result = await glValidationService.validateSaleGLEntries(id);
+    const result = await glValidationService.validateSaleGLEntries(
+      id,
+      (req as unknown as { tenantPool?: Pool }).tenantPool || globalPool
+    );
 
     // Defensive: Ensure result is valid
     if (!result) {
@@ -300,7 +309,10 @@ router.post(
       return sendError(res, 400, 'Invalid payment ID format. Must be a valid UUID.');
     }
 
-    const result = await glValidationService.validatePaymentGLEntries(id);
+    const result = await glValidationService.validatePaymentGLEntries(
+      id,
+      (req as unknown as { tenantPool?: Pool }).tenantPool || globalPool
+    );
 
     // Defensive: Ensure result is valid
     if (!result) {

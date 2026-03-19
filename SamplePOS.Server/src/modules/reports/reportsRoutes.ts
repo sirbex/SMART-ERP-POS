@@ -180,7 +180,7 @@ export function createReportsRouter(pool: Pool) {
   );
   router.get(
     '/sales-details',
-    asyncHandler(async (req, res) => reportsController.getSalesDetailsReport(req, res, pool))
+    asyncHandler(async (req, res) => reportsController.getSalesDetailsReport(req, res, p(req)))
   );
   router.get(
     '/sales-by-cashier',

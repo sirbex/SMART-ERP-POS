@@ -14,11 +14,18 @@ import logger from '../utils/logger.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../rbac/middleware.js';
+import { pool as globalPool } from '../db/pool.js';
+import type { Pool } from 'pg';
 
 const router = Router();
 
 // All banking routes require authentication
 router.use(authenticate);
+
+/** Resolve tenant pool (multi-tenant) or fall back to global pool */
+function p(req: Request): Pool {
+  return (req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
+}
 
 // =============================================================================
 // VALIDATION SCHEMAS
@@ -157,7 +164,7 @@ router.get(
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
     const includeInactive = req.query.includeInactive === 'true';
-    const accounts = await BankingService.getAllAccounts(includeInactive);
+    const accounts = await BankingService.getAllAccounts(includeInactive, p(req));
 
     res.json({ success: true, data: accounts });
   })
@@ -171,7 +178,7 @@ router.get(
   '/accounts/:id',
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
-    const account = await BankingService.getAccountById(req.params.id);
+    const account = await BankingService.getAccountById(req.params.id, p(req));
 
     if (!account) {
       return res.status(404).json({ success: false, error: 'Bank account not found' });
@@ -190,7 +197,7 @@ router.post(
   requirePermission('banking.create'),
   asyncHandler(async (req, res) => {
     const dto = CreateBankAccountSchema.parse(req.body);
-    const account = await BankingService.createAccount(dto, getUserId(req));
+    const account = await BankingService.createAccount(dto, getUserId(req), p(req));
 
     res.status(201).json({ success: true, data: account });
   })
@@ -210,14 +217,18 @@ router.get(
   asyncHandler(async (req, res) => {
     const { startDate, endDate, type, isReconciled, limit, offset } = req.query;
 
-    const result = await BankingService.getTransactions(req.params.accountId, {
-      startDate: startDate as string,
-      endDate: endDate as string,
-      type: type as string,
-      isReconciled: isReconciled === 'true' ? true : isReconciled === 'false' ? false : undefined,
-      limit: limit ? parseInt(limit as string) : undefined,
-      offset: offset ? parseInt(offset as string) : undefined,
-    });
+    const result = await BankingService.getTransactions(
+      req.params.accountId,
+      {
+        startDate: startDate as string,
+        endDate: endDate as string,
+        type: type as string,
+        isReconciled: isReconciled === 'true' ? true : isReconciled === 'false' ? false : undefined,
+        limit: limit ? parseInt(limit as string) : undefined,
+        offset: offset ? parseInt(offset as string) : undefined,
+      },
+      p(req)
+    );
 
     res.json({
       success: true,
@@ -257,8 +268,8 @@ router.get(
     // If bankAccountId provided, filter by that account
     // Otherwise, get transactions from all accounts
     const result = bankAccountId
-      ? await BankingService.getTransactions(bankAccountId as string, options)
-      : await BankingService.getAllTransactions(options);
+      ? await BankingService.getTransactions(bankAccountId as string, options, p(req))
+      : await BankingService.getAllTransactions(options, p(req));
 
     res.json({
       success: true,
@@ -276,7 +287,7 @@ router.get(
   '/transactions/:id',
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
-    const transaction = await BankingService.getTransactionById(req.params.id);
+    const transaction = await BankingService.getTransactionById(req.params.id, p(req));
 
     if (!transaction) {
       return res.status(404).json({ success: false, error: 'Transaction not found' });
@@ -295,7 +306,7 @@ router.post(
   requirePermission('banking.create'),
   asyncHandler(async (req, res) => {
     const dto = CreateBankTransactionSchema.parse(req.body);
-    const transaction = await BankingService.createTransaction(dto, getUserId(req));
+    const transaction = await BankingService.createTransaction(dto, getUserId(req), p(req));
 
     res.status(201).json({ success: true, data: transaction });
   })
@@ -310,7 +321,7 @@ router.post(
   requirePermission('banking.create'),
   asyncHandler(async (req, res) => {
     const dto = CreateTransferSchema.parse(req.body);
-    const result = await BankingService.createTransfer(dto, getUserId(req));
+    const result = await BankingService.createTransfer(dto, getUserId(req), p(req));
 
     res.status(201).json({
       success: true,
@@ -332,7 +343,8 @@ router.post(
 
     const reversalTransaction = await BankingService.reverseTransaction(
       { transactionId: req.params.id, reason },
-      getUserId(req)
+      getUserId(req),
+      p(req)
     );
 
     res.json({
@@ -356,7 +368,7 @@ router.get(
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
     const direction = req.query.direction as 'IN' | 'OUT' | undefined;
-    const categories = await BankingService.getCategories(direction);
+    const categories = await BankingService.getCategories(direction, p(req));
 
     res.json({ success: true, data: categories });
   })
@@ -380,7 +392,8 @@ router.post(
       req.params.accountId,
       transactionIds,
       statementBalance,
-      getUserId(req)
+      getUserId(req),
+      p(req)
     );
 
     res.json({
@@ -405,7 +418,8 @@ router.post(
       bankAccountId,
       transactionIds,
       statementBalance,
-      getUserId(req)
+      getUserId(req),
+      p(req)
     );
 
     res.json({
@@ -440,7 +454,8 @@ router.get(
     const patterns = await BankingService.findMatchingPatterns(
       description as string,
       parseFloat(amount as string),
-      direction as 'IN' | 'OUT'
+      direction as 'IN' | 'OUT',
+      p(req)
     );
 
     res.json({ success: true, data: patterns });
@@ -463,7 +478,8 @@ router.post(
       dto.direction,
       dto.categoryId,
       dto.contraAccountId,
-      getUserId(req)
+      getUserId(req),
+      p(req)
     );
 
     res.status(201).json({ success: true, data: pattern });
@@ -480,7 +496,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { accepted } = PatternFeedbackSchema.parse(req.body);
 
-    await BankingService.updatePatternConfidence(req.params.id, accepted);
+    await BankingService.updatePatternConfidence(req.params.id, accepted, p(req));
 
     res.json({
       success: true,
@@ -502,7 +518,7 @@ router.get(
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
     const status = (req.query.status as 'NEW' | 'REVIEWED' | 'DISMISSED' | 'RESOLVED') || 'NEW';
-    const alerts = await BankingService.getAlerts(status);
+    const alerts = await BankingService.getAlerts(status, p(req));
 
     res.json({ success: true, data: alerts });
   })
@@ -518,7 +534,13 @@ router.patch(
   asyncHandler(async (req, res) => {
     const { status, notes } = UpdateAlertStatusSchema.parse(req.body);
 
-    await BankingService.updateAlertStatus(req.params.id, status, notes || null, getUserId(req));
+    await BankingService.updateAlertStatus(
+      req.params.id,
+      status,
+      notes || null,
+      getUserId(req),
+      p(req)
+    );
 
     res.json({ success: true, message: 'Alert updated' });
   })
@@ -536,7 +558,7 @@ router.get(
   '/templates',
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
-    const templates = await BankingService.getTemplates();
+    const templates = await BankingService.getTemplates(p(req));
     res.json({ success: true, data: templates });
   })
 );
@@ -550,7 +572,7 @@ router.post(
   requirePermission('banking.create'),
   asyncHandler(async (req, res) => {
     const data = CreateTemplateSchema.parse(req.body);
-    const template = await BankingService.createTemplate(data);
+    const template = await BankingService.createTemplate(data, p(req));
     res.status(201).json({ success: true, data: template });
   })
 );
@@ -579,7 +601,8 @@ router.post(
       {
         periodStart: data.periodStart,
         periodEnd: data.periodEnd,
-      }
+      },
+      p(req)
     );
 
     res.status(201).json({
@@ -599,7 +622,7 @@ router.get(
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
     const status = req.query.status as 'UNMATCHED' | 'MATCHED' | 'CREATED' | 'SKIPPED' | undefined;
-    const lines = await BankingService.getStatementLines(req.params.id, status);
+    const lines = await BankingService.getStatementLines(req.params.id, status, p(req));
     res.json({ success: true, data: lines });
   })
 );
@@ -623,7 +646,8 @@ router.post(
         categoryId: data.categoryId,
         contraAccountId: data.contraAccountId,
         skipReason: data.skipReason,
-      }
+      },
+      p(req)
     );
 
     res.json({ success: true, data: result });
@@ -638,7 +662,7 @@ router.post(
   '/statements/:id/complete',
   requirePermission('banking.import'),
   asyncHandler(async (req, res) => {
-    await BankingService.completeStatement(req.params.id, getUserId(req));
+    await BankingService.completeStatement(req.params.id, getUserId(req), p(req));
     res.json({ success: true, message: 'Statement completed' });
   })
 );
@@ -692,7 +716,7 @@ router.get(
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
     const bankAccountId = req.query.bankAccountId as string | undefined;
-    const rules = await BankingService.getRecurringRules(bankAccountId);
+    const rules = await BankingService.getRecurringRules(bankAccountId, p(req));
     res.json({ success: true, data: rules });
   })
 );
@@ -705,7 +729,7 @@ router.get(
   '/recurring-rules/:id',
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
-    const rule = await BankingService.getRecurringRuleById(req.params.id);
+    const rule = await BankingService.getRecurringRuleById(req.params.id, p(req));
     if (!rule) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
     }
@@ -722,7 +746,7 @@ router.post(
   requirePermission('banking.create'),
   asyncHandler(async (req, res) => {
     const data = CreateRecurringRuleSchema.parse(req.body);
-    const rule = await BankingService.createRecurringRule(data, getUserId(req));
+    const rule = await BankingService.createRecurringRule(data, getUserId(req), p(req));
     res.status(201).json({ success: true, data: rule });
   })
 );
@@ -736,7 +760,7 @@ router.patch(
   requirePermission('banking.update'),
   asyncHandler(async (req, res) => {
     const data = UpdateRecurringRuleSchema.parse(req.body);
-    const rule = await BankingService.updateRecurringRule(req.params.id, data);
+    const rule = await BankingService.updateRecurringRule(req.params.id, data, p(req));
     res.json({ success: true, data: rule });
   })
 );
@@ -749,7 +773,7 @@ router.delete(
   '/recurring-rules/:id',
   requirePermission('banking.delete'),
   asyncHandler(async (req, res) => {
-    await BankingService.deleteRecurringRule(req.params.id);
+    await BankingService.deleteRecurringRule(req.params.id, p(req));
     res.json({ success: true, message: 'Rule deleted' });
   })
 );
@@ -762,7 +786,7 @@ router.post(
   '/recurring-rules/check-overdue',
   requirePermission('banking.update'),
   asyncHandler(async (req, res) => {
-    const alertCount = await BankingService.checkOverdueRecurring();
+    const alertCount = await BankingService.checkOverdueRecurring(p(req));
     res.json({ success: true, data: { alertsCreated: alertCount } });
   })
 );
@@ -785,7 +809,12 @@ router.put(
   requirePermission('banking.update'),
   asyncHandler(async (req, res) => {
     const data = SetLowBalanceThresholdSchema.parse(req.body);
-    await BankingService.setLowBalanceThreshold(req.params.id, data.threshold, data.enabled);
+    await BankingService.setLowBalanceThreshold(
+      req.params.id,
+      data.threshold,
+      data.enabled,
+      p(req)
+    );
     res.json({ success: true, message: 'Low balance settings updated' });
   })
 );
@@ -798,7 +827,7 @@ router.post(
   '/check-low-balances',
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
-    const alertCount = await BankingService.checkLowBalanceAlerts();
+    const alertCount = await BankingService.checkLowBalanceAlerts(p(req));
     res.json({ success: true, data: { alertsCreated: alertCount } });
   })
 );
@@ -815,7 +844,7 @@ router.get(
   '/reports/account-summaries',
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
-    const summaries = await BankingService.getAccountSummaries();
+    const summaries = await BankingService.getAccountSummaries(p(req));
     res.json({ success: true, data: summaries });
   })
 );
@@ -841,7 +870,8 @@ router.get(
     const report = await BankingService.getActivityReport(
       req.params.accountId,
       periodStart,
-      periodEnd
+      periodEnd,
+      p(req)
     );
     res.json({ success: true, data: report });
   })
@@ -856,7 +886,7 @@ router.get(
   requirePermission('banking.read'),
   asyncHandler(async (req, res) => {
     const asOfDate = req.query.asOfDate as string | undefined;
-    const report = await BankingService.getCashPositionReport(asOfDate);
+    const report = await BankingService.getCashPositionReport(asOfDate, p(req));
     res.json({ success: true, data: report });
   })
 );

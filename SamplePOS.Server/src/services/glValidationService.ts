@@ -1,6 +1,6 @@
 /**
  * GL VALIDATION SERVICE
- * 
+ *
  * Validates that GL entries are properly created for transactions.
  * Use this to verify accounting integrity at the API level.
  */
@@ -27,7 +27,10 @@ interface ReconciliationResult {
 /**
  * Validates that a sale has proper GL entries
  */
-export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): Promise<GLValidationResult> {
+export async function validateSaleGLEntries(
+  saleId: string,
+  dbPool?: pg.Pool
+): Promise<GLValidationResult> {
   const pool = dbPool || globalPool;
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -117,14 +120,14 @@ export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): P
     return {
       isValid: errors.length === 0,
       errors,
-      warnings
+      warnings,
     };
   } catch (error) {
     logger.error('GL validation error', { saleId, error });
     return {
       isValid: false,
       errors: [`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`],
-      warnings: []
+      warnings: [],
     };
   }
 }
@@ -132,7 +135,10 @@ export async function validateSaleGLEntries(saleId: string, dbPool?: pg.Pool): P
 /**
  * Validates that a customer payment has proper GL entries
  */
-export async function validatePaymentGLEntries(paymentId: string, dbPool?: pg.Pool): Promise<GLValidationResult> {
+export async function validatePaymentGLEntries(
+  paymentId: string,
+  dbPool?: pg.Pool
+): Promise<GLValidationResult> {
   const pool = dbPool || globalPool;
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -175,14 +181,14 @@ export async function validatePaymentGLEntries(paymentId: string, dbPool?: pg.Po
     return {
       isValid: errors.length === 0,
       errors,
-      warnings
+      warnings,
     };
   } catch (error) {
     logger.error('GL validation error', { paymentId, error });
     return {
       isValid: false,
       errors: [`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`],
-      warnings: []
+      warnings: [],
     };
   }
 }
@@ -214,7 +220,7 @@ export async function checkARReconciliation(dbPool?: pg.Pool): Promise<Reconcili
     glBalance,
     subledgerBalance,
     difference,
-    isBalanced: new Decimal(difference).abs().lessThan('0.01')
+    isBalanced: new Decimal(difference).abs().lessThan('0.01'),
   };
 }
 
@@ -245,22 +251,24 @@ export async function checkAPReconciliation(dbPool?: pg.Pool): Promise<Reconcili
     glBalance,
     subledgerBalance,
     difference,
-    isBalanced: new Decimal(difference).abs().lessThan('0.01')
+    isBalanced: new Decimal(difference).abs().lessThan('0.01'),
   };
 }
 
 /**
  * Check Inventory reconciliation (GL vs Cost Layers Subledger)
- * 
+ *
  * CRITICAL: This check ensures the GL Inventory account (1300) matches
  * the sum of remaining inventory value in cost_layers.
- * 
+ *
  * Discrepancies can occur when:
  * - Cost layers are created without GL posting (e.g., direct API calls)
  * - Goods receipts fail to trigger GL posting
  * - Manual adjustments to cost_layers without corresponding GL entries
  */
-export async function checkInventoryReconciliation(dbPool?: pg.Pool): Promise<ReconciliationResult> {
+export async function checkInventoryReconciliation(
+  dbPool?: pg.Pool
+): Promise<ReconciliationResult> {
   const pool = dbPool || globalPool;
   const result = await pool.query(`
     SELECT 
@@ -286,7 +294,7 @@ export async function checkInventoryReconciliation(dbPool?: pg.Pool): Promise<Re
     glBalance,
     subledgerBalance,
     difference,
-    isBalanced: new Decimal(difference).abs().lessThan('0.01')
+    isBalanced: new Decimal(difference).abs().lessThan('0.01'),
   };
 }
 
@@ -306,9 +314,9 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
 }> {
   const pool = dbPool || globalPool;
   const [ar, ap, inventory] = await Promise.all([
-    checkARReconciliation(),
-    checkAPReconciliation(),
-    checkInventoryReconciliation()
+    checkARReconciliation(pool),
+    checkAPReconciliation(pool),
+    checkInventoryReconciliation(pool),
   ]);
 
   // Check for unbalanced journal entries
@@ -355,7 +363,7 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
     inventoryReconciliation: inventory,
     unbalancedJournalEntries: parseInt(unbalanced.rows[0]?.count || '0'),
     creditSalesWithoutGL: parseInt(salesNoGL.rows[0]?.count || '0'),
-    paymentsWithoutGL: parseInt(paymentsNoGL.rows[0]?.count || '0')
+    paymentsWithoutGL: parseInt(paymentsNoGL.rows[0]?.count || '0'),
   };
 
   const passed =
@@ -375,5 +383,5 @@ export const glValidationService = {
   checkARReconciliation,
   checkAPReconciliation,
   checkInventoryReconciliation,
-  runFullIntegrityCheck
+  runFullIntegrityCheck,
 };
