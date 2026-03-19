@@ -7,6 +7,7 @@
 
 import pg from 'pg';
 import logger from '../utils/logger.js';
+import type { TenantPlan } from '../../../shared/types/tenant.js';
 
 const { Pool } = pg;
 
@@ -21,14 +22,30 @@ export interface TenantPoolConfig {
   databaseName: string;
   databaseHost: string;
   databasePort: number;
+  plan?: TenantPlan;
+  replicaHost?: string;
+  replicaPort?: number;
 }
 
 interface PoolEntry {
   pool: pg.Pool;
+  readPool?: pg.Pool; // read-replica pool (if configured)
   config: TenantPoolConfig;
   lastUsed: number;
   connectionCount: number;
 }
+
+// ── Adaptive Pool Sizing ──────────────────────────────────
+// Pool connections scale with tenant plan to avoid the 50×10 = 500
+// connection ceiling when hundreds of tenants are active.
+
+const PLAN_POOL_SIZES: Record<string, number> = {
+  FREE: 3,
+  STARTER: 5,
+  PROFESSIONAL: 10,
+  ENTERPRISE: 20,
+};
+const DEFAULT_POOL_SIZE = 5;
 
 // ── Circuit Breaker ───────────────────────────────────────
 // Per-tenant health tracking: prevents cascading failures when a tenant DB is down.
@@ -162,6 +179,9 @@ class ConnectionManager {
       this.evictLeastRecentlyUsed();
     }
 
+    // Adaptive pool sizing: allocate connections based on tenant plan
+    const maxConns = PLAN_POOL_SIZES[config.plan ?? ''] ?? DEFAULT_POOL_SIZE;
+
     // Create new pool for this tenant — use discrete params to keep password out of logs
     const pool = new Pool({
       host: config.databaseHost,
@@ -169,7 +189,7 @@ class ConnectionManager {
       database: config.databaseName,
       user: this.dbUser,
       password: this.dbPassword,
-      max: this.defaultMaxConnections,
+      max: maxConns,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
     });
@@ -185,18 +205,48 @@ class ConnectionManager {
       });
     });
 
+    // Read replica pool (optional — for reports/dashboards)
+    let readPool: pg.Pool | undefined;
+    if (config.replicaHost) {
+      const readConns = Math.max(2, Math.ceil(maxConns * 0.6));
+      readPool = new Pool({
+        host: config.replicaHost,
+        port: config.replicaPort ?? config.databasePort,
+        database: config.databaseName,
+        user: this.dbUser,
+        password: this.dbPassword,
+        max: readConns,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+      });
+      readPool.on('connect', (client) => {
+        client.query('SET timezone = "UTC"');
+      });
+      readPool.on('error', (err) => {
+        logger.error(`Tenant read-replica pool error [${config.slug}]`, {
+          tenantId: config.tenantId,
+          error: err.message,
+        });
+      });
+    }
+
     const entry: PoolEntry = {
       pool,
+      readPool,
       config,
       lastUsed: Date.now(),
       connectionCount: 1,
     };
 
     this.pools.set(config.tenantId, entry);
-    logger.info(`Tenant pool created [${config.slug}] → ${config.databaseName}`, {
-      tenantId: config.tenantId,
-      activePools: this.pools.size,
-    });
+    logger.info(
+      `Tenant pool created [${config.slug}] → ${config.databaseName} (max=${maxConns}${readPool ? ', +replica' : ''})`,
+      {
+        tenantId: config.tenantId,
+        plan: config.plan ?? 'unknown',
+        activePools: this.pools.size,
+      }
+    );
 
     return pool;
   }
@@ -276,6 +326,19 @@ class ConnectionManager {
   }
 
   /**
+   * Get the read-replica pool for a tenant (falls back to primary if no replica configured).
+   * Use for read-heavy workloads: reports, dashboards, search.
+   */
+  getReadPool(tenantId: string): pg.Pool | undefined {
+    const entry = this.pools.get(tenantId);
+    if (entry) {
+      entry.lastUsed = Date.now();
+      return entry.readPool ?? entry.pool;
+    }
+    return undefined;
+  }
+
+  /**
    * Check if a pool exists for a tenant
    */
   hasPool(tenantId: string): boolean {
@@ -292,15 +355,30 @@ class ConnectionManager {
   /**
    * Get status of all pools
    */
-  getStatus(): { tenantId: string; slug: string; lastUsed: number; connectionCount: number }[] {
-    const entries: { tenantId: string; slug: string; lastUsed: number; connectionCount: number }[] =
-      [];
+  getStatus(): {
+    tenantId: string;
+    slug: string;
+    plan: string;
+    lastUsed: number;
+    connectionCount: number;
+    hasReplica: boolean;
+  }[] {
+    const entries: {
+      tenantId: string;
+      slug: string;
+      plan: string;
+      lastUsed: number;
+      connectionCount: number;
+      hasReplica: boolean;
+    }[] = [];
     for (const [tenantId, entry] of this.pools) {
       entries.push({
         tenantId,
         slug: entry.config.slug,
+        plan: entry.config.plan ?? 'unknown',
         lastUsed: entry.lastUsed,
         connectionCount: entry.connectionCount,
+        hasReplica: !!entry.readPool,
       });
     }
     return entries;
@@ -314,6 +392,7 @@ class ConnectionManager {
     if (entry) {
       try {
         await entry.pool.end();
+        if (entry.readPool) await entry.readPool.end();
         this.pools.delete(tenantId);
         logger.info(`Tenant pool removed [${entry.config.slug}]`, { tenantId });
       } catch (err) {
@@ -341,6 +420,11 @@ class ConnectionManager {
         entry.pool.end().catch((err) => {
           logger.error(`Error evicting pool [${entry.config.slug}]`, { error: err });
         });
+        if (entry.readPool) {
+          entry.readPool.end().catch((err) => {
+            logger.error(`Error evicting read-replica pool [${entry.config.slug}]`, { error: err });
+          });
+        }
         this.pools.delete(tenantId);
         logger.info(`Evicted idle tenant pool [${entry.config.slug}]`, { tenantId });
       }
@@ -371,6 +455,9 @@ class ConnectionManager {
         entry.pool.end().catch((err) => {
           logger.error(`Error evicting LRU pool [${entry.config.slug}]`, { error: err });
         });
+        if (entry.readPool) {
+          entry.readPool.end().catch(() => {});
+        }
         this.pools.delete(oldestId);
         logger.info(`Evicted LRU tenant pool [${entry.config.slug}]`);
       }
@@ -393,6 +480,13 @@ class ConnectionManager {
           logger.error(`Error closing pool [${entry.config.slug}]`, { error: err });
         })
       );
+      if (entry.readPool) {
+        closePromises.push(
+          entry.readPool.end().catch((err) => {
+            logger.error(`Error closing read-replica pool [${entry.config.slug}]`, { error: err });
+          })
+        );
+      }
     }
 
     if (this.masterPool) {

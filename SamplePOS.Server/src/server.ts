@@ -53,6 +53,8 @@ import { platformRoutes } from './modules/platform/platformRoutes.js';
 import { syncRoutes } from './modules/platform/syncRoutes.js';
 import { tenantConfigRoutes } from './modules/tenant/tenantConfigRoutes.js';
 import { tenantMiddleware } from './middleware/tenantMiddleware.js';
+import { tenantRateLimit } from './middleware/tenantRateLimit.js';
+import type { TenantPlan } from '../../shared/types/tenant.js';
 import { jobQueue } from './services/jobQueue.js';
 import { connectionManager } from './db/connectionManager.js';
 import { authenticate } from './middleware/auth.js';
@@ -205,6 +207,9 @@ app.use(auditContextMiddleware);
 
 // Multi-tenant middleware (resolves tenant from JWT/header/subdomain → attaches pool)
 app.use(tenantMiddleware);
+
+// Per-tenant rate limiting (must be after tenant resolution, before routes)
+app.use(tenantRateLimit);
 
 // ============================================================
 // ROUTES
@@ -396,8 +401,9 @@ async function startServer() {
             database_name: string;
             database_host: string;
             database_port: number;
+            plan: string;
           }>(
-            `SELECT id, slug, database_name, database_host, database_port
+            `SELECT id, slug, database_name, database_host, database_port, plan
              FROM tenants WHERE status = 'ACTIVE'`
           );
           for (const row of rows) {
@@ -407,6 +413,7 @@ async function startServer() {
               databaseName: row.database_name,
               databaseHost: row.database_host,
               databasePort: row.database_port,
+              plan: row.plan as TenantPlan,
             });
           }
           logger.info(`Pre-warmed ${rows.length} active tenant pool(s)`);

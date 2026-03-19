@@ -27,6 +27,7 @@ import { normalizeTenant } from '../../../shared/types/tenant.js';
 import logger from '../utils/logger.js';
 import NodeCache from 'node-cache';
 import { distributedCache } from '../services/distributedCache.js';
+import type { TenantPlan } from '../../../shared/types/tenant.js';
 
 // L1: in-process cache (5 min) — zero-latency for hot tenants
 const tenantCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
@@ -116,6 +117,7 @@ async function resolveTenant(req: Request, res: Response, next: NextFunction): P
     databaseName: tenant.databaseName,
     databaseHost: tenant.databaseHost,
     databasePort: tenant.databasePort,
+    plan: tenant.plan as TenantPlan,
   };
 
   req.tenantPool = connectionManager.getPool(poolConfig);
@@ -290,4 +292,16 @@ export function getTenantPool(req: Request): pg.Pool {
   throw new Error(
     'No tenant database pool on request. Ensure tenantMiddleware is applied and tenant resolution succeeded.'
   );
+}
+
+/**
+ * Get the read-replica pool for a tenant (falls back to primary if no replica).
+ * Use for read-heavy workloads: reports, dashboards, search queries.
+ */
+export function getTenantReadPool(req: Request): pg.Pool {
+  if (req.tenantId) {
+    const readPool = connectionManager.getReadPool(req.tenantId);
+    if (readPool) return readPool;
+  }
+  return getTenantPool(req);
 }
