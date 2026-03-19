@@ -82,13 +82,13 @@ export const invoiceService = {
    * @param input - Invoice creation data (customer, sale linkage, dates, payment)
    * @returns Created invoice with initial payment (if provided)
    * @throws Error if sale already has invoice or validation fails
-   * 
+   *
    * Business Rules:
    * - One invoice per sale (enforced uniqueness)
    * - Customer must match sale customer (if sale has customer)
    * - Invoice amounts derived from sale totals
    * - Initial payment updates invoice balance immediately
-   * 
+   *
    * Invoice Workflow:
    * 1. Check sale doesn't already have invoice
    * 2. Validate customer linkage with sale
@@ -96,7 +96,7 @@ export const invoiceService = {
    * 4. Create invoice record with auto-generated invoice_number
    * 5. Process initial payment (optional)
    * 6. Recalculate invoice balance
-   * 
+   *
    * Status Management:
    * - DRAFT: Initial state
    * - SENT: Delivered to customer
@@ -146,7 +146,7 @@ export const invoiceService = {
       logger.info('Invoice creation - Sale data retrieved', {
         saleId: input.saleId,
         hasSaleData: !!saleData,
-        hasPaymentLines: !!(saleData.paymentLines),
+        hasPaymentLines: !!saleData.paymentLines,
         paymentLinesCount: (saleData.paymentLines || []).length,
         paymentLines: saleData.paymentLines,
       });
@@ -164,12 +164,15 @@ export const invoiceService = {
 
       // Calculate amount paid from payment_lines (EXCLUDING CREDIT payments)
       // Credit payments represent the invoice amount, not actual payments
-      const paymentLines: PaymentLineRow[] = (saleData.paymentLines || []) as unknown as PaymentLineRow[];
-      const creditPaymentLines = paymentLines.filter((line: PaymentLineRow) =>
-        line.payment_method === 'CREDIT' || line.paymentMethod === 'CREDIT'
+      const paymentLines: PaymentLineRow[] = (saleData.paymentLines ||
+        []) as unknown as PaymentLineRow[];
+      const creditPaymentLines = paymentLines.filter(
+        (line: PaymentLineRow) =>
+          line.payment_method === 'CREDIT' || line.paymentMethod === 'CREDIT'
       );
-      const nonCreditPaymentLines = paymentLines.filter((line: PaymentLineRow) =>
-        line.payment_method !== 'CREDIT' && line.paymentMethod !== 'CREDIT'
+      const nonCreditPaymentLines = paymentLines.filter(
+        (line: PaymentLineRow) =>
+          line.payment_method !== 'CREDIT' && line.paymentMethod !== 'CREDIT'
       );
 
       const amountPaid = nonCreditPaymentLines.reduce((sum: Decimal, line: PaymentLineRow) => {
@@ -266,10 +269,9 @@ export const invoiceService = {
       }
 
       // Fetch customer name for invoice
-      const customerResult = await client.query(
-        'SELECT name FROM customers WHERE id = $1',
-        [input.customerId]
-      );
+      const customerResult = await client.query('SELECT name FROM customers WHERE id = $1', [
+        input.customerId,
+      ]);
       const customerName = (customerResult.rows[0]?.name as string) || 'Unknown Customer';
 
       const invoice = await invoiceRepository.createInvoice(client, {
@@ -372,7 +374,7 @@ export const invoiceService = {
                 productName: item.product_name,
                 quantityRequested: item.quantity,
                 unitPrice: Money.parseDb(item.unit_price).toNumber(),
-                lineTotal: Money.parseDb(item.line_total).toNumber()
+                lineTotal: Money.parseDb(item.line_total).toNumber(),
               }));
 
               const deliveryOrderData = {
@@ -387,7 +389,7 @@ export const invoiceService = {
                 totalAmount: Money.parseDb(fresh.total_amount).toNumber(),
                 deliveryDate: new Date().toLocaleDateString('en-CA'), // Today
                 priority: 'NORMAL' as const,
-                notes: `Auto-generated from invoice ${fresh.invoice_number}`
+                notes: `Auto-generated from invoice ${fresh.invoice_number}`,
               };
 
               // Create audit context for delivery creation
@@ -395,7 +397,7 @@ export const invoiceService = {
                 userId: input.createdById || 'system',
                 sessionId: 'system-auto',
                 ipAddress: 'system',
-                userAgent: 'InvoiceService-AutoDelivery'
+                userAgent: 'InvoiceService-AutoDelivery',
               };
 
               const deliveryResult = await createDeliveryOrder(deliveryOrderData, auditContext);
@@ -406,13 +408,13 @@ export const invoiceService = {
                   invoiceNumber: fresh.invoice_number,
                   deliveryNumber: deliveryResult.data.deliveryNumber,
                   customerId: fresh.customer_id,
-                  customerName: customer.name
+                  customerName: customer.name,
                 });
               } else {
                 logger.warn('Failed to auto-create delivery order for invoice', {
                   invoiceId: fresh.id,
                   invoiceNumber: fresh.invoice_number,
-                  error: deliveryResult.error
+                  error: deliveryResult.error,
                 });
               }
             }
@@ -421,7 +423,7 @@ export const invoiceService = {
               invoiceId: fresh.id,
               invoiceNumber: fresh.invoice_number,
               customerId: fresh.customer_id,
-              hasAddress: !!(customer?.address?.trim())
+              hasAddress: !!customer?.address?.trim(),
             });
           }
         }
@@ -429,7 +431,7 @@ export const invoiceService = {
         logger.error('Unexpected error in delivery integration for invoice', {
           invoiceId: fresh.id,
           invoiceNumber: fresh.invoice_number,
-          error: (error instanceof Error ? error.message : String(error))
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     });
@@ -443,13 +445,13 @@ export const invoiceService = {
    * @param id - Invoice UUID
    * @returns Invoice with payments array and sale line items
    * @throws Error if invoice not found
-   * 
+   *
    * Includes:
    * - Invoice header (amounts, dates, status)
    * - All payment records (amount, method, date, reference)
    * - Sale line items (product, quantity, price, cost)
    * - Calculated fields (amount_paid, balance)
-   * 
+   *
    * Use Cases:
    * - Invoice detail page
    * - Payment processing screen
@@ -516,21 +518,20 @@ export const invoiceService = {
       if (!inv) {
         throw new Error(
           `GHOST PAYMENT PREVENTION: Invoice ${invoiceId} does not exist. ` +
-          `Cannot record payment against non-existent invoice. This would create orphaned transaction records.`
+            `Cannot record payment against non-existent invoice. This would create orphaned transaction records.`
         );
       }
 
       // Validate customer still exists
       if (inv.customer_id) {
-        const customerCheck = await client.query(
-          'SELECT id, name FROM customers WHERE id = $1',
-          [inv.customer_id]
-        );
+        const customerCheck = await client.query('SELECT id, name FROM customers WHERE id = $1', [
+          inv.customer_id,
+        ]);
 
         if (customerCheck.rows.length === 0) {
           throw new Error(
             `GHOST CUSTOMER: Invoice ${inv.invoice_number} is linked to non-existent customer ${inv.customer_id}. ` +
-            `Cannot process payment for invoice with orphaned customer linkage. Data integrity violation detected.`
+              `Cannot process payment for invoice with orphaned customer linkage. Data integrity violation detected.`
           );
         }
       }
@@ -546,9 +547,9 @@ export const invoiceService = {
       if (newTotalPaidDec.greaterThan(invTotalDec)) {
         throw new Error(
           `OVERPAYMENT PREVENTION: Payment of ${input.amount.toFixed(2)} would exceed invoice total. ` +
-          `Invoice ${inv.invoice_number} total: ${invTotalDec.toFixed(2)}, ` +
-          `Already paid: ${Money.parseDb(inv.amount_paid).toFixed(2)}, ` +
-          `Maximum payment allowed: ${invTotalDec.minus(Money.parseDb(inv.amount_paid)).toFixed(2)}`
+            `Invoice ${inv.invoice_number} total: ${invTotalDec.toFixed(2)}, ` +
+            `Already paid: ${Money.parseDb(inv.amount_paid).toFixed(2)}, ` +
+            `Maximum payment allowed: ${invTotalDec.minus(Money.parseDb(inv.amount_paid)).toFixed(2)}`
         );
       }
 
@@ -561,11 +562,14 @@ export const invoiceService = {
         }
 
         // Verify customer has sufficient deposit balance
-        const depositBalance = await depositsService.getCustomerDepositBalance(pool, inv.customer_id);
+        const depositBalance = await depositsService.getCustomerDepositBalance(
+          pool,
+          inv.customer_id
+        );
         if (new Decimal(depositBalance.availableBalance).lessThan(input.amount)) {
           throw new Error(
             `INSUFFICIENT DEPOSIT: Customer has ${new Decimal(depositBalance.availableBalance).toFixed(2)} available, ` +
-            `but payment requires ${new Decimal(input.amount).toFixed(2)}`
+              `but payment requires ${new Decimal(input.amount).toFixed(2)}`
           );
         }
 
@@ -586,7 +590,9 @@ export const invoiceService = {
           customerId: inv.customer_id,
           amount: input.amount,
           depositBalanceBefore: depositBalance.availableBalance,
-          depositBalanceAfter: Money.toNumber(new Decimal(depositBalance.availableBalance).minus(input.amount)),
+          depositBalanceAfter: Money.toNumber(
+            new Decimal(depositBalance.availableBalance).minus(input.amount)
+          ),
         });
       }
 
@@ -614,20 +620,22 @@ export const invoiceService = {
         // Check if sale is now fully paid - if so, we need to update payment_method
         // to avoid violating chk_sales_credit_has_debt constraint which requires
         // CREDIT sales to have amount_paid < total_amount
-        const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(new Decimal(fresh.total_amount));
+        const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(
+          new Decimal(fresh.total_amount)
+        );
 
         // Get current sale payment method to determine if update is needed
-        const saleResult = await client.query(
-          'SELECT payment_method FROM sales WHERE id = $1',
-          [inv.sale_id]
-        );
+        const saleResult = await client.query('SELECT payment_method FROM sales WHERE id = $1', [
+          inv.sale_id,
+        ]);
         const currentPaymentMethod = saleResult.rows[0]?.payment_method;
 
         // If sale was CREDIT and is now fully paid, change to the payment method used
         // This satisfies the constraint: CREDIT must have amount_paid < total_amount
-        const newPaymentMethod = (isFullyPaid && currentPaymentMethod === 'CREDIT')
-          ? input.paymentMethod
-          : currentPaymentMethod;
+        const newPaymentMethod =
+          isFullyPaid && currentPaymentMethod === 'CREDIT'
+            ? input.paymentMethod
+            : currentPaymentMethod;
 
         await client.query(
           `UPDATE sales 
@@ -683,19 +691,23 @@ export const invoiceService = {
       // (DEPOSIT payments are skipped inside recordInvoicePaymentToGL)
       // ============================================================
       try {
-        const paymentDateStr = (input.paymentDate instanceof Date)
-          ? input.paymentDate.toLocaleDateString('en-CA')
-          : new Date().toLocaleDateString('en-CA');
+        const paymentDateStr =
+          input.paymentDate instanceof Date
+            ? input.paymentDate.toLocaleDateString('en-CA')
+            : new Date().toLocaleDateString('en-CA');
 
-        await glEntryService.recordInvoicePaymentToGL({
-          paymentId: payment.id,
-          receiptNumber: payment.receipt_number,
-          paymentDate: paymentDateStr,
-          amount: input.amount,
-          paymentMethod: input.paymentMethod,
-          invoiceId: invoiceId,
-          invoiceNumber: inv.invoice_number,
-        });
+        await glEntryService.recordInvoicePaymentToGL(
+          {
+            paymentId: payment.id,
+            receiptNumber: payment.receipt_number,
+            paymentDate: paymentDateStr,
+            amount: input.amount,
+            paymentMethod: input.paymentMethod,
+            invoiceId: invoiceId,
+            invoiceNumber: inv.invoice_number,
+          },
+          pool
+        );
       } catch (glError) {
         // Non-blocking: payment is committed, GL failure is logged
         logger.error('GL posting failed for invoice payment (non-blocking)', {

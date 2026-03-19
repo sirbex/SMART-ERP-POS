@@ -1,13 +1,17 @@
 /**
  * Payments Service - Business logic for split payment system
  * Handles atomic transactions for split payments and customer credit
- * 
+ *
  * ARCHITECTURE: Service layer - Business logic orchestration, uses repository for data access
  */
 
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
-import { paymentsRepository, CreateSalePaymentData, CreateCreditTransactionData } from './paymentsRepository.js';
+import {
+  paymentsRepository,
+  CreateSalePaymentData,
+  CreateCreditTransactionData,
+} from './paymentsRepository.js';
 import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
@@ -72,7 +76,7 @@ export const paymentsService = {
   async getPaymentMethods(pool: Pool): Promise<PaymentMethodInfo[]> {
     const methods = await paymentsRepository.getPaymentMethods(pool);
 
-    return methods.map(m => ({
+    return methods.map((m) => ({
       code: m.code,
       name: m.name,
       requiresReference: m.requires_reference,
@@ -101,19 +105,21 @@ export const paymentsService = {
     input: ProcessSplitPaymentInput
   ): Promise<ProcessSplitPaymentResult> {
     // Calculate totals upfront for validation
-    const totalPaid = input.payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
+    const totalPaid = input.payments
+      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0))
+      .toNumber();
     const totalAmount = new Decimal(input.totalAmount);
     const paidDecimal = new Decimal(totalPaid);
 
     // Validate payment amount
-    const hasCreditPayment = input.payments.some(p => p.method === 'CUSTOMER_CREDIT');
+    const hasCreditPayment = input.payments.some((p) => p.method === 'CUSTOMER_CREDIT');
     if (!hasCreditPayment && paidDecimal.lessThan(totalAmount.minus(0.01))) {
       throw new Error('Insufficient payment amount');
     }
 
     const txResult = await UnitOfWork.run(pool, async (client) => {
       // Process each payment segment
-      const paymentRecords: CreateSalePaymentData[] = input.payments.map(p => ({
+      const paymentRecords: CreateSalePaymentData[] = input.payments.map((p) => ({
         saleId: input.saleId,
         paymentMethodCode: p.method,
         amount: p.amount,
@@ -127,20 +133,23 @@ export const paymentsService = {
       // Handle customer credit if applicable
       let creditTransaction: { id: string; newBalance: number } | undefined;
 
-      const creditPayment = input.payments.find(p => p.method === 'CUSTOMER_CREDIT');
+      const creditPayment = input.payments.find((p) => p.method === 'CUSTOMER_CREDIT');
       if (creditPayment) {
         if (!input.customerId) {
           throw new Error('Customer ID required for credit payment');
         }
 
         // Get current balance
-        const currentBalance = await paymentsRepository.getCustomerBalance(client, input.customerId);
+        const currentBalance = await paymentsRepository.getCustomerBalance(
+          client,
+          input.customerId
+        );
         const creditAmount = new Decimal(creditPayment.amount);
         const newBalance = new Decimal(currentBalance).plus(creditAmount);
 
         // Find the payment ID for this credit payment
         const creditPaymentRecord = createdPayments.find(
-          p => p.payment_method_code === 'CUSTOMER_CREDIT'
+          (p) => p.payment_method_code === 'CUSTOMER_CREDIT'
         );
 
         // Create credit transaction record
@@ -193,7 +202,7 @@ export const paymentsService = {
 
     const result: ProcessSplitPaymentResult = {
       success: true,
-      salePayments: txResult.createdPayments.map(p => ({
+      salePayments: txResult.createdPayments.map((p) => ({
         id: p.id,
         method: p.payment_method_code,
         amount: parseFloat(p.amount),
@@ -260,22 +269,25 @@ export const paymentsService = {
     // ============================================================
     try {
       // Fetch customer name for GL description
-      const custRow = await pool.query(
-        'SELECT name FROM customers WHERE id = $1',
-        [input.customerId]
-      );
+      const custRow = await pool.query('SELECT name FROM customers WHERE id = $1', [
+        input.customerId,
+      ]);
       const customerName = (custRow.rows[0]?.name as string) || 'Unknown';
 
-      await glEntryService.recordCustomerPaymentToGL({
-        paymentId: result.transactionId,
-        paymentNumber: input.reference || `CPAY-${result.transactionId.slice(0, 8)}`,
-        paymentDate: new Date().toLocaleDateString('en-CA'),
-        amount: input.amount,
-        paymentMethod: (input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER') || 'CASH',
-        customerId: input.customerId,
-        customerName,
-        reducesAR: true,
-      });
+      await glEntryService.recordCustomerPaymentToGL(
+        {
+          paymentId: result.transactionId,
+          paymentNumber: input.reference || `CPAY-${result.transactionId.slice(0, 8)}`,
+          paymentDate: new Date().toLocaleDateString('en-CA'),
+          amount: input.amount,
+          paymentMethod:
+            (input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER') || 'CASH',
+          customerId: input.customerId,
+          customerName,
+          reducesAR: true,
+        },
+        pool
+      );
     } catch (glError) {
       // Non-blocking: payment is committed, GL failure is logged
       logger.error('GL posting failed for customer payment (non-blocking)', {
@@ -298,14 +310,14 @@ export const paymentsService = {
     const totalPaid = payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
 
     return {
-      payments: payments.map(p => ({
+      payments: payments.map((p) => ({
         id: p.id,
         method: p.payment_method_code,
         amount: parseFloat(p.amount),
         reference: p.reference_number,
         processedAt: p.processed_at,
       })),
-      creditTransactions: creditTransactions.map(t => ({
+      creditTransactions: creditTransactions.map((t) => ({
         id: t.id,
         type: t.transaction_type,
         amount: parseFloat(t.amount),
@@ -320,14 +332,10 @@ export const paymentsService = {
   /**
    * Get customer credit history
    */
-  async getCustomerCreditHistory(
-    pool: Pool,
-    customerId: string,
-    limit: number = 50
-  ) {
+  async getCustomerCreditHistory(pool: Pool, customerId: string, limit: number = 50) {
     const transactions = await paymentsRepository.getCustomerCreditHistory(pool, customerId, limit);
 
-    return transactions.map(t => ({
+    return transactions.map((t) => ({
       id: t.id,
       type: t.transaction_type,
       amount: parseFloat(t.amount),
@@ -344,11 +352,15 @@ export const paymentsService = {
    * Only cash overpayments generate change
    */
   calculateChange(payments: PaymentSegment[], totalDue: number): number {
-    const cashPayments = payments.filter(p => p.method === 'CASH');
-    const totalCash = cashPayments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
+    const cashPayments = payments.filter((p) => p.method === 'CASH');
+    const totalCash = cashPayments
+      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0))
+      .toNumber();
 
-    const nonCashPayments = payments.filter(p => p.method !== 'CASH');
-    const totalNonCash = nonCashPayments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
+    const nonCashPayments = payments.filter((p) => p.method !== 'CASH');
+    const totalNonCash = nonCashPayments
+      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0))
+      .toNumber();
 
     const remainingAfterNonCash = new Decimal(totalDue).minus(totalNonCash).toNumber();
 
@@ -375,7 +387,7 @@ export const paymentsService = {
     }
 
     const totalPaid = payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0)).toNumber();
-    const hasCreditPayment = payments.some(p => p.method === 'CUSTOMER_CREDIT');
+    const hasCreditPayment = payments.some((p) => p.method === 'CUSTOMER_CREDIT');
 
     // Check individual payments
     for (const payment of payments) {
@@ -395,10 +407,13 @@ export const paymentsService = {
     }
 
     // Check for duplicate methods (except cash)
-    const methodCounts = payments.reduce((acc, p) => {
-      acc[p.method] = (acc[p.method] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const methodCounts = payments.reduce(
+      (acc, p) => {
+        acc[p.method] = (acc[p.method] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
 
     for (const [method, count] of Object.entries(methodCounts)) {
       if (method !== 'CASH' && (count as number) > 1) {

@@ -81,7 +81,12 @@ export const createExpense = async (data: CreateExpenseData, pool?: Pool) => {
 /**
  * Update expense
  */
-export const updateExpense = async (id: string, data: UpdateExpenseData, userId: string, pool?: Pool) => {
+export const updateExpense = async (
+  id: string,
+  data: UpdateExpenseData,
+  userId: string,
+  pool?: Pool
+) => {
   try {
     const dbPool = pool || globalPool;
     // Check if expense exists and is modifiable
@@ -152,7 +157,11 @@ export const submitExpense = async (id: string, userId: string, pool?: Pool) => 
     }
 
     // Update status to pending approval
-    const result = await expenseRepository.updateExpense(id, { status: 'PENDING_APPROVAL' }, dbPool);
+    const result = await expenseRepository.updateExpense(
+      id,
+      { status: 'PENDING_APPROVAL' },
+      dbPool
+    );
     return result;
   } catch (error) {
     logger.error('Error in expense service submitExpense', { error, id, userId });
@@ -163,7 +172,12 @@ export const submitExpense = async (id: string, userId: string, pool?: Pool) => 
 /**
  * Approve expense
  */
-export const approveExpense = async (id: string, approverId: string, comments?: string, pool?: Pool) => {
+export const approveExpense = async (
+  id: string,
+  approverId: string,
+  comments?: string,
+  pool?: Pool
+) => {
   try {
     const dbPool = pool || globalPool;
     const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
@@ -211,15 +225,18 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
       );
       const isPaidAtApproval = paymentStatusResult.rows[0]?.payment_status === 'PAID';
 
-      await glEntryService.recordExpenseApprovalToGL({
-        expenseId: id,
-        expenseNumber: existingExpense.expenseNumber,
-        expenseDate: existingExpense.expenseDate,
-        amount: existingExpense.amount,
-        categoryCode: existingExpense.categoryCode || existingExpense.category || 'GENERAL',
-        description: existingExpense.title || existingExpense.expenseNumber,
-        isPaidAtApproval,
-      }, dbPool);
+      await glEntryService.recordExpenseApprovalToGL(
+        {
+          expenseId: id,
+          expenseNumber: existingExpense.expenseNumber,
+          expenseDate: existingExpense.expenseDate,
+          amount: existingExpense.amount,
+          categoryCode: existingExpense.categoryCode || existingExpense.category || 'GENERAL',
+          description: existingExpense.title || existingExpense.expenseNumber,
+          isPaidAtApproval,
+        },
+        dbPool
+      );
     } catch (glError) {
       logger.error('GL posting failed for expense approval (non-fatal)', {
         expenseId: id,
@@ -239,7 +256,12 @@ export const approveExpense = async (id: string, approverId: string, comments?: 
 /**
  * Reject expense
  */
-export const rejectExpense = async (id: string, rejectorId: string, reason: string, pool?: Pool) => {
+export const rejectExpense = async (
+  id: string,
+  rejectorId: string,
+  reason: string,
+  pool?: Pool
+) => {
   try {
     const dbPool = pool || globalPool;
     const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
@@ -363,7 +385,8 @@ export const markExpensePaid = async (
           existingExpense.amount,
           existingExpense.paymentMethod || 'BANK_TRANSFER',
           updateData.paid_at?.split('T')[0] || new Date().toLocaleDateString('en-CA'),
-          existingExpense.categoryId || undefined
+          existingExpense.categoryId || undefined,
+          dbPool
         );
         if (bankTxn) {
           logger.info('Bank transaction created for expense', {
@@ -395,15 +418,18 @@ export const markExpensePaid = async (
         }
       }
 
-      const paymentDate = (paymentData.paymentDate || new Date().toLocaleDateString('en-CA'));
+      const paymentDate = paymentData.paymentDate || new Date().toLocaleDateString('en-CA');
 
-      await glEntryService.recordExpensePaymentToGL({
-        expenseId: id,
-        expenseNumber: existingExpense.expenseNumber,
-        amount: existingExpense.amount,
-        paymentDate,
-        paymentAccountCode,
-      }, dbPool);
+      await glEntryService.recordExpensePaymentToGL(
+        {
+          expenseId: id,
+          expenseNumber: existingExpense.expenseNumber,
+          amount: existingExpense.amount,
+          paymentDate,
+          paymentAccountCode,
+        },
+        dbPool
+      );
     } catch (glError) {
       logger.error('GL posting failed for expense payment (non-fatal)', {
         expenseId: id,
@@ -447,11 +473,14 @@ export const getPaymentAccounts = async (pool?: Pool) => {
 /**
  * Create expense category
  */
-export const createExpenseCategory = async (data: {
-  name: string;
-  code: string;
-  description?: string;
-}, pool?: Pool) => {
+export const createExpenseCategory = async (
+  data: {
+    name: string;
+    code: string;
+    description?: string;
+  },
+  pool?: Pool
+) => {
   try {
     const dbPool = pool || globalPool;
     // Check if category with same name or code exists
@@ -571,7 +600,10 @@ export const submitForApproval = async (id: string, userId: string, pool?: Pool)
 /**
  * Get expenses by category report
  */
-export const getExpensesByCategory = async (filters: { startDate?: string; endDate?: string }, pool?: Pool) => {
+export const getExpensesByCategory = async (
+  filters: { startDate?: string; endDate?: string },
+  pool?: Pool
+) => {
   try {
     return await expenseRepository.getExpensesByCategory(filters, pool || globalPool);
   } catch (error) {
@@ -583,7 +615,10 @@ export const getExpensesByCategory = async (filters: { startDate?: string; endDa
 /**
  * Get expenses by vendor report
  */
-export const getExpensesByVendor = async (filters: { startDate?: string; endDate?: string }, pool?: Pool) => {
+export const getExpensesByVendor = async (
+  filters: { startDate?: string; endDate?: string },
+  pool?: Pool
+) => {
   try {
     return await expenseRepository.getExpensesByVendor(filters, pool || globalPool);
   } catch (error) {
@@ -595,7 +630,10 @@ export const getExpensesByVendor = async (filters: { startDate?: string; endDate
 /**
  * Get expense trends
  */
-export const getExpenseTrends = async (filters: { startDate?: string; endDate?: string }, pool?: Pool) => {
+export const getExpenseTrends = async (
+  filters: { startDate?: string; endDate?: string },
+  pool?: Pool
+) => {
   try {
     return await expenseRepository.getExpenseTrends(filters, pool || globalPool);
   } catch (error) {
@@ -607,10 +645,13 @@ export const getExpenseTrends = async (filters: { startDate?: string; endDate?: 
 /**
  * Get expenses by payment method
  */
-export const getExpensesByPaymentMethod = async (filters: {
-  startDate?: string;
-  endDate?: string;
-}, pool?: Pool) => {
+export const getExpensesByPaymentMethod = async (
+  filters: {
+    startDate?: string;
+    endDate?: string;
+  },
+  pool?: Pool
+) => {
   try {
     return await expenseRepository.getExpensesByPaymentMethod(filters, pool || globalPool);
   } catch (error) {
@@ -622,12 +663,15 @@ export const getExpensesByPaymentMethod = async (filters: {
 /**
  * Get expenses for export
  */
-export const getExpensesForExport = async (filters: {
-  startDate?: string;
-  endDate?: string;
-  categoryId?: string;
-  status?: string;
-}, pool?: Pool) => {
+export const getExpensesForExport = async (
+  filters: {
+    startDate?: string;
+    endDate?: string;
+    categoryId?: string;
+    status?: string;
+  },
+  pool?: Pool
+) => {
   try {
     return await expenseRepository.getExpensesForExport(filters, pool || globalPool);
   } catch (error) {
@@ -639,11 +683,14 @@ export const getExpensesForExport = async (filters: {
 /**
  * Get expense summary/statistics
  */
-export const getExpenseSummary = async (filters: {
-  startDate?: string;
-  endDate?: string;
-  categoryId?: string;
-}, pool?: Pool) => {
+export const getExpenseSummary = async (
+  filters: {
+    startDate?: string;
+    endDate?: string;
+    categoryId?: string;
+  },
+  pool?: Pool
+) => {
   try {
     return await expenseRepository.getExpenseSummary(filters, pool || globalPool);
   } catch (error) {
@@ -662,7 +709,11 @@ export const updateExpenseCategory = async (
   pool?: Pool
 ) => {
   try {
-    const category = await expenseRepository.updateExpenseCategory(id, updateData, pool || globalPool);
+    const category = await expenseRepository.updateExpenseCategory(
+      id,
+      updateData,
+      pool || globalPool
+    );
 
     if (category) {
       logger.info('Expense category updated', {

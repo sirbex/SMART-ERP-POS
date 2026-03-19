@@ -74,7 +74,9 @@ if (process.env.NODE_ENV === 'production') {
   const required = ['JWT_SECRET', 'DATABASE_URL'];
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
-    console.error(`FATAL: Missing required environment variables in production: ${missing.join(', ')}`);
+    console.error(
+      `FATAL: Missing required environment variables in production: ${missing.join(', ')}`
+    );
     process.exit(1);
   }
   if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
@@ -82,20 +84,31 @@ if (process.env.NODE_ENV === 'production') {
     process.exit(1);
   }
   // Warn about default/weak database credentials
-  if (process.env.DATABASE_URL?.includes('password@') || process.env.DATABASE_URL?.includes(':postgres@')) {
-    console.warn('WARNING: DATABASE_URL appears to use default credentials. Change for production!');
+  if (
+    process.env.DATABASE_URL?.includes('password@') ||
+    process.env.DATABASE_URL?.includes(':postgres@')
+  ) {
+    console.warn(
+      'WARNING: DATABASE_URL appears to use default credentials. Change for production!'
+    );
   }
   // Warn about missing APM — errors are invisible without it
   if (!process.env.SENTRY_DSN) {
-    console.warn('WARNING: SENTRY_DSN not set. Production errors will only appear in logs, not in an APM dashboard.');
+    console.warn(
+      'WARNING: SENTRY_DSN not set. Production errors will only appear in logs, not in an APM dashboard.'
+    );
   }
   // Warn about missing Redis — queues/banking retries won't work
   if (!process.env.REDIS_URL) {
-    console.warn('WARNING: REDIS_URL not set. Job queues (banking retries, imports) will fail silently.');
+    console.warn(
+      'WARNING: REDIS_URL not set. Job queues (banking retries, imports) will fail silently.'
+    );
   }
   // Validate CORS_ORIGIN — block wildcard in production
   if (process.env.CORS_ORIGIN === '*') {
-    console.error('FATAL: CORS_ORIGIN=* is not allowed in production (credentials mode requires explicit origins)');
+    console.error(
+      'FATAL: CORS_ORIGIN=* is not allowed in production (credentials mode requires explicit origins)'
+    );
     process.exit(1);
   }
 }
@@ -384,16 +397,18 @@ async function startServer() {
 
       // Register CSV import worker (requires Redis)
       try {
-        import('./modules/import/importWorker.js').then(({ processImportJob }) => {
-          jobQueue.processQueue('imports', async (job) => {
-            await processImportJob(job.data.payload as Parameters<typeof processImportJob>[0]);
+        import('./modules/import/importWorker.js')
+          .then(({ processImportJob }) => {
+            jobQueue.processQueue('imports', async (job) => {
+              await processImportJob(job.data.payload as Parameters<typeof processImportJob>[0]);
+            });
+            logger.info('CSV import worker registered');
+          })
+          .catch((err) => {
+            logger.warn('CSV import worker not started', {
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
-          logger.info('CSV import worker registered');
-        }).catch((err) => {
-          logger.warn('CSV import worker not started', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
       } catch (err) {
         logger.warn('CSV import worker not started (Redis may be offline)', {
           error: err instanceof Error ? err.message : String(err),
@@ -402,35 +417,52 @@ async function startServer() {
 
       // Register banking retry worker (requires Redis)
       try {
-        import('./services/bankingService.js').then(({ BankingService }) => {
-          jobQueue.processQueue('banking', async (job) => {
-            const payload = job.data.payload as {
-              saleId: string;
-              saleNumber: string;
-              saleDate: string;
-              payments: Array<{ amount: number; paymentMethod: string }>;
-            };
-            for (const payment of payload.payments) {
-              await BankingService.createFromSale(
-                payload.saleId,
-                payload.saleNumber,
-                payment.amount,
-                payment.paymentMethod,
-                payload.saleDate
-              );
-            }
-            logger.info('Banking retry succeeded', {
-              saleId: payload.saleId,
-              saleNumber: payload.saleNumber,
-              attempt: job.attemptsMade + 1,
+        import('./services/bankingService.js')
+          .then(({ BankingService }) => {
+            jobQueue.processQueue('banking', async (job) => {
+              const payload = job.data.payload as {
+                saleId: string;
+                saleNumber: string;
+                saleDate: string;
+                payments: Array<{ amount: number; paymentMethod: string }>;
+                tenantId?: string;
+              };
+
+              // Resolve tenant pool for multi-tenant isolation
+              let workerPool = payload.tenantId
+                ? connectionManager.getPoolById(payload.tenantId)
+                : undefined;
+              if (payload.tenantId && !workerPool) {
+                logger.error('Banking retry: tenant pool not found, skipping job', {
+                  tenantId: payload.tenantId,
+                  saleId: payload.saleId,
+                });
+                return; // Don't retry — pool eviction means tenant hasn't been active
+              }
+
+              for (const payment of payload.payments) {
+                await BankingService.createFromSale(
+                  payload.saleId,
+                  payload.saleNumber,
+                  payment.amount,
+                  payment.paymentMethod,
+                  payload.saleDate,
+                  workerPool
+                );
+              }
+              logger.info('Banking retry succeeded', {
+                saleId: payload.saleId,
+                saleNumber: payload.saleNumber,
+                attempt: job.attemptsMade + 1,
+              });
+            });
+            logger.info('Banking retry worker registered');
+          })
+          .catch((err) => {
+            logger.warn('Banking retry worker not started', {
+              error: err instanceof Error ? err.message : String(err),
             });
           });
-          logger.info('Banking retry worker registered');
-        }).catch((err) => {
-          logger.warn('Banking retry worker not started', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
       } catch (err) {
         logger.warn('Banking retry worker not started (Redis may be offline)', {
           error: err instanceof Error ? err.message : String(err),

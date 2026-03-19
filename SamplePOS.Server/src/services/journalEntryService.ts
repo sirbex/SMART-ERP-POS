@@ -297,16 +297,19 @@ export class JournalEntryService {
         entityType: line.entityType,
       }));
 
-      await AccountingCore.createJournalEntry({
-        entryDate: request.entryDate,
-        description: `Journal Entry: ${request.narration}`,
-        referenceType: 'JOURNAL_ENTRY',
-        referenceId: entryId,
-        referenceNumber: entryNumber,
-        lines: glLines,
-        userId: resolveUserId(request.createdBy),
-        idempotencyKey: `JE-${entryId}`,
-      });
+      await AccountingCore.createJournalEntry(
+        {
+          entryDate: request.entryDate,
+          description: `Journal Entry: ${request.narration}`,
+          referenceType: 'JOURNAL_ENTRY',
+          referenceId: entryId,
+          referenceNumber: entryNumber,
+          lines: glLines,
+          userId: resolveUserId(request.createdBy),
+          idempotencyKey: `JE-${entryId}`,
+        },
+        this.pool
+      );
 
       logger.info('Manual journal entry posted to GL', {
         entryId,
@@ -651,8 +654,5 @@ export class JournalEntryService {
 let journalEntryServiceInstance: JournalEntryService | null = null;
 
 export function getJournalEntryService(pool: Pool): JournalEntryService {
-  if (!journalEntryServiceInstance) {
-    journalEntryServiceInstance = new JournalEntryService(pool);
-  }
-  return journalEntryServiceInstance;
+  return new JournalEntryService(pool);
 }

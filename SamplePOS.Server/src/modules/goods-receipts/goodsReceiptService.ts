@@ -745,15 +745,18 @@ export const goodsReceiptService = {
         );
         const supplierName = supplierRes.rows[0]?.CompanyName || 'Unknown Supplier';
 
-        await glEntryService.recordGoodsReceiptToGL({
-          grId: id,
-          grNumber: finalized.gr.grNumber || id,
-          grDate: finalized.gr.receivedDate || new Date().toLocaleDateString('en-CA'),
-          totalAmount: grTotalNum,
-          supplierId: finalized.gr.supplierId || '',
-          supplierName,
-          poNumber: finalized.gr.purchaseOrderId || undefined,
-        });
+        await glEntryService.recordGoodsReceiptToGL(
+          {
+            grId: id,
+            grNumber: finalized.gr.grNumber || id,
+            grDate: finalized.gr.receivedDate || new Date().toLocaleDateString('en-CA'),
+            totalAmount: grTotalNum,
+            supplierId: finalized.gr.supplierId || '',
+            supplierName,
+            poNumber: finalized.gr.purchaseOrderId || undefined,
+          },
+          pool
+        );
       } catch (glError: unknown) {
         logger.error('GL posting failed for goods receipt (non-fatal)', {
           grId: id,

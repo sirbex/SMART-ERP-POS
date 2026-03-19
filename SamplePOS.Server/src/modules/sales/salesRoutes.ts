@@ -136,9 +136,14 @@ export const salesController = {
         discountAmount: posData.discountAmount || 0,
         taxAmount: posData.taxAmount,
         totalAmount: posData.totalAmount,
-        paymentMethod: posData.paymentMethod || (posData.paymentLines && posData.paymentLines.length > 0
-          ? posData.paymentLines.reduce((primary, line) => line.amount > primary.amount ? line : primary, posData.paymentLines[0]).paymentMethod
-          : 'CASH'), // Use highest-amount payment line as primary method
+        paymentMethod:
+          posData.paymentMethod ||
+          (posData.paymentLines && posData.paymentLines.length > 0
+            ? posData.paymentLines.reduce(
+                (primary, line) => (line.amount > primary.amount ? line : primary),
+                posData.paymentLines[0]
+              ).paymentMethod
+            : 'CASH'), // Use highest-amount payment line as primary method
         paymentReceived: posData.amountTendered || posData.totalAmount,
         soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // From auth middleware - null UUID for system
         saleDate: posData.saleDate || undefined, // Backdated sale date if provided
@@ -146,7 +151,10 @@ export const salesController = {
       };
     } else {
       // Log POS validation errors
-      console.error('POS Schema validation failed:', JSON.stringify(posValidation.error.errors, null, 2));
+      console.error(
+        'POS Schema validation failed:',
+        JSON.stringify(posValidation.error.errors, null, 2)
+      );
       console.error('Request body:', JSON.stringify(req.body, null, 2));
 
       // Try legacy format
@@ -155,7 +163,10 @@ export const salesController = {
         serviceInput = legacyValidation.data;
       } else {
         // Both validations failed - return POS schema errors as they're more relevant
-        console.error('Legacy Schema validation also failed:', JSON.stringify(legacyValidation.error.errors, null, 2));
+        console.error(
+          'Legacy Schema validation also failed:',
+          JSON.stringify(legacyValidation.error.errors, null, 2)
+        );
         res.status(400).json({
           success: false,
           error: 'Validation failed',
@@ -167,11 +178,15 @@ export const salesController = {
 
     let result;
     try {
-      result = await salesService.createSale(pool, serviceInput);
+      result = await salesService.createSale(pool, serviceInput, req.tenantId);
     } catch (createErr: unknown) {
       // Handle concurrent duplicate: PG unique violation on idempotency_key
       const pgErr = createErr as { code?: string; constraint?: string };
-      if (pgErr.code === '23505' && String(pgErr.constraint || '').includes('idempotency_key') && serviceInput.idempotencyKey) {
+      if (
+        pgErr.code === '23505' &&
+        String(pgErr.constraint || '').includes('idempotency_key') &&
+        serviceInput.idempotencyKey
+      ) {
         const dup = await pool.query(
           `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
           [serviceInput.idempotencyKey]
@@ -267,9 +282,7 @@ export const salesController = {
     const query = ListSalesQuerySchema.parse(req.query);
 
     // Server-enforced: cashiers can ONLY see their own sales
-    const effectiveCashierId = req.user?.role === 'CASHIER'
-      ? req.user.id
-      : query.cashierId;
+    const effectiveCashierId = req.user?.role === 'CASHIER' ? req.user.id : query.cashierId;
 
     const result = await salesService.listSales(pool, query.page, query.limit, {
       status: query.status,
@@ -289,14 +302,15 @@ export const salesController = {
         totalPages: Math.ceil(result.total / query.limit),
       },
     });
-  },  /**
+  } /**
    * Get sales summary (totals, count, by payment method)
-   */
+   */,
   async getSalesSummary(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const { startDate, endDate, groupBy } = SalesSummaryQuerySchema.parse(req.query);
 
-    const filters: { startDate?: string; endDate?: string; groupBy?: string; cashierId?: string } = {};
+    const filters: { startDate?: string; endDate?: string; groupBy?: string; cashierId?: string } =
+      {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
     if (groupBy) filters.groupBy = groupBy;
@@ -315,9 +329,17 @@ export const salesController = {
    */
   async getProductSalesSummary(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
-    const { startDate, endDate, productId, customerId } = ProductSalesSummaryQuerySchema.parse(req.query);
+    const { startDate, endDate, productId, customerId } = ProductSalesSummaryQuerySchema.parse(
+      req.query
+    );
 
-    const filters: { startDate?: string; endDate?: string; productId?: string; customerId?: string; cashierId?: string } = {};
+    const filters: {
+      startDate?: string;
+      endDate?: string;
+      productId?: string;
+      customerId?: string;
+      cashierId?: string;
+    } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
     if (productId) filters.productId = productId;
@@ -345,11 +367,7 @@ export const salesController = {
     if (query.endDate) filters.endDate = query.endDate;
     if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
-    const result = await salesService.getTopSellingProducts(
-      pool,
-      query.limit ?? 10,
-      filters
-    );
+    const result = await salesService.getTopSellingProducts(pool, query.limit ?? 10, filters);
 
     res.json({
       success: true,
@@ -443,15 +461,20 @@ export const salesController = {
       if ((error instanceof Error ? error.message : String(error)).includes('not found')) {
         res.status(404).json({
           success: false,
-          error: (error instanceof Error ? error.message : String(error)),
+          error: error instanceof Error ? error.message : String(error),
         });
         return;
       }
 
-      if ((error instanceof Error ? error.message : String(error)).includes('Manager approval required') || (error instanceof Error ? error.message : String(error)).includes('must have MANAGER')) {
+      if (
+        (error instanceof Error ? error.message : String(error)).includes(
+          'Manager approval required'
+        ) ||
+        (error instanceof Error ? error.message : String(error)).includes('must have MANAGER')
+      ) {
         res.status(403).json({
           success: false,
-          error: (error instanceof Error ? error.message : String(error)),
+          error: error instanceof Error ? error.message : String(error),
         });
         return;
       }
@@ -459,7 +482,7 @@ export const salesController = {
       if ((error instanceof Error ? error.message : String(error)).includes('Cannot void')) {
         res.status(400).json({
           success: false,
-          error: (error instanceof Error ? error.message : String(error)),
+          error: error instanceof Error ? error.message : String(error),
         });
         return;
       }
@@ -489,9 +512,21 @@ salesRoutes.get('/summary', authenticate, asyncHandler(salesController.getSalesS
 salesRoutes.get('/:id', authenticate, asyncHandler(salesController.getSaleById));
 
 // Sales reports - all authenticated users
-salesRoutes.get('/reports/product-summary', authenticate, asyncHandler(salesController.getProductSalesSummary));
-salesRoutes.get('/reports/top-selling', authenticate, asyncHandler(salesController.getTopSellingProducts));
-salesRoutes.get('/reports/summary-by-date', authenticate, asyncHandler(salesController.getSalesSummaryByDate));
+salesRoutes.get(
+  '/reports/product-summary',
+  authenticate,
+  asyncHandler(salesController.getProductSalesSummary)
+);
+salesRoutes.get(
+  '/reports/top-selling',
+  authenticate,
+  asyncHandler(salesController.getTopSellingProducts)
+);
+salesRoutes.get(
+  '/reports/summary-by-date',
+  authenticate,
+  asyncHandler(salesController.getSalesSummaryByDate)
+);
 
 // Void sale - requires sales.void permission (with audit trail)
 salesRoutes.post(

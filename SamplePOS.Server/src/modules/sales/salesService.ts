@@ -145,7 +145,8 @@ export const salesService = {
    */
   async createSale(
     pool: Pool,
-    input: CreateSaleInput
+    input: CreateSaleInput,
+    tenantId?: string
   ): Promise<{
     sale: SaleRecord;
     items: SaleItemRecord[];
@@ -452,16 +453,16 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-          ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+            ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-          ?.filter((line) => line.paymentMethod === 'CREDIT')
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+            ?.filter((line) => line.paymentMethod === 'CREDIT')
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(0);
 
@@ -723,23 +724,28 @@ export const salesService = {
       // GL POSTING: Application-layer double-entry (replaces database trigger)
       // Post AFTER items exist so revenue/COGS split is accurate.
       try {
-        await glEntryService.recordSaleToGL({
-          saleId: sale.id,
-          saleNumber: sale.saleNumber,
-          saleDate: sale.saleDate || new Date().toLocaleDateString('en-CA'),
-          totalAmount: sale.totalAmount,
-          costAmount: sale.totalCost || 0,
-          paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
-          amountPaid: sale.amountPaid ?? sale.totalAmount,
-          taxAmount: sale.taxAmount || 0,
-          customerId: sale.customerId || undefined,
-          saleItems: itemsWithCosts.map(item => ({
-            productType: item.productId?.startsWith('custom_') ? 'service' as const : 'inventory' as const,
-            totalPrice: item.lineTotal,
-            unitCost: item.costPrice || 0,
-            quantity: item.quantity,
-          })),
-        });
+        await glEntryService.recordSaleToGL(
+          {
+            saleId: sale.id,
+            saleNumber: sale.saleNumber,
+            saleDate: sale.saleDate || new Date().toLocaleDateString('en-CA'),
+            totalAmount: sale.totalAmount,
+            costAmount: sale.totalCost || 0,
+            paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
+            amountPaid: sale.amountPaid ?? sale.totalAmount,
+            taxAmount: sale.taxAmount || 0,
+            customerId: sale.customerId || undefined,
+            saleItems: itemsWithCosts.map((item) => ({
+              productType: item.productId?.startsWith('custom_')
+                ? ('service' as const)
+                : ('inventory' as const),
+              totalPrice: item.lineTotal,
+              unitCost: item.costPrice || 0,
+              quantity: item.quantity,
+            })),
+          },
+          pool
+        );
       } catch (glError: unknown) {
         logger.error('GL posting failed for sale — transaction will rollback', {
           saleId: sale.id,
@@ -941,8 +947,8 @@ export const salesService = {
 
           throw new BusinessError(
             `Not enough stock for "${item.productName}". ` +
-            `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
-            `Short by: ${remainingQty.toFixed(2)}.`,
+              `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+              `Short by: ${remainingQty.toFixed(2)}.`,
             errorCode,
             {
               product: item.productName,
@@ -1474,7 +1480,8 @@ export const salesService = {
               sale.saleNumber,
               payment.amount,
               payment.paymentMethod,
-              saleDateStr
+              saleDateStr,
+              pool
             );
             logger.info('Bank transaction created for sale payment', {
               saleId: sale.id,
@@ -1504,6 +1511,7 @@ export const salesService = {
             payments: failedPayments,
             failedAt: new Date().toISOString(),
             originalError: lastError,
+            tenantId: tenantId || undefined,
           };
 
           try {
@@ -2068,12 +2076,15 @@ export const salesService = {
 
       // GL POSTING: Reverse the original sale GL entry
       try {
-        await glEntryService.recordSaleVoidToGL({
-          saleId,
-          saleNumber: sale.sale_number,
-          voidDate: new Date().toLocaleDateString('en-CA'),
-          voidReason: voidReason || 'No reason provided',
-        });
+        await glEntryService.recordSaleVoidToGL(
+          {
+            saleId,
+            saleNumber: sale.sale_number,
+            voidDate: new Date().toLocaleDateString('en-CA'),
+            voidReason: voidReason || 'No reason provided',
+          },
+          pool
+        );
       } catch (glError: unknown) {
         logger.error('GL void reversal failed — sale void will still proceed', {
           saleId,

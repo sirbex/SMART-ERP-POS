@@ -69,27 +69,33 @@ export async function recordMovement(
   // RETURN movements do not get GL entries here (handled elsewhere)
   // ============================================================
   const glMovementTypes = ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY'] as const;
-  if (glMovementTypes.includes(data.movementType as typeof glMovementTypes[number])) {
+  if (glMovementTypes.includes(data.movementType as (typeof glMovementTypes)[number])) {
     try {
       const movementValue = new Decimal(Math.abs(result.quantity))
         .times(new Decimal(result.unitCost || 0))
         .toNumber();
 
       // Get product name for GL description
-      const productResult = await pool.query(
-        'SELECT name FROM products WHERE id = $1',
-        [data.productId]
-      );
+      const productResult = await pool.query('SELECT name FROM products WHERE id = $1', [
+        data.productId,
+      ]);
       const productName = productResult.rows[0]?.name || 'Unknown';
 
-      await glEntryService.recordStockMovementToGL({
-        movementId: result.id,
-        movementNumber: result.movementNumber,
-        movementDate: new Date().toLocaleDateString('en-CA'),
-        movementType: data.movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
-        movementValue,
-        productName,
-      });
+      await glEntryService.recordStockMovementToGL(
+        {
+          movementId: result.id,
+          movementNumber: result.movementNumber,
+          movementDate: new Date().toLocaleDateString('en-CA'),
+          movementType: data.movementType as
+            | 'ADJUSTMENT_IN'
+            | 'ADJUSTMENT_OUT'
+            | 'DAMAGE'
+            | 'EXPIRY',
+          movementValue,
+          productName,
+        },
+        pool
+      );
     } catch (glError) {
       logger.error('GL posting failed for stock movement (non-fatal)', {
         movementId: result.id,
