@@ -160,6 +160,9 @@ export const tenantService = {
         fullName: input.ownerFullName,
       });
 
+      // 5b. Seed internal system user (required for automated GL posting audit trail)
+      await this.seedSystemUser(tenantPool);
+
       // 6. Seed default system settings
       await this.seedSystemSettings(tenantPool, {
         companyName: input.name,
@@ -177,9 +180,7 @@ export const tenantService = {
         await this.seedDefaultRbac(tenantPool);
       }
 
-      const { rows: uomCheck } = await tenantPool.query(
-        'SELECT count(*)::int AS cnt FROM uoms'
-      );
+      const { rows: uomCheck } = await tenantPool.query('SELECT count(*)::int AS cnt FROM uoms');
       if ((uomCheck[0]?.cnt ?? 0) === 0) {
         logger.info('UOMs missing — seeding defaults');
         await this.seedDefaultUoms(tenantPool);
@@ -392,7 +393,7 @@ export const tenantService = {
         try {
           const templateResult = execSync(
             `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+              `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
             { encoding: 'utf-8', timeout: 10_000 }
           );
           templateTableCount = parseInt(templateResult.trim(), 10) || 0;
@@ -472,13 +473,27 @@ export const tenantService = {
       } catch {
         logger.warn('Could not seed RBAC data into template (non-fatal)');
       }
+
+      // Seed internal system user required for automated GL journal entry audit trail
+      try {
+        execSync(
+          `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+            `-d ${TEMPLATE_DB_NAME} -c "INSERT INTO users (id, email, password_hash, full_name, role, is_active, user_number) ` +
+            `VALUES ('00000000-0000-0000-0000-000000000000', 'system@internal', 'NOLOGIN', 'System', 'ADMIN', false, 'SYS-0000') ` +
+            `ON CONFLICT (id) DO NOTHING;"`,
+          { encoding: 'utf-8', timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        logger.info('Template seeded with system user');
+      } catch {
+        logger.warn('Could not seed system user into template (non-fatal)');
+      }
     } catch (error: unknown) {
       // Check if enough tables were created despite warnings
       let tableCount = 0;
       try {
         const result = execSync(
           `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-          `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
           { encoding: 'utf-8', timeout: 10_000 }
         );
         tableCount = parseInt(result.trim(), 10) || 0;
@@ -650,6 +665,28 @@ export const tenantService = {
     );
 
     logger.info(`Seeded admin user: ${user.email}`);
+  },
+
+  /**
+   * Seed the internal system user used for automated GL journal entries.
+   * This user cannot log in (is_active = false, password = 'NOLOGIN').
+   * Required because audit_log.user_id has a FK to users.id.
+   */
+  async seedSystemUser(tenantPool: pg.Pool): Promise<void> {
+    await tenantPool.query(
+      `INSERT INTO users (id, email, password_hash, full_name, role, is_active, user_number)
+       VALUES ($1, $2, $3, $4, $5, false, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        '00000000-0000-0000-0000-000000000000',
+        'system@internal',
+        'NOLOGIN',
+        'System',
+        'ADMIN',
+        'SYS-0000',
+      ]
+    );
+    logger.info('Seeded internal system user (GL audit trail)');
   },
 
   /**
@@ -964,13 +1001,22 @@ export const tenantService = {
         name: 'Manager',
         desc: 'Operational management',
         filter: (mod: string) =>
-          ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos'].includes(mod),
+          ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos'].includes(
+            mod
+          ),
       },
       {
         name: 'Cashier',
         desc: 'Point of sale operations',
         filter: (_mod: string, _act: string, key: string) =>
-          ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'inventory.read'].includes(key),
+          [
+            'pos.read',
+            'pos.create',
+            'sales.read',
+            'sales.create',
+            'customers.read',
+            'inventory.read',
+          ].includes(key),
       },
       {
         name: 'Auditor',
@@ -996,7 +1042,9 @@ export const tenantService = {
       if (!roleId) continue;
 
       const grantKeys = perms
-        .filter((p: { key: string; module: string; action: string }) => role.filter(p.module, p.action, p.key))
+        .filter((p: { key: string; module: string; action: string }) =>
+          role.filter(p.module, p.action, p.key)
+        )
         .map((p: { key: string }) => p.key);
 
       for (const key of grantKeys) {
@@ -1017,10 +1065,9 @@ export const tenantService = {
     const sysUser = '00000000-0000-0000-0000-000000000001';
 
     // Get admin user ID
-    const { rows: userRows } = await tenantPool.query(
-      'SELECT id FROM users WHERE email = $1',
-      [adminEmail]
-    );
+    const { rows: userRows } = await tenantPool.query('SELECT id FROM users WHERE email = $1', [
+      adminEmail,
+    ]);
     const userId = userRows[0]?.id;
     if (!userId) {
       logger.warn(`Cannot assign RBAC role: admin user ${adminEmail} not found`);
