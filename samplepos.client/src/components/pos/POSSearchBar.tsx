@@ -5,6 +5,7 @@ interface POSSearchBarProps {
   value: string;
   onChange: (value: string) => void;
   onSearch?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   placeholder?: string;
   autoFocus?: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -13,7 +14,8 @@ interface POSSearchBarProps {
 export default function POSSearchBar({ 
   value, 
   onChange, 
-  onSearch, 
+  onSearch,
+  onKeyDown,
   placeholder = 'Search products...', 
   autoFocus,
   inputRef 
@@ -32,7 +34,11 @@ export default function POSSearchBar({
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && onSearch) onSearch(); }}
+        onKeyDown={e => {
+          if (onKeyDown) onKeyDown(e);
+          if (e.key === 'Enter' && onSearch) onSearch();
+        }}
+        autoComplete="off"
         className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
         placeholder={placeholder}
         aria-label="POS product search"
