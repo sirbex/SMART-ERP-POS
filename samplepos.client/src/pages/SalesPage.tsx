@@ -6,6 +6,8 @@ import { formatCurrency } from '../utils/currency';
 import Decimal from 'decimal.js';
 import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
+import { printReceipt } from '../lib/print';
+import type { ReceiptData } from '../lib/print';
 
 // ── Local type definitions ──────────────────────────────────────────────
 
@@ -1599,7 +1601,39 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
             >
               Close
             </button>
-            <button className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2">
+            <button
+              onClick={() => {
+                const s = saleDetails ?? sale;
+                const receiptData: ReceiptData = {
+                  saleNumber: s.saleNumber,
+                  saleDate: s.saleDate || s.createdAt,
+                  totalAmount: s.totalAmount,
+                  subtotal: s.subtotal,
+                  discountAmount: s.discountAmount,
+                  taxAmount: s.taxAmount,
+                  cashierName: s.cashierName || s.soldByName,
+                  customerName: s.customerName || 'Walk-in Customer',
+                  paymentMethod: s.paymentMethod,
+                  amountPaid: s.amountPaid || s.paymentReceived,
+                  changeAmount: s.changeAmount,
+                  items: s.items?.map((item) => ({
+                    name: item.productName || item.product_name || 'Unknown',
+                    quantity: Number(item.quantity || item.qty || 0),
+                    unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
+                    subtotal: Number(item.subtotal || item.totalAmount || 0),
+                  })),
+                  payments: s.paymentLines?.map((pl) => ({
+                    method: pl.paymentMethod || pl.payment_method || 'CASH',
+                    amount: Number(pl.amount),
+                    reference: pl.reference,
+                  })),
+                };
+                printReceipt(receiptData).catch((err) =>
+                  console.error('Print failed:', err)
+                );
+              }}
+              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+            >
               <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
               </svg>
