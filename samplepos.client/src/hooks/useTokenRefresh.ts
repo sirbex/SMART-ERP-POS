@@ -151,8 +151,11 @@ export function setupAxiosInterceptors() {
                 try {
                     await refreshPromise;
                 } catch (error) {
-                    // Only force logout if we're online — network errors while offline should not clear tokens
-                    if (navigator.onLine) {
+                    // Only force logout if the server explicitly rejected the refresh
+                    // (has a response). Network errors should preserve tokens for offline use.
+                    const isNetworkError = error instanceof Error &&
+                        (!('response' in error) || (error as AxiosError).response == null);
+                    if (navigator.onLine && !isNetworkError) {
                         clearTokens();
                         window.location.href = '/login';
                     }
@@ -198,8 +201,11 @@ export function setupAxiosInterceptors() {
                         }
                         return axios(originalRequest);
                     } catch (refreshError) {
-                        // Only force logout if online
-                        if (navigator.onLine) {
+                        // Only force logout if the server explicitly rejected the token
+                        // (has a response). Network errors preserve tokens for offline use.
+                        const isNetworkError = refreshError instanceof Error &&
+                            (!('response' in refreshError) || (refreshError as AxiosError).response == null);
+                        if (navigator.onLine && !isNetworkError) {
                             clearTokens();
                             window.location.href = '/login';
                         }

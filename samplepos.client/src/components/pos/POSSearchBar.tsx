@@ -11,22 +11,22 @@ interface POSSearchBarProps {
   inputRef?: RefObject<HTMLInputElement | null>;
 }
 
-export default function POSSearchBar({ 
-  value, 
-  onChange, 
+export default function POSSearchBar({
+  value,
+  onChange,
   onSearch,
   onKeyDown,
-  placeholder = 'Search products...', 
+  placeholder = 'Search products...',
   autoFocus,
-  inputRef 
+  inputRef
 }: POSSearchBarProps) {
   const internalRef = useRef<HTMLInputElement>(null);
   const refToUse = inputRef || internalRef;
-  
+
   useEffect(() => {
     if (autoFocus && refToUse.current) refToUse.current.focus();
   }, [autoFocus, refToUse]);
-  
+
   return (
     <div className="flex items-center gap-2">
       <input

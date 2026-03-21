@@ -6,6 +6,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
+import { useOfflineContext } from '../contexts/OfflineContext';
 import type {
     CashRegister,
     CashRegisterSession,
@@ -101,20 +102,48 @@ export function useUpdateRegister() {
 // SESSION HOOKS
 // ============================================================================
 
+// Key for caching session in localStorage (offline resilience)
+const SESSION_CACHE_KEY = 'cash_register_session';
+
+function getCachedSession(): CashRegisterSession | null {
+    try {
+        const raw = localStorage.getItem(SESSION_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
- * Get current user's open session
+ * Get current user's open session.
+ * Caches to localStorage so the POS stays usable when offline
+ * (avoids the "Cash Register Required" overlay on network blips).
  */
 export function useCurrentSession() {
+    const { isOnline } = useOfflineContext();
+
     return useQuery({
         queryKey: QUERY_KEYS.currentSession,
         queryFn: async () => {
             const response = await api.get<{ success: boolean; data: CashRegisterSession | null }>(
                 '/cash-registers/sessions/current'
             );
-            return response.data.data;
+            const session = response.data.data;
+            // Persist for offline use
+            if (session) {
+                localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(session));
+            } else {
+                localStorage.removeItem(SESSION_CACHE_KEY);
+            }
+            return session;
         },
-        refetchInterval: 30000, // Refresh every 30 seconds
+        // Don't poll the server when offline — use cached data
+        refetchInterval: isOnline ? 30000 : false,
         staleTime: 10000,
+        // Seed from localStorage so offline starts with last-known session
+        initialData: getCachedSession,
+        // Keep stale data visible while a background refetch is in-flight
+        placeholderData: (prev: CashRegisterSession | null | undefined) => prev ?? getCachedSession(),
     });
 }
 

@@ -170,8 +170,15 @@ apiClient.interceptors.response.use(
             originalRequest.headers.Authorization = `Bearer ${token}`;
           }
           return apiClient(originalRequest);
-        } catch {
-          // Refresh failed — fall through to logout
+        } catch (refreshErr) {
+          // If refresh failed due to network (no server response), keep tokens —
+          // user may still work offline with cached session data.
+          const isNetworkError = refreshErr instanceof Error &&
+            (!('response' in refreshErr) || (refreshErr as AxiosError).response == null);
+          if (isNetworkError) {
+            return Promise.reject(error);
+          }
+          // Genuine auth rejection — fall through to logout
         }
       }
 

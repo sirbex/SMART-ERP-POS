@@ -253,7 +253,7 @@ export default function POSPage() {
   >('CASH');
 
   // Cash register session for drawer tracking
-  const { data: currentSession, isLoading: isLoadingSession } = useCurrentSession();
+  const { data: currentSession, isLoading: isLoadingSession, isError: isSessionError } = useCurrentSession();
 
   // State for showing open register dialog when required
   const [showOpenRegisterDialog, setShowOpenRegisterDialog] = useState(false);
@@ -1983,7 +1983,8 @@ export default function POSPage() {
 
     // CRITICAL: Block sales if no cash register session is open (ONLINE only)
     // Offline sales bypass register check – tagged for reconciliation on sync
-    if (!hasOpenRegister && isOnline) {
+    // Also allow if session query errored (don't block on network blips)
+    if (!hasOpenRegister && isOnline && !isSessionError) {
       console.log('⚠️ BLOCKED: No open cash register session');
       toast.error('Please open a cash register before making sales');
       setShowOpenRegisterDialog(true);
@@ -4266,7 +4267,8 @@ export default function POSPage() {
       />
 
       {/* Blocking overlay when no cash register session - prevents sales (ONLINE ONLY) */}
-      {!isLoadingSession && !hasOpenRegister && isOnline && (
+      {/* Also skip when session query errored (network blip ≠ no session) */}
+      {!isLoadingSession && !isSessionError && !hasOpenRegister && isOnline && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-yellow-100 flex items-center justify-center">
