@@ -128,12 +128,12 @@ export const uploadAndStartImport = asyncHandler(async (req: Request, res: Respo
   const pool = req.tenantPool || globalPool;
   const tenantPoolConfig: TenantPoolConfig | undefined = req.tenant
     ? {
-        tenantId: req.tenant.id,
-        slug: req.tenant.slug,
-        databaseName: req.tenant.databaseName,
-        databaseHost: req.tenant.databaseHost,
-        databasePort: req.tenant.databasePort,
-      }
+      tenantId: req.tenant.id,
+      slug: req.tenant.slug,
+      databaseName: req.tenant.databaseName,
+      databaseHost: req.tenant.databaseHost,
+      databasePort: req.tenant.databasePort,
+    }
     : undefined;
 
   // Validate body params (entityType, duplicateStrategy)
@@ -290,7 +290,7 @@ export const exportErrorsCsv = asyncHandler(async (req: Request, res: Response) 
       const safeRawData = rawData.replace(/[\r\n]+/g, ' ');
       res.write(
         [String(err.rowNumber), err.errorType, `"${safeMessage}"`, `"${safeRawData}"`].join(',') +
-          '\n'
+        '\n'
       );
     }
     offset += PAGE_SIZE;
@@ -328,12 +328,12 @@ export const retryImportJob = asyncHandler(async (req: Request, res: Response) =
   const pool = req.tenantPool || globalPool;
   const tenantPoolConfig: TenantPoolConfig | undefined = req.tenant
     ? {
-        tenantId: req.tenant.id,
-        slug: req.tenant.slug,
-        databaseName: req.tenant.databaseName,
-        databaseHost: req.tenant.databaseHost,
-        databasePort: req.tenant.databasePort,
-      }
+      tenantId: req.tenant.id,
+      slug: req.tenant.slug,
+      databaseName: req.tenant.databaseName,
+      databaseHost: req.tenant.databaseHost,
+      databasePort: req.tenant.databasePort,
+    }
     : undefined;
   const { id } = JobIdParamSchema.parse(req.params);
   const job = await importService.retryImportJob(id, tenantPoolConfig, pool);

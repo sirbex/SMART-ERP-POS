@@ -116,12 +116,12 @@ class ConnectionManager {
       const poolConfig = process.env.DATABASE_URL
         ? { connectionString: process.env.DATABASE_URL }
         : {
-            host: 'localhost',
-            port: 5432,
-            database: 'pos_system',
-            user: this.dbUser,
-            password: this.dbPassword,
-          };
+          host: 'localhost',
+          port: 5432,
+          database: 'pos_system',
+          user: this.dbUser,
+          password: this.dbPassword,
+        };
 
       this.masterPool = new Pool({
         ...poolConfig,
@@ -456,7 +456,7 @@ class ConnectionManager {
           logger.error(`Error evicting LRU pool [${entry.config.slug}]`, { error: err });
         });
         if (entry.readPool) {
-          entry.readPool.end().catch(() => {});
+          entry.readPool.end().catch(() => { });
         }
         this.pools.delete(oldestId);
         logger.info(`Evicted LRU tenant pool [${entry.config.slug}]`);

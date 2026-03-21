@@ -32,10 +32,10 @@ let jobQueueInstance: {
     name: string
   ) =>
     | {
-        getWaiting: () => Promise<
-          Array<{ data?: Record<string, unknown>; remove: () => Promise<void> }>
-        >;
-      }
+      getWaiting: () => Promise<
+        Array<{ data?: Record<string, unknown>; remove: () => Promise<void> }>
+      >;
+    }
     | undefined;
 } | null = null;
 

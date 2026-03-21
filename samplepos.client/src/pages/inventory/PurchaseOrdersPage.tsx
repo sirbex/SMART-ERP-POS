@@ -155,7 +155,7 @@ function LineItemRow({
   let lineTotal = new Decimal(0);
   try {
     lineTotal = new Decimal(item.quantity || 0).times(new Decimal(item.unitCost || 0));
-  } catch {}
+  } catch { }
 
   const handleUomChange = (params: {
     uomId: string | null;
@@ -1307,9 +1307,8 @@ export default function PurchaseOrdersPage() {
               {/* Status Badge */}
               <div>
                 <span
-                  className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${
-                    PO_STATUSES[selectedPO.status as POStatus]?.color || 'bg-gray-100 text-gray-800'
-                  }`}
+                  className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${PO_STATUSES[selectedPO.status as POStatus]?.color || 'bg-gray-100 text-gray-800'
+                    }`}
                 >
                   {PO_STATUSES[selectedPO.status as POStatus]?.icon}{' '}
                   {PO_STATUSES[selectedPO.status as POStatus]?.label}

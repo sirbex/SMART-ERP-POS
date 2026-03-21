@@ -69,7 +69,7 @@ export function UomSelector({
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
-    
+
     if (uoms.length === 0) return;
 
     // Reset sync tracker so the effect can work for the new selection

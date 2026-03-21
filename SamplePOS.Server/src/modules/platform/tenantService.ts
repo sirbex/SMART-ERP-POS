@@ -393,7 +393,7 @@ export const tenantService = {
         try {
           const templateResult = execSync(
             `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-              `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
             { encoding: 'utf-8', timeout: 10_000 }
           );
           templateTableCount = parseInt(templateResult.trim(), 10) || 0;
@@ -478,9 +478,9 @@ export const tenantService = {
       try {
         execSync(
           `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `-d ${TEMPLATE_DB_NAME} -c "INSERT INTO users (id, email, password_hash, full_name, role, is_active, user_number) ` +
-            `VALUES ('00000000-0000-0000-0000-000000000000', 'system@internal', 'NOLOGIN', 'System', 'ADMIN', false, 'SYS-0000') ` +
-            `ON CONFLICT (id) DO NOTHING;"`,
+          `-d ${TEMPLATE_DB_NAME} -c "INSERT INTO users (id, email, password_hash, full_name, role, is_active, user_number) ` +
+          `VALUES ('00000000-0000-0000-0000-000000000000', 'system@internal', 'NOLOGIN', 'System', 'ADMIN', false, 'SYS-0000') ` +
+          `ON CONFLICT (id) DO NOTHING;"`,
           { encoding: 'utf-8', timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] }
         );
         logger.info('Template seeded with system user');
@@ -493,7 +493,7 @@ export const tenantService = {
       try {
         const result = execSync(
           `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
+          `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
           { encoding: 'utf-8', timeout: 10_000 }
         );
         tableCount = parseInt(result.trim(), 10) || 0;

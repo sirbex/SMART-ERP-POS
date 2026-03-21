@@ -33,7 +33,7 @@ export function computeUomPrices(input: ComputeUomPricesInput): ComputeUomPrices
   Decimal.set({ rounding: roundingMode });
 
   const baseCost = new Decimal(input.baseCost);
-  
+
   if (!baseCost.isFinite()) {
     throw new Error(`Invalid base cost: ${input.baseCost}`);
   }

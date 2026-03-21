@@ -140,9 +140,9 @@ export const salesController = {
           posData.paymentMethod ||
           (posData.paymentLines && posData.paymentLines.length > 0
             ? posData.paymentLines.reduce(
-                (primary, line) => (line.amount > primary.amount ? line : primary),
-                posData.paymentLines[0]
-              ).paymentMethod
+              (primary, line) => (line.amount > primary.amount ? line : primary),
+              posData.paymentLines[0]
+            ).paymentMethod
             : 'CASH'), // Use highest-amount payment line as primary method
         paymentReceived: posData.amountTendered || posData.totalAmount,
         soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // From auth middleware - null UUID for system

@@ -221,8 +221,8 @@ export class JournalEntryService {
       if (!totalDebit.equals(totalCredit)) {
         throw new BusinessError(
           `Journal entry is not balanced. ` +
-            `Debits: ${totalDebit.toFixed(2)}, Credits: ${totalCredit.toFixed(2)}, ` +
-            `Difference: ${totalDebit.minus(totalCredit).toFixed(2)}`,
+          `Debits: ${totalDebit.toFixed(2)}, Credits: ${totalCredit.toFixed(2)}, ` +
+          `Difference: ${totalDebit.minus(totalCredit).toFixed(2)}`,
           'ERR_JOURNAL_008',
           {
             totalDebit: parseFloat(totalDebit.toFixed(2)),

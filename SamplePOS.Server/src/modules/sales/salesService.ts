@@ -453,16 +453,16 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-            ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+          ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-            ?.filter((line) => line.paymentMethod === 'CREDIT')
-            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+          ?.filter((line) => line.paymentMethod === 'CREDIT')
+          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(0);
 
@@ -947,8 +947,8 @@ export const salesService = {
 
           throw new BusinessError(
             `Not enough stock for "${item.productName}". ` +
-              `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
-              `Short by: ${remainingQty.toFixed(2)}.`,
+            `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+            `Short by: ${remainingQty.toFixed(2)}.`,
             errorCode,
             {
               product: item.productName,

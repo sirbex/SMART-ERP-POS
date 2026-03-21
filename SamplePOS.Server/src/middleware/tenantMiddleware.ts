@@ -223,10 +223,10 @@ async function getTenantById(tenantId: string): Promise<Tenant | null> {
   const tenant = normalizeTenant(result.rows[0]);
   tenantCache.set(cacheKey, tenant);
   tenantCache.set(`tenant:slug:${tenant.slug}`, tenant);
-  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => {});
+  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => { });
   distributedCache
     .set(`tenant:slug:${tenant.slug}`, tenant, { ttl: REDIS_TENANT_TTL })
-    .catch(() => {});
+    .catch(() => { });
   return tenant;
 }
 
@@ -259,8 +259,8 @@ async function getTenantBySlug(slug: string): Promise<Tenant | null> {
   const tenant = normalizeTenant(result.rows[0]);
   tenantCache.set(cacheKey, tenant);
   tenantCache.set(`tenant:id:${tenant.id}`, tenant);
-  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => {});
-  distributedCache.set(`tenant:id:${tenant.id}`, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => {});
+  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => { });
+  distributedCache.set(`tenant:id:${tenant.id}`, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => { });
   return tenant;
 }
 
@@ -271,11 +271,11 @@ async function getTenantBySlug(slug: string): Promise<Tenant | null> {
 export function invalidateTenantCache(tenantId?: string, slug?: string): void {
   if (tenantId) {
     tenantCache.del(`tenant:id:${tenantId}`);
-    distributedCache.delete(`tenant:id:${tenantId}`).catch(() => {});
+    distributedCache.delete(`tenant:id:${tenantId}`).catch(() => { });
   }
   if (slug) {
     tenantCache.del(`tenant:slug:${slug}`);
-    distributedCache.delete(`tenant:slug:${slug}`).catch(() => {});
+    distributedCache.delete(`tenant:slug:${slug}`).catch(() => { });
   }
 }
 

@@ -289,12 +289,12 @@ export const goodsReceiptService = {
         grId: gr.id,
         manualPOData: manualPO
           ? {
-              id: manualPO.id,
-              poNumber: manualPO.poNumber,
-              supplierId: manualPO.supplierId,
-              status: manualPO.status,
-              totalAmount: manualPO.totalAmount,
-            }
+            id: manualPO.id,
+            poNumber: manualPO.poNumber,
+            supplierId: manualPO.supplierId,
+            status: manualPO.status,
+            totalAmount: manualPO.totalAmount,
+          }
           : undefined,
       };
     });

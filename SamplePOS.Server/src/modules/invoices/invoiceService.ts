@@ -518,7 +518,7 @@ export const invoiceService = {
       if (!inv) {
         throw new Error(
           `GHOST PAYMENT PREVENTION: Invoice ${invoiceId} does not exist. ` +
-            `Cannot record payment against non-existent invoice. This would create orphaned transaction records.`
+          `Cannot record payment against non-existent invoice. This would create orphaned transaction records.`
         );
       }
 
@@ -531,7 +531,7 @@ export const invoiceService = {
         if (customerCheck.rows.length === 0) {
           throw new Error(
             `GHOST CUSTOMER: Invoice ${inv.invoice_number} is linked to non-existent customer ${inv.customer_id}. ` +
-              `Cannot process payment for invoice with orphaned customer linkage. Data integrity violation detected.`
+            `Cannot process payment for invoice with orphaned customer linkage. Data integrity violation detected.`
           );
         }
       }
@@ -547,9 +547,9 @@ export const invoiceService = {
       if (newTotalPaidDec.greaterThan(invTotalDec)) {
         throw new Error(
           `OVERPAYMENT PREVENTION: Payment of ${input.amount.toFixed(2)} would exceed invoice total. ` +
-            `Invoice ${inv.invoice_number} total: ${invTotalDec.toFixed(2)}, ` +
-            `Already paid: ${Money.parseDb(inv.amount_paid).toFixed(2)}, ` +
-            `Maximum payment allowed: ${invTotalDec.minus(Money.parseDb(inv.amount_paid)).toFixed(2)}`
+          `Invoice ${inv.invoice_number} total: ${invTotalDec.toFixed(2)}, ` +
+          `Already paid: ${Money.parseDb(inv.amount_paid).toFixed(2)}, ` +
+          `Maximum payment allowed: ${invTotalDec.minus(Money.parseDb(inv.amount_paid)).toFixed(2)}`
         );
       }
 
@@ -569,7 +569,7 @@ export const invoiceService = {
         if (new Decimal(depositBalance.availableBalance).lessThan(input.amount)) {
           throw new Error(
             `INSUFFICIENT DEPOSIT: Customer has ${new Decimal(depositBalance.availableBalance).toFixed(2)} available, ` +
-              `but payment requires ${new Decimal(input.amount).toFixed(2)}`
+            `but payment requires ${new Decimal(input.amount).toFixed(2)}`
           );
         }
 
