@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import POSSearchBar from '../../components/pos/POSSearchBar';
@@ -221,9 +221,11 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       enabled: isOnline && !!search, // Disable when offline
     });
 
-    // ── Offline search: use cached catalog ──
-    const offlineResults: ProductSearchResult[] =
-      !isOnline && search ? searchCachedProducts(search).map(transformCachedToSearchResult) : [];
+    // ── Offline search: use cached catalog (memoized to prevent new array ref each render) ──
+    const offlineResults = useMemo<ProductSearchResult[]>(
+      () => (!isOnline && search ? searchCachedProducts(search).map(transformCachedToSearchResult) : []),
+      [isOnline, search]
+    );
 
     // Unified data source
     const data = isOnline ? onlineData : offlineResults;
