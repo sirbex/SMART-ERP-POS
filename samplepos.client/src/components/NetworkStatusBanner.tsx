@@ -9,11 +9,14 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useOfflineContext } from '../contexts/OfflineContext';
 
 export default function NetworkStatusBanner() {
   const { isOnline, isCacheWarming } = useOfflineContext();
-  const [visible, setVisible] = useState(!isOnline);
+  const location = useLocation();
+  const visible0 = !isOnline;
+  const [visible, setVisible] = useState(visible0);
   const [showReconnected, setShowReconnected] = useState(false);
   const wasOfflineRef = useRef(!isOnline);
 
@@ -35,8 +38,11 @@ export default function NetworkStatusBanner() {
     }
   }, [isOnline]);
 
+  // POS page has its own offline banner with more detail — skip the global one
+  const isPOS = location.pathname === '/pos' || location.pathname === '/';
+
   // Offline banner
-  if (visible && !isOnline) {
+  if (visible && !isOnline && !isPOS) {
     return (
       <div
         role="alert"
