@@ -4,7 +4,7 @@ import { z } from 'zod';
 export const POSSaleLineItemSchema = z.object({
   productId: z.string().min(1), // Accept UUID or custom IDs (e.g., custom_* for quotation items)
   productName: z.string().min(1),
-  sku: z.string(), // Allow empty for custom/service items
+  sku: z.string().optional().default(''), // Allow empty/missing for custom/service items
   uom: z.string().min(1),
   uomId: z.string().uuid().optional(), // UUID of product_uom used
   quantity: z.number().positive().finite(),

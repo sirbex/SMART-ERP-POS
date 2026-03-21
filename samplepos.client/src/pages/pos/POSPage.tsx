@@ -2160,7 +2160,7 @@ export default function POSPage() {
         return {
           productId: item.id,
           productName: item.name,
-          sku: item.sku,
+          sku: item.sku || '',
           uom: item.uom,
           uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
           quantity: item.quantity,
