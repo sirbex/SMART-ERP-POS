@@ -280,17 +280,66 @@ export async function retryImportJob(
 
 // ── CSV Template ──────────────────────────────────────────
 
+/** Sample data rows for each entity type so users see the expected format. */
+const PRODUCT_SAMPLE_ROW = [
+  'SKU-001', 'Paracetamol 500mg', '6001234567890', 'Pain relief tablets', 'Pharmacy',
+  'Paracetamol', 'PACK', '3500', '5000', '100', '', '2027-06-30',
+  'true', '18', 'FIFO', '', 'false', '10', 'true', '30', '1', 'true',
+];
+const CUSTOMER_SAMPLE_ROW = [
+  'John Doe', 'john@example.com', '+256700000000', '123 Main St, Kampala', '500000',
+];
+const SUPPLIER_SAMPLE_ROW = [
+  'MedSupplies Ltd', 'Jane Smith', 'orders@medsupplies.com', '+256700000001',
+  '456 Industrial Rd', 'NET30', '10000000', 'TIN-123456', 'Primary pharma supplier',
+];
+
+const PRODUCT_INSTRUCTIONS_ROW = [
+  '(Required)', '(Required)', '(Optional)', '(Optional)', '(Optional)',
+  '(Optional)', '(EACH/PIECE/BOX/KG/LITER etc)', '(Number)', '(Number)', '(Number - auto-creates batch)',
+  '(Optional - auto-generated if blank)', '(YYYY-MM-DD)', '(true/false)', '(Number e.g. 18)',
+  '(FIFO/AVCO)', '(Optional)', '(true/false)', '(Number)', '(true/false)',
+  '(Number - min days)', '(Number)', '(true/false)',
+];
+const CUSTOMER_INSTRUCTIONS_ROW = [
+  '(Required)', '(Optional)', '(Optional)', '(Optional)', '(Number)',
+];
+const SUPPLIER_INSTRUCTIONS_ROW = [
+  '(Required)', '(Optional)', '(Optional)', '(Optional)', '(Optional)',
+  '(e.g. NET30/NET60/COD)', '(Number)', '(Optional)', '(Optional)',
+];
+
+function getSampleRow(entityType: ImportEntityType): string[] {
+  switch (entityType) {
+    case 'PRODUCT': return PRODUCT_SAMPLE_ROW;
+    case 'CUSTOMER': return CUSTOMER_SAMPLE_ROW;
+    case 'SUPPLIER': return SUPPLIER_SAMPLE_ROW;
+  }
+}
+
+function getInstructionsRow(entityType: ImportEntityType): string[] {
+  switch (entityType) {
+    case 'PRODUCT': return PRODUCT_INSTRUCTIONS_ROW;
+    case 'CUSTOMER': return CUSTOMER_INSTRUCTIONS_ROW;
+    case 'SUPPLIER': return SUPPLIER_INSTRUCTIONS_ROW;
+  }
+}
+
 /**
- * Generate a CSV template (header row only) for a given entity type.
- * Uses the canonical field names from the CSV field maps.
+ * Generate a CSV template with headers, an instructions row, and a sample data row.
+ * Users should delete the instructions and sample rows before importing.
  */
 export function generateCsvTemplate(entityType: ImportEntityType): {
   headers: string[];
+  instructionsRow: string[];
+  sampleRow: string[];
   filename: string;
 } {
   const headers = [...getTemplateHeaders(entityType)];
+  const instructionsRow = getInstructionsRow(entityType);
+  const sampleRow = getSampleRow(entityType);
   const filename = `${entityType.toLowerCase()}-template.csv`;
-  return { headers, filename };
+  return { headers, instructionsRow, sampleRow, filename };
 }
 
 // ── File Cleanup ──────────────────────────────────────────

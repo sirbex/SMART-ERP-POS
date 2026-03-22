@@ -350,9 +350,18 @@ export const retryImportJob = asyncHandler(async (req: Request, res: Response) =
  */
 export const downloadTemplate = asyncHandler(async (req: Request, res: Response) => {
   const { entityType } = EntityTypeParamSchema.parse(req.params);
-  const { headers, filename } = importService.generateCsvTemplate(entityType);
+  const { headers, instructionsRow, sampleRow, filename } = importService.generateCsvTemplate(entityType);
+
+  // Escape CSV fields that may contain commas or parentheses
+  const escapeCsv = (val: string) => val.includes(',') || val.includes('(') ? `"${val}"` : val;
+
+  const lines = [
+    headers.join(','),
+    instructionsRow.map(escapeCsv).join(','),
+    sampleRow.map(escapeCsv).join(','),
+  ];
 
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.send(headers.join(',') + '\n');
+  res.send(lines.join('\n') + '\n');
 });

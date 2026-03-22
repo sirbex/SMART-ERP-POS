@@ -847,12 +847,13 @@ export const salesService = {
           );
         }
 
-        // Fallback: if no non-expiring batches or no threshold configured, use all active batches
+        // Fallback: if no non-expiring batches or no threshold configured, use all active non-expired batches
         if (!batchesResult || batchesResult.rows.length === 0) {
           batchesResult = await client.query(
             `SELECT id, remaining_quantity, expiry_date, cost_price
              FROM inventory_batches
              WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
              ORDER BY expiry_date ASC NULLS LAST, received_date ASC
              FOR UPDATE`,
             [item.productId]
