@@ -679,13 +679,20 @@ function normalizeDateString(value: string): string {
     candidate = value.replace(/\//g, '-');
   }
 
-  // DD/MM/YYYY or DD-MM-YYYY (day > 12 disambiguates)
+  // DD/MM/YYYY, MM-DD-YYYY, DD.MM.YYYY etc. (supports / - . separators)
+  // Also handles 2-digit years: 00-49 → 2000s, 50-99 → 1900s
   if (!candidate) {
-    const slashParts = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/);
+    const slashParts = value.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
     if (slashParts) {
-      const [, a, b, year] = slashParts;
+      const [, a, b, rawYear] = slashParts;
       const aNum = parseInt(a, 10);
       const bNum = parseInt(b, 10);
+      // Expand 2-digit year to 4-digit
+      let year = rawYear;
+      if (rawYear.length === 2) {
+        const yy = parseInt(rawYear, 10);
+        year = String(yy <= 49 ? 2000 + yy : 1900 + yy);
+      }
       // If first part > 12, it must be a day (DD/MM/YYYY)
       if (aNum > 12) {
         candidate = `${year}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`;

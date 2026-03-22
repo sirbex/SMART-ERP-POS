@@ -28,6 +28,7 @@ export interface SessionData {
 export class SessionService {
   private readonly SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
   private readonly CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     // Start periodic cleanup
@@ -333,7 +334,7 @@ export class SessionService {
    * Start periodic cleanup timer
    */
   private startCleanupTimer(): void {
-    setInterval(async () => {
+    this.cleanupTimer = setInterval(async () => {
       try {
         const cleaned = await this.cleanupExpiredSessions();
         if (cleaned > 0) {
@@ -343,6 +344,20 @@ export class SessionService {
         console.error('Session cleanup error:', error);
       }
     }, this.CLEANUP_INTERVAL);
+    // Don't block Node.js from exiting
+    if (this.cleanupTimer.unref) {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * Stop the cleanup timer (for graceful shutdown)
+   */
+  shutdown(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
   }
 }
 

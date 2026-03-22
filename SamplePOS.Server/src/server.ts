@@ -57,6 +57,7 @@ import { tenantRateLimit } from './middleware/tenantRateLimit.js';
 import type { TenantPlan } from '../../shared/types/tenant.js';
 import { jobQueue } from './services/jobQueue.js';
 import { connectionManager } from './db/connectionManager.js';
+import { sessionService } from './services/sessionService.js';
 import { authenticate } from './middleware/auth.js';
 import { correlationId } from './middleware/correlationId.js';
 import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
@@ -527,6 +528,7 @@ async function startServer() {
 
       server.close(async () => {
         try {
+          sessionService.shutdown();
           await closeHealthRedis().catch((err: unknown) => {
             logger.warn('Health Redis close error', {
               error: err instanceof Error ? err.message : String(err),

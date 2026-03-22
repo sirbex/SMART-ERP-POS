@@ -223,10 +223,14 @@ async function getTenantById(tenantId: string): Promise<Tenant | null> {
   const tenant = normalizeTenant(result.rows[0]);
   tenantCache.set(cacheKey, tenant);
   tenantCache.set(`tenant:slug:${tenant.slug}`, tenant);
-  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => { });
+  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch((err) => {
+    logger.warn('Redis L2 cache set failed (tenant by id)', { error: err instanceof Error ? err.message : String(err) });
+  });
   distributedCache
     .set(`tenant:slug:${tenant.slug}`, tenant, { ttl: REDIS_TENANT_TTL })
-    .catch(() => { });
+    .catch((err) => {
+      logger.warn('Redis L2 cache set failed (tenant by slug)', { error: err instanceof Error ? err.message : String(err) });
+    });
   return tenant;
 }
 
@@ -259,8 +263,12 @@ async function getTenantBySlug(slug: string): Promise<Tenant | null> {
   const tenant = normalizeTenant(result.rows[0]);
   tenantCache.set(cacheKey, tenant);
   tenantCache.set(`tenant:id:${tenant.id}`, tenant);
-  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => { });
-  distributedCache.set(`tenant:id:${tenant.id}`, tenant, { ttl: REDIS_TENANT_TTL }).catch(() => { });
+  distributedCache.set(cacheKey, tenant, { ttl: REDIS_TENANT_TTL }).catch((err) => {
+    logger.warn('Redis L2 cache set failed (tenant by slug)', { error: err instanceof Error ? err.message : String(err) });
+  });
+  distributedCache.set(`tenant:id:${tenant.id}`, tenant, { ttl: REDIS_TENANT_TTL }).catch((err) => {
+    logger.warn('Redis L2 cache set failed (tenant by id)', { error: err instanceof Error ? err.message : String(err) });
+  });
   return tenant;
 }
 
@@ -271,11 +279,15 @@ async function getTenantBySlug(slug: string): Promise<Tenant | null> {
 export function invalidateTenantCache(tenantId?: string, slug?: string): void {
   if (tenantId) {
     tenantCache.del(`tenant:id:${tenantId}`);
-    distributedCache.delete(`tenant:id:${tenantId}`).catch(() => { });
+    distributedCache.delete(`tenant:id:${tenantId}`).catch((err) => {
+      logger.warn('Redis L2 cache delete failed', { error: err instanceof Error ? err.message : String(err) });
+    });
   }
   if (slug) {
     tenantCache.del(`tenant:slug:${slug}`);
-    distributedCache.delete(`tenant:slug:${slug}`).catch(() => { });
+    distributedCache.delete(`tenant:slug:${slug}`).catch((err) => {
+      logger.warn('Redis L2 cache delete failed', { error: err instanceof Error ? err.message : String(err) });
+    });
   }
 }
 

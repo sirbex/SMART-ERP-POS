@@ -15,19 +15,19 @@ export const BUSINESS_RULES = {
   INV_001: 'BR-INV-001', // Sufficient stock before sale
   INV_002: 'BR-INV-002', // Positive quantity for adjustments
   INV_003: 'BR-INV-003', // FEFO batch selection
-  
+
   // Sales Rules (BR-SAL)
   SAL_001: 'BR-SAL-001', // Valid customer
   SAL_002: 'BR-SAL-002', // Valid payment method
   SAL_003: 'BR-SAL-003', // Credit limit enforcement
   SAL_004: 'BR-SAL-004', // Non-negative sale amount
-  
+
   // Purchase Order Rules (BR-PO)
   PO_001: 'BR-PO-001', // Valid supplier
   PO_002: 'BR-PO-002', // Valid items with quantities
   PO_003: 'BR-PO-003', // Positive unit cost
   PO_004: 'BR-PO-004', // Valid status transitions
-  
+
   // Product Rules (BR-PRC)
   PRC_001: 'BR-PRC-001', // Cost price < selling price
   PRC_002: 'BR-PRC-002', // Min stock ≤ reorder level ≤ max stock
@@ -162,30 +162,30 @@ export const VALIDATION = {
   MAX_SKU: 50,
   MIN_COST_PRICE: new Decimal(0.01),
   MIN_SELLING_PRICE: new Decimal(0.01),
-  
+
   // Customer
   MIN_CUSTOMER_NAME: 2,
   MAX_CUSTOMER_NAME: 255,
   MIN_CREDIT_LIMIT: new Decimal(0),
   MAX_CREDIT_LIMIT: new Decimal(100000000), // 100M
-  
+
   // Supplier
   MIN_SUPPLIER_NAME: 2,
   MAX_SUPPLIER_NAME: 255,
-  
+
   // Quantity
   MIN_QUANTITY: new Decimal(0.001),
   MAX_QUANTITY: new Decimal(1000000),
-  
+
   // Stock Levels
   MIN_STOCK: new Decimal(0),
   MIN_REORDER_LEVEL: new Decimal(0),
   MIN_MAX_STOCK: new Decimal(0),
-  
+
   // Expiry Warning Days
   EXPIRY_WARNING_DAYS: 30,
   EXPIRY_CRITICAL_DAYS: 7,
-  
+
   // Cost Change Alert Threshold
   COST_CHANGE_HIGH_PERCENT: new Decimal(10), // 10% = HIGH severity
   COST_CHANGE_MEDIUM_PERCENT: new Decimal(0), // Any change = MEDIUM

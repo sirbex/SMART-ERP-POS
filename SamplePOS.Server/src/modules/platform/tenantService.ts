@@ -328,15 +328,18 @@ export const tenantService = {
       databasePort: tenant.database_port,
     });
 
-    // Query the tenant database for usage stats
+    // Query the tenant database for usage stats (each with fallback to prevent partial failure)
+    const fallback = { rows: [{ count: 0 }] };
     const [users, products, sales, dbSize] = await Promise.all([
-      tenantPool.query('SELECT COUNT(*)::int as count FROM users WHERE is_active = true'),
-      tenantPool.query('SELECT COUNT(*)::int as count FROM products'),
+      tenantPool.query('SELECT COUNT(*)::int as count FROM users WHERE is_active = true')
+        .catch(() => fallback),
+      tenantPool.query('SELECT COUNT(*)::int as count FROM products')
+        .catch(() => fallback),
       tenantPool.query(
         `SELECT COUNT(*)::int as count FROM sales 
          WHERE sale_date >= date_trunc('month', CURRENT_DATE)
            AND status = 'COMPLETED'`
-      ),
+      ).catch(() => fallback),
       tenantPool
         .query(`SELECT pg_database_size(current_database())::bigint as size_bytes`)
         .catch(() => ({ rows: [{ size_bytes: 0 }] })),

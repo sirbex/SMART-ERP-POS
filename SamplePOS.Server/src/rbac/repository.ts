@@ -340,12 +340,18 @@ export class RbacRepository {
   }
 
   async commitTransaction(client: PoolClient): Promise<void> {
-    await client.query('COMMIT');
-    client.release();
+    try {
+      await client.query('COMMIT');
+    } finally {
+      client.release();
+    }
   }
 
   async rollbackTransaction(client: PoolClient): Promise<void> {
-    await client.query('ROLLBACK');
-    client.release();
+    try {
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
   }
 }

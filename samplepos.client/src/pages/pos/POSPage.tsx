@@ -2558,11 +2558,10 @@ export default function POSPage() {
                     <Link
                       to={item.path}
                       onClick={() => setShowNavDrawer(false)}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                        location.pathname === item.path || location.pathname.startsWith(item.path + '/')
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${location.pathname === item.path || location.pathname.startsWith(item.path + '/')
                           ? 'bg-blue-50 text-blue-700 font-medium'
                           : 'text-gray-700 hover:bg-gray-100'
-                      }`}
+                        }`}
                     >
                       <span className="text-xl">{item.icon}</span>
                       <span>{item.name}</span>
