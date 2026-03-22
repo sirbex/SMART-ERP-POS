@@ -27,7 +27,8 @@ export type ProductHistoryType =
   | 'TRANSFER_OUT'
   | 'RETURN'
   | 'DAMAGE'
-  | 'EXPIRY';
+  | 'EXPIRY'
+  | 'OPENING_BALANCE';
 
 // Type-safe history item interface
 export interface ProductHistoryItem {
@@ -197,6 +198,7 @@ export function getHistoryTypeVariant(type: ProductHistoryType): {
     RETURN: { color: 'text-purple-700', bgColor: 'bg-purple-100', label: 'Return' },
     DAMAGE: { color: 'text-red-700', bgColor: 'bg-red-100', label: 'Damage' },
     EXPIRY: { color: 'text-gray-700', bgColor: 'bg-gray-100', label: 'Expiry' },
+    OPENING_BALANCE: { color: 'text-cyan-700', bgColor: 'bg-cyan-100', label: 'Opening Bal.' },
   };
   return variants[type];
 }
@@ -232,6 +234,8 @@ export function formatHistoryReference(item: ProductHistoryItem): string {
       return `GR ${ref.grNumber}${ref.poNumber ? ` (PO ${ref.poNumber})` : ''}${ref.supplierName ? ` - ${ref.supplierName}` : ''}`;
     case 'SALE':
       return `${ref.saleNumber}${ref.customerName ? ` - ${ref.customerName}` : ''}${ref.paymentMethod ? ` • ${ref.paymentMethod}` : ''}`;
+    case 'OPENING_BALANCE':
+      return `Opening stock import${ref.notes ? ` — ${ref.notes}` : ''}`;
     default:
       return ref.notes || ref.referenceType || '';
   }

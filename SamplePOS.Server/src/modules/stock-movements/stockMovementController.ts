@@ -34,6 +34,7 @@ const MOVEMENT_TYPE_VALUES = [
   'RETURN',
   'DAMAGE',
   'EXPIRY',
+  'OPENING_BALANCE',
 ] as const;
 
 const ListMovementsQuerySchema = z.object({

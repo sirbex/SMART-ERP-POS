@@ -128,7 +128,7 @@ export const productHistoryRepository = {
     const where: string[] = [
       'sm.product_id = $1',
       // Exclude system-generated GR and SALE movements to avoid duplicates.
-      "sm.movement_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT','TRANSFER_IN','TRANSFER_OUT','RETURN','DAMAGE','EXPIRY')",
+      "sm.movement_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT','TRANSFER_IN','TRANSFER_OUT','RETURN','DAMAGE','EXPIRY','OPENING_BALANCE')",
     ];
     const params: unknown[] = [productId];
     let i = 2;
@@ -151,7 +151,7 @@ export const productHistoryRepository = {
         sm.created_at AS event_date,
         sm.movement_type AS type,
         CASE 
-          WHEN sm.movement_type IN ('ADJUSTMENT_IN','TRANSFER_IN','RETURN') THEN sm.quantity
+          WHEN sm.movement_type IN ('ADJUSTMENT_IN','TRANSFER_IN','RETURN','OPENING_BALANCE') THEN sm.quantity
           ELSE -sm.quantity
         END AS quantity_change,
         b.batch_number,

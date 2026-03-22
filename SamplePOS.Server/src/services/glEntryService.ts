@@ -52,6 +52,7 @@ export const AccountCodes = {
 
   // Equity
   OWNERS_EQUITY: '3000',
+  OPENING_BALANCE_EQUITY: '3050',
 
   // Revenue - These may need to be added to chart of accounts
   SALES_REVENUE: '4000',
@@ -1391,6 +1392,78 @@ export async function recordStockMovementToGL(movement: StockMovementData, pool?
   } catch (error: unknown) {
     logger.error('Failed to record stock movement to GL', { error, movement });
     throw new Error(`GL posting failed for stock movement ${movement.movementNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// OPENING STOCK / BULK IMPORT JOURNAL ENTRIES
+// =============================================================================
+
+export interface OpeningStockData {
+  movementId: string;
+  movementNumber: string;
+  movementDate: string;
+  movementValue: number;     // quantity * unit_cost
+  productName?: string;
+}
+
+/**
+ * Record opening stock (from bulk CSV import) in the general ledger.
+ *
+ * Per SAP/Odoo/Tally/QuickBooks best practices, opening stock credits EQUITY
+ * (not revenue). This prevents imported quantities from inflating P&L.
+ *
+ *   DR Inventory (1300)              value
+ *   CR Opening Balance Equity (3050) value
+ *
+ * This function is ONLY for bulk imports / opening balance stock.
+ * For found-stock adjustments (physical count surplus), use recordStockMovementToGL
+ * which correctly credits Stock Overage Income (4110).
+ */
+export async function recordOpeningStockToGL(data: OpeningStockData, pool?: pg.Pool): Promise<void> {
+  try {
+    if (data.movementValue <= 0) {
+      logger.debug('Skipping opening stock GL posting (zero value)', {
+        movementNumber: data.movementNumber,
+      });
+      return;
+    }
+
+    const description = `Opening stock import: ${data.productName ?? 'Unknown'} — ${data.movementNumber}`;
+
+    const lines: JournalLine[] = [
+      {
+        accountCode: AccountCodes.INVENTORY,
+        description: `Inventory increase (import): ${data.movementNumber}`,
+        debitAmount: data.movementValue,
+        creditAmount: 0,
+      },
+      {
+        accountCode: AccountCodes.OPENING_BALANCE_EQUITY,
+        description: `Opening balance equity: ${data.movementNumber}`,
+        debitAmount: 0,
+        creditAmount: data.movementValue,
+      },
+    ];
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.movementDate,
+      description,
+      referenceType: 'OPENING_STOCK',
+      referenceId: data.movementId,
+      referenceNumber: data.movementNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `OPENING_STOCK-${data.movementId}`,
+    }, pool);
+
+    logger.info('Recorded opening stock to GL', {
+      movementId: data.movementId,
+      value: data.movementValue,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record opening stock to GL', { error, data });
+    throw new Error(`GL posting failed for opening stock ${data.movementNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 

@@ -13,7 +13,8 @@ export type MovementType =
   | 'TRANSFER_OUT'
   | 'RETURN'
   | 'DAMAGE'
-  | 'EXPIRY';
+  | 'EXPIRY'
+  | 'OPENING_BALANCE';
 
 /**
  * Manual movement types (can be created manually)
@@ -34,6 +35,7 @@ export const IN_MOVEMENT_TYPES: MovementType[] = [
   'ADJUSTMENT_IN',
   'TRANSFER_IN',
   'RETURN',
+  'OPENING_BALANCE',
 ];
 
 /**

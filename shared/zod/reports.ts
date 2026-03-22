@@ -446,7 +446,7 @@ export const StockMovementAnalysisParamsSchema = z.object({
   start_date: z.string(),
   end_date: z.string(),
   product_id: z.string().uuid().optional(),
-  movement_type: z.enum(['GOODS_RECEIPT', 'SALE', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'TRANSFER_IN', 'TRANSFER_OUT', 'RETURN', 'DAMAGE', 'EXPIRY']).optional(),
+  movement_type: z.enum(['GOODS_RECEIPT', 'SALE', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'TRANSFER_IN', 'TRANSFER_OUT', 'RETURN', 'DAMAGE', 'EXPIRY', 'OPENING_BALANCE']).optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });
 

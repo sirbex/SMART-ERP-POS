@@ -1193,6 +1193,7 @@ export default function ReportsPage() {
               <option value="RETURN">Return</option>
               <option value="DAMAGE">Damage</option>
               <option value="EXPIRY">Expiry</option>
+              <option value="OPENING_BALANCE">Opening Balance</option>
             </select>
           </div>
         )}

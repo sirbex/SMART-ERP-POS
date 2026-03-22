@@ -711,9 +711,12 @@ export async function bulkInsertProducts(
     .filter(r => r.batchNumber);
 
   if (batchRows.length > 0) {
-    // Skip the auto stock-movement trigger — we create ADJUSTMENT_IN movements
-    // manually so they post to the GL (trigger creates GOODS_RECEIPT which skips GL).
+    // Skip the auto stock-movement trigger — we create OPENING_BALANCE movements
+    // manually so they post to the GL via recordOpeningStockToGL (equity, not revenue).
     await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
+
+    // Well-known SYSTEM supplier ID for import traceability (created by migration 045)
+    const SYSTEM_SUPPLIER_ID = 'a0000000-0000-0000-0000-000000000001';
 
     // For UPDATE strategy, capture existing batch quantities BEFORE upsert
     // so we can compute the delta for accurate stock movements.
@@ -756,7 +759,7 @@ export async function bulkInsertProducts(
 
       const qty = r.quantityOnHand ?? 0;
       batchPlaceholders.push(
-        `($${bIdx}, $${bIdx + 1}, $${bIdx + 2}, $${bIdx + 3}, $${bIdx + 4}, $${bIdx + 5}, 'IMPORT')`
+        `($${bIdx}, $${bIdx + 1}, $${bIdx + 2}, $${bIdx + 3}, $${bIdx + 4}, $${bIdx + 5}, 'IMPORT', $${bIdx + 6}::uuid)`
       );
       batchValues.push(
         productId,
@@ -765,8 +768,9 @@ export async function bulkInsertProducts(
         qty,
         r.costPrice ?? 0,
         r.expiryDate || null,
+        SYSTEM_SUPPLIER_ID,
       );
-      bIdx += 6;
+      bIdx += 7;
     }
 
     if (batchPlaceholders.length > 0) {
@@ -783,16 +787,17 @@ export async function bulkInsertProducts(
       const batchResult = await client.query(
         `INSERT INTO inventory_batches (
           product_id, batch_number, quantity, remaining_quantity,
-          cost_price, expiry_date, source_type
+          cost_price, expiry_date, source_type, source_id
         ) VALUES ${batchPlaceholders.join(', ')}
         ${batchConflict}
         RETURNING id, product_id, batch_number, remaining_quantity, cost_price`,
         batchValues
       );
 
-      // ── Create ADJUSTMENT_IN stock movements for imported quantities ──
-      // This ensures: (a) proper audit trail, (b) records unit_cost for GL posting
-      // by the import worker after this transaction commits, (c) reports see the stock.
+      // ── Create OPENING_BALANCE stock movements for imported quantities ──
+      // Per SAP/Odoo/Tally/QuickBooks best practices, opening stock is a distinct
+      // movement type — not an adjustment. The import worker posts GL entries as
+      // DR Inventory (1300) / CR Opening Balance Equity (3050).
       if (batchResult.rows.length > 0) {
         const smValues: unknown[] = [];
         const smPlaceholders: string[] = [];
@@ -812,7 +817,7 @@ export async function bulkInsertProducts(
 
           smPlaceholders.push(
             `(gen_random_uuid(), generate_movement_number(), $${smIdx}::uuid, $${smIdx + 1}::uuid,
-              'ADJUSTMENT_IN'::movement_type, $${smIdx + 2}::numeric, $${smIdx + 3}::numeric,
+              'OPENING_BALANCE'::movement_type, $${smIdx + 2}::numeric, $${smIdx + 3}::numeric,
               'IMPORT', NULL, $${smIdx + 4}::text, NULL)`
           );
           smValues.push(
@@ -820,7 +825,7 @@ export async function bulkInsertProducts(
             batch.id,
             delta,
             batchCost,
-            `CSV import stock increase`,
+            `Opening balance stock import`,
           );
           smIdx += 5;
         }

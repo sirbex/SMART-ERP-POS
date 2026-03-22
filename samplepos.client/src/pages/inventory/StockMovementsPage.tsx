@@ -31,6 +31,7 @@ const MOVEMENT_TYPES = {
   RETURN: { label: 'Return', color: 'bg-indigo-100 text-indigo-800', icon: '↩️', sign: '+' },
   DAMAGE: { label: 'Damage', color: 'bg-red-100 text-red-800', icon: '⚠️', sign: '-' },
   EXPIRY: { label: 'Expiry', color: 'bg-gray-100 text-gray-800', icon: '⏰', sign: '-' },
+  OPENING_BALANCE: { label: 'Opening Balance', color: 'bg-cyan-100 text-cyan-800', icon: '📋', sign: '+' },
 } as const;
 
 type MovementType = keyof typeof MOVEMENT_TYPES;

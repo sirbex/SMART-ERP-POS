@@ -502,11 +502,12 @@ async function flushChunk(
           const movementValue = sm.quantity * sm.unitCost;
           if (movementValue <= 0) continue;
 
-          await glEntryService.recordStockMovementToGL({
+          // Per ERP best practices (SAP/Odoo/Tally/QuickBooks), opening stock
+          // credits Opening Balance Equity (3050), NOT revenue (4110).
+          await glEntryService.recordOpeningStockToGL({
             movementId: sm.movementId,
             movementNumber: sm.movementNumber,
             movementDate: importDate,
-            movementType: 'ADJUSTMENT_IN',
             movementValue,
             productName: nameMap.get(sm.productId) || 'Imported product',
           }, dbPool);

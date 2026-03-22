@@ -492,7 +492,7 @@ export const reportsRepository = {
           0 as reorder_quantity,
           COALESCE(SUM(
             CASE 
-              WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN')
+              WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE')
               THEN sm.quantity
               WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE', 'TRANSFER_OUT')
               THEN -sm.quantity
@@ -997,7 +997,7 @@ export const reportsRepository = {
         p.description,
         COALESCE(SUM(
           CASE 
-            WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN') THEN sm.quantity
+            WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'OPENING_BALANCE') THEN sm.quantity
             WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE') THEN -sm.quantity
             ELSE 0
           END
@@ -1057,7 +1057,7 @@ export const reportsRepository = {
       FROM stock_movements sm
       INNER JOIN products p ON p.id = sm.product_id
       LEFT JOIN inventory_batches b ON b.id = sm.batch_id
-      WHERE sm.movement_type IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE', 'RETURN', 'TRANSFER_IN', 'TRANSFER_OUT')
+      WHERE sm.movement_type IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE', 'RETURN', 'TRANSFER_IN', 'TRANSFER_OUT', 'OPENING_BALANCE')
         AND sm.created_at BETWEEN $1 AND $2
         ${productFilter}
       ORDER BY sm.created_at DESC
@@ -1222,9 +1222,9 @@ export const reportsRepository = {
       SELECT 
         ${selectFields},
         COUNT(sm.id) as transaction_count,
-        SUM(CASE WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN') THEN sm.quantity ELSE 0 END) as total_in,
+        SUM(CASE WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE') THEN sm.quantity ELSE 0 END) as total_in,
         SUM(CASE WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY', 'TRANSFER_OUT') THEN sm.quantity ELSE 0 END) as total_out,
-        SUM(CASE WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN') THEN sm.quantity ELSE -sm.quantity END) as net_movement
+        SUM(CASE WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE') THEN sm.quantity ELSE -sm.quantity END) as net_movement
       FROM stock_movements sm
       INNER JOIN products p ON p.id = sm.product_id
       WHERE ${whereClause}

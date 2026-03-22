@@ -17,6 +17,7 @@ export const MovementTypeSchema = z.enum([
   'RETURN',
   'DAMAGE',
   'EXPIRY',
+  'OPENING_BALANCE',
 ]);
 
 export type MovementType = z.infer<typeof MovementTypeSchema>;
