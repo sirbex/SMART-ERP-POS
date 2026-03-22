@@ -52,6 +52,34 @@ WHERE NOT EXISTS (
   SELECT 1 FROM suppliers WHERE "SupplierCode" = 'SYS-OPENING-BAL'
 );
 
+-- 4. Protect SYSTEM supplier from modification/deletion (DB-level safety net)
+CREATE OR REPLACE FUNCTION fn_protect_system_supplier()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD."SupplierCode" LIKE 'SYS-%' THEN
+      RAISE EXCEPTION 'System suppliers cannot be deleted (code: %)', OLD."SupplierCode";
+    END IF;
+    RETURN OLD;
+  END IF;
+  -- UPDATE: prevent changing critical fields
+  IF OLD."SupplierCode" LIKE 'SYS-%' THEN
+    IF NEW."SupplierCode" != OLD."SupplierCode"
+       OR NEW."IsActive" != OLD."IsActive"
+       OR NEW."CompanyName" != OLD."CompanyName" THEN
+      RAISE EXCEPTION 'System supplier fields (code, name, active) cannot be modified';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_protect_system_supplier ON suppliers;
+CREATE TRIGGER trg_protect_system_supplier
+  BEFORE UPDATE OR DELETE ON suppliers
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_protect_system_supplier();
+
 -- Verify
 SELECT "AccountCode", "AccountName", "AccountType" FROM accounts WHERE "AccountCode" = '3050';
 SELECT "SupplierCode", "CompanyName" FROM suppliers WHERE "SupplierCode" = 'SYS-OPENING-BAL';

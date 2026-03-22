@@ -8,6 +8,7 @@
 import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
+import { SYSTEM_SUPPLIER_ID } from '../suppliers/supplierService.js';
 import type pg from 'pg';
 import type {
   ImportJob,
@@ -714,9 +715,6 @@ export async function bulkInsertProducts(
     // Skip the auto stock-movement trigger — we create OPENING_BALANCE movements
     // manually so they post to the GL via recordOpeningStockToGL (equity, not revenue).
     await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
-
-    // Well-known SYSTEM supplier ID for import traceability (created by migration 045)
-    const SYSTEM_SUPPLIER_ID = 'a0000000-0000-0000-0000-000000000001';
 
     // For UPDATE strategy, capture existing batch quantities BEFORE upsert
     // so we can compute the delta for accurate stock movements.

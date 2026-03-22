@@ -5,6 +5,21 @@ import { Pool } from 'pg';
 import * as supplierRepository from './supplierRepository.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { ForbiddenError } from '../../middleware/errorHandler.js';
+
+/** Well-known UUID for the SYSTEM supplier (created by migration 045). */
+export const SYSTEM_SUPPLIER_ID = 'a0000000-0000-0000-0000-000000000001';
+const SYSTEM_SUPPLIER_CODE_PREFIX = 'SYS-';
+
+/** Throws ForbiddenError if the supplier is a protected SYSTEM entity. */
+function assertNotSystemSupplier(supplier: { id?: string; SupplierCode?: string }): void {
+  if (
+    supplier.id === SYSTEM_SUPPLIER_ID ||
+    (supplier.SupplierCode && supplier.SupplierCode.startsWith(SYSTEM_SUPPLIER_CODE_PREFIX))
+  ) {
+    throw new ForbiddenError('System suppliers cannot be modified or deleted');
+  }
+}
 
 /**
  * Get all suppliers with pagination
@@ -151,6 +166,9 @@ export async function updateSupplier(
       throw new Error(`Supplier with ID ${id} not found`);
     }
 
+    // Protect SYSTEM suppliers from modification
+    assertNotSystemSupplier(existing);
+
     // BR-PO-001: Validate supplier data if name is being updated
     if (data.name !== undefined && data.name.trim().length < 2) {
       throw new Error('Supplier name must be at least 2 characters');
@@ -173,6 +191,9 @@ export async function deleteSupplier(pool: Pool, id: string) {
     if (!existing) {
       throw new Error(`Supplier with ID ${id} not found`);
     }
+
+    // Protect SYSTEM suppliers from deletion
+    assertNotSystemSupplier(existing);
 
     // Check if supplier has active purchase orders
     const hasActivePOs = await supplierRepository.hasActivePurchaseOrders(client, id);
