@@ -839,8 +839,8 @@ export const salesRepository = {
         ROUND(SUM(s.total_cost)::numeric, 2) as total_cost,
         ROUND(SUM(s.profit)::numeric, 2) as total_profit,
         CASE 
-          WHEN SUM(s.total_cost) > 0 
-          THEN ROUND((SUM(s.profit) / SUM(s.total_cost) * 100)::numeric, 2)
+          WHEN SUM(s.subtotal - s.discount_amount) > 0 
+          THEN ROUND((SUM(s.profit) / SUM(s.subtotal - s.discount_amount) * 100)::numeric, 2)
           ELSE 0 
         END as profit_margin_percentage,
         ROUND(AVG(s.total_amount)::numeric, 2) as avg_transaction_value,

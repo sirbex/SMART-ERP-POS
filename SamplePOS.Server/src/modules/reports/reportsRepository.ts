@@ -937,20 +937,12 @@ export const reportsRepository = {
     }
 
     const query = `
-      WITH sale_costs AS (
-        SELECT 
-          si.sale_id,
-          SUM(si.quantity * si.unit_cost) as total_cost
-        FROM sale_items si
-        GROUP BY si.sale_id
-      )
       SELECT 
         ${dateGroup} as period,
-        SUM(s.total_amount) as revenue,
-        SUM(sc.total_cost) as cost_of_goods_sold,
-        SUM(s.total_amount - sc.total_cost) as gross_profit
+        SUM(s.subtotal - s.discount_amount) as revenue,
+        SUM(s.total_cost) as cost_of_goods_sold,
+        SUM(s.profit) as gross_profit
       FROM sales s
-      INNER JOIN sale_costs sc ON sc.sale_id = s.id
       WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
         AND s.status NOT IN ('VOID', 'REFUNDED')
       GROUP BY ${dateGroup}
@@ -2652,6 +2644,7 @@ export const reportsRepository = {
           COUNT(s.id) as transactions_count,
           COUNT(DISTINCT s.customer_id) as unique_customers,
           SUM(s.total_amount) as total_revenue,
+          SUM(s.subtotal - s.discount_amount) as net_revenue,
           SUM(s.total_cost) as total_cost,
           SUM(s.profit) as gross_profit,
           AVG(s.total_amount) as avg_transaction_value,
@@ -2705,8 +2698,8 @@ export const reportsRepository = {
           COALESCE(cm.total_receivables, 0) as outstanding_receivables,
           -- Efficiency ratios
           CASE 
-            WHEN COALESCE(dsm.total_revenue, 0) > 0 THEN 
-              COALESCE(dsm.gross_profit, 0) / COALESCE(dsm.total_revenue, 0) * 100
+            WHEN COALESCE(dsm.net_revenue, 0) > 0 THEN 
+              COALESCE(dsm.gross_profit, 0) / COALESCE(dsm.net_revenue, 0) * 100
             ELSE 0
           END as profit_margin_percent,
           CASE 
