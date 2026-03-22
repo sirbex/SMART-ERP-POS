@@ -28,6 +28,7 @@ import { cleanupJobFile } from './importService.js';
 import { ProductCreateSchema } from '../../../../shared/zod/product.js';
 import { CreateCustomerSchema } from '../../../../shared/zod/customer.js';
 import { CreateSupplierSchema } from '../../../../shared/zod/supplier.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import {
   getFieldMapForEntity,
   type ImportEntityType,
@@ -477,6 +478,48 @@ async function flushChunk(
           );
       }
     });
+
+    // Post GL entries for imported stock movements (after transaction commits)
+    const stockMovements = entityType === 'PRODUCT' && 'stockMovements' in result
+      ? (result as { stockMovements: Array<{ movementId: string; movementNumber: string; productId: string; quantity: number; unitCost: number }> }).stockMovements
+      : [];
+
+    if (stockMovements.length > 0) {
+      // Fetch product names in one query for GL descriptions
+      const productIds = [...new Set(stockMovements.map(sm => sm.productId))];
+      const nameRes = await dbPool.query(
+        `SELECT id, name FROM products WHERE id = ANY($1::uuid[])`,
+        [productIds]
+      );
+      const nameMap = new Map<string, string>();
+      for (const r of nameRes.rows) {
+        nameMap.set(r.id as string, r.name as string);
+      }
+
+      const importDate = new Date().toLocaleDateString('en-CA');
+      for (const sm of stockMovements) {
+        try {
+          const movementValue = sm.quantity * sm.unitCost;
+          if (movementValue <= 0) continue;
+
+          await glEntryService.recordStockMovementToGL({
+            movementId: sm.movementId,
+            movementNumber: sm.movementNumber,
+            movementDate: importDate,
+            movementType: 'ADJUSTMENT_IN',
+            movementValue,
+            productName: nameMap.get(sm.productId) || 'Imported product',
+          }, dbPool);
+        } catch (glErr) {
+          // GL failure during import is non-fatal — log and continue.
+          // Stock movements are recorded; GL can be reconciled manually.
+          logger.error('Import GL posting failed for movement (non-fatal)', {
+            movementId: sm.movementId,
+            error: glErr instanceof Error ? glErr.message : String(glErr),
+          });
+        }
+      }
+    }
 
     return { ...result, failed: failedCount };
   } catch (error: unknown) {

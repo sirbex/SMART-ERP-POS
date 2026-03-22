@@ -466,8 +466,17 @@ export async function bulkInsertProducts(
     expiryDate?: string;
   }>,
   duplicateStrategy: DuplicateStrategy
-): Promise<{ inserted: number; skipped: number }> {
-  if (rows.length === 0) return { inserted: 0, skipped: 0 };
+): Promise<{ inserted: number; skipped: number; stockMovements: Array<{ movementId: string; movementNumber: string; productId: string; quantity: number; unitCost: number }> }> {
+  if (rows.length === 0) return { inserted: 0, skipped: 0, stockMovements: [] };
+
+  // Collect created stock movements for GL posting by the caller
+  const stockMovements: Array<{
+    movementId: string;
+    movementNumber: string;
+    productId: string;
+    quantity: number;
+    unitCost: number;
+  }> = [];
 
   const values: unknown[] = [];
   const placeholders: string[] = [];
@@ -782,8 +791,8 @@ export async function bulkInsertProducts(
       );
 
       // ── Create ADJUSTMENT_IN stock movements for imported quantities ──
-      // This ensures: (a) proper audit trail, (b) GL trigger posts entries
-      // (DR Inventory 1300, CR Overage Revenue 4110), (c) reports see the stock.
+      // This ensures: (a) proper audit trail, (b) records unit_cost for GL posting
+      // by the import worker after this transaction commits, (c) reports see the stock.
       if (batchResult.rows.length > 0) {
         const smValues: unknown[] = [];
         const smPlaceholders: string[] = [];
@@ -817,20 +826,32 @@ export async function bulkInsertProducts(
         }
 
         if (smPlaceholders.length > 0) {
-          await client.query(
+          const smResult = await client.query(
             `INSERT INTO stock_movements (
               id, movement_number, product_id, batch_id,
               movement_type, quantity, unit_cost,
               reference_type, reference_id, notes, created_by_id
-            ) VALUES ${smPlaceholders.join(', ')}`,
+            ) VALUES ${smPlaceholders.join(', ')}
+            RETURNING id, movement_number, product_id, quantity, unit_cost`,
             smValues
           );
+
+          // Collect movement data for GL posting by the caller
+          for (const sm of smResult.rows) {
+            stockMovements.push({
+              movementId: sm.id as string,
+              movementNumber: sm.movement_number as string,
+              productId: sm.product_id as string,
+              quantity: Money.parseDb(sm.quantity).toNumber(),
+              unitCost: Money.parseDb(sm.unit_cost).toNumber(),
+            });
+          }
         }
       }
     }
   }
 
-  return { inserted, skipped };
+  return { inserted, skipped, stockMovements };
 }
 
 /**
@@ -929,13 +950,23 @@ export async function bulkInsertSuppliers(
 ): Promise<{ inserted: number; skipped: number }> {
   if (rows.length === 0) return { inserted: 0, skipped: 0 };
 
+  // Get the next supplier code sequence number from existing suppliers
+  const seqRes = await client.query(
+    `SELECT COALESCE(MAX(
+       CASE WHEN "SupplierCode" ~ '^SUP-\\d{4}-\\d+$'
+            THEN CAST(SPLIT_PART("SupplierCode", '-', 3) AS INTEGER)
+            ELSE 0 END
+     ), 0) AS max_seq FROM suppliers`
+  );
+  let nextSeq = (Number(seqRes.rows[0]?.max_seq) || 0) + 1;
+  const year = new Date().getFullYear();
+
   const values: unknown[] = [];
   const placeholders: string[] = [];
   let idx = 1;
 
   for (const r of rows) {
-    // Generate supplier code: SUP-RANDOM8
-    const supplierCode = `SUP-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    const supplierCode = `SUP-${year}-${String(nextSeq++).padStart(4, '0')}`;
     const paymentTermsDays = paymentTermsStringToDays(r.paymentTerms || 'NET30');
 
     placeholders.push(

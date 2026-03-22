@@ -70,39 +70,53 @@ export async function recordMovement(
   // ============================================================
   const glMovementTypes = ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY'] as const;
   if (glMovementTypes.includes(data.movementType as (typeof glMovementTypes)[number])) {
-    try {
-      const movementValue = new Decimal(Math.abs(result.quantity))
-        .times(new Decimal(result.unitCost || 0))
-        .toNumber();
-
-      // Get product name for GL description
-      const productResult = await pool.query('SELECT name FROM products WHERE id = $1', [
-        data.productId,
-      ]);
-      const productName = productResult.rows[0]?.name || 'Unknown';
-
-      await glEntryService.recordStockMovementToGL(
-        {
-          movementId: result.id,
-          movementNumber: result.movementNumber,
-          movementDate: new Date().toLocaleDateString('en-CA'),
-          movementType: data.movementType as
-            | 'ADJUSTMENT_IN'
-            | 'ADJUSTMENT_OUT'
-            | 'DAMAGE'
-            | 'EXPIRY',
-          movementValue,
-          productName,
-        },
-        pool
+    // Resolve unit cost: use stored value, or fall back to batch cost / product cost
+    let unitCost = result.unitCost ? new Decimal(result.unitCost).toNumber() : 0;
+    if (unitCost === 0 && data.batchId) {
+      const batchRes = await pool.query(
+        'SELECT cost_price FROM inventory_batches WHERE id = $1',
+        [data.batchId]
       );
-    } catch (glError) {
-      logger.error('GL posting failed for stock movement (non-fatal)', {
+      if (batchRes.rows[0]?.cost_price) {
+        unitCost = new Decimal(batchRes.rows[0].cost_price).toNumber();
+      }
+    }
+    if (unitCost === 0) {
+      const prodRes = await pool.query(
+        'SELECT cost_price FROM products WHERE id = $1',
+        [data.productId]
+      );
+      if (prodRes.rows[0]?.cost_price) {
+        unitCost = new Decimal(prodRes.rows[0].cost_price).toNumber();
+      }
+    }
+
+    const movementValue = new Decimal(Math.abs(result.quantity))
+      .times(new Decimal(unitCost))
+      .toNumber();
+
+    // Get product name for GL description
+    const productResult = await pool.query('SELECT name FROM products WHERE id = $1', [
+      data.productId,
+    ]);
+    const productName = productResult.rows[0]?.name || 'Unknown';
+
+    // GL failure is fatal — consistency with sales/GR error handling
+    await glEntryService.recordStockMovementToGL(
+      {
         movementId: result.id,
         movementNumber: result.movementNumber,
-        error: glError,
-      });
-    }
+        movementDate: new Date().toLocaleDateString('en-CA'),
+        movementType: data.movementType as
+          | 'ADJUSTMENT_IN'
+          | 'ADJUSTMENT_OUT'
+          | 'DAMAGE'
+          | 'EXPIRY',
+        movementValue,
+        productName,
+      },
+      pool
+    );
   }
 
   return result;
