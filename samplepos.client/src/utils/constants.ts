@@ -72,6 +72,7 @@ export const STOCK_MOVEMENT_TYPE = {
   RETURN: 'RETURN',
   DAMAGE: 'DAMAGE',
   EXPIRY: 'EXPIRY',
+  OPENING_BALANCE: 'OPENING_BALANCE',
 } as const;
 
 /**

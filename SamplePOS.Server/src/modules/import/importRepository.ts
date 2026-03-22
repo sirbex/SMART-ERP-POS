@@ -787,7 +787,7 @@ export async function bulkInsertProducts(
       const batchResult = await client.query(
         `INSERT INTO inventory_batches (
           product_id, batch_number, quantity, remaining_quantity,
-          cost_price, expiry_date, source_type, source_id
+          cost_price, expiry_date, source_type, source_reference_id
         ) VALUES ${batchPlaceholders.join(', ')}
         ${batchConflict}
         RETURNING id, product_id, batch_number, remaining_quantity, cost_price`,

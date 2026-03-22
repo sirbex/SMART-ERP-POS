@@ -997,8 +997,8 @@ export const reportsRepository = {
         p.description,
         COALESCE(SUM(
           CASE 
-            WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'OPENING_BALANCE') THEN sm.quantity
-            WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE') THEN -sm.quantity
+            WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE') THEN sm.quantity
+            WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE', 'TRANSFER_OUT') THEN -sm.quantity
             ELSE 0
           END
         ), 0) as final_stock_level
