@@ -37,9 +37,27 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
     },
 }));
 
+// Mock errorHandler so ForbiddenError is available
+jest.unstable_mockModule('../../middleware/errorHandler.js', () => {
+    class AppError extends Error {
+        constructor(public statusCode: number, message: string) {
+            super(message);
+        }
+    }
+    class ForbiddenError extends AppError {
+        constructor(message: string = 'Forbidden') {
+            super(403, message);
+        }
+    }
+    return { AppError, ForbiddenError };
+});
+
 const supplierService = await import('./supplierService.js');
+const { ForbiddenError } = await import('../../middleware/errorHandler.js');
 
 const mockPool = {} as Pool;
+
+const SYSTEM_ID = 'a0000000-0000-0000-0000-000000000001';
 
 describe('supplierService', () => {
     beforeEach(() => jest.clearAllMocks());
@@ -115,6 +133,77 @@ describe('supplierService', () => {
 
             const results = await supplierService.searchSuppliers(mockPool, 'Acme');
             expect(results).toHaveLength(1);
+        });
+    });
+
+    // ── SYSTEM supplier protection tests ──
+
+    describe('SYSTEM_SUPPLIER_ID constant', () => {
+        it('should export the well-known UUID', () => {
+            expect(supplierService.SYSTEM_SUPPLIER_ID).toBe(SYSTEM_ID);
+        });
+    });
+
+    describe('updateSupplier — SYSTEM supplier protection', () => {
+        it('should throw ForbiddenError when updating SYSTEM supplier by ID', async () => {
+            mockFindById.mockResolvedValue({ id: SYSTEM_ID, name: 'SYSTEM', SupplierCode: 'SYS-OPENING-BAL' });
+
+            await expect(
+                supplierService.updateSupplier(mockPool, SYSTEM_ID, { name: 'Hacked' })
+            ).rejects.toThrow(ForbiddenError);
+
+            expect(mockUpdate).not.toHaveBeenCalled();
+        });
+
+        it('should throw ForbiddenError when updating supplier with SYS- code prefix', async () => {
+            mockFindById.mockResolvedValue({ id: 'other-uuid', SupplierCode: 'SYS-CUSTOM' });
+
+            await expect(
+                supplierService.updateSupplier(mockPool, 'other-uuid', { name: 'Hacked' })
+            ).rejects.toThrow(ForbiddenError);
+
+            expect(mockUpdate).not.toHaveBeenCalled();
+        });
+
+        it('should allow updating a normal supplier', async () => {
+            mockFindById.mockResolvedValue({ id: 's1', SupplierCode: 'SUP-2025-0001' });
+            mockUpdate.mockResolvedValue({ id: 's1', name: 'Updated' });
+
+            const result = await supplierService.updateSupplier(mockPool, 's1', { name: 'Updated' });
+            expect(result).toBeDefined();
+            expect(mockUpdate).toHaveBeenCalled();
+        });
+    });
+
+    describe('deleteSupplier — SYSTEM supplier protection', () => {
+        it('should throw ForbiddenError when deleting SYSTEM supplier by ID', async () => {
+            mockFindById.mockResolvedValue({ id: SYSTEM_ID, SupplierCode: 'SYS-OPENING-BAL' });
+
+            await expect(
+                supplierService.deleteSupplier(mockPool, SYSTEM_ID)
+            ).rejects.toThrow(ForbiddenError);
+
+            expect(mockHasActivePurchaseOrders).not.toHaveBeenCalled();
+            expect(mockSoftDeleteSupplier).not.toHaveBeenCalled();
+        });
+
+        it('should throw ForbiddenError when deleting supplier with SYS- code prefix', async () => {
+            mockFindById.mockResolvedValue({ id: 'some-id', SupplierCode: 'SYS-FUTURE' });
+
+            await expect(
+                supplierService.deleteSupplier(mockPool, 'some-id')
+            ).rejects.toThrow(ForbiddenError);
+
+            expect(mockSoftDeleteSupplier).not.toHaveBeenCalled();
+        });
+
+        it('should allow deleting a normal supplier', async () => {
+            mockFindById.mockResolvedValue({ id: 's1', SupplierCode: 'SUP-2025-0001' });
+            mockHasActivePurchaseOrders.mockResolvedValue(false);
+            mockSoftDeleteSupplier.mockResolvedValue(undefined);
+
+            await expect(supplierService.deleteSupplier(mockPool, 's1')).resolves.not.toThrow();
+            expect(mockSoftDeleteSupplier).toHaveBeenCalled();
         });
     });
 });
