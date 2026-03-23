@@ -178,18 +178,21 @@ export const goodsReceiptService = {
 
         // Server-side normalization: ensure unitCost is base unit cost
         // Uses pre-fetched product data instead of per-item query
+        // All arithmetic via Decimal to avoid floating-point precision loss (Tally/SAP pattern)
         const productData = grProductsMap.get(it.productId);
         if (productData) {
-          const baseCost = Money.parseDb(productData.cost_price).toNumber();
-          if (baseCost > 0 && unitCost > 0) {
-            const ratio = unitCost / baseCost;
-            const rounded = Math.round(ratio);
-            const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
-            if (isIntegerish && rounded >= 2 && rounded <= 200) {
+          const baseCostDec = Money.parseDb(productData.cost_price);
+          const unitCostDec = new Decimal(unitCost);
+          if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
+            const ratio = unitCostDec.dividedBy(baseCostDec);
+            const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+            const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
+            if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
+              const normalizedCost = unitCostDec.dividedBy(rounded);
               logger.info(
-                `Normalizing unit cost for ${it.productName}: ${unitCost} → ${unitCost / rounded} (factor: ${rounded})`
+                `Normalizing unit cost for ${it.productName}: ${unitCost} → ${Money.toNumber(normalizedCost)} (factor: ${rounded})`
               );
-              unitCost = unitCost / rounded;
+              unitCost = Money.toNumber(normalizedCost);
             }
           }
         }
@@ -840,16 +843,18 @@ export const goodsReceiptService = {
           [productId]
         );
         if (productRes.rows.length > 0) {
-          const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
-          if (baseCost > 0 && data.unitCost > 0) {
-            const ratio = data.unitCost / baseCost;
-            const rounded = Math.round(ratio);
-            const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
-            if (isIntegerish && rounded >= 2 && rounded <= 200) {
+          const baseCostDec = Money.parseDb(productRes.rows[0].cost_price);
+          const unitCostDec = new Decimal(data.unitCost);
+          if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
+            const ratio = unitCostDec.dividedBy(baseCostDec);
+            const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+            const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
+            if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
+              const normalizedCost = unitCostDec.dividedBy(rounded);
               logger.info(
-                `Normalizing unit cost for item ${itemId}: ${data.unitCost} → ${data.unitCost / rounded} (factor: ${rounded})`
+                `Normalizing unit cost for item ${itemId}: ${data.unitCost} → ${Money.toNumber(normalizedCost)} (factor: ${rounded})`
               );
-              normalizedUnitCost = data.unitCost / rounded;
+              normalizedUnitCost = Money.toNumber(normalizedCost);
             }
           }
         }

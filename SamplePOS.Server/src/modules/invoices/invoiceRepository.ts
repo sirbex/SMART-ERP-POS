@@ -1,4 +1,5 @@
 import { Pool, PoolClient } from 'pg';
+import { Money } from '../../utils/money.js';
 
 // Helper to normalize Pascal case database columns to camelCase
 function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
@@ -294,7 +295,7 @@ export const invoiceRepository = {
       'SELECT COALESCE(SUM(amount),0) AS amount_paid FROM invoice_payments WHERE invoice_id = $1',
       [invoiceId]
     );
-    const amountPaid = parseFloat(payAgg.rows[0].amount_paid);
+    const amountPaid = Money.toNumber(Money.parseDb(payAgg.rows[0].amount_paid));
     const updated = await pool.query(
       `UPDATE invoices
          SET "AmountPaid" = $1,

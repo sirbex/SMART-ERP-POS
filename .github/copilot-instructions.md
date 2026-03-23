@@ -288,7 +288,7 @@ const normalizedSales = useMemo(() => {
     ...sale,
     saleNumber: sale.sale_number,
     customerId: sale.customer_id,
-    totalAmount: parseFloat(sale.total_amount),
+    totalAmount: Number(sale.total_amount),
     paymentMethod: sale.payment_method,
   }));
 }, [sales]);
@@ -382,10 +382,10 @@ export function normalizeSale(dbRow: SaleDbRow): Sale {
     saleNumber: dbRow.sale_number,
     customerId: dbRow.customer_id,
     customerName: dbRow.customer_name,
-    totalAmount: parseFloat(dbRow.total_amount || '0'),
-    totalCost: parseFloat(dbRow.total_cost || '0'),
-    profit: parseFloat(dbRow.profit || '0'),
-    profitMargin: dbRow.profit_margin ? parseFloat(dbRow.profit_margin) : undefined,
+    totalAmount: Money.toNumber(Money.parseDb(dbRow.total_amount)),
+    totalCost: Money.toNumber(Money.parseDb(dbRow.total_cost)),
+    profit: Money.toNumber(Money.parseDb(dbRow.profit)),
+    profitMargin: dbRow.profit_margin ? Money.toNumber(Money.parseDb(dbRow.profit_margin)) : undefined,
     saleDate: dbRow.sale_date,
     createdAt: dbRow.created_at,
     paymentMethod: dbRow.payment_method as Sale['paymentMethod'],
@@ -393,8 +393,8 @@ export function normalizeSale(dbRow: SaleDbRow): Sale {
     cashierId: dbRow.cashier_id,
     cashierName: dbRow.cashier_name,
     notes: dbRow.notes,
-    amountPaid: dbRow.amount_paid ? parseFloat(dbRow.amount_paid) : undefined,
-    changeAmount: dbRow.change_amount ? parseFloat(dbRow.change_amount) : undefined,
+    amountPaid: dbRow.amount_paid ? Money.toNumber(Money.parseDb(dbRow.amount_paid)) : undefined,
+    changeAmount: dbRow.change_amount ? Money.toNumber(Money.parseDb(dbRow.change_amount)) : undefined,
   };
 }
 ```
@@ -466,17 +466,26 @@ const sales: Sale[] = response.data.data;
 - `amountDue` - Outstanding balance
 - `changeAmount` - Change given
 
-**Use Decimal.js for all calculations**:
+**Use Money utility for all calculations (NEVER raw Decimal.js or parseFloat)**:
 ```typescript
-import Decimal from 'decimal.js';
+import { Money } from '../utils/money.js';
 
-// ✅ CORRECT
-const profit = new Decimal(sale.totalAmount).minus(sale.totalCost);
-const margin = profit.dividedBy(sale.totalAmount).times(100);
+// ✅ CORRECT: Money utility for all financial math
+const profit = Money.subtract(sale.totalAmount, sale.totalCost);
+const margin = Money.percentageRate(profit, sale.totalAmount);
 
-// ❌ WRONG
+// ✅ CORRECT: Parse DB NUMERIC values
+const amount = Money.toNumber(Money.parseDb(row.total_amount));
+
+// ❌ WRONG: parseFloat on DB values (precision loss)
+const amount = parseFloat(row.total_amount);
+
+// ❌ WRONG: Raw JS arithmetic
 const profit = sale.totalAmount - sale.totalCost;
 const margin = (profit / sale.totalAmount) * 100;
+
+// ❌ WRONG: Direct Decimal.js (use Money wrapper)
+const profit = new Decimal(sale.totalAmount).minus(sale.totalCost);
 ```
 
 ### 5. Enum Types for Status Fields
@@ -577,10 +586,14 @@ return stmt.get(id);
 
 ### Decimal Arithmetic
 ```typescript
-import Decimal from 'decimal.js';
+import { Money } from '../utils/money.js';
 
-// ✅ Always use Decimal for money/quantities
-const total = new Decimal(item.quantity).times(item.price);
+// ✅ Always use Money utility for financial values
+const total = Money.lineTotal(item.quantity, item.price);
+const cost = Money.toNumber(Money.parseDb(row.cost_price));
+
+// ❌ Never use parseFloat on PostgreSQL NUMERIC columns
+const cost = parseFloat(row.cost_price); // WRONG - precision loss
 
 // ❌ Never use native JS numbers for currency
 const total = item.quantity * item.price; // WRONG - precision loss
@@ -789,6 +802,10 @@ npm run build
 - [ ] Typed error classes used (NotFoundError, ValidationError, etc. — not raw Error)
 - [ ] Multi-table operations wrapped in `withTransaction`
 - [ ] Used `Money` utility for currency/quantity arithmetic (not raw Decimal.js or floats)
+- [ ] **No `parseFloat()` on PostgreSQL NUMERIC columns — use `Money.toNumber(Money.parseDb())`**
+- [ ] **No raw JS arithmetic (`/`, `*`, `-`) on financial values — use Money/Decimal methods**
+- [ ] **No `Math.abs/Math.max/Math.round` on Decimal values — use `.abs()`, `Money.max()`, `.toDecimalPlaces()`**
+- [ ] **No intermediate `.toNumber()` mid-calculation — keep Decimal until final output boundary**
 - [ ] List endpoints use `PaginationHelper`
 - [ ] Related-data loading uses `batchFetch` (no N+1 loops)
 - [ ] No business logic in repositories

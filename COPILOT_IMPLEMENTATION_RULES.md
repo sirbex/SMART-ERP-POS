@@ -233,40 +233,116 @@ Repository files **must**:
 
 ---
 
-## 🧮 4️⃣ Numeric Precision & Calculations
+## 🧮 4️⃣ Numeric Precision & Financial Math (CRITICAL)
 
-### Decimal.js for All Financial Math
+### Principle: Decimal-Safe from Parse to Storage (Tally/SAP Pattern)
 
-Use `Decimal.js` for:
-- Quantities
-- Unit costs
-- Margins
-- Totals
-- Tax calculations
-- Discount calculations
-- UoM conversions
+All financial values must remain in `Decimal` (via `Money` utility) from the moment they
+enter the system until they leave. **Never convert to JS `number` in the middle of a
+calculation chain.** Convert to `number` only at the final output boundary (API response,
+DB parameter, UI display).
 
-**Never use native JS floats for financial math.**
+### Money Utility — SINGLE AUTHORITY for All Financial Math
 
-### Example Usage
 ```typescript
-import Decimal from 'decimal.js';
+import { Money } from '../utils/money.js';
 
-// ✅ Correct
-const total = new Decimal(quantity).times(price);
-const discountAmount = total.times(discountPercent).dividedBy(100);
-const finalAmount = total.minus(discountAmount);
+// ✅ CORRECT: Use Money for ALL financial operations
+const subtotal = Money.lineTotal(quantity, unitPrice);
+const discount = Money.applyDiscount(subtotal, discountPercent);
+const tax      = Money.calculateTax(discount, taxRate);
+const total    = Money.add(discount, tax);
+const margin   = Money.grossMargin(sellingPrice, costPrice);
 
-// ❌ Wrong
-const total = quantity * price; // Precision loss!
+// ✅ CORRECT: Parse DB NUMERIC values with Money.parseDb()
+const amount = Money.toNumber(Money.parseDb(row.total_amount));
+
+// ✅ CORRECT: Keep Decimal through entire calculation, convert at boundary
+const totalCash = payments.reduce((sum, p) => sum.plus(p.amount), new Decimal(0));
+const remaining = new Decimal(totalDue).minus(totalNonCash);
+if (totalCash.greaterThan(remaining)) {
+  return totalCash.minus(remaining).toDecimalPlaces(2).toNumber(); // boundary
+}
 ```
 
-### Decimal Configuration
+### ZERO TOLERANCE Violations
+
+| Violation | Why It's Wrong | Correct Pattern |
+|-----------|----------------|------------------|
+| `parseFloat(row.amount)` | Truncates to 64-bit float, loses precision on large NUMERIC | `Money.toNumber(Money.parseDb(row.amount))` |
+| `unitCost / baseCost` (raw JS `/`) | IEEE 754 floating-point division | `new Decimal(unitCost).dividedBy(baseCost)` |
+| `Math.round(ratio)` on money | Floating-point rounding | `ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP)` |
+| `Math.abs(value)` on Decimal | Converts to number first | `value.abs()` or `Money.abs(value)` |
+| `Math.max(0, decimal.toNumber())` | Loses precision before comparison | `Money.max(0, decimal)` or `Decimal.max(0, decimal)` |
+| `.toNumber()` mid-calculation | Breaks Decimal chain | Keep as `Decimal`, call `.toNumber()` only at return |
+| `quantity * price` (native `*`) | Floating-point multiplication | `Money.multiply(quantity, price)` |
+| `.toFixed(2)` for comparison | Returns string, not number | Use `Money.round(value, 2)` |
+
+### PostgreSQL NUMERIC Handling
+
+PostgreSQL returns `NUMERIC`/`DECIMAL` columns as **strings** to preserve precision.
+Never use `parseFloat()` — it silently truncates.
+
+```typescript
+// ✅ CORRECT: Money.parseDb handles string → Decimal safely
+const cost = Money.toNumber(Money.parseDb(row.cost_price));     // For API response
+const costDec = Money.parseDb(row.cost_price);                  // For further math
+
+// ✅ CORRECT: In mapper functions
+function mapRow(r: Record<string, unknown>) {
+  return {
+    unitCost: Money.toNumber(Money.parseDb(r.unit_cost)),
+    totalValue: Money.toNumber(Money.parseDb(r.total_value)),
+    quantity: Money.toNumber(Money.parseDb(r.quantity)),
+  };
+}
+
+// ❌ FORBIDDEN
+parseFloat(row.cost_price)           // Precision loss
+Number(row.total_amount)             // Same problem
++row.quantity                        // Coercion, loses precision
+```
+
+### Decimal.js Configuration (Already Set in money.ts)
 ```typescript
 Decimal.set({
-  precision: 20,
-  rounding: Decimal.ROUND_HALF_UP
+  precision: 20,                    // High precision for intermediates
+  rounding: Decimal.ROUND_HALF_UP,  // Standard currency rounding
+  toExpNeg: -9,                     // Avoid scientific notation
+  toExpPos: 21,
 });
+```
+
+### Unit Cost Normalization Pattern (GR / Sales)
+When detecting if a cost is a UoM multiple, use Decimal throughout:
+
+```typescript
+// ✅ CORRECT: All-Decimal normalization
+const baseCostDec = Money.parseDb(productData.cost_price);
+const unitCostDec = new Decimal(unitCost);
+if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
+  const ratio = unitCostDec.dividedBy(baseCostDec);
+  const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+  const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
+  if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
+    unitCost = Money.toNumber(unitCostDec.dividedBy(rounded));
+  }
+}
+
+// ❌ FORBIDDEN: Raw JS division
+const ratio = unitCost / baseCost;
+const rounded = Math.round(ratio);
+```
+
+### Financial Comparison Pattern
+```typescript
+// ✅ CORRECT: Decimal comparisons
+if (balance.lessThan(0) && balance.abs().greaterThan('0.01')) { ... }
+const safeBalance = Money.max(0, balance);
+
+// ❌ FORBIDDEN
+if (Math.abs(balance.toNumber()) > 0.01) { ... }
+const safeBalance = Math.max(0, balance.toNumber());
 ```
 
 ---

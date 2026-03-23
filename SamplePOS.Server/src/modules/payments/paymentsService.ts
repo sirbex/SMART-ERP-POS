@@ -19,6 +19,7 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
+import { Money } from '../../utils/money.js';
 
 // Payment segment type (local definition)
 interface PaymentSegment {
@@ -187,7 +188,7 @@ export const paymentsService = {
               saleId: input.saleId,
               saleNumber: input.saleNumber || input.saleId,
               paymentMethod: payment.payment_method_code,
-              amount: parseFloat(payment.amount),
+              amount: Money.toNumber(Money.parseDb(payment.amount)),
               referenceNumber: payment.reference_number,
               isSplitPayment: txResult.createdPayments.length > 1,
               processedBy: input.processedBy,
@@ -205,7 +206,7 @@ export const paymentsService = {
       salePayments: txResult.createdPayments.map((p) => ({
         id: p.id,
         method: p.payment_method_code,
-        amount: parseFloat(p.amount),
+        amount: Money.toNumber(Money.parseDb(p.amount)),
         reference: p.reference_number,
       })),
       creditTransaction: txResult.creditTransaction,
@@ -242,7 +243,7 @@ export const paymentsService = {
       const paymentAmount = new Decimal(input.amount);
       const newBalance = new Decimal(currentBalance).minus(paymentAmount);
 
-      if (newBalance.lessThan(0) && Math.abs(newBalance.toNumber()) > 0.01) {
+      if (newBalance.lessThan(0) && newBalance.abs().greaterThan('0.01')) {
         throw new Error('Payment amount exceeds outstanding balance');
       }
 
@@ -251,14 +252,14 @@ export const paymentsService = {
         customerId: input.customerId,
         transactionType: 'PAYMENT',
         amount: -paymentAmount.toNumber(), // Negative for payment
-        balanceAfter: Math.max(0, newBalance.toNumber()), // Don't go negative
+        balanceAfter: Money.toNumber(Money.max(0, newBalance)), // Don't go negative
         referenceNumber: input.reference || null,
         notes: input.notes || `Payment via ${input.paymentMethod}`,
         processedBy: input.processedBy || null,
       });
 
       return {
-        newBalance: Math.max(0, newBalance.toNumber()),
+        newBalance: Money.toNumber(Money.max(0, newBalance)),
         transactionId: transaction.id,
       };
     });
@@ -313,15 +314,15 @@ export const paymentsService = {
       payments: payments.map((p) => ({
         id: p.id,
         method: p.payment_method_code,
-        amount: parseFloat(p.amount),
+        amount: Money.toNumber(Money.parseDb(p.amount)),
         reference: p.reference_number,
         processedAt: p.processed_at,
       })),
       creditTransactions: creditTransactions.map((t) => ({
         id: t.id,
         type: t.transaction_type,
-        amount: parseFloat(t.amount),
-        balanceAfter: parseFloat(t.balance_after),
+        amount: Money.toNumber(Money.parseDb(t.amount)),
+        balanceAfter: Money.toNumber(Money.parseDb(t.balance_after)),
         createdAt: t.created_at,
       })),
       totalPaid,
@@ -338,8 +339,8 @@ export const paymentsService = {
     return transactions.map((t) => ({
       id: t.id,
       type: t.transaction_type,
-      amount: parseFloat(t.amount),
-      balanceAfter: parseFloat(t.balance_after),
+      amount: Money.toNumber(Money.parseDb(t.amount)),
+      balanceAfter: Money.toNumber(Money.parseDb(t.balance_after)),
       saleId: t.sale_id,
       reference: t.reference_number,
       notes: t.notes,
@@ -354,18 +355,16 @@ export const paymentsService = {
   calculateChange(payments: PaymentSegment[], totalDue: number): number {
     const cashPayments = payments.filter((p) => p.method === 'CASH');
     const totalCash = cashPayments
-      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0))
-      .toNumber();
+      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0));
 
     const nonCashPayments = payments.filter((p) => p.method !== 'CASH');
     const totalNonCash = nonCashPayments
-      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0))
-      .toNumber();
+      .reduce((sum, p) => sum.plus(p.amount), new Decimal(0));
 
-    const remainingAfterNonCash = new Decimal(totalDue).minus(totalNonCash).toNumber();
+    const remainingAfterNonCash = new Decimal(totalDue).minus(totalNonCash);
 
-    if (totalCash > remainingAfterNonCash && remainingAfterNonCash > 0) {
-      return new Decimal(totalCash).minus(remainingAfterNonCash).toDecimalPlaces(2).toNumber();
+    if (totalCash.greaterThan(remainingAfterNonCash) && remainingAfterNonCash.greaterThan(0)) {
+      return totalCash.minus(remainingAfterNonCash).toDecimalPlaces(2).toNumber();
     }
 
     return 0;

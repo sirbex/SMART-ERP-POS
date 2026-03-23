@@ -3,6 +3,7 @@
 
 import type { Pool } from 'pg';
 import logger from '../../utils/logger.js';
+import { Money } from '../../utils/money.js';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -66,10 +67,10 @@ function mapLedgerRow(r: Record<string, unknown>): LedgerEntry {
         productId: r.product_id as string,
         batchId: r.batch_id as string | null,
         movementType: r.movement_type as string,
-        absQuantity: parseFloat(String(r.abs_quantity)),
-        signedQuantity: parseFloat(String(r.signed_quantity)),
-        unitCost: parseFloat(String(r.unit_cost ?? 0)),
-        signedValue: parseFloat(String(r.signed_value)),
+        absQuantity: Money.toNumber(Money.parseDb(r.abs_quantity)),
+        signedQuantity: Money.toNumber(Money.parseDb(r.signed_quantity)),
+        unitCost: Money.toNumber(Money.parseDb(r.unit_cost ?? 0)),
+        signedValue: Money.toNumber(Money.parseDb(r.signed_value)),
         referenceType: r.reference_type as string | null,
         referenceId: r.reference_id as string | null,
         notes: r.notes as string | null,
@@ -85,13 +86,13 @@ function mapValuationRow(r: Record<string, unknown>): ValuationLayer {
         productName: r.product_name as string,
         sku: r.sku as string | null,
         batchNumber: r.batch_number as string | null,
-        originalQuantity: parseFloat(String(r.original_quantity)),
-        remainingQuantity: parseFloat(String(r.remaining_quantity)),
-        consumedQuantity: parseFloat(String(r.consumed_quantity)),
-        unitCost: parseFloat(String(r.unit_cost)),
-        remainingValue: parseFloat(String(r.remaining_value)),
-        originalValue: parseFloat(String(r.original_value)),
-        consumedValue: parseFloat(String(r.consumed_value)),
+        originalQuantity: Money.toNumber(Money.parseDb(r.original_quantity)),
+        remainingQuantity: Money.toNumber(Money.parseDb(r.remaining_quantity)),
+        consumedQuantity: Money.toNumber(Money.parseDb(r.consumed_quantity)),
+        unitCost: Money.toNumber(Money.parseDb(r.unit_cost)),
+        remainingValue: Money.toNumber(Money.parseDb(r.remaining_value)),
+        originalValue: Money.toNumber(Money.parseDb(r.original_value)),
+        consumedValue: Money.toNumber(Money.parseDb(r.consumed_value)),
         receivedDate: String(r.received_date),
         isActive: r.is_active as boolean,
         layerStatus: r.layer_status as 'DEPLETED' | 'PARTIAL' | 'FULL',
@@ -104,12 +105,12 @@ function mapReconciliationRow(r: Record<string, unknown>): ReconciliationRow {
         productId: r.product_id as string,
         productName: r.product_name as string,
         sku: r.sku as string | null,
-        ledgerStock: parseFloat(String(r.ledger_stock)),
-        batchStock: parseFloat(String(r.batch_stock)),
-        cachedStock: parseFloat(String(r.cached_stock)),
-        ledgerVsBatchDiff: parseFloat(String(r.ledger_vs_batch_diff)),
-        batchVsCacheDiff: parseFloat(String(r.batch_vs_cache_diff)),
-        ledgerVsCacheDiff: parseFloat(String(r.ledger_vs_cache_diff)),
+        ledgerStock: Money.toNumber(Money.parseDb(r.ledger_stock)),
+        batchStock: Money.toNumber(Money.parseDb(r.batch_stock)),
+        cachedStock: Money.toNumber(Money.parseDb(r.cached_stock)),
+        ledgerVsBatchDiff: Money.toNumber(Money.parseDb(r.ledger_vs_batch_diff)),
+        batchVsCacheDiff: Money.toNumber(Money.parseDb(r.batch_vs_cache_diff)),
+        ledgerVsCacheDiff: Money.toNumber(Money.parseDb(r.ledger_vs_cache_diff)),
         isReconciled: r.is_reconciled as boolean,
         totalMovements: parseInt(String(r.total_movements), 10),
         lastMovementDate: r.last_movement_date ? String(r.last_movement_date) : null,
@@ -159,7 +160,7 @@ export const inventoryLedgerRepository = {
             `SELECT fn_ledger_stock_balance($1) AS balance`,
             [productId]
         );
-        return parseFloat(result.rows[0].balance);
+        return Money.toNumber(Money.parseDb(result.rows[0].balance));
     },
 
     /**
@@ -201,8 +202,8 @@ export const inventoryLedgerRepository = {
     `);
         const r = result.rows[0];
         return {
-            totalRemainingValue: parseFloat(r.total_remaining),
-            totalOriginalValue: parseFloat(r.total_original),
+            totalRemainingValue: Money.toNumber(Money.parseDb(r.total_remaining)),
+            totalOriginalValue: Money.toNumber(Money.parseDb(r.total_original)),
             activeLayers: parseInt(r.active_layers, 10),
             products: parseInt(r.products, 10),
         };
@@ -258,8 +259,8 @@ export const inventoryLedgerRepository = {
         return result.rows.map(r => ({
             movementType: r.movement_type as string,
             count: parseInt(r.movement_count, 10),
-            totalQuantity: parseFloat(r.total_quantity),
-            totalValue: parseFloat(r.total_value),
+            totalQuantity: Money.toNumber(Money.parseDb(r.total_quantity)),
+            totalValue: Money.toNumber(Money.parseDb(r.total_value)),
         }));
     },
 };

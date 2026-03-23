@@ -2,6 +2,7 @@
 
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 import * as discountRepo from './discountRepository';
 import * as auditService from '../audit/auditService';
 import { calculateDiscountAmount, isDiscountAllowed, RoleDiscountLimits } from '@shared/zod/discount';
@@ -261,7 +262,7 @@ export async function approveDiscount(
           {
             saleId: auth.sale_id,
             saleNumber: auth.sale_id, // TODO: Fetch actual sale number if needed
-            discountAmount: parseFloat(auth.discount_amount),
+            discountAmount: Money.toNumber(Money.parseDb(auth.discount_amount)),
             requestedBy: auth.requested_by_name,
             approvedBy: managerName,
           },
@@ -284,10 +285,10 @@ export async function getPendingAuthorizations(pool: Pool): Promise<Record<strin
   return rows.map((row) => ({
     id: row.id,
     saleId: row.sale_id,
-    discountAmount: parseFloat(row.discount_amount),
+    discountAmount: Money.toNumber(Money.parseDb(row.discount_amount)),
     discountType: row.discount_type,
-    originalAmount: parseFloat(row.original_amount),
-    finalAmount: parseFloat(row.final_amount),
+    originalAmount: Money.toNumber(Money.parseDb(row.original_amount)),
+    finalAmount: Money.toNumber(Money.parseDb(row.final_amount)),
     reason: row.reason,
     requestedBy: row.requested_by,
     requestedByName: row.requested_by_name,
@@ -305,9 +306,9 @@ function normalizeDiscount(row: discountRepo.DiscountDbRow): Discount {
     name: row.name,
     type: row.type as 'PERCENTAGE' | 'FIXED_AMOUNT' | 'BUY_X_GET_Y',
     scope: row.scope as 'CUSTOMER' | 'LINE_ITEM' | 'CART',
-    value: parseFloat(row.value),
-    maxDiscountAmount: row.max_discount_amount ? parseFloat(row.max_discount_amount) : null,
-    minPurchaseAmount: row.min_purchase_amount ? parseFloat(row.min_purchase_amount) : null,
+    value: Money.toNumber(Money.parseDb(row.value)),
+    maxDiscountAmount: row.max_discount_amount ? Money.toNumber(Money.parseDb(row.max_discount_amount)) : null,
+    minPurchaseAmount: row.min_purchase_amount ? Money.toNumber(Money.parseDb(row.min_purchase_amount)) : null,
     requiresApproval: row.requires_approval,
     approvalRoles: row.approval_roles || undefined,
     isActive: row.is_active,
