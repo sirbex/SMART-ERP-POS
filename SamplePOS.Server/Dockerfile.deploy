@@ -44,11 +44,18 @@ COPY --from=deps /app/SamplePOS.Server/node_modules ./node_modules
 COPY --from=builder /app/SamplePOS.Server/package.json ./package.json
 COPY --from=builder /app/config ../config
 
-# Create logs and backups directories writable by nodejs user
-RUN mkdir -p /app/dist/SamplePOS.Server/logs /app/backups && chown -R nodejs:nodejs /app/dist/SamplePOS.Server/logs /app/backups
+# Create logs, backups, and uploads directories writable by nodejs user
+RUN mkdir -p /app/dist/SamplePOS.Server/logs /app/backups /app/uploads/imports \
+    && chown -R nodejs:nodejs /app/dist/SamplePOS.Server/logs /app/backups /app/uploads
+
+# Entrypoint script: ensure bind-mounted directories have required subdirs.
+# Bind mounts override the container FS, so we must create subdirs at runtime.
+# Uses || true because the nodejs user may not own the parent (host creates it).
+RUN printf '#!/bin/sh\nmkdir -p /app/uploads/imports /app/logs 2>/dev/null || true\nexec "$@"\n' \
+    > /app/entrypoint.sh && chmod 755 /app/entrypoint.sh
 
 USER nodejs
 EXPOSE 3001
 
-ENTRYPOINT ["dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--", "/app/entrypoint.sh"]
 CMD ["node", "dist/SamplePOS.Server/src/server.js"]

@@ -31,8 +31,11 @@ const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'imports');
 // Ensure directory exists at startup
 try {
   mkdirSync(UPLOAD_DIR, { recursive: true });
-} catch {
-  /* ignore */
+} catch (err) {
+  logger.error('Failed to create import uploads directory — uploads may fail', {
+    path: UPLOAD_DIR,
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 const storage = multer.diskStorage({
