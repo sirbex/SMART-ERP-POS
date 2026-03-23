@@ -210,7 +210,7 @@ describe('Product Zod Schemas', () => {
             expect(result.success).toBe(true);
         });
 
-        it('should default unitOfMeasure to PIECE', () => {
+        it('should default unitOfMeasure to EACH', () => {
             const result = ProductCreateSchema.safeParse({
                 name: 'Minimal Product',
                 sku: 'MIN-001',
@@ -218,7 +218,7 @@ describe('Product Zod Schemas', () => {
             });
             expect(result.success).toBe(true);
             if (result.success) {
-                expect(result.data.unitOfMeasure).toBe('PIECE');
+                expect(result.data.unitOfMeasure).toBe('EACH');
             }
         });
     });

@@ -17,7 +17,7 @@ export const ProductCoreObject = z.object({
   description: z.string().trim().min(1).max(2000).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   category: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   genericName: z.string().trim().min(1).max(255).optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
-  unitOfMeasure: UnitOfMeasureEnum.default('PIECE'),
+  unitOfMeasure: UnitOfMeasureEnum.default('EACH'),
   conversionFactor: z.number().positive().finite().default(1),
   costPrice: z.number().min(0, 'Cost price must be >= 0').finite().default(0),
   sellingPrice: z.number().min(0, 'Selling price must be >= 0').finite().default(0),

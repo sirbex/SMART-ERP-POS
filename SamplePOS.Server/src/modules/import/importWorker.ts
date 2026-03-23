@@ -28,6 +28,7 @@ import { cleanupJobFile } from './importService.js';
 import { ProductCreateSchema } from '../../../../shared/zod/product.js';
 import { CreateCustomerSchema } from '../../../../shared/zod/customer.js';
 import { CreateSupplierSchema } from '../../../../shared/zod/supplier.js';
+import { Money } from '../../utils/money.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import {
   getFieldMapForEntity,
@@ -228,6 +229,19 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
           return;
         }
         if (dedupeKey) seenKeys.add(dedupeKey);
+
+        // ── Product import defaults ──────────────────────────
+        // When a product CSV row is missing selling price but has cost,
+        // auto-fill selling price at 60% markup (cost × 1.6) using
+        // Decimal-safe Money utility (SAP/Tally-grade precision).
+        if (entityType === 'PRODUCT') {
+          const cost = typeof mapped.costPrice === 'number' ? mapped.costPrice : 0;
+          const sell = typeof mapped.sellingPrice === 'number' ? mapped.sellingPrice : 0;
+          if (sell <= 0 && cost > 0) {
+            const costDec = Money.parse(cost);
+            mapped.sellingPrice = Money.toNumber(Money.round(costDec.times('1.6')));
+          }
+        }
 
         // Validate with Zod
         const parseResult = schema.safeParse(mapped);
