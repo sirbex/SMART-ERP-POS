@@ -162,6 +162,7 @@ describe('importService', () => {
         'job-uuid-1',
         'FAILED',
         expect.stringContaining('Queue error'),
+        undefined,
       );
     });
   });
@@ -173,7 +174,7 @@ describe('importService', () => {
 
       const result = await importService.getImportJob('12345678-1234-5678-1234-567812345678');
 
-      expect(mockRepo.findJobById).toHaveBeenCalledWith('12345678-1234-5678-1234-567812345678');
+      expect(mockRepo.findJobById).toHaveBeenCalledWith('12345678-1234-5678-1234-567812345678', undefined);
       expect(result).toEqual(fakeJob);
     });
 
@@ -183,7 +184,7 @@ describe('importService', () => {
 
       const result = await importService.getImportJob('IMP-2025-0001');
 
-      expect(mockRepo.findJobByNumber).toHaveBeenCalledWith('IMP-2025-0001');
+      expect(mockRepo.findJobByNumber).toHaveBeenCalledWith('IMP-2025-0001', undefined);
       expect(result).toEqual(fakeJob);
     });
   });
@@ -200,7 +201,7 @@ describe('importService', () => {
       const result = await importService.cancelImportJob('IMP-2025-0001');
 
       expect(result.status).toBe('CANCELLED');
-      expect(mockRepo.atomicCancelJob).toHaveBeenCalledWith('job-uuid-1');
+      expect(mockRepo.atomicCancelJob).toHaveBeenCalledWith('job-uuid-1', undefined);
     });
 
     it('should reject cancelling a non-PENDING job', async () => {
@@ -247,8 +248,8 @@ describe('importService', () => {
       expect(result.status).toBe('PENDING');
       expect(result.errorSummary).toBeNull();
       expect(mockAccess).toHaveBeenCalledWith('/uploads/products.csv');
-      expect(mockRepo.resetJobForRetry).toHaveBeenCalledWith('job-uuid-1');
-      expect(mockRepo.deleteJobErrors).toHaveBeenCalledWith('job-uuid-1');
+      expect(mockRepo.resetJobForRetry).toHaveBeenCalledWith('job-uuid-1', undefined);
+      expect(mockRepo.deleteJobErrors).toHaveBeenCalledWith('job-uuid-1', undefined);
       expect(mockAddJob).toHaveBeenCalledWith('imports', 'csv-import', expect.objectContaining({
         jobId: 'job-uuid-1',
       }));
@@ -384,7 +385,7 @@ describe('importService', () => {
         entityType: 'PRODUCT',
         limit: 10,
         offset: 0,
-      });
+      }, undefined);
     });
   });
 
@@ -394,7 +395,7 @@ describe('importService', () => {
 
       const result = await importService.getImportJobErrors('job-uuid-1', 50, 0);
 
-      expect(mockRepo.getJobErrors).toHaveBeenCalledWith('job-uuid-1', 50, 0);
+      expect(mockRepo.getJobErrors).toHaveBeenCalledWith('job-uuid-1', 50, 0, undefined);
       expect(result).toEqual({ rows: [], total: 0 });
     });
   });
