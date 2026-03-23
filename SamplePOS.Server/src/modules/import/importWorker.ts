@@ -230,17 +230,9 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
         }
         if (dedupeKey) seenKeys.add(dedupeKey);
 
-        // ── Product import defaults ──────────────────────────
-        // When a product CSV row is missing selling price but has cost,
-        // auto-fill selling price at 60% markup (cost × 1.6) using
-        // Decimal-safe Money utility (SAP/Tally-grade precision).
+        // Apply product-specific import defaults (UOM, selling price markup)
         if (entityType === 'PRODUCT') {
-          const cost = typeof mapped.costPrice === 'number' ? mapped.costPrice : 0;
-          const sell = typeof mapped.sellingPrice === 'number' ? mapped.sellingPrice : 0;
-          if (sell <= 0 && cost > 0) {
-            const costDec = Money.parse(cost);
-            mapped.sellingPrice = Money.toNumber(Money.round(costDec.times('1.6')));
-          }
+          applyProductImportDefaults(mapped);
         }
 
         // Validate with Zod
@@ -671,6 +663,25 @@ function coerceValue(fieldName: string, value: string, entityType: ImportEntityT
   }
 
   return value;
+}
+
+// ── Product Import Defaults ──────────────────────────────
+
+/**
+ * Apply smart defaults for imported product rows:
+ * 1. If sellingPrice is missing/zero and costPrice > 0, auto-fill at 60% markup
+ *    (costPrice × 1.6) using Decimal-safe Money utility.
+ *
+ * Mutates the row in place.
+ */
+export function applyProductImportDefaults(row: Record<string, unknown>): void {
+  const cost = typeof row.costPrice === 'number' ? row.costPrice : 0;
+  const sell = typeof row.sellingPrice === 'number' ? row.sellingPrice : 0;
+
+  if (sell <= 0 && cost > 0) {
+    const costDec = Money.parse(cost);
+    row.sellingPrice = Money.toNumber(Money.round(costDec.times('1.6')));
+  }
 }
 
 // ── Deduplication Helpers ─────────────────────────────────
