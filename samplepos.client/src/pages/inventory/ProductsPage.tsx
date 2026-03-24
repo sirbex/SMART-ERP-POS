@@ -129,7 +129,7 @@ export default function ProductsPage() {
 
   // API Hooks — use offline-aware hook for reading, standard hooks for mutations
   const queryClient = useQueryClient();
-  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true });
+  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true, limit: 5000 });
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();

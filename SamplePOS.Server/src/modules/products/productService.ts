@@ -13,8 +13,9 @@ import type { Product, CreateProduct, UpdateProduct } from '../../../../shared/z
 import { PricingBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
 
-// Server-side limit cap — SAP/Odoo style: never trust the client to paginate responsibly.
-const MAX_LIST_LIMIT = 200;
+// Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
+// 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
+const MAX_LIST_LIMIT = 5000;
 
 export async function getAllProducts(
   page: number = 1,
