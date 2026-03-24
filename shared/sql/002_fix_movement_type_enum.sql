@@ -15,7 +15,8 @@ CREATE TYPE movement_type AS ENUM (
   'TRANSFER_OUT',
   'RETURN',
   'DAMAGE',
-  'EXPIRY'
+  'EXPIRY',
+  'OPENING_BALANCE'
 );
 
 ALTER TABLE stock_movements 

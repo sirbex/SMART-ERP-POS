@@ -444,11 +444,10 @@ export default function BatchManagementPage() {
 
                       {/* Category */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                          product?.category
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
                             ? 'bg-blue-50 text-blue-700'
                             : 'text-gray-400'
-                        }`}>
+                          }`}>
                           {product?.category || '\u2014'}
                         </span>
                       </td>
@@ -477,15 +476,14 @@ export default function BatchManagementPage() {
                             </div>
                             {daysUntilExpiry !== null && (
                               <div
-                                className={`text-xs ${
-                                  daysUntilExpiry < 0
+                                className={`text-xs ${daysUntilExpiry < 0
                                     ? 'text-red-600 font-bold'
                                     : daysUntilExpiry <= 7
                                       ? 'text-red-600'
                                       : daysUntilExpiry <= 30
                                         ? 'text-yellow-600'
                                         : 'text-green-600'
-                                }`}
+                                  }`}
                               >
                                 {daysUntilExpiry < 0
                                   ? `Expired ${Math.abs(daysUntilExpiry)} days ago`
@@ -518,13 +516,12 @@ export default function BatchManagementPage() {
                       {/* Status */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            batch.status === 'ACTIVE'
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
                               ? 'bg-green-100 text-green-800'
                               : batch.status === 'DEPLETED'
                                 ? 'bg-gray-100 text-gray-800'
                                 : 'bg-red-100 text-red-800'
-                          }`}
+                            }`}
                         >
                           {batch.status}
                         </span>
@@ -575,8 +572,8 @@ export default function BatchManagementPage() {
           batch={selectedBatch}
           product={
             productMap.get(selectedBatch.product_id) as
-              | { name?: string; sku?: string; unitOfMeasure?: string }
-              | undefined
+            | { name?: string; sku?: string; unitOfMeasure?: string }
+            | undefined
           }
           onClose={() => setShowDetailsModal(false)}
         />
@@ -599,8 +596,8 @@ function BatchDetailsModal({
 }) {
   const daysUntilExpiry = batch.expiry_date
     ? Math.ceil(
-        (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-      )
+      (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+    )
     : null;
 
   const batchValue = new Decimal(batch.remaining_quantity).times(batch.cost_price);
@@ -679,9 +676,8 @@ function BatchDetailsModal({
                 <div>
                   <span className="text-gray-600">Status:</span>
                   <span
-                    className={`ml-2 font-semibold ${
-                      batch.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-600'
-                    }`}
+                    className={`ml-2 font-semibold ${batch.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-600'
+                      }`}
                   >
                     {batch.status}
                   </span>
@@ -702,15 +698,14 @@ function BatchDetailsModal({
                   </div>
                   {daysUntilExpiry !== null && (
                     <div
-                      className={`text-sm font-semibold ${
-                        daysUntilExpiry < 0
+                      className={`text-sm font-semibold ${daysUntilExpiry < 0
                           ? 'text-red-600'
                           : daysUntilExpiry <= 7
                             ? 'text-red-600'
                             : daysUntilExpiry <= 30
                               ? 'text-yellow-600'
                               : 'text-green-600'
-                      }`}
+                        }`}
                     >
                       {daysUntilExpiry < 0
                         ? `⚠️ EXPIRED ${Math.abs(daysUntilExpiry)} days ago`
