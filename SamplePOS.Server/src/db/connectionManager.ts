@@ -191,7 +191,7 @@ class ConnectionManager {
       password: this.dbPassword,
       max: maxConns,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 10000,
     });
 
     pool.on('connect', (client) => {

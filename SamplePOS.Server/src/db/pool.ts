@@ -31,10 +31,10 @@ types.setTypeParser(DATATYPE_DATE, (val: string) => {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 20,
+  max: 50,
   min: 5, // Keep warm connections to eliminate cold-start latency
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000, // 5s prevents false timeouts under burst load
+  connectionTimeoutMillis: 10000, // 10s to wait for free connection under load
 });
 
 // Set session timezone to UTC for all connections

@@ -13,6 +13,9 @@ import type { Product, CreateProduct, UpdateProduct } from '../../../../shared/z
 import { PricingBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
 
+// Server-side limit cap — SAP/Odoo style: never trust the client to paginate responsibly.
+const MAX_LIST_LIMIT = 200;
+
 export async function getAllProducts(
   page: number = 1,
   limit: number = 50,
@@ -27,34 +30,36 @@ export async function getAllProducts(
     totalPages: number;
   };
 }> {
-  const offset = (page - 1) * limit;
+  const safePage = Math.max(1, page);
+  const safeLimit = Math.min(Math.max(1, limit), MAX_LIST_LIMIT);
+  const offset = (safePage - 1) * safeLimit;
+
+  // Two-tier query (SAP/Odoo approach):
+  // 1. Lightweight flat query — no json_agg, no GROUP BY
+  // 2. Batch UOM fetch for the page's products (single query)
   const [products, total] = await Promise.all([
-    productRepository.findAllProducts(limit, offset, dbPool),
+    productRepository.findProductsForListView(safeLimit, offset, dbPool),
     productRepository.countProducts(dbPool),
   ]);
 
-  // If includeUoms is true, fetch UoMs for each product
-  let productsWithUoms = products;
-  if (includeUoms) {
-    productsWithUoms = await Promise.all(
-      products.map(async (product) => {
-        if (!product.id) return product;
-        const uoms = await uomRepository.listProductUoms(product.id, dbPool);
-        return {
-          ...product,
-          productUoms: uoms,
-        };
-      })
-    );
+  // Attach UOMs via a single batch query (not N+1)
+  if (includeUoms && products.length > 0) {
+    const productIds = products.map(p => p.id).filter(Boolean) as string[];
+    const uomMap = await productRepository.findProductUomsBatch(productIds, dbPool);
+    for (const product of products) {
+      if (product.id) {
+        (product as Record<string, unknown>).productUoms = uomMap.get(product.id) || [];
+      }
+    }
   }
 
   return {
-    data: productsWithUoms,
+    data: products,
     pagination: {
-      page,
-      limit,
+      page: safePage,
+      limit: safeLimit,
       total,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / safeLimit),
     },
   };
 }

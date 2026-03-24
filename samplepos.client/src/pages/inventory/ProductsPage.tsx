@@ -129,7 +129,7 @@ export default function ProductsPage() {
 
   // API Hooks — use offline-aware hook for reading, standard hooks for mutations
   const queryClient = useQueryClient();
-  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true, limit: 10000 });
+  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true });
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();
@@ -1049,11 +1049,10 @@ export default function ProductsPage() {
                         <div className="text-sm text-gray-500">{product.description || 'No description'}</div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                          product.category
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product.category
                             ? 'bg-blue-50 text-blue-700'
                             : 'text-gray-400'
-                        }`}>
+                          }`}>
                           {product.category || '—'}
                         </span>
                       </td>

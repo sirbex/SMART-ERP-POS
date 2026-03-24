@@ -152,7 +152,7 @@ export function useOfflineContext(): OfflineContextValue {
 
 async function prewarmProducts(): Promise<void> {
   try {
-    const res = await apiClient.get('/products?page=1&limit=5000&includeUoms=true');
+    const res = await apiClient.get('/products?page=1&limit=200&includeUoms=true');
     const raw: ApiRow[] = res.data?.data || [];
     await putProducts(raw.map(mapApiProduct));
   } catch {
