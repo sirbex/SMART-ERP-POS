@@ -19,6 +19,7 @@ interface ProductItem {
   id: string;
   sku?: string;
   name?: string;
+  category?: string;
   baseUom?: string;
   additionalUoms?: Array<{ unitName: string; conversionFactor: number }>;
   // Fields used by formatMultiUomQuantity
@@ -52,6 +53,7 @@ export default function StockLevelsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'low' | 'expiring'>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
 
   // Helper: calculate days until expiry from a date string
   const getDaysUntilExpiry = (expiryDate: string | null | undefined): number | null => {
@@ -100,6 +102,15 @@ export default function StockLevelsPage() {
     return map;
   }, [products]);
 
+  // Derive unique categories from products
+  const uniqueCategories = useMemo(() => {
+    const cats = new Set<string>();
+    products.forEach((p: ProductItem) => {
+      if (p.category) cats.add(p.category);
+    });
+    return Array.from(cats).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
   // Filter stock levels
   const filteredStockLevels = useMemo(() => {
     let filtered = stockLevels;
@@ -107,9 +118,14 @@ export default function StockLevelsPage() {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(
-        (item: StockLevelItem) =>
-          item.product_name?.toLowerCase().includes(term) ||
-          item.product_id?.toLowerCase().includes(term)
+        (item: StockLevelItem) => {
+          const product = productMap.get(item.product_id);
+          return (
+            item.product_name?.toLowerCase().includes(term) ||
+            item.product_id?.toLowerCase().includes(term) ||
+            (product?.category ?? '').toLowerCase().includes(term)
+          );
+        }
       );
     }
 
@@ -122,13 +138,20 @@ export default function StockLevelsPage() {
       });
     }
 
+    if (filterCategory !== 'all') {
+      filtered = filtered.filter((item: StockLevelItem) => {
+        const product = productMap.get(item.product_id);
+        return product?.category === filterCategory;
+      });
+    }
+
     return filtered;
-  }, [stockLevels, searchTerm, filterStatus]);
+  }, [stockLevels, searchTerm, filterStatus, filterCategory, productMap]);
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus]);
+  }, [searchTerm, filterStatus, filterCategory]);
 
   // Paginated stock levels
   const totalPages = Math.max(1, Math.ceil(filteredStockLevels.length / ITEMS_PER_PAGE));
@@ -197,20 +220,36 @@ export default function StockLevelsPage() {
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Search Products</label>
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name..."
+              placeholder="Search by name or category..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
+            <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
+              Category
+            </label>
+            <select
+              id="filter-category"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Categories</option>
+              {uniqueCategories.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-2">
-              Filter Status
+              Status
             </label>
             <select
               id="filter-status"
@@ -235,6 +274,9 @@ export default function StockLevelsPage() {
                 Product
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Category
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Quantity
               </th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -254,8 +296,8 @@ export default function StockLevelsPage() {
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedStockLevels.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                  {searchTerm || filterStatus !== 'all'
+                <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                  {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
                     ? 'No products match your filters'
                     : 'No inventory data. Create products on the Products page.'}
                 </td>
@@ -279,6 +321,15 @@ export default function StockLevelsPage() {
                           <div className="text-xs text-gray-500 mt-1">SKU: {product.sku}</div>
                         )}
                       </div>
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                        product?.category
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-400'
+                      }`}>
+                        {product?.category || '\u2014'}
+                      </span>
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex flex-col gap-1">

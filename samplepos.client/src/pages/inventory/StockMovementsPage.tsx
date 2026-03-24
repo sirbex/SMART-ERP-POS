@@ -62,6 +62,7 @@ interface ProductRow {
   id: string;
   name: string;
   sku?: string;
+  category?: string;
   status?: string;
   unitOfMeasure?: string;
 }
@@ -572,6 +573,9 @@ export default function StockMovementsPage() {
                   Product
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Category
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Type
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -597,7 +601,7 @@ export default function StockMovementsPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || selectedType !== 'ALL' || startDate || endDate
                       ? 'No movements match your filters'
                       : 'No stock movements recorded yet'}
@@ -645,6 +649,17 @@ export default function StockMovementsPage() {
                             Batch: {movement.batchNumber}
                           </div>
                         )}
+                      </td>
+
+                      {/* Category */}
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                          product?.category
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'text-gray-400'
+                        }`}>
+                          {product?.category || '\u2014'}
+                        </span>
                       </td>
 
                       {/* Type */}

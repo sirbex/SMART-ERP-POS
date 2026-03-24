@@ -66,6 +66,7 @@ interface ProductRow {
   name: string;
   sku?: string;
   status?: string;
+  category?: string;
 }
 
 // Stock level row from API (snake_case)
@@ -212,6 +213,18 @@ export default function InventoryAdjustmentsPage() {
     );
   }, [stockLevelsData]);
 
+  // Product category lookup by product_id
+  const productCategoryMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (productsData) {
+      const prods = (productsData as { data?: ProductRow[] }).data || (Array.isArray(productsData) ? productsData as ProductRow[] : []);
+      prods.forEach((p: ProductRow) => {
+        if (p.category) map.set(p.id, p.category);
+      });
+    }
+    return map;
+  }, [productsData]);
+
   // Filter batches based on search
   const filteredBatches = useMemo(() => {
     if (!searchTerm) return batches;
@@ -220,9 +233,10 @@ export default function InventoryAdjustmentsPage() {
     return batches.filter(
       (batch: Batch) =>
         batch.product_name.toLowerCase().includes(term) ||
-        batch.batch_number.toLowerCase().includes(term)
+        batch.batch_number.toLowerCase().includes(term) ||
+        (productCategoryMap.get(batch.product_id) || '').toLowerCase().includes(term)
     );
-  }, [batches, searchTerm]);
+  }, [batches, searchTerm, productCategoryMap]);
 
   // Pagination for batch table
   const batchTotalPages = Math.max(1, Math.ceil(filteredBatches.length / ITEMS_PER_PAGE));
@@ -714,6 +728,9 @@ export default function InventoryAdjustmentsPage() {
                 Product
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Category
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Batch Number
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -733,7 +750,7 @@ export default function InventoryAdjustmentsPage() {
           <tbody className="bg-white divide-y divide-gray-200">
             {filteredBatches.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                   {searchTerm ? 'No batches match your search' : 'No inventory batches found'}
                 </td>
               </tr>
@@ -742,6 +759,15 @@ export default function InventoryAdjustmentsPage() {
                 <tr key={batch.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <div className="text-sm font-medium text-gray-900">{batch.product_name}</div>
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    {productCategoryMap.get(batch.product_id) ? (
+                      <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700">
+                        {productCategoryMap.get(batch.product_id)}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">{batch.batch_number}</td>
                   <td className="px-6 py-4 text-sm text-gray-900">

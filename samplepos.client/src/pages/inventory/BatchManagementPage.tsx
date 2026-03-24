@@ -380,6 +380,9 @@ export default function BatchManagementPage() {
                   Product
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Category
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Batch Number
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -405,7 +408,7 @@ export default function BatchManagementPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {sortedBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || filterStatus !== 'ALL' || filterUrgency !== 'ALL'
                       ? 'No batches match your filters'
                       : 'No batches found. Create products to see batch inventory.'}
@@ -414,7 +417,7 @@ export default function BatchManagementPage() {
               ) : (
                 sortedBatches.map((batch, index) => {
                   const product = productMap.get(batch.product_id) as
-                    | { unitOfMeasure?: string }
+                    | { unitOfMeasure?: string; category?: string }
                     | undefined;
                   const urgency = calculateExpiryUrgency(batch.expiry_date);
                   const urgencyBadge = getUrgencyBadge(urgency);
@@ -437,6 +440,17 @@ export default function BatchManagementPage() {
                         <div className="text-sm font-medium text-gray-900">
                           {batch.product_name}
                         </div>
+                      </td>
+
+                      {/* Category */}
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                          product?.category
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'text-gray-400'
+                        }`}>
+                          {product?.category || '\u2014'}
+                        </span>
                       </td>
 
                       {/* Batch Number */}
