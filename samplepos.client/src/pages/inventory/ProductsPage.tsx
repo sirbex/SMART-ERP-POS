@@ -141,6 +141,7 @@ export default function ProductsPage() {
   // Local State
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [formData, setFormData] = useState<ProductFormData>(initialFormData);
@@ -347,6 +348,15 @@ export default function ProductsPage() {
     return `PRD-${timestamp}-${random}`;
   };
 
+  // Derive unique categories from loaded products
+  const uniqueCategories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const p of products) {
+      if (p.category) cats.add(p.category);
+    }
+    return Array.from(cats).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
   // Filter products
   const filteredProducts = useMemo(() => {
     let filtered = products;
@@ -356,7 +366,8 @@ export default function ProductsPage() {
       filtered = filtered.filter((p: ProductListItem) =>
         String(p.name ?? '').toLowerCase().includes(term) ||
         String(p.sku ?? '').toLowerCase().includes(term) ||
-        String(p.barcode ?? '').toLowerCase().includes(term)
+        String(p.barcode ?? '').toLowerCase().includes(term) ||
+        String(p.category ?? '').toLowerCase().includes(term)
       );
     }
 
@@ -366,13 +377,19 @@ export default function ProductsPage() {
       );
     }
 
+    if (filterCategory !== 'all') {
+      filtered = filtered.filter((p: ProductListItem) =>
+        p.category === filterCategory
+      );
+    }
+
     return filtered;
-  }, [products, searchTerm, filterStatus]);
+  }, [products, searchTerm, filterStatus, filterCategory]);
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus]);
+  }, [searchTerm, filterStatus, filterCategory]);
 
   // Paginated products
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));
@@ -939,7 +956,7 @@ export default function ProductsPage() {
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label htmlFor="search-products" className="block text-sm font-medium text-gray-700 mb-2">
               Search Products
@@ -949,13 +966,29 @@ export default function ProductsPage() {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name, SKU, or barcode..."
+              placeholder="Search by name, SKU, barcode, or category..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
           <div>
+            <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
+              Category
+            </label>
+            <select
+              id="filter-category"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">All Categories</option>
+              {uniqueCategories.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-2">
-              Filter Status
+              Status
             </label>
             <select
               id="filter-status"
@@ -978,6 +1011,7 @@ export default function ProductsPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU/Barcode</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pricing</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Margin</th>
@@ -989,8 +1023,8 @@ export default function ProductsPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    {searchTerm || filterStatus !== 'all'
+                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
                       ? 'No products match your filters'
                       : 'No products yet. Click "Add Product" to create your first product.'}
                   </td>
@@ -1013,6 +1047,15 @@ export default function ProductsPage() {
                           )}
                         </div>
                         <div className="text-sm text-gray-500">{product.description || 'No description'}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                          product.category
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'text-gray-400'
+                        }`}>
+                          {product.category || '—'}
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-900">SKU: {product.sku}</div>
