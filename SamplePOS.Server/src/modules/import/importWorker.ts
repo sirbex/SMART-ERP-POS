@@ -503,6 +503,7 @@ async function flushChunk(
       }
 
       const importDate = new Date().toLocaleDateString('en-CA');
+      const glFailures: Array<{ movementId: string; error: string }> = [];
       for (const sm of stockMovements) {
         try {
           const movementValue = sm.quantity * sm.unitCost;
@@ -518,13 +519,18 @@ async function flushChunk(
             productName: nameMap.get(sm.productId) || 'Imported product',
           }, dbPool);
         } catch (glErr) {
-          // GL failure during import is non-fatal — log and continue.
-          // Stock movements are recorded; GL can be reconciled manually.
-          logger.error('Import GL posting failed for movement (non-fatal)', {
+          const errMsg = glErr instanceof Error ? glErr.message : String(glErr);
+          logger.error('Import GL posting failed for movement', {
             movementId: sm.movementId,
-            error: glErr instanceof Error ? glErr.message : String(glErr),
+            error: errMsg,
           });
+          glFailures.push({ movementId: sm.movementId, error: errMsg });
         }
+      }
+      if (glFailures.length > 0) {
+        logger.warn(`Import GL incomplete: ${glFailures.length}/${stockMovements.length} movements failed GL posting`, {
+          failedMovements: glFailures,
+        });
       }
     }
 

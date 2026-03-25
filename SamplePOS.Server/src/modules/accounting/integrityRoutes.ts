@@ -329,4 +329,47 @@ router.post(
   })
 );
 
+/**
+ * POST /api/accounting/integrity/repost-missing-gl
+ * Find and repost missing GL entries for completed transactions.
+ *
+ * Scans for completed Goods Receipts and Supplier Payments that have no
+ * corresponding GL entries, and reposts them via glEntryService.
+ * Idempotency keys prevent double-posting.
+ *
+ * Requires: accounting.write permission (ADMIN/MANAGER only)
+ */
+router.post(
+  '/repost-missing-gl',
+  requirePermission('accounting.write'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const dbPool = (req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
+
+    logger.info('Admin repost-missing-gl initiated', {
+      user: (req as unknown as { user?: { id: string } }).user?.id,
+    });
+
+    const result = await glValidationService.repostMissingGL(dbPool);
+
+    sendSuccess(res, {
+      summary: result.summary,
+      goodsReceipts: {
+        found: result.goodsReceipts.found,
+        reposted: result.goodsReceipts.reposted,
+        errors: result.goodsReceipts.errors,
+      },
+      supplierPayments: {
+        found: result.supplierPayments.found,
+        reposted: result.supplierPayments.reposted,
+        errors: result.supplierPayments.errors,
+      },
+      sales: {
+        found: result.sales.found,
+        reposted: result.sales.reposted,
+        errors: result.sales.errors,
+      },
+    });
+  })
+);
+
 export default router;

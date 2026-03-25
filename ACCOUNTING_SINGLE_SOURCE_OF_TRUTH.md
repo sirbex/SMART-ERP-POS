@@ -70,14 +70,24 @@
 
 ### Disabled Triggers (Do NOT Re-enable)
 
+**Migration**: `shared/sql/250_disable_gl_posting_triggers.sql` (2026-03-25)
+
+All 12 GL posting triggers are DISABLED. The application layer (`glEntryService.ts` → `AccountingCore.createJournalEntry()`) is the **single source of truth** for GL posting.
+
 ```sql
 -- These triggers are DISABLED because glEntryService handles GL posting:
-trg_post_sale_to_ledger           -- sales table
-trg_post_sale_void_to_ledger      -- sales table  
-trg_post_goods_receipt_to_ledger  -- goods_receipts table
-trg_post_expense_to_ledger        -- expenses table
-trg_post_customer_payment_to_ledger -- customer_payments table
-trg_post_invoice_payment_to_ledger  -- invoice_payments table
+trg_post_sale_to_ledger               -- sales table
+trg_post_sale_void_to_ledger          -- sales table  
+trg_post_goods_receipt_to_ledger      -- goods_receipts table
+trg_post_expense_to_ledger            -- expenses table
+trg_post_customer_payment_to_ledger   -- customer_payments table
+trg_post_invoice_payment_to_ledger    -- invoice_payments table
+trg_post_supplier_payment_to_ledger   -- supplier_payments table
+trg_post_customer_invoice_to_ledger   -- invoices table
+trg_post_supplier_invoice_to_ledger   -- supplier_invoices table
+trg_post_customer_deposit_to_ledger   -- pos_customer_deposits table
+trg_post_deposit_application_to_ledger -- pos_deposit_applications table
+trg_post_stock_movement_to_ledger     -- stock_movements table
 ```
 
 ### Active Triggers (Keep Enabled)

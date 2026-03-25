@@ -148,11 +148,12 @@ export async function createDeposit(
             customerName: customer?.name || 'Unknown',
         }, pool);
     } catch (glError) {
-        logger.error('GL posting failed for customer deposit (non-fatal)', {
+        logger.error('GL posting failed for customer deposit — will propagate error', {
             depositId: deposit.id,
             depositNumber: deposit.depositNumber,
-            error: glError,
+            error: glError instanceof Error ? glError.message : String(glError),
         });
+        throw glError;
     }
 
     return deposit;

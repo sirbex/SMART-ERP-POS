@@ -226,16 +226,33 @@ HAVING c.balance - COALESCE(SUM(i."OutstandingBalance"), 0) != 0;
 
 ---
 
-## 🔄 GL POSTING INTEGRITY (Added January 2025)
+## 🔄 GL POSTING INTEGRITY (Updated March 2026)
 
-### GL Triggers for Automatic Posting
+### GL Posting: Application Layer (Single Source of Truth)
+
+All GL posting is now handled by the application layer via `glEntryService.ts` → `AccountingCore.createJournalEntry()`. Database GL triggers have been **DISABLED** to prevent dual-posting discrepancies.
+
+**Migration**: `shared/sql/250_disable_gl_posting_triggers.sql`
+
+| Transaction Type | Application Service | GL Function | Status |
+|-----------------|---------------------|-------------|--------|
+| Sales | `salesService.ts` | `recordSaleToGL()` | ✅ App-layer |
+| Invoice Payments | `invoiceService.ts` | `recordInvoicePaymentToGL()` | ✅ App-layer |
+| Supplier Payments | `supplierPaymentService.ts` | `recordSupplierPaymentToGL()` | ✅ App-layer |
+| Goods Receipts | `goodsReceiptService.ts` | `recordGoodsReceiptToGL()` | ✅ App-layer |
+| Stock Movements | `stockMovementService.ts` | `recordStockMovementToGL()` | ✅ App-layer |
+| Customer Payments | `paymentsService.ts` | `recordCustomerPaymentToGL()` | ✅ App-layer |
+| Customer Deposits | `depositsService.ts` | `recordCustomerDepositToGL()` | ✅ App-layer |
+| Expenses | `expenseService.ts` | `recordExpenseToGL()` | ✅ App-layer |
+
+### Legacy GL Triggers (DISABLED — Do NOT Re-enable)
 
 | Transaction Type | Trigger Name | Function | Status |
 |-----------------|--------------|----------|--------|
-| Sales | `trg_post_sale_to_ledger` | `fn_post_sale_to_ledger()` | ✅ Active |
-| Invoice Payments | `trg_post_invoice_payment_to_ledger` | `fn_post_invoice_payment_to_ledger()` | ✅ Active |
-| Supplier Payments | `trg_post_supplier_payment_to_ledger` | `fn_post_supplier_payment_to_ledger()` | ✅ Active |
-| Stock Movements | `trg_post_stock_movement_to_ledger` | `fn_post_stock_movement_to_ledger()` | ✅ Active |
+| Sales | `trg_post_sale_to_ledger` | `fn_post_sale_to_ledger()` | ❌ Disabled |
+| Invoice Payments | `trg_post_invoice_payment_to_ledger` | `fn_post_invoice_payment_to_ledger()` | ❌ Disabled |
+| Supplier Payments | `trg_post_supplier_payment_to_ledger` | `fn_post_supplier_payment_to_ledger()` | ❌ Disabled |
+| Stock Movements | `trg_post_stock_movement_to_ledger` | `fn_post_stock_movement_to_ledger()` | ❌ Disabled |
 
 ### Idempotency Protection
 

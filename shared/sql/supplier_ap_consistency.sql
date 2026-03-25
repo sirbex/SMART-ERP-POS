@@ -156,14 +156,15 @@ BEGIN
         RETURN COALESCE(NEW, OLD);
     END IF;
     
-    -- Calculate total goods received for this supplier
+    -- Calculate total goods received for this supplier (EXCLUDE BONUS ITEMS)
     SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)
     INTO v_gr_total
     FROM goods_receipts gr
     JOIN goods_receipt_items gri ON gr.id = gri.goods_receipt_id
     JOIN purchase_orders po ON gr.purchase_order_id = po.id
     WHERE po.supplier_id = v_supplier_id
-      AND gr.status = 'COMPLETED';
+      AND gr.status = 'COMPLETED'
+      AND (gri.is_bonus = false OR gri.is_bonus IS NULL);
     
     -- Calculate total payments for this supplier
     SELECT COALESCE(SUM("Amount"), 0)
@@ -204,14 +205,15 @@ BEGIN
         RETURN COALESCE(NEW, OLD);
     END IF;
     
-    -- Calculate total goods received for this supplier
+    -- Calculate total goods received for this supplier (EXCLUDE BONUS ITEMS)
     SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)
     INTO v_gr_total
     FROM goods_receipts gr
     JOIN goods_receipt_items gri ON gr.id = gri.goods_receipt_id
     JOIN purchase_orders po ON gr.purchase_order_id = po.id
     WHERE po.supplier_id = v_supplier_id
-      AND gr.status = 'COMPLETED';
+      AND gr.status = 'COMPLETED'
+      AND (gri.is_bonus = false OR gri.is_bonus IS NULL);
     
     -- Calculate total payments for this supplier
     SELECT COALESCE(SUM("Amount"), 0)
@@ -272,14 +274,15 @@ BEGIN
         WHERE po.id = NEW.purchase_order_id;
         
         IF v_supplier_id IS NOT NULL THEN
-            -- Calculate total goods received for this supplier
+            -- Calculate total goods received for this supplier (EXCLUDE BONUS ITEMS)
             SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)
             INTO v_gr_total
             FROM goods_receipts gr
             JOIN goods_receipt_items gri ON gr.id = gri.goods_receipt_id
             JOIN purchase_orders po ON gr.purchase_order_id = po.id
             WHERE po.supplier_id = v_supplier_id
-              AND gr.status = 'COMPLETED';
+              AND gr.status = 'COMPLETED'
+              AND (gri.is_bonus = false OR gri.is_bonus IS NULL);
             
             -- Calculate total payments for this supplier
             SELECT COALESCE(SUM("Amount"), 0)
