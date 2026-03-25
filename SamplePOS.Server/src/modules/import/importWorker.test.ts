@@ -7,6 +7,7 @@
  * - Decimal-safe arithmetic (no floating-point drift)
  */
 
+import { describe, it, expect } from '@jest/globals';
 import { applyProductImportDefaults } from './importWorker.js';
 import { ProductCreateSchema } from '../../../../shared/zod/product.js';
 
