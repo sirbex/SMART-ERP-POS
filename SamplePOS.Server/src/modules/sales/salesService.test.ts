@@ -77,13 +77,6 @@ jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
     InventoryBusinessRules: { ALLOW_NEGATIVE_STOCK: false },
 }));
 
-jest.unstable_mockModule('../../services/accountingIntegrationService.js', () => ({
-    accountingIntegrationService: {
-        createSaleJournalEntry: jest.fn<MockFn>().mockResolvedValue(undefined),
-        createVoidSaleJournalEntry: jest.fn<MockFn>().mockResolvedValue(undefined),
-    },
-}));
-
 jest.unstable_mockModule('../../services/accountingApiClient.js', () => ({
     accountingApiClient: {
         postJournalEntry: jest.fn<MockFn>().mockResolvedValue(undefined),

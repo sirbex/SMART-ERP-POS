@@ -34,13 +34,6 @@ jest.unstable_mockModule('../sales/salesRepository.js', () => ({
     default: mockSalesRepo,
 }));
 
-jest.unstable_mockModule('../../services/accountingIntegrationService.js', () => ({
-    accountingIntegrationService: {
-        createInvoiceJournalEntry: jest.fn<MockFn>().mockResolvedValue(undefined),
-        createPaymentJournalEntry: jest.fn<MockFn>().mockResolvedValue(undefined),
-    },
-}));
-
 jest.unstable_mockModule('../../services/accountingApiClient.js', () => ({
     accountingApiClient: {
         postJournalEntry: jest.fn<MockFn>().mockResolvedValue(undefined),

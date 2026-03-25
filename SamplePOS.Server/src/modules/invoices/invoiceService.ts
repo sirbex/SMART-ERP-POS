@@ -2,7 +2,6 @@ import { Pool, PoolClient } from 'pg';
 import { invoiceRepository, InvoicePaymentRecord } from './invoiceRepository.js';
 import { salesRepository } from '../sales/salesRepository.js';
 import logger from '../../utils/logger.js';
-import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as depositsService from '../deposits/depositsService.js';
 import Decimal from 'decimal.js';
@@ -333,6 +332,20 @@ export const invoiceService = {
       if (!freshInvoice) {
         throw new Error('Failed to refresh invoice after creation');
       }
+
+      // BR-INV-003: Recalculate customer balance from invoices
+      // New invoice affects outstanding balance — update customer.balance
+      await client.query(
+        `UPDATE customers 
+         SET balance = (
+           SELECT COALESCE(SUM("OutstandingBalance"), 0)
+           FROM invoices
+           WHERE "CustomerId" = $1
+           AND "Status" != 'Paid'
+         )
+         WHERE id = $1`,
+        [input.customerId]
+      );
 
       return freshInvoice;
     });
@@ -709,12 +722,12 @@ export const invoiceService = {
           pool
         );
       } catch (glError) {
-        // Non-blocking: payment is committed, GL failure is logged
-        logger.error('GL posting failed for invoice payment (non-blocking)', {
+        logger.error('GL posting failed for invoice payment — will propagate error', {
           paymentId: payment.id,
           receiptNumber: payment.receipt_number,
           error: glError instanceof Error ? glError.message : String(glError),
         });
+        throw glError;
       }
 
       logger.info('Invoice payment committed with GL verification', {

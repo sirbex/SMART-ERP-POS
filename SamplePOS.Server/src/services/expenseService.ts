@@ -238,12 +238,12 @@ export const approveExpense = async (
         dbPool
       );
     } catch (glError) {
-      logger.error('GL posting failed for expense approval (non-fatal)', {
+      logger.error('GL posting failed for expense approval — will propagate error', {
         expenseId: id,
         expenseNumber: existingExpense.expenseNumber,
         error: glError,
       });
-      // Non-fatal: approval succeeds, GL can be reconciled later
+      throw glError;
     }
 
     return expense;
@@ -431,11 +431,12 @@ export const markExpensePaid = async (
         dbPool
       );
     } catch (glError) {
-      logger.error('GL posting failed for expense payment (non-fatal)', {
+      logger.error('GL posting failed for expense payment — will propagate error', {
         expenseId: id,
         expenseNumber: existingExpense.expenseNumber,
         error: glError,
       });
+      throw glError;
     }
 
     return updatedExpense;

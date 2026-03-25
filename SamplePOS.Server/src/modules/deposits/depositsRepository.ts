@@ -227,13 +227,18 @@ export async function applyDepositToSaleInTransaction(
         [input.depositId, input.saleId, input.amount, input.appliedBy || null]
     );
 
-    // Update deposit used amount (trigger will update available and status)
+    // Update deposit used amount, available amount, and status
+    // (replaces trg_update_deposit_status trigger)
     const newUsed = new Decimal(deposit.amount_used).plus(amountToApply);
+    const depositAmount = new Decimal(deposit.amount);
+    const newAvailable = depositAmount.minus(newUsed);
+    const newStatus = newAvailable.lessThanOrEqualTo(0) ? 'DEPLETED' : 'ACTIVE';
+
     await client.query(
         `UPDATE pos_customer_deposits 
-     SET amount_used = $1
-     WHERE id = $2`,
-        [newUsed.toFixed(2), input.depositId]
+     SET amount_used = $1, amount_available = $2, status = $3
+     WHERE id = $4`,
+        [newUsed.toFixed(2), (newAvailable.greaterThan(0) ? newAvailable : new Decimal(0)).toFixed(2), newStatus, input.depositId]
     );
 
     return applicationResult.rows[0];
@@ -268,10 +273,13 @@ export async function reverseDepositApplicationInTransaction(
 
     const application = appResult.rows[0];
 
-    // Lock and update the deposit
+    // Lock and update the deposit — recalculate available + status
+    // (replaces trg_update_deposit_status trigger)
     await client.query(
         `UPDATE pos_customer_deposits 
-     SET amount_used = amount_used - $1
+     SET amount_used = amount_used - $1,
+         amount_available = amount - (amount_used - $1),
+         status = CASE WHEN (amount - (amount_used - $1)) > 0 THEN 'ACTIVE' ELSE 'DEPLETED' END
      WHERE id = $2`,
         [application.amount_applied, application.deposit_id]
     );

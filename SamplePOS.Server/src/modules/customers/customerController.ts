@@ -9,6 +9,7 @@ import { getSettings } from '../settings/invoiceSettingsService.js';
 import { pool as globalPool } from '../../db/pool.js';
 import Money from '../../utils/money.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import logger from '../../utils/logger.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const PaginationQuerySchema = z.object({
@@ -104,7 +105,7 @@ export const createCustomer = asyncHandler(async (req: Request, res: Response) =
       auditContext
     );
   } catch (auditError) {
-    console.error('Audit logging failed (non-fatal):', auditError);
+    logger.error('Audit logging failed (non-fatal)', { error: auditError });
   }
 
   res.status(201).json({

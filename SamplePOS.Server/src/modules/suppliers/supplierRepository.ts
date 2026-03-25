@@ -310,33 +310,42 @@ export async function softDeleteSupplier(client: PoolClient, id: string): Promis
 }
 
 /**
- * @deprecated DO NOT USE - Supplier balance is managed by database triggers
+ * Recalculate supplier outstanding balance from source data (Odoo "compute field" pattern).
  * 
- * The supplier outstanding balance is automatically maintained by:
- * - trg_sync_supplier_on_invoice -> fn_recalculate_supplier_ap_balance
+ * Formula: SUM(completed GR items excl. bonus) - SUM(completed payments)
+ * This is a full recalculation — not incremental — to prevent balance drift.
  * 
- * This function exists for backward compatibility only.
- * Using this will cause DOUBLE-COUNTING issues.
- * 
- * @see shared/sql/comprehensive_invoice_triggers.sql
+ * Must be called within a transaction (PoolClient) after any operation that
+ * changes the supplier's financial position: GR finalization, payment, allocation.
  */
-export async function updateOutstandingBalance(
+export async function recalculateOutstandingBalance(
   client: PoolClient,
-  supplierId: string,
-  change: number
+  supplierId: string
 ): Promise<number> {
-  console.warn(
-    `DEPRECATED: updateOutstandingBalance called for supplier ${supplierId}. ` +
-    `Supplier balance is managed by database triggers. This may cause inconsistencies.`
-  );
   const result = await client.query(
-    `UPDATE suppliers 
-     SET "OutstandingBalance" = COALESCE("OutstandingBalance", 0) + $1, "UpdatedAt" = NOW()
-     WHERE "Id" = $2
-     RETURNING COALESCE("OutstandingBalance", 0) as "outstandingBalance"`,
-    [change, supplierId]
+    `WITH gr_total AS (
+       SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) AS total
+       FROM goods_receipt_items gri
+       JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+       JOIN purchase_orders po ON gr.purchase_order_id = po.id
+       WHERE po.supplier_id = $1
+         AND gr.status = 'COMPLETED'
+         AND (gri.is_bonus = false OR gri.is_bonus IS NULL)
+     ),
+     payment_total AS (
+       SELECT COALESCE(SUM("Amount"), 0) AS total
+       FROM supplier_payments
+       WHERE "SupplierId" = $1
+         AND "Status" = 'COMPLETED'
+     )
+     UPDATE suppliers
+     SET "OutstandingBalance" = (SELECT total FROM gr_total) - (SELECT total FROM payment_total),
+         "UpdatedAt" = NOW()
+     WHERE "Id" = $1
+     RETURNING "OutstandingBalance" as "outstandingBalance"`,
+    [supplierId]
   );
-  return result.rows[0]?.outstandingBalance || 0;
+  return parseFloat(result.rows[0]?.outstandingBalance ?? '0');
 }
 
 /**

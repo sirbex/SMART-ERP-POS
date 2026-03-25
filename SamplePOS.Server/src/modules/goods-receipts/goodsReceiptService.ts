@@ -17,6 +17,7 @@ import * as costLayerService from '../../services/costLayerService.js';
 import * as pricingService from '../../services/pricingService.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
+import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { batchFetchProducts, type ProductBatchRow } from '../../db/batchFetch.js';
 import logger from '../../utils/logger.js';
 import {
@@ -718,6 +719,14 @@ export const goodsReceiptService = {
         }
       }
 
+      // ============================================================
+      // SUPPLIER BALANCE: Recalculate from source (Odoo compute pattern)
+      // Replaces trg_sync_supplier_on_gr_complete / trg_sync_supplier_balance_on_gr
+      // ============================================================
+      if (supplierId) {
+        await recalcSupplierBalance(client, supplierId);
+      }
+
       return { alerts, warnings };
     });
 
@@ -761,11 +770,11 @@ export const goodsReceiptService = {
           pool
         );
       } catch (glError: unknown) {
-        logger.error('GL posting failed for goods receipt (non-fatal)', {
+        logger.error('GL posting failed for goods receipt — will propagate error', {
           grId: id,
           error: glError instanceof Error ? glError.message : String(glError),
         });
-        // Don't fail GR finalization if GL posting fails — can be reconciled later
+        throw glError;
       }
     }
     return {

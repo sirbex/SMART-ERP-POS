@@ -12,7 +12,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 import * as auditService from '../audit/auditService.js';
-import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import type {
   DeliveryOrder,
@@ -49,34 +49,13 @@ import * as deliveryRepo from './deliveryRepository.js';
 async function postDeliveryFeeToGL(deliveryOrder: DeliveryOrder, pool?: Pool): Promise<void> {
   if (!(deliveryOrder.deliveryFee > 0) || !deliveryOrder.customerId) return;
 
-  try {
-    const accountingResult = await accountingIntegrationService.recordDeliveryCharge({
-      deliveryId: deliveryOrder.id,
-      deliveryNumber: deliveryOrder.deliveryNumber,
-      customerId: deliveryOrder.customerId,
-      deliveryFee: deliveryOrder.deliveryFee,
-      fuelCost: deliveryOrder.fuelCost || 0,
-      deliveryDate: deliveryOrder.deliveryDate
-    }, pool);
-
-    if (!accountingResult.success) {
-      logger.error('CRITICAL: Delivery fee GL posting failed - REQUIRES MANUAL REMEDIATION', {
-        deliveryId: deliveryOrder.id,
-        deliveryNumber: deliveryOrder.deliveryNumber,
-        deliveryFee: deliveryOrder.deliveryFee,
-        error: accountingResult.error,
-        remediation: `Create manual journal entry: DR AR/Cash, CR Delivery Revenue for amount ${deliveryOrder.deliveryFee}`
-      });
-    }
-  } catch (error: unknown) {
-    logger.error('CRITICAL: Delivery fee GL posting exception - REQUIRES MANUAL REMEDIATION', {
-      deliveryId: deliveryOrder.id,
-      deliveryNumber: deliveryOrder.deliveryNumber,
-      deliveryFee: deliveryOrder.deliveryFee,
-      error: (error instanceof Error ? error.message : String(error)),
-      remediation: `Create manual journal entry: DR AR/Cash, CR Delivery Revenue for amount ${deliveryOrder.deliveryFee}`
-    });
-  }
+  await glEntryService.recordDeliveryChargeToGL({
+    deliveryId: deliveryOrder.id,
+    deliveryNumber: deliveryOrder.deliveryNumber,
+    customerId: deliveryOrder.customerId,
+    deliveryFee: deliveryOrder.deliveryFee,
+    deliveryDate: deliveryOrder.deliveryDate
+  }, pool);
 }
 
 // ====================================================
@@ -333,41 +312,14 @@ export async function updateDeliveryStatus(
 
     const deliveryOrder = normalizeDeliveryOrder(updatedRow);
 
-    // ACCOUNTING INTEGRATION: Update delivery completion in accounting
-    // NOTE: Delivery completion accounting is for cost tracking. If it fails,
-    // log CRITICAL error but don't fail the status update - manual remediation required.
+    // GL POSTING: Record delivery completion costs (fail-fast)
     if (data.status === 'DELIVERED') {
-      try {
-        const accountingResult = await accountingIntegrationService.recordDeliveryCompleted({
-          deliveryId: deliveryOrder.id,
-          deliveryNumber: deliveryOrder.deliveryNumber,
-          completedAt: new Date().toISOString(),
-          actualCosts: {
-            fuelCost: deliveryOrder.fuelCost || 0,
-            totalCost: deliveryOrder.totalCost || deliveryOrder.deliveryFee
-          }
-        }, dbPool);
-
-        if (!accountingResult.success) {
-          logger.error('CRITICAL: Delivery completion GL posting failed - REQUIRES MANUAL REMEDIATION', {
-            deliveryId: deliveryOrder.id,
-            deliveryNumber: deliveryOrder.deliveryNumber,
-            actualCosts: {
-              fuelCost: deliveryOrder.fuelCost || 0,
-              totalCost: deliveryOrder.totalCost || deliveryOrder.deliveryFee
-            },
-            error: accountingResult.error,
-            remediation: 'Update delivery costs in GL manually'
-          });
-        }
-      } catch (error: unknown) {
-        logger.error('CRITICAL: Delivery completion GL posting exception - REQUIRES MANUAL REMEDIATION', {
-          deliveryId: deliveryOrder.id,
-          deliveryNumber: deliveryOrder.deliveryNumber,
-          error: (error instanceof Error ? error.message : String(error)),
-          remediation: 'Update delivery costs in GL manually'
-        });
-      }
+      await glEntryService.recordDeliveryCompletedToGL({
+        deliveryId: deliveryOrder.id,
+        deliveryNumber: deliveryOrder.deliveryNumber,
+        completedAt: new Date().toISOString(),
+        totalCost: deliveryOrder.totalCost || deliveryOrder.deliveryFee
+      }, dbPool);
     }
 
     logger.info('Delivery status updated successfully', {

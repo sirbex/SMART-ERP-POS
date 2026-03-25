@@ -178,10 +178,10 @@ export async function calculatePrice(
         formula: product.pricing_formula,
       };
     } catch (error) {
-      logger.error('Formula evaluation failed, using base price', {
+      logger.warn('Formula evaluation failed — falling back to base price (requires admin review)', {
         productId,
         formula: product.pricing_formula,
-        error,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -351,6 +351,8 @@ async function updatePricingTiersWithClient(
     [productId]
   );
 
+  const tierErrors: Array<{ tierId: string; formula: string; error: unknown }> = [];
+
   for (const tier of tiersResult.rows) {
     try {
       const calculatedPrice = await evaluateFormula(tier.pricing_formula, productId, 1, client);
@@ -373,11 +375,17 @@ async function updatePricingTiersWithClient(
         formula: tier.pricing_formula,
         error,
       });
-      // Continue with other tiers even if one fails
+      tierErrors.push({ tierId: tier.id, formula: tier.pricing_formula, error });
     }
   }
 
-  logger.info('Pricing tiers updated', { productId, tierCount: tiersResult.rows.length });
+  logger.info('Pricing tiers updated', { productId, tierCount: tiersResult.rows.length, failedCount: tierErrors.length });
+
+  if (tierErrors.length > 0) {
+    throw new Error(
+      `${tierErrors.length} of ${tiersResult.rows.length} pricing tiers failed to update for product ${productId}`
+    );
+  }
 }
 
 /**

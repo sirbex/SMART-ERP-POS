@@ -14,7 +14,6 @@ import {
 } from './paymentsRepository.js';
 import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
-import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
@@ -197,7 +196,7 @@ export const paymentsService = {
           );
         }
       } catch (auditError) {
-        console.error('⚠️ Audit logging failed for payment (non-fatal):', auditError);
+        logger.error('Audit logging failed for payment (non-fatal)', { error: auditError });
       }
     }
 
@@ -290,12 +289,12 @@ export const paymentsService = {
         pool
       );
     } catch (glError) {
-      // Non-blocking: payment is committed, GL failure is logged
-      logger.error('GL posting failed for customer payment (non-blocking)', {
+      logger.error('GL posting failed for customer payment — will propagate error', {
         transactionId: result.transactionId,
         customerId: input.customerId,
         error: glError instanceof Error ? glError.message : String(glError),
       });
+      throw glError;
     }
 
     return result;

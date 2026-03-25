@@ -224,13 +224,42 @@ export const salesRepository = {
     pool: Pool | PoolClient,
     items: CreateSaleItemData[]
   ): Promise<SaleItemRecord[]> {
+    // Batch-fetch product_type and income_account_id for all non-custom items
+    // (replaces trg_sale_items_set_product_type trigger)
+    const productIds = items
+      .filter((item) => !item.productId?.startsWith('custom_') && item.productId)
+      .map((item) => item.productId!);
+
+    const productTypeMap = new Map<string, { productType: string; incomeAccountId: string | null }>();
+    if (productIds.length > 0) {
+      const uniqueIds = [...new Set(productIds)];
+      const ptResult = await pool.query(
+        `SELECT p.id, p.product_type,
+           COALESCE(p.income_account_id,
+             CASE WHEN p.product_type = 'service'
+               THEN (SELECT "Id" FROM accounts WHERE "AccountCode" = '4100' LIMIT 1)
+               ELSE (SELECT "Id" FROM accounts WHERE "AccountCode" = '4000' LIMIT 1)
+             END
+           ) AS income_account_id
+         FROM products p
+         WHERE p.id = ANY($1)`,
+        [uniqueIds]
+      );
+      for (const row of ptResult.rows) {
+        productTypeMap.set(row.id, {
+          productType: row.product_type || 'inventory',
+          incomeAccountId: row.income_account_id || null,
+        });
+      }
+    }
+
     const values: unknown[] = [];
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
-      const offset = index * 11; // 11 fields including product_name, item_type, and discount_amount
+      const offset = index * 13; // 13 fields now (added product_type, income_account_id)
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13})`
       );
 
       // Use provided profit if available (may include discount allocation),
@@ -248,6 +277,11 @@ export const salesRepository = {
       const productId = isCustomItem ? null : item.productId;
       const itemType = isCustomItem ? 'custom' : 'product';
 
+      // Resolve product_type and income_account_id from batch lookup
+      const productInfo = productId ? productTypeMap.get(productId) : null;
+      const productType = productInfo?.productType || 'inventory';
+      const incomeAccountId = productInfo?.incomeAccountId || null;
+
       values.push(
         item.saleId,
         productId, // NULL for custom items
@@ -259,13 +293,15 @@ export const salesRepository = {
         costPrice.toFixed(2), // Maps to unit_cost
         itemProfit.toFixed(2), // Maps to profit
         item.uomId || null, // Include uom_id (NULL if not provided)
-        item.discountAmount || 0 // Per-item discount amount
+        item.discountAmount || 0, // Per-item discount amount
+        productType,
+        incomeAccountId
       );
     });
 
     const result = await pool.query(
       `INSERT INTO sale_items (
-        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount
+        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount, product_type, income_account_id
       ) VALUES ${placeholders.join(', ')}
       RETURNING *`,
       values

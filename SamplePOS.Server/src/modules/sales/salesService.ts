@@ -16,7 +16,6 @@ import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
-import { accountingIntegrationService } from '../../services/accountingIntegrationService.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import type { SaleData } from '../../services/glEntryService.js';

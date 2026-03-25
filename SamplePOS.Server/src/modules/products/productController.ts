@@ -10,6 +10,7 @@ import * as supplierProductPriceRepository from '../suppliers/supplierProductPri
 import { normalizeResponse } from '../../utils/caseConverter.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import { pool as globalPool } from '../../db/pool.js';
+import logger from '../../utils/logger.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 
@@ -137,7 +138,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
       );
     }
   } catch (auditError) {
-    console.error('Audit logging failed (non-fatal):', auditError);
+    logger.error('Audit logging failed (non-fatal)', { error: auditError });
   }
 
   res.status(201).json({

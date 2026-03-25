@@ -7,6 +7,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import * as supplierPaymentRepository from './supplierPaymentRepository.js';
+import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
@@ -215,6 +216,13 @@ export async function createSupplierPayment(
                 newStatus = 'PartiallyPaid';
             }
 
+            // Update invoice paid amount and status (replaces trg_supplier_payment_allocation_sync)
+            await supplierPaymentRepository.updateInvoicePaidAmount(
+                client,
+                invoice.id,
+                newPaidAmount.toNumber()
+            );
+
             allocations.push({
                 invoiceId: invoice.id,
                 invoiceNumber: invoice.invoiceNumber || 'N/A',
@@ -290,6 +298,9 @@ export async function createSupplierPayment(
 
         // GL POSTING: Done after UnitOfWork via glEntryService.recordSupplierPaymentToGL()
 
+        // Recalculate supplier balance from source (replaces trg_sync_supplier_balance_on_payment)
+        await recalcSupplierBalance(client, data.supplierId);
+
         return receiptData;
     });
 
@@ -311,11 +322,12 @@ export async function createSupplierPayment(
             pool
         );
     } catch (glError) {
-        logger.error('GL posting failed for supplier payment (non-fatal)', {
+        logger.error('GL posting failed for supplier payment — will propagate error', {
             paymentId: receiptData.payment.id,
             paymentNumber: receiptData.payment.paymentNumber,
-            error: glError,
+            error: glError instanceof Error ? glError.message : String(glError),
         });
+        throw glError;
     }
 
     return receiptData;
@@ -340,7 +352,17 @@ export async function deleteSupplierPayment(pool: Pool, id: string) {
             throw new Error('Cannot delete payment with existing allocations. Remove allocations first.');
         }
 
+        // Get supplierId before deletion for balance recalculation
+        const payment = await supplierPaymentRepository.findPaymentById(pool, id);
+        const supplierId = payment?.supplierId;
+
         const result = await supplierPaymentRepository.deletePayment(client, id);
+
+        // Recalculate supplier balance (replaces trg_sync_supplier_balance_on_payment)
+        if (supplierId) {
+            await recalcSupplierBalance(client, supplierId);
+        }
+
         return result;
     });
 }
@@ -509,6 +531,18 @@ export async function allocatePayment(pool: Pool, data: AllocatePaymentInput, us
             amount: allocationAmount.toNumber(), // Ensure precise value
         });
 
+        // Update invoice paid amount and status (replaces trg_supplier_payment_allocation_sync)
+        const invoiceTotal = new Decimal(invoice.totalAmount);
+        const newPaidAmount = new Decimal(invoice.amountPaid || 0).plus(allocationAmount);
+        await supplierPaymentRepository.updateInvoicePaidAmount(
+            client,
+            data.supplierInvoiceId,
+            newPaidAmount.toNumber()
+        );
+
+        // Recalculate supplier balance from source (replaces trg_sync_supplier_balance_on_payment)
+        await recalcSupplierBalance(client, payment.supplierId);
+
         logger.info('Payment allocated to invoice', {
             paymentId: data.supplierPaymentId,
             invoiceId: data.supplierInvoiceId,
@@ -525,7 +559,37 @@ export async function getPaymentAllocations(pool: Pool, paymentId: string) {
 
 export async function removeAllocation(pool: Pool, allocationId: string) {
     return UnitOfWork.run(pool, async (client) => {
+        // Fetch allocation + payment details before deletion for recalculation
+        const allocRow = await client.query(
+            `SELECT spa."PaymentId", spa."SupplierInvoiceId", sp."SupplierId"
+             FROM supplier_payment_allocations spa
+             JOIN supplier_payments sp ON sp."Id" = spa."PaymentId"
+             WHERE spa."Id" = $1 AND spa.deleted_at IS NULL`,
+            [allocationId]
+        );
+        const allocInfo = allocRow.rows[0];
+
         const result = await supplierPaymentRepository.deleteAllocation(client, allocationId);
+
+        // After deletion, recalculate invoice paid amount from remaining allocations
+        if (allocInfo) {
+            const sumResult = await client.query(
+                `SELECT COALESCE(SUM("AmountAllocated"), 0) as total_paid
+                 FROM supplier_payment_allocations
+                 WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
+                [allocInfo.SupplierInvoiceId]
+            );
+            const newPaidAmount = new Decimal(sumResult.rows[0].total_paid).toNumber();
+            await supplierPaymentRepository.updateInvoicePaidAmount(
+                client,
+                allocInfo.SupplierInvoiceId,
+                newPaidAmount
+            );
+
+            // Recalculate supplier balance from source
+            await recalcSupplierBalance(client, allocInfo.SupplierId);
+        }
+
         return result;
     });
 }
@@ -569,6 +633,15 @@ export async function autoAllocatePayment(pool: Pool, paymentId: string, userId?
                 amount: allocationAmount.toNumber(),
             });
 
+            // Update invoice paid amount and status (replaces trg_supplier_payment_allocation_sync)
+            const invoiceTotal = new Decimal(invoice.totalAmount);
+            const newPaidAmount = new Decimal(invoice.amountPaid || 0).plus(allocationAmount);
+            await supplierPaymentRepository.updateInvoicePaidAmount(
+                client,
+                invoice.id,
+                newPaidAmount.toNumber()
+            );
+
             allocations.push(allocation);
             remainingAmount = remainingAmount.minus(allocationAmount);
 
@@ -580,6 +653,9 @@ export async function autoAllocatePayment(pool: Pool, paymentId: string, userId?
                 remainingUnallocated: remainingAmount.toNumber(),
             });
         }
+
+        // Recalculate supplier balance from source (replaces trg_sync_supplier_balance_on_payment)
+        await recalcSupplierBalance(client, payment.supplierId);
 
         logger.info('Auto-allocation completed', {
             paymentId,

@@ -30,8 +30,8 @@ jest.unstable_mockModule('../repositories/expenseRepository', () => ({
 }));
 
 jest.unstable_mockModule('../db/pool.js', () => ({
-    pool: { query: jest.fn<MockFn>(), connect: jest.fn<MockFn>() },
-    default: { query: jest.fn<MockFn>(), connect: jest.fn<MockFn>() },
+    pool: { query: jest.fn<MockFn>().mockResolvedValue({ rows: [], rowCount: 0 }), connect: jest.fn<MockFn>() },
+    default: { query: jest.fn<MockFn>().mockResolvedValue({ rows: [], rowCount: 0 }), connect: jest.fn<MockFn>() },
 }));
 
 jest.unstable_mockModule('../db/unitOfWork.js', () => ({
@@ -63,6 +63,8 @@ jest.unstable_mockModule('../middleware/errorHandler.js', () => ({
 jest.unstable_mockModule('./glEntryService.js', () => ({
     createExpenseGLEntries: jest.fn<MockFn>().mockResolvedValue(undefined),
     reverseExpenseGLEntries: jest.fn<MockFn>().mockResolvedValue(undefined),
+    recordExpenseApprovalToGL: jest.fn<MockFn>().mockResolvedValue(undefined),
+    recordExpensePaymentToGL: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('./bankingService.js', () => ({

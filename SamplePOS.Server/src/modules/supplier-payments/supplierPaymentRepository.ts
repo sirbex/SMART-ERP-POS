@@ -680,9 +680,8 @@ export async function createInvoice(
         ]
     );
 
-    // NOTE: Supplier outstanding balance is automatically updated by database trigger
-    // trg_sync_supplier_on_invoice -> fn_recalculate_supplier_ap_balance
-    // DO NOT manually update here - it causes double-counting
+    // NOTE: Supplier outstanding balance is updated by the service layer
+    // via recalculateOutstandingBalance() within the same UnitOfWork transaction.
 
     return result.rows[0];
 }
@@ -773,10 +772,8 @@ export async function deleteInvoice(client: PoolClient, id: string): Promise<boo
         [id]
     );
 
-    // NOTE: Supplier outstanding balance is automatically updated by database trigger
-    // trg_sync_supplier_on_invoice -> fn_recalculate_supplier_ap_balance
-    // The trigger excludes invoices with deleted_at IS NOT NULL
-    // DO NOT manually update here - it causes double-counting
+    // NOTE: Supplier outstanding balance is updated by the service layer
+    // via recalculateOutstandingBalance() within the same UnitOfWork transaction.
 
     return result.rowCount !== null && result.rowCount > 0;
 }
@@ -890,10 +887,9 @@ export async function deleteAllocation(client: PoolClient, id: string): Promise<
         [deallocateAmount.toNumber(), PaymentId]
     );
 
-    // NOTE: Invoice AmountPaid/OutstandingBalance/Status are automatically updated by
-    // the trg_supplier_payment_allocation_sync trigger on supplier_payment_allocations.
-    // The trigger SUMs all allocations (WHERE deleted_at IS NULL) and sets the correct values.
-    // DO NOT manually call updateInvoicePaidAmount here - it causes double-counting.
+    // NOTE: Invoice AmountPaid/OutstandingBalance/Status and supplier balance
+    // are updated by the service layer (supplierPaymentService.removeAllocation)
+    // after this function completes within the same UnitOfWork transaction.
 
     return true;
 }
