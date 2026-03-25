@@ -2,7 +2,7 @@
  * invoiceService unit tests
  * Tests invoice creation, payment processing, and listing.
  */
-import { jest } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import type { Pool, PoolClient } from 'pg';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
@@ -66,7 +66,7 @@ const mockPool = {
 const { invoiceService } = await import('./invoiceService.js');
 
 describe('invoiceService', () => {
-    beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => { jest.clearAllMocks(); });
 
     describe('getInvoiceById', () => {
         it('should return invoice with line items', async () => {

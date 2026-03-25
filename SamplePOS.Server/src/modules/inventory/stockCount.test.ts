@@ -4,6 +4,7 @@
  * @architecture E2E tests covering full workflow: create → count → validate → reconcile
  */
 
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import request from 'supertest';
 import { pool } from '../../db/pool.js';
 import app from '../../server.js';

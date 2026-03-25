@@ -4,6 +4,7 @@
  * Tests for RBAC role-permission mapping.
  */
 
+import { describe, it, expect } from '@jest/globals';
 import {
     getUserPermissions,
     hasPermission,

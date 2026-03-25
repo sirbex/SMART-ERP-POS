@@ -5,6 +5,7 @@
  * These schemas are used by both frontend and backend.
  */
 
+import { describe, it, expect } from '@jest/globals';
 import { z } from 'zod';
 import {
     CustomerSchema,

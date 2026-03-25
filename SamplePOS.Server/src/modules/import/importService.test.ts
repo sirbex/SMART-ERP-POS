@@ -2,7 +2,7 @@
  * importService unit tests
  * Tests job creation, cancellation, retry, template generation, and file cleanup.
  */
-import { jest } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
 type MockFn = (...args: unknown[]) => Promise<unknown>;

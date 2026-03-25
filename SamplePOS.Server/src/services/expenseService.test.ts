@@ -2,7 +2,7 @@
  * expenseService unit tests
  * Tests expense CRUD and approval workflow with mocked repository.
  */
-import { jest } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */
 type MockFn = (...args: unknown[]) => Promise<unknown>;
@@ -85,7 +85,7 @@ jest.unstable_mockModule('../utils/logger.js', () => ({
 const expenseService = await import('./expenseService.js');
 
 describe('expenseService', () => {
-    beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => { jest.clearAllMocks(); });
 
     describe('getExpenseById', () => {
         it('should return expense when found', async () => {

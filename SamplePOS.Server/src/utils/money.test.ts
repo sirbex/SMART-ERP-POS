@@ -5,6 +5,7 @@
  * Tests parsing, arithmetic, rounding, comparison, formatting, and accounting helpers.
  */
 
+import { describe, it, expect, afterEach } from '@jest/globals';
 import Decimal from 'decimal.js';
 import { Money, CURRENCIES } from './money.js';
 

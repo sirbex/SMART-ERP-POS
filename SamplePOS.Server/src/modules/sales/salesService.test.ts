@@ -2,7 +2,7 @@
  * salesService unit tests
  * Tests sale retrieval, listing, and summary logic.
  */
-import { jest } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import type { Pool, PoolClient } from 'pg';
 
 /** Flexible mock fn type — avoids `any` while allowing mockResolvedValue/mockReturnValue */

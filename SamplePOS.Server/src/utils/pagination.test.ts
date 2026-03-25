@@ -4,6 +4,7 @@
  * Tests for query parsing, envelope construction, and SQL fragment generation.
  */
 
+import { describe, it, expect } from '@jest/globals';
 import { PaginationHelper } from './pagination.js';
 
 describe('PaginationHelper', () => {
