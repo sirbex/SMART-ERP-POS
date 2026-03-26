@@ -376,7 +376,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
     });
 
     // Clean up uploaded file after successful completion
-    await cleanupJobFile(jobId).catch(() => {});
+    await cleanupJobFile(jobId).catch(() => { });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error('Import job failed', { error: msg });
@@ -398,9 +398,9 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
     // Flush any pending errors before marking failed
     if (pendingErrors.length > 0) {
-      await importRepo.logImportErrors(pendingErrors, dbPool).catch(() => {});
+      await importRepo.logImportErrors(pendingErrors, dbPool).catch(() => { });
     }
-    await importRepo.updateImportProgress(jobId, progress, dbPool).catch(() => {});
+    await importRepo.updateImportProgress(jobId, progress, dbPool).catch(() => { });
     await importRepo.completeImportJob(jobId, 'FAILED', msg, dbPool);
 
     // Note: NOT cleaning up file on failure to allow retry
@@ -489,16 +489,16 @@ async function flushChunk(
     const stockMovements =
       entityType === 'PRODUCT' && 'stockMovements' in result
         ? (
-            result as {
-              stockMovements: Array<{
-                movementId: string;
-                movementNumber: string;
-                productId: string;
-                quantity: number;
-                unitCost: number;
-              }>;
-            }
-          ).stockMovements
+          result as {
+            stockMovements: Array<{
+              movementId: string;
+              movementNumber: string;
+              productId: string;
+              quantity: number;
+              unitCost: number;
+            }>;
+          }
+        ).stockMovements
         : [];
 
     if (stockMovements.length > 0) {

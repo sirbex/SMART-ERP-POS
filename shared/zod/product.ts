@@ -1,25 +1,12 @@
 import { z } from "zod";
 
-// Enums
-export const UnitOfMeasureEnum = z.enum([
-  "PIECE",
-  "BOX",
-  "CARTON",
-  "KG",
-  "LITER",
-  "METER",
-  "EACH",
-  "BOTTLE",
-  "CRATE",
-  "DOZEN",
-  "PACKET",
-  "SACHET",
-  "SACK",
-  "STRIP",
-  "TABLET",
-  "TIN",
-  "PACK",
-]);
+// UoM is dynamic master data (like SAP/Odoo) — users create UoMs via the
+// UoM management screen. Validation here only ensures the value is a non-empty
+// string; the backend resolves it against the `uoms` table at save time.
+export const UnitOfMeasureEnum = z
+  .string()
+  .min(1, "Unit of measure is required")
+  .max(100);
 export const CostingMethodEnum = z.enum(["FIFO", "AVCO", "STANDARD"]);
 export type CostingMethod = z.infer<typeof CostingMethodEnum>;
 
@@ -156,14 +143,9 @@ export const ProductUpdateSchema = ProductCoreObject.partial()
   })
   .superRefine(pricingRefinement);
 
-// Import schema — accepts any UoM string (resolved against DB during import)
-// instead of the hardcoded UnitOfMeasureEnum, so custom UoMs like Amp, Tube,
-// Capsule, Syrup, Vial etc. pass Zod validation.
-export const ProductImportSchema = ProductCoreObject.omit({
-  unitOfMeasure: true,
-})
-  .extend({ unitOfMeasure: z.string().min(1).max(100).default("EACH") })
-  .superRefine(pricingRefinement);
+// Back-compat: ProductImportSchema is now identical to ProductCreateSchema
+// since UoM validation is dynamic (z.string instead of z.enum).
+export const ProductImportSchema = ProductCreateSchema;
 
 // Back-compat named exports (if other code expects these names)
 export const CreateProductSchema = ProductCreateSchema;
@@ -180,7 +162,7 @@ export const ProductSchema = z
     description: z.string().optional(),
     category: z.string().optional(),
     genericName: z.string().optional(),
-    unitOfMeasure: UnitOfMeasureEnum,
+    unitOfMeasure: z.string().min(1).max(100),
     conversionFactor: z.number(),
     costPrice: z.number(),
     sellingPrice: z.number(),
