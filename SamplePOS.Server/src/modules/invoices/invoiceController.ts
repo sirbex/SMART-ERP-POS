@@ -8,6 +8,7 @@ import { getSettings } from '../settings/invoiceSettingsService.js';
 import PDFDocument from 'pdfkit';
 import Decimal from 'decimal.js';
 import Money from '../../utils/money.js';
+import { amountToWords } from '../../utils/amountToWords.js';
 import {
   asyncHandler,
   NotFoundError,
@@ -437,6 +438,14 @@ export const invoiceController = {
       doc.text(formatCurrency(totalAmount.toNumber()), summaryX + summaryWidth / 2, currentY, {
         width: summaryWidth / 2,
         align: 'right',
+      });
+      currentY += 16;
+
+      // Amount in words
+      doc.fontSize(8).font('Helvetica-Oblique').fillColor(colors.dark);
+      doc.text(amountToWords(totalAmount.toNumber()), margin, currentY, {
+        width: contentWidth,
+        align: 'left',
       });
       currentY += 20;
 

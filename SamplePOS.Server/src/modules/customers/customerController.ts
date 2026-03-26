@@ -8,6 +8,7 @@ import PDFDocument from 'pdfkit';
 import { getSettings } from '../settings/invoiceSettingsService.js';
 import { pool as globalPool } from '../../db/pool.js';
 import Money from '../../utils/money.js';
+import { amountToWords } from '../../utils/amountToWords.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 
@@ -725,6 +726,19 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     .text(formatCurrency(Math.abs(netChange)), tableLeft + 20, currentY + 27, {
       width: contentWidth - 40,
     });
+
+  // Closing balance in words
+  currentY += 60;
+  doc
+    .fillColor(colors.dark)
+    .fontSize(9)
+    .font('Helvetica-Bold')
+    .text('Closing Balance in Words:', tableLeft, currentY, { width: contentWidth });
+  currentY += 14;
+  doc
+    .fontSize(9)
+    .font('Helvetica-Oblique')
+    .text(amountToWords(Math.abs(closingBalance)), tableLeft, currentY, { width: contentWidth });
 
   // Page numbering with styled footer
   const pageCount = doc.bufferedPageRange().count;

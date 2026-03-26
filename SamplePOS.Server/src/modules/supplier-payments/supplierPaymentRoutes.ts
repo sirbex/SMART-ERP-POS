@@ -13,6 +13,7 @@ import PDFDocument from 'pdfkit';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import Money from '../../utils/money.js';
+import { amountToWords } from '../../utils/amountToWords.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
 // Zod schemas for validation
@@ -568,6 +569,14 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
             doc.text(formatCurrency(totalAmount), totalsX + totalsW * 0.6, currentY, {
                 width: totalsW * 0.4,
                 align: 'right',
+            });
+            currentY += 16;
+
+            // Amount in words
+            doc.fontSize(8).font('Helvetica-Oblique').fillColor(colors.dark);
+            doc.text(amountToWords(totalAmount), margin, currentY, {
+                width: contentWidth,
+                align: 'left',
             });
             currentY += 20;
 
