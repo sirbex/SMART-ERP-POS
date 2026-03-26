@@ -47,7 +47,7 @@ export default function StockLevelsPage() {
 
   // Use offline-aware hooks that cache to IndexedDB and fall back when offline
   const { data: stockLevelsData, isLoading, error, refetch } = useOfflineStockLevels();
-  const { data: productsData } = useOfflineProducts({ limit: 10000 });
+  const { data: productsData } = useOfflineProducts({ limit: 10000, includeUoms: true });
 
   const ITEMS_PER_PAGE = 50;
   const [currentPage, setCurrentPage] = useState(1);
