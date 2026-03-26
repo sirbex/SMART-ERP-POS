@@ -442,12 +442,10 @@ export const invoiceController = {
       currentY += 16;
 
       // Amount in words
-      doc.fontSize(8).font('Helvetica-Oblique').fillColor(colors.dark);
-      doc.text(amountToWords(totalAmount.toNumber()), margin, currentY, {
-        width: contentWidth,
-        align: 'left',
-      });
-      currentY += 20;
+      doc.fontSize(9).font('Helvetica-Bold').fillColor(colors.dark);
+      doc.text('Amount in Words: ', margin, currentY, { continued: true, width: contentWidth });
+      doc.font('Helvetica').text(amountToWords(totalAmount.toNumber()));
+      currentY = doc.y + 8;
 
       doc.fontSize(9).font('Helvetica');
       doc.text('Amount Paid:', summaryX, currentY, { width: summaryWidth / 2, align: 'left' });

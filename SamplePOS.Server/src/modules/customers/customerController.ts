@@ -737,7 +737,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   currentY += 14;
   doc
     .fontSize(9)
-    .font('Helvetica-Oblique')
+    .font('Helvetica')
     .text(amountToWords(Math.abs(closingBalance)), tableLeft, currentY, { width: contentWidth });
 
   // Page numbering with styled footer
