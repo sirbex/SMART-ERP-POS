@@ -54,7 +54,10 @@ interface SaleItemRow {
   unit_price?: number | string;
   price?: number | string;
   subtotal?: number | string;
+  totalPrice?: number | string;
+  total_price?: number | string;
   discountAmount?: number | string;
+  discount_amount?: number | string;
   taxAmount?: number | string;
   totalAmount?: number | string;
   batchNumber?: string;
@@ -1478,40 +1481,64 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                 </div>
               ) : (
                 <div className="overflow-x-auto -mx-4 sm:mx-0">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Subtotal</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {items.map((item: SaleItemRow, index: number) => {
-                        const quantity = parseFloat(String(item.quantity || item.qty || 0));
-                        const unitPrice = parseFloat(String(item.unitPrice || item.unit_price || item.price || 0));
-                        const subtotal = new Decimal(quantity).times(unitPrice).toNumber();
-
-                        return (
-                          <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">
-                              {item.productName || item.product_name || 'Unknown Product'}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
-                              {quantity.toFixed(quantity % 1 === 0 ? 0 : 2)}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-600 text-right">
-                              {formatCurrency(unitPrice)}
-                            </td>
-                            <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">
-                              {formatCurrency(subtotal)}
-                            </td>
+                  {(() => {
+                    const hasAnyDiscount = items.some((item: SaleItemRow) => {
+                      const disc = parseFloat(String(item.discountAmount || item.discount_amount || 0));
+                      return disc > 0;
+                    });
+                    return (
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                            {hasAnyDiscount && (
+                              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Discount</th>
+                            )}
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Subtotal</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {items.map((item: SaleItemRow, index: number) => {
+                            const quantity = parseFloat(String(item.quantity || item.qty || 0));
+                            const unitPrice = parseFloat(String(item.unitPrice || item.unit_price || item.price || 0));
+                            const itemDiscount = parseFloat(String(item.discountAmount || item.discount_amount || 0));
+                            // Use stored total_price if available, otherwise compute
+                            const subtotal = item.totalPrice || item.total_price
+                              ? parseFloat(String(item.totalPrice || item.total_price || 0))
+                              : new Decimal(quantity).times(unitPrice).minus(itemDiscount).toNumber();
+
+                            return (
+                              <tr key={index} className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  {item.productName || item.product_name || 'Unknown Product'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                                  {quantity.toFixed(quantity % 1 === 0 ? 0 : 2)}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600 text-right">
+                                  {formatCurrency(unitPrice)}
+                                </td>
+                                {hasAnyDiscount && (
+                                  <td className="px-4 py-3 text-sm text-right">
+                                    {itemDiscount > 0 ? (
+                                      <span className="text-red-600 font-medium">-{formatCurrency(itemDiscount)}</span>
+                                    ) : (
+                                      <span className="text-gray-400">—</span>
+                                    )}
+                                  </td>
+                                )}
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right">
+                                  {formatCurrency(subtotal)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -1519,16 +1546,33 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
             {/* Totals Summary */}
             <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mt-6">
               <div className="space-y-2">
-                <div className="flex justify-between text-gray-600">
-                  <span>Subtotal:</span>
-                  <span className="font-medium">{formatCurrency(sale.subtotal || sale.totalAmount || 0)}</span>
-                </div>
-                {(sale.discountAmount || sale.discount_amount) && parseFloat(String(sale.discountAmount || sale.discount_amount || '0')) > 0 && (
-                  <div className="flex justify-between text-red-600">
-                    <span>Discount:</span>
-                    <span className="font-medium">-{formatCurrency(sale.discountAmount || sale.discount_amount || 0)}</span>
-                  </div>
-                )}
+                {(() => {
+                  // Compute effective discount: sale-level OR sum of item-level discounts
+                  const saleDiscount = parseFloat(String(sale.discountAmount || sale.discount_amount || 0));
+                  const itemDiscountTotal = saleDiscount > 0 ? 0 : items.reduce((sum: number, item: SaleItemRow) => {
+                    return sum + parseFloat(String(item.discountAmount || item.discount_amount || 0));
+                  }, 0);
+                  const effectiveDiscount = saleDiscount > 0 ? saleDiscount : itemDiscountTotal;
+                  // Show pre-discount subtotal when there's a discount
+                  const displaySubtotal = effectiveDiscount > 0
+                    ? new Decimal(sale.totalAmount || 0).plus(effectiveDiscount).toNumber()
+                    : sale.subtotal || sale.totalAmount || 0;
+
+                  return (
+                    <>
+                      <div className="flex justify-between text-gray-600">
+                        <span>Subtotal:</span>
+                        <span className="font-medium">{formatCurrency(displaySubtotal)}</span>
+                      </div>
+                      {effectiveDiscount > 0 && (
+                        <div className="flex justify-between text-red-600">
+                          <span>Discount:</span>
+                          <span className="font-medium">-{formatCurrency(effectiveDiscount)}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {(sale.taxAmount || sale.tax_amount) && (
                   <div className="flex justify-between text-gray-600">
                     <span>Tax:</span>
@@ -1604,12 +1648,21 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
             <button
               onClick={() => {
                 const s = saleDetails ?? sale;
+                // Compute effective discount from sale-level or item-level
+                const saleDisc = Number(s.discountAmount || 0);
+                const itemDiscTotal = saleDisc > 0 ? 0 : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
+                  return sum + parseFloat(String(item.discountAmount || item.discount_amount || 0));
+                }, 0);
+                const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
+
                 const receiptData: ReceiptData = {
                   saleNumber: s.saleNumber,
                   saleDate: s.saleDate || s.createdAt,
                   totalAmount: s.totalAmount,
-                  subtotal: s.subtotal,
-                  discountAmount: s.discountAmount,
+                  subtotal: effectiveDisc > 0
+                    ? new Decimal(s.totalAmount || 0).plus(effectiveDisc).toNumber()
+                    : s.subtotal,
+                  discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
                   taxAmount: s.taxAmount,
                   cashierName: s.cashierName || s.soldByName,
                   customerName: s.customerName || 'Walk-in Customer',
@@ -1620,7 +1673,8 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                     name: item.productName || item.product_name || 'Unknown',
                     quantity: Number(item.quantity || item.qty || 0),
                     unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
-                    subtotal: Number(item.subtotal || item.totalAmount || 0),
+                    subtotal: Number(item.totalPrice || item.total_price || item.subtotal || item.totalAmount || 0),
+                    discountAmount: parseFloat(String(item.discountAmount || item.discount_amount || 0)) || undefined,
                   })),
                   payments: s.paymentLines?.map((pl) => ({
                     method: pl.paymentMethod || pl.payment_method || 'CASH',

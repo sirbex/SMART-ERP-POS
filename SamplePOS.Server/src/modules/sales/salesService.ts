@@ -452,16 +452,16 @@ export const salesService = {
       // ============================================================
       const paymentReceived = hasPaymentLines
         ? (input.paymentLines
-          ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+            ?.filter((line) => line.paymentMethod !== 'CREDIT') // Exclude CREDIT
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(input.paymentReceived || 0);
 
       // Calculate the CREDIT amount for logging/invoice purposes
       const creditAmount = hasPaymentLines
         ? (input.paymentLines
-          ?.filter((line) => line.paymentMethod === 'CREDIT')
-          .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
+            ?.filter((line) => line.paymentMethod === 'CREDIT')
+            .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0)) ??
           new Decimal(0))
         : new Decimal(0);
 
@@ -613,6 +613,17 @@ export const salesService = {
         });
       }
 
+      // Total discount = cart-level discount + sum of all line-item discounts
+      // This ensures sales.discount_amount reflects ALL discounts (not just cart-level)
+      const cartDiscount = input.discountAmount
+        ? Money.round(new Decimal(input.discountAmount), 2)
+        : new Decimal(0);
+      const lineItemDiscountTotal = itemsWithCosts.reduce(
+        (sum, item) => sum.plus(new Decimal(item.discountAmount || 0)),
+        new Decimal(0)
+      );
+      const totalDiscountAmount = cartDiscount.plus(lineItemDiscountTotal);
+
       const saleData: CreateSaleData = {
         customerId: input.customerId || null,
         subtotal: input.subtotal
@@ -620,9 +631,7 @@ export const salesService = {
           : Money.toNumber(subtotal),
         totalAmount: Money.toNumber(actualTotalAmount),
         totalCost: Money.toNumber(totalCost),
-        discountAmount: input.discountAmount
-          ? Money.toNumber(Money.round(new Decimal(input.discountAmount), 2))
-          : 0,
+        discountAmount: Money.toNumber(totalDiscountAmount),
         taxAmount: Money.toNumber(taxAmount),
         paymentMethod: effectivePaymentMethod,
         // Store the actual amount received from the customer (cash tendered)
@@ -947,8 +956,8 @@ export const salesService = {
 
           throw new BusinessError(
             `Not enough stock for "${item.productName}". ` +
-            `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
-            `Short by: ${remainingQty.toFixed(2)}.`,
+              `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+              `Short by: ${remainingQty.toFixed(2)}.`,
             errorCode,
             {
               product: item.productName,
