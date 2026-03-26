@@ -1393,12 +1393,13 @@ export const reportsRepository = {
       ${whereClause}
       GROUP BY p.id, p.name, p.sku, p.category
       HAVING SUM(si.quantity) > 0
-      ${options.minMarginPercent !== undefined
-        ? (() => {
-          params.push(options.minMarginPercent);
-          return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`;
-        })()
-        : ''
+      ${
+        options.minMarginPercent !== undefined
+          ? (() => {
+              params.push(options.minMarginPercent);
+              return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`;
+            })()
+          : ''
       }
       ORDER BY total_profit DESC
     `;
@@ -1560,10 +1561,10 @@ export const reportsRepository = {
         profitMargin:
           row.total_sales > 0
             ? new Decimal(row.gross_profit || 0)
-              .div(row.total_sales)
-              .mul(100)
-              .toDecimalPlaces(2)
-              .toNumber()
+                .div(row.total_sales)
+                .mul(100)
+                .toDecimalPlaces(2)
+                .toNumber()
             : 0,
         cashFlowImpact: new Decimal(row.cash_amount || 0).toDecimalPlaces(2).toNumber(),
       }));
@@ -2168,10 +2169,10 @@ export const reportsRepository = {
       const effectiveVelocity =
         dailyVelocity > 0
           ? new Decimal(dailyVelocity)
-            .times(0.7)
-            .plus(new Decimal(recent7dayVelocity).times(0.3))
-            .toDecimalPlaces(2)
-            .toNumber()
+              .times(0.7)
+              .plus(new Decimal(recent7dayVelocity).times(0.3))
+              .toDecimalPlaces(2)
+              .toNumber()
           : 0;
 
       // ── Self-Learning Override: use pre-computed stats when available ──
@@ -2291,6 +2292,7 @@ export const reportsRepository = {
         SUM(si.total_price) as total_revenue,
         SUM(si.quantity * si.unit_cost) as total_cost,
         SUM(si.profit) as gross_profit,
+        COALESCE(SUM(si.discount_amount), 0) as total_discounts,
         COUNT(DISTINCT s.id) as transaction_count,
         AVG(si.total_price) as average_transaction_value
       FROM sales s
@@ -2320,6 +2322,7 @@ export const reportsRepository = {
         totalCost: totalCost.toDecimalPlaces(2).toNumber(),
         grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
         profitMargin: profitMargin.toDecimalPlaces(2).toNumber(),
+        totalDiscounts: new Decimal(row.total_discounts || 0).toDecimalPlaces(2).toNumber(),
         transactionCount: parseInt(row.transaction_count),
         averageTransactionValue: new Decimal(row.average_transaction_value || 0)
           .toDecimalPlaces(2)
@@ -2356,7 +2359,8 @@ export const reportsRepository = {
           s.payment_method,
           COUNT(s.id) as transaction_count,
           SUM(s.total_amount) as total_revenue,
-          AVG(s.total_amount) as average_transaction_value
+          AVG(s.total_amount) as average_transaction_value,
+          COALESCE(SUM(s.discount_amount), 0) as total_discounts
         FROM sales s
         WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
           AND s.status NOT IN ('VOID', 'REFUNDED')
@@ -2370,6 +2374,7 @@ export const reportsRepository = {
         pt.transaction_count,
         pt.total_revenue,
         pt.average_transaction_value,
+        pt.total_discounts,
         (pt.total_revenue / NULLIF(gt.grand_total_revenue, 0) * 100) as percentage_of_total
       FROM payment_totals pt
       CROSS JOIN grand_total gt
@@ -2382,6 +2387,7 @@ export const reportsRepository = {
       paymentMethod: row.payment_method || 'UNKNOWN',
       transactionCount: parseInt(row.transaction_count),
       totalRevenue: new Decimal(row.total_revenue || 0).toDecimalPlaces(2).toNumber(),
+      totalDiscounts: new Decimal(row.total_discounts || 0).toDecimalPlaces(2).toNumber(),
       averageTransactionValue: new Decimal(row.average_transaction_value || 0)
         .toDecimalPlaces(2)
         .toNumber(),
@@ -3151,10 +3157,10 @@ export const reportsRepository = {
       for (const type of Object.keys(byMovementType)) {
         byMovementType[type].percentage = grandTotal.gt(0)
           ? new Decimal(byMovementType[type].total)
-            .div(grandTotal)
-            .times(100)
-            .toDecimalPlaces(2)
-            .toNumber()
+              .div(grandTotal)
+              .times(100)
+              .toDecimalPlaces(2)
+              .toNumber()
           : 0;
       }
 

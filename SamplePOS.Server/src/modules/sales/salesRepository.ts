@@ -230,7 +230,10 @@ export const salesRepository = {
       .filter((item) => !item.productId?.startsWith('custom_') && item.productId)
       .map((item) => item.productId!);
 
-    const productTypeMap = new Map<string, { productType: string; incomeAccountId: string | null }>();
+    const productTypeMap = new Map<
+      string,
+      { productType: string; incomeAccountId: string | null }
+    >();
     if (productIds.length > 0) {
       const uniqueIds = [...new Set(productIds)];
       const ptResult = await pool.query(
@@ -543,7 +546,8 @@ export const salesRepository = {
         COUNT(*) as total_sales,
         COALESCE(SUM(total_amount), 0) as total_amount,
         COALESCE(SUM(total_cost), 0) as total_cost,
-        COALESCE(SUM(total_amount - COALESCE(total_cost, 0)), 0) as total_profit
+        COALESCE(SUM(total_amount - COALESCE(total_cost, 0)), 0) as total_profit,
+        COALESCE(SUM(discount_amount), 0) as total_discounts
        FROM sales
        WHERE ${whereClause}`,
       values
@@ -567,6 +571,7 @@ export const salesRepository = {
       totalAmount: parseFloat(summaryResult.rows[0].total_amount),
       totalCost: parseFloat(summaryResult.rows[0].total_cost),
       totalProfit: parseFloat(summaryResult.rows[0].total_profit),
+      totalDiscounts: parseFloat(summaryResult.rows[0].total_discounts),
       byPaymentMethod: paymentMethodResult.rows.map((row) => ({
         paymentMethod: row.payment_method,
         count: parseInt(row.count),
@@ -659,10 +664,10 @@ export const salesRepository = {
         profit_margin_pct:
           totalRevenue > 0
             ? new Decimal(totalProfit)
-              .dividedBy(totalRevenue)
-              .times(100)
-              .toDecimalPlaces(2)
-              .toString()
+                .dividedBy(totalRevenue)
+                .times(100)
+                .toDecimalPlaces(2)
+                .toString()
             : '0.00',
       };
     });
