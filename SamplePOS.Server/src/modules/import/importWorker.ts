@@ -25,7 +25,7 @@ import type pg from 'pg';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as importRepo from './importRepository.js';
 import { cleanupJobFile } from './importService.js';
-import { ProductCreateSchema } from '../../../../shared/zod/product.js';
+import { ProductImportSchema } from '../../../../shared/zod/product.js';
 import { CreateCustomerSchema } from '../../../../shared/zod/customer.js';
 import { CreateSupplierSchema } from '../../../../shared/zod/supplier.js';
 import { Money } from '../../utils/money.js';
@@ -376,7 +376,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
     });
 
     // Clean up uploaded file after successful completion
-    await cleanupJobFile(jobId).catch(() => { });
+    await cleanupJobFile(jobId).catch(() => {});
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error('Import job failed', { error: msg });
@@ -398,9 +398,9 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
     // Flush any pending errors before marking failed
     if (pendingErrors.length > 0) {
-      await importRepo.logImportErrors(pendingErrors, dbPool).catch(() => { });
+      await importRepo.logImportErrors(pendingErrors, dbPool).catch(() => {});
     }
-    await importRepo.updateImportProgress(jobId, progress, dbPool).catch(() => { });
+    await importRepo.updateImportProgress(jobId, progress, dbPool).catch(() => {});
     await importRepo.completeImportJob(jobId, 'FAILED', msg, dbPool);
 
     // Note: NOT cleaning up file on failure to allow retry
@@ -486,13 +486,24 @@ async function flushChunk(
     });
 
     // Post GL entries for imported stock movements (after transaction commits)
-    const stockMovements = entityType === 'PRODUCT' && 'stockMovements' in result
-      ? (result as { stockMovements: Array<{ movementId: string; movementNumber: string; productId: string; quantity: number; unitCost: number }> }).stockMovements
-      : [];
+    const stockMovements =
+      entityType === 'PRODUCT' && 'stockMovements' in result
+        ? (
+            result as {
+              stockMovements: Array<{
+                movementId: string;
+                movementNumber: string;
+                productId: string;
+                quantity: number;
+                unitCost: number;
+              }>;
+            }
+          ).stockMovements
+        : [];
 
     if (stockMovements.length > 0) {
       // Fetch product names in one query for GL descriptions
-      const productIds = [...new Set(stockMovements.map(sm => sm.productId))];
+      const productIds = [...new Set(stockMovements.map((sm) => sm.productId))];
       const nameRes = await dbPool.query(
         `SELECT id, name FROM products WHERE id = ANY($1::uuid[])`,
         [productIds]
@@ -511,13 +522,16 @@ async function flushChunk(
 
           // Per ERP best practices (SAP/Odoo/Tally/QuickBooks), opening stock
           // credits Opening Balance Equity (3050), NOT revenue (4110).
-          await glEntryService.recordOpeningStockToGL({
-            movementId: sm.movementId,
-            movementNumber: sm.movementNumber,
-            movementDate: importDate,
-            movementValue,
-            productName: nameMap.get(sm.productId) || 'Imported product',
-          }, dbPool);
+          await glEntryService.recordOpeningStockToGL(
+            {
+              movementId: sm.movementId,
+              movementNumber: sm.movementNumber,
+              movementDate: importDate,
+              movementValue,
+              productName: nameMap.get(sm.productId) || 'Imported product',
+            },
+            dbPool
+          );
         } catch (glErr) {
           const errMsg = glErr instanceof Error ? glErr.message : String(glErr);
           logger.error('Import GL posting failed for movement', {
@@ -528,9 +542,12 @@ async function flushChunk(
         }
       }
       if (glFailures.length > 0) {
-        logger.warn(`Import GL incomplete: ${glFailures.length}/${stockMovements.length} movements failed GL posting`, {
-          failedMovements: glFailures,
-        });
+        logger.warn(
+          `Import GL incomplete: ${glFailures.length}/${stockMovements.length} movements failed GL posting`,
+          {
+            failedMovements: glFailures,
+          }
+        );
       }
     }
 
@@ -659,6 +676,30 @@ function coerceValue(fieldName: string, value: string, entityType: ImportEntityT
       TABLET: 'TABLET',
       TN: 'TIN',
       TIN: 'TIN',
+      // Pharmaceutical UoMs
+      AMP: 'AMP',
+      AMPOULE: 'AMP',
+      AMPULE: 'AMP',
+      TUBE: 'TUBE',
+      TBE: 'TUBE',
+      CAP: 'CAPSULE',
+      CAPS: 'CAPSULE',
+      CAPSULE: 'CAPSULE',
+      SYP: 'SYRUP',
+      SYRUP: 'SYRUP',
+      VIAL: 'VIAL',
+      VL: 'VIAL',
+      SUPP: 'SUPPOSITORY',
+      SUPPOSITORY: 'SUPPOSITORY',
+      INJ: 'INJECTION',
+      INJECTION: 'INJECTION',
+      CREAM: 'CREAM',
+      CRM: 'CREAM',
+      OINT: 'OINTMENT',
+      OINTMENT: 'OINTMENT',
+      DROP: 'DROPS',
+      DROPS: 'DROPS',
+      DRP: 'DROPS',
     };
     return uomAliases[value.toUpperCase()] || value.toUpperCase();
   }
@@ -818,7 +859,7 @@ async function checkExistingDuplicates(
 function getZodSchema(entityType: ImportEntityType): ZodSchema {
   switch (entityType) {
     case 'PRODUCT':
-      return ProductCreateSchema;
+      return ProductImportSchema;
     case 'CUSTOMER':
       return CreateCustomerSchema;
     case 'SUPPLIER':

@@ -62,9 +62,7 @@ function normalizeErrorRow(row: Record<string, unknown>): ImportJobError {
 export async function generateJobNumber(dbPool?: pg.Pool | pg.PoolClient): Promise<string> {
   const pool = dbPool || globalPool;
   const year = new Date().getFullYear();
-  const result = await pool.query(
-    `SELECT nextval('import_job_number_seq') AS seq`
-  );
+  const result = await pool.query(`SELECT nextval('import_job_number_seq') AS seq`);
   const seq = String(result.rows[0].seq).padStart(4, '0');
   return `IMP-${year}-${seq}`;
 }
@@ -112,10 +110,7 @@ export async function findJobById(
   dbPool?: pg.Pool | pg.PoolClient
 ): Promise<ImportJob | null> {
   const pool = dbPool || globalPool;
-  const result = await pool.query(
-    `SELECT * FROM import_jobs WHERE id = $1`,
-    [jobId]
-  );
+  const result = await pool.query(`SELECT * FROM import_jobs WHERE id = $1`, [jobId]);
   return result.rows[0] ? normalizeJobRow(result.rows[0]) : null;
 }
 
@@ -127,10 +122,7 @@ export async function findJobByNumber(
   dbPool?: pg.Pool | pg.PoolClient
 ): Promise<ImportJob | null> {
   const pool = dbPool || globalPool;
-  const result = await pool.query(
-    `SELECT * FROM import_jobs WHERE job_number = $1`,
-    [jobNumber]
-  );
+  const result = await pool.query(`SELECT * FROM import_jobs WHERE job_number = $1`, [jobNumber]);
   return result.rows[0] ? normalizeJobRow(result.rows[0]) : null;
 }
 
@@ -138,7 +130,13 @@ export async function findJobByNumber(
  * List import jobs for a user (most recent first).
  */
 export async function listJobs(
-  filters: { userId?: string; entityType?: ImportEntityType; status?: string; limit?: number; offset?: number },
+  filters: {
+    userId?: string;
+    entityType?: ImportEntityType;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  },
   dbPool?: pg.Pool | pg.PoolClient
 ): Promise<{ rows: ImportJob[]; total: number }> {
   const pool = dbPool || globalPool;
@@ -323,7 +321,13 @@ export async function logImportErrors(
     let idx = 1;
     for (const e of batch) {
       placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
-      values.push(e.importJobId, e.rowNumber, e.rawData ? JSON.stringify(e.rawData) : null, e.errorMessage, e.errorType);
+      values.push(
+        e.importJobId,
+        e.rowNumber,
+        e.rawData ? JSON.stringify(e.rawData) : null,
+        e.errorMessage,
+        e.errorType
+      );
       idx += 5;
     }
 
@@ -389,10 +393,7 @@ export async function getJobFilePath(
   dbPool?: pg.Pool | pg.PoolClient
 ): Promise<string | null> {
   const pool = dbPool || globalPool;
-  const result = await pool.query(
-    `SELECT file_path FROM import_jobs WHERE id = $1`,
-    [jobId]
-  );
+  const result = await pool.query(`SELECT file_path FROM import_jobs WHERE id = $1`, [jobId]);
   return result.rows[0]?.file_path ?? null;
 }
 
@@ -426,10 +427,7 @@ export async function deleteJobErrors(
   dbPool?: pg.Pool | pg.PoolClient
 ): Promise<void> {
   const pool = dbPool || globalPool;
-  await pool.query(
-    `DELETE FROM import_job_errors WHERE import_job_id = $1`,
-    [jobId]
-  );
+  await pool.query(`DELETE FROM import_job_errors WHERE import_job_id = $1`, [jobId]);
 }
 
 // ── Bulk Entity Inserts ───────────────────────────────────
@@ -467,7 +465,17 @@ export async function bulkInsertProducts(
     expiryDate?: string;
   }>,
   duplicateStrategy: DuplicateStrategy
-): Promise<{ inserted: number; skipped: number; stockMovements: Array<{ movementId: string; movementNumber: string; productId: string; quantity: number; unitCost: number }> }> {
+): Promise<{
+  inserted: number;
+  skipped: number;
+  stockMovements: Array<{
+    movementId: string;
+    movementNumber: string;
+    productId: string;
+    quantity: number;
+    unitCost: number;
+  }>;
+}> {
   if (rows.length === 0) return { inserted: 0, skipped: 0, stockMovements: [] };
 
   // Collect created stock movements for GL posting by the caller
@@ -508,7 +516,7 @@ export async function bulkInsertProducts(
       r.reorderLevel ?? 0,
       r.trackExpiry ?? false,
       r.minDaysBeforeExpirySale ?? 0,
-      r.isActive ?? true,
+      r.isActive ?? true
     );
     idx += 19;
   }
@@ -562,12 +570,12 @@ export async function bulkInsertProducts(
   }
   // RETURNING may miss rows for SKIP/DO NOTHING or UPDATE that didn't change.
   const missingSKUs = rows
-    .filter(r => !skuToProductId.has(r.sku.toLowerCase()))
-    .map(r => r.sku);
+    .filter((r) => !skuToProductId.has(r.sku.toLowerCase()))
+    .map((r) => r.sku);
   if (missingSKUs.length > 0) {
     const lookupResult = await client.query(
       `SELECT id, LOWER(sku) AS sku FROM products WHERE LOWER(sku) = ANY($1::text[])`,
-      [missingSKUs.map(s => s.toLowerCase())]
+      [missingSKUs.map((s) => s.toLowerCase())]
     );
     for (const row of lookupResult.rows) {
       skuToProductId.set(row.sku, row.id);
@@ -582,13 +590,12 @@ export async function bulkInsertProducts(
   // strategy: UPDATE syncs all products, SKIP/FAIL syncs only newly inserted.
   const newlyInsertedIds = new Set<string>(result.rows.map((r: { id: string }) => r.id));
   // For UPDATE: every row was touched; for SKIP/FAIL: only newly inserted rows
-  const idsToSync = duplicateStrategy === 'UPDATE'
-    ? new Set<string>(skuToProductId.values())
-    : newlyInsertedIds;
+  const idsToSync =
+    duplicateStrategy === 'UPDATE' ? new Set<string>(skuToProductId.values()) : newlyInsertedIds;
 
   if (idsToSync.size > 0) {
     // Filter to rows whose product IDs are in the sync set
-    const syncRows = rows.filter(r => {
+    const syncRows = rows.filter((r) => {
       const pid = skuToProductId.get(r.sku.toLowerCase());
       return pid && idsToSync.has(pid);
     });
@@ -610,7 +617,7 @@ export async function bulkInsertProducts(
         r.costPrice ?? 0, // last_cost = cost_price on import
         r.costingMethod || 'FIFO',
         r.pricingFormula || null,
-        r.autoUpdatePrice ?? false,
+        r.autoUpdatePrice ?? false
       );
       pvIdx += 8;
     }
@@ -637,14 +644,8 @@ export async function bulkInsertProducts(
     let piIdx = 1;
     for (const r of syncRows) {
       const productId = skuToProductId.get(r.sku.toLowerCase())!;
-      piPlaceholders.push(
-        `($${piIdx}::uuid, $${piIdx + 1}::numeric, $${piIdx + 2}::numeric)`
-      );
-      piValues.push(
-        productId,
-        r.quantityOnHand ?? 0,
-        r.reorderLevel ?? 0,
-      );
+      piPlaceholders.push(`($${piIdx}::uuid, $${piIdx + 1}::numeric, $${piIdx + 2}::numeric)`);
+      piValues.push(productId, r.quantityOnHand ?? 0, r.reorderLevel ?? 0);
       piIdx += 3;
     }
     if (piPlaceholders.length > 0) {
@@ -661,15 +662,37 @@ export async function bulkInsertProducts(
 
     // ── product_uoms: assign UOM to imported products ──
     // Uses the CSV "Unit of Measure" column if provided, otherwise defaults to "Each".
+    // Auto-creates missing UoMs so imports never silently fall back to "Each".
     {
       // Build a name→id lookup for all UOMs in the system
-      const allUoms = await client.query(`SELECT id, UPPER(name) AS name, UPPER(symbol) AS symbol FROM uoms`);
+      const allUoms = await client.query(
+        `SELECT id, UPPER(name) AS name, UPPER(symbol) AS symbol FROM uoms`
+      );
       const uomNameMap = new Map<string, string>();
       for (const u of allUoms.rows) {
         uomNameMap.set(u.name, u.id);
         if (u.symbol) uomNameMap.set(u.symbol, u.id);
       }
       const eachUomId = uomNameMap.get('EACH') || uomNameMap.get('EA');
+
+      // Collect unique UoM names from CSV that don't exist in DB yet
+      const missingUoms = new Set<string>();
+      for (const r of syncRows) {
+        if (r.unitOfMeasure) {
+          const upper = r.unitOfMeasure.toUpperCase();
+          if (!uomNameMap.has(upper)) missingUoms.add(r.unitOfMeasure);
+        }
+      }
+      // Auto-create missing UoMs
+      for (const uomName of missingUoms) {
+        const res = await client.query(
+          `INSERT INTO uoms (name, symbol, type) VALUES ($1, $2, 'QUANTITY') RETURNING id, UPPER(name) AS name`,
+          [uomName, uomName.toLowerCase()]
+        );
+        if (res.rows[0]) {
+          uomNameMap.set(res.rows[0].name, res.rows[0].id);
+        }
+      }
 
       const puValues: unknown[] = [];
       const puPlaceholders: string[] = [];
@@ -683,9 +706,7 @@ export async function bulkInsertProducts(
         }
         if (!uomId) uomId = eachUomId;
         if (!uomId) continue; // no UOM available at all
-        puPlaceholders.push(
-          `($${puIdx}::uuid, $${puIdx + 1}::uuid, 1.0, true)`
-        );
+        puPlaceholders.push(`($${puIdx}::uuid, $${puIdx + 1}::uuid, 1.0, true)`);
         puValues.push(productId, uomId);
         puIdx += 2;
       }
@@ -707,9 +728,13 @@ export async function bulkInsertProducts(
   const batchRows = rows
     .map((r, i) => ({
       ...r,
-      batchNumber: r.batchNumber || ((r.quantityOnHand ?? 0) > 0 ? `IMP-${datePart}-${String(i + 1).padStart(4, '0')}` : undefined),
+      batchNumber:
+        r.batchNumber ||
+        ((r.quantityOnHand ?? 0) > 0
+          ? `IMP-${datePart}-${String(i + 1).padStart(4, '0')}`
+          : undefined),
     }))
-    .filter(r => r.batchNumber);
+    .filter((r) => r.batchNumber);
 
   if (batchRows.length > 0) {
     // Skip the auto stock-movement trigger — we create OPENING_BALANCE movements
@@ -721,7 +746,7 @@ export async function bulkInsertProducts(
     const existingBatchQty = new Map<string, number>();
     if (duplicateStrategy === 'UPDATE') {
       const batchKeys = batchRows
-        .map(r => {
+        .map((r) => {
           const pid = skuToProductId.get(r.sku.toLowerCase());
           return pid ? { productId: pid, batchNumber: r.batchNumber! } : null;
         })
@@ -729,8 +754,8 @@ export async function bulkInsertProducts(
 
       if (batchKeys.length > 0) {
         // Build a lookup of existing batch quantities
-        const pids = batchKeys.map(k => k.productId);
-        const bns = batchKeys.map(k => k.batchNumber);
+        const pids = batchKeys.map((k) => k.productId);
+        const bns = batchKeys.map((k) => k.batchNumber);
         const existingResult = await client.query(
           `SELECT product_id, batch_number, remaining_quantity
            FROM inventory_batches
@@ -766,7 +791,7 @@ export async function bulkInsertProducts(
         qty,
         r.costPrice ?? 0,
         r.expiryDate || null,
-        SYSTEM_SUPPLIER_ID,
+        SYSTEM_SUPPLIER_ID
       );
       bIdx += 7;
     }
@@ -774,13 +799,14 @@ export async function bulkInsertProducts(
     if (batchPlaceholders.length > 0) {
       // For UPDATE strategy: replace batch quantities (idempotent re-import).
       // For SKIP/FAIL strategy: only create brand-new batches, leave existing untouched.
-      const batchConflict = duplicateStrategy === 'UPDATE'
-        ? `ON CONFLICT (product_id, batch_number) DO UPDATE SET
+      const batchConflict =
+        duplicateStrategy === 'UPDATE'
+          ? `ON CONFLICT (product_id, batch_number) DO UPDATE SET
             quantity = EXCLUDED.quantity,
             remaining_quantity = EXCLUDED.remaining_quantity,
             cost_price = EXCLUDED.cost_price,
             expiry_date = COALESCE(EXCLUDED.expiry_date, inventory_batches.expiry_date)`
-        : `ON CONFLICT (product_id, batch_number) DO NOTHING`;
+          : `ON CONFLICT (product_id, batch_number) DO NOTHING`;
 
       const batchResult = await client.query(
         `INSERT INTO inventory_batches (
@@ -823,7 +849,7 @@ export async function bulkInsertProducts(
             batch.id,
             delta,
             batchCost,
-            `Opening balance stock import`,
+            `Opening balance stock import`
           );
           smIdx += 5;
         }
@@ -880,13 +906,7 @@ export async function bulkInsertCustomers(
 
   for (const r of rows) {
     placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
-    values.push(
-      r.name,
-      r.email || null,
-      r.phone || null,
-      r.address || null,
-      r.creditLimit ?? 0,
-    );
+    values.push(r.name, r.email || null, r.phone || null, r.address || null, r.creditLimit ?? 0);
     idx += 5;
   }
 
@@ -985,7 +1005,7 @@ export async function bulkInsertSuppliers(
       paymentTermsDays,
       r.creditLimit ?? 0,
       r.taxId || null,
-      r.notes || null,
+      r.notes || null
     );
     idx += 10;
   }
@@ -1034,7 +1054,7 @@ export async function findExistingProductSkus(
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT LOWER(sku) AS sku FROM products WHERE LOWER(sku) = ANY($1::text[])`,
-    [skus.map(s => s.toLowerCase())]
+    [skus.map((s) => s.toLowerCase())]
   );
   return new Set(result.rows.map((r: { sku: string }) => r.sku));
 }
@@ -1050,7 +1070,7 @@ export async function findExistingSupplierNames(
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT LOWER("CompanyName") AS name FROM suppliers WHERE LOWER("CompanyName") = ANY($1::text[])`,
-    [names.map(n => n.toLowerCase())]
+    [names.map((n) => n.toLowerCase())]
   );
   return new Set(result.rows.map((r: { name: string }) => r.name));
 }
@@ -1066,12 +1086,12 @@ export async function findExistingCustomerKeys(
   const pool = dbPool || globalPool;
 
   // Build parameterized composite key check
-  const names = keys.map(k => k.name);
+  const names = keys.map((k) => k.name);
   const result = await pool.query(
     `SELECT LOWER(name) || '|' || LOWER(COALESCE(email, '')) AS key
      FROM customers
      WHERE LOWER(name) = ANY($1::text[])`,
-    [names.map(n => n.toLowerCase())]
+    [names.map((n) => n.toLowerCase())]
   );
   return new Set(result.rows.map((r: { key: string }) => r.key));
 }
@@ -1080,12 +1100,18 @@ export async function findExistingCustomerKeys(
 
 function paymentTermsStringToDays(terms: string): number {
   switch (terms?.toUpperCase()) {
-    case 'COD': return 0;
-    case 'PREPAID': return -1;
-    case 'NET15': return 15;
-    case 'NET30': return 30;
-    case 'NET60': return 60;
-    case 'NET90': return 90;
+    case 'COD':
+      return 0;
+    case 'PREPAID':
+      return -1;
+    case 'NET15':
+      return 15;
+    case 'NET30':
+      return 30;
+    case 'NET60':
+      return 60;
+    case 'NET90':
+      return 90;
     default: {
       const match = terms?.match(/NET(\d+)/i);
       if (match) return parseInt(match[1], 10);

@@ -420,10 +420,10 @@ export default function SalesPage() {
     const paymentMethodsRaw = summaryObj.byPaymentMethod || summaryObj.by_payment_method || [];
     const paymentMethods: NormalizedPaymentMethod[] = Array.isArray(paymentMethodsRaw)
       ? paymentMethodsRaw.map((pm) => ({
-          paymentMethod: String(pm.payment_method || pm.paymentMethod || ''),
-          count: Number(pm.count || 0),
-          totalAmount: Number(pm.total_amount || pm.totalAmount || 0),
-        }))
+        paymentMethod: String(pm.payment_method || pm.paymentMethod || ''),
+        count: Number(pm.count || 0),
+        totalAmount: Number(pm.total_amount || pm.totalAmount || 0),
+      }))
       : [];
 
     return {
@@ -567,71 +567,64 @@ export default function SalesPage() {
           <div className="flex flex-wrap gap-2 pb-4 border-b border-gray-200">
             <button
               onClick={() => handleDateFilterChange('today')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'today'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'today'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               Today
             </button>
             <button
               onClick={() => handleDateFilterChange('yesterday')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'yesterday'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'yesterday'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               Yesterday
             </button>
             <button
               onClick={() => handleDateFilterChange('this-week')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'this-week'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'this-week'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               This Week
             </button>
             <button
               onClick={() => handleDateFilterChange('last-week')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'last-week'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'last-week'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               Last Week
             </button>
             <button
               onClick={() => handleDateFilterChange('this-month')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'this-month'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'this-month'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               This Month
             </button>
             <button
               onClick={() => handleDateFilterChange('last-month')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'last-month'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'last-month'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               Last Month
             </button>
             <button
               onClick={() => handleDateFilterChange('custom')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                dateFilter === 'custom'
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'custom'
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
               Custom Range
             </button>
@@ -765,11 +758,10 @@ export default function SalesPage() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors whitespace-nowrap ${
-                    activeTab === tab.id
+                  className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors whitespace-nowrap ${activeTab === tab.id
                       ? 'border-b-2 border-blue-600 text-blue-600 bg-blue-50'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
+                    }`}
                 >
                   <span>{tab.icon}</span>
                   <span>{tab.label}</span>
@@ -868,9 +860,9 @@ export default function SalesPage() {
                                   <td className="py-2 text-right">
                                     {day.totalAmount > 0
                                       ? new Decimal(day.totalProfit)
-                                          .dividedBy(day.totalAmount)
-                                          .times(100)
-                                          .toFixed(1)
+                                        .dividedBy(day.totalAmount)
+                                        .times(100)
+                                        .toFixed(1)
                                       : '0.0'}
                                     %
                                   </td>
@@ -1076,28 +1068,26 @@ function SalesTable({
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <span
-                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                      sale.paymentMethod === 'CASH'
+                    className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH'
                         ? 'bg-green-100 text-green-800'
                         : sale.paymentMethod === 'CARD'
                           ? 'bg-blue-100 text-blue-800'
                           : sale.paymentMethod === 'CREDIT'
                             ? 'bg-orange-100 text-orange-800'
                             : 'bg-gray-100 text-gray-800'
-                    }`}
+                      }`}
                   >
                     {sale.paymentMethod}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <span
-                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                      sale.status === 'COMPLETED'
+                    className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.status === 'COMPLETED'
                         ? 'bg-green-100 text-green-800'
                         : sale.status === 'PENDING'
                           ? 'bg-yellow-100 text-yellow-800'
                           : 'bg-red-100 text-red-800'
-                    }`}
+                      }`}
                   >
                     {sale.status}
                   </span>
@@ -1653,33 +1643,30 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                 <div className="text-xl font-bold text-purple-900">{items.length}</div>
               </div>
               <div
-                className={`rounded-lg p-4 border ${
-                  sale.status === 'COMPLETED'
+                className={`rounded-lg p-4 border ${sale.status === 'COMPLETED'
                     ? 'bg-green-50 border-green-100'
                     : sale.status === 'PENDING'
                       ? 'bg-yellow-50 border-yellow-100'
                       : 'bg-red-50 border-red-100'
-                }`}
+                  }`}
               >
                 <div
-                  className={`text-sm font-medium ${
-                    sale.status === 'COMPLETED'
+                  className={`text-sm font-medium ${sale.status === 'COMPLETED'
                       ? 'text-green-600'
                       : sale.status === 'PENDING'
                         ? 'text-yellow-600'
                         : 'text-red-600'
-                  }`}
+                    }`}
                 >
                   Status
                 </div>
                 <div
-                  className={`text-xl font-bold ${
-                    sale.status === 'COMPLETED'
+                  className={`text-xl font-bold ${sale.status === 'COMPLETED'
                       ? 'text-green-900'
                       : sale.status === 'PENDING'
                         ? 'text-yellow-900'
                         : 'text-red-900'
-                  }`}
+                    }`}
                 >
                   {sale.status}
                 </div>
@@ -1705,8 +1692,7 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                 <div className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">Payment Method</span>
                   <span
-                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                      sale.paymentMethod === 'CASH'
+                    className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH'
                         ? 'bg-green-100 text-green-800'
                         : sale.paymentMethod === 'CARD'
                           ? 'bg-blue-100 text-blue-800'
@@ -1715,7 +1701,7 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                             : sale.paymentMethod === 'CREDIT'
                               ? 'bg-orange-100 text-orange-800'
                               : 'bg-gray-100 text-gray-800'
-                    }`}
+                      }`}
                   >
                     {sale.paymentMethod}
                   </span>
@@ -1739,18 +1725,17 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                         className="flex items-center justify-between gap-2 p-2 bg-gray-50 rounded-lg"
                       >
                         <span
-                          className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                            (payment.paymentMethod || payment.payment_method) === 'CASH'
+                          className={`px-2 py-1 text-xs font-semibold rounded-full ${(payment.paymentMethod || payment.payment_method) === 'CASH'
                               ? 'bg-green-100 text-green-800'
                               : (payment.paymentMethod || payment.payment_method) === 'CARD'
                                 ? 'bg-blue-100 text-blue-800'
                                 : (payment.paymentMethod || payment.payment_method) ===
-                                    'MOBILE_MONEY'
+                                  'MOBILE_MONEY'
                                   ? 'bg-purple-100 text-purple-800'
                                   : (payment.paymentMethod || payment.payment_method) === 'CREDIT'
                                     ? 'bg-orange-100 text-orange-800'
                                     : 'bg-gray-100 text-gray-800'
-                          }`}
+                            }`}
                         >
                           {payment.paymentMethod || payment.payment_method}
                         </span>
@@ -1849,9 +1834,9 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                               item.totalPrice || item.total_price
                                 ? parseFloat(String(item.totalPrice || item.total_price || 0))
                                 : new Decimal(quantity)
-                                    .times(unitPrice)
-                                    .minus(itemDiscount)
-                                    .toNumber();
+                                  .times(unitPrice)
+                                  .minus(itemDiscount)
+                                  .toNumber();
 
                             return (
                               <tr key={index} className="hover:bg-gray-50">
@@ -1901,11 +1886,11 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                     saleDiscount > 0
                       ? 0
                       : items.reduce((sum: number, item: SaleItemRow) => {
-                          return (
-                            sum +
-                            parseFloat(String(item.discountAmount || item.discount_amount || 0))
-                          );
-                        }, 0);
+                        return (
+                          sum +
+                          parseFloat(String(item.discountAmount || item.discount_amount || 0))
+                        );
+                      }, 0);
                   const effectiveDiscount = saleDiscount > 0 ? saleDiscount : itemDiscountTotal;
                   // Show pre-discount subtotal when there's a discount
                   const displaySubtotal =
@@ -2020,10 +2005,10 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                   saleDisc > 0
                     ? 0
                     : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
-                        return (
-                          sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
-                        );
-                      }, 0);
+                      return (
+                        sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
+                      );
+                    }, 0);
                 const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
 
                 const receiptData: ReceiptData = {

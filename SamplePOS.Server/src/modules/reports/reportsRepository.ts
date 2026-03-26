@@ -1393,13 +1393,12 @@ export const reportsRepository = {
       ${whereClause}
       GROUP BY p.id, p.name, p.sku, p.category
       HAVING SUM(si.quantity) > 0
-      ${
-        options.minMarginPercent !== undefined
-          ? (() => {
-              params.push(options.minMarginPercent);
-              return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`;
-            })()
-          : ''
+      ${options.minMarginPercent !== undefined
+        ? (() => {
+          params.push(options.minMarginPercent);
+          return `AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${params.length}`;
+        })()
+        : ''
       }
       ORDER BY total_profit DESC
     `;
@@ -1561,10 +1560,10 @@ export const reportsRepository = {
         profitMargin:
           row.total_sales > 0
             ? new Decimal(row.gross_profit || 0)
-                .div(row.total_sales)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(row.total_sales)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         cashFlowImpact: new Decimal(row.cash_amount || 0).toDecimalPlaces(2).toNumber(),
       }));
@@ -2169,10 +2168,10 @@ export const reportsRepository = {
       const effectiveVelocity =
         dailyVelocity > 0
           ? new Decimal(dailyVelocity)
-              .times(0.7)
-              .plus(new Decimal(recent7dayVelocity).times(0.3))
-              .toDecimalPlaces(2)
-              .toNumber()
+            .times(0.7)
+            .plus(new Decimal(recent7dayVelocity).times(0.3))
+            .toDecimalPlaces(2)
+            .toNumber()
           : 0;
 
       // ── Self-Learning Override: use pre-computed stats when available ──
@@ -3157,10 +3156,10 @@ export const reportsRepository = {
       for (const type of Object.keys(byMovementType)) {
         byMovementType[type].percentage = grandTotal.gt(0)
           ? new Decimal(byMovementType[type].total)
-              .div(grandTotal)
-              .times(100)
-              .toDecimalPlaces(2)
-              .toNumber()
+            .div(grandTotal)
+            .times(100)
+            .toDecimalPlaces(2)
+            .toNumber()
           : 0;
       }
 

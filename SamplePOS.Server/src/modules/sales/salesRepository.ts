@@ -664,10 +664,10 @@ export const salesRepository = {
         profit_margin_pct:
           totalRevenue > 0
             ? new Decimal(totalProfit)
-                .dividedBy(totalRevenue)
-                .times(100)
-                .toDecimalPlaces(2)
-                .toString()
+              .dividedBy(totalRevenue)
+              .times(100)
+              .toDecimalPlaces(2)
+              .toString()
             : '0.00',
       };
     });
