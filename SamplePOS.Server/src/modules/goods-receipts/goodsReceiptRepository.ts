@@ -1,5 +1,5 @@
 import { Pool, PoolClient } from 'pg';
-import logger from '../../utils/logger';
+import logger from '../../utils/logger.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export interface GoodsReceipt {

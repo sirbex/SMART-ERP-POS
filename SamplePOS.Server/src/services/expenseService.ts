@@ -1,5 +1,5 @@
-import * as expenseRepository from '../repositories/expenseRepository';
-import { ExpenseFilters, CreateExpenseData, UpdateExpenseData } from '../types/expense';
+import * as expenseRepository from '../repositories/expenseRepository.js';
+import { ExpenseFilters, CreateExpenseData, UpdateExpenseData } from '../types/expense.js';
 import logger from '../utils/logger.js';
 import { BusinessError, NotFoundError } from '../middleware/errorHandler.js';
 import * as glEntryService from './glEntryService.js';

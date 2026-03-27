@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express';
-import { quotationController } from './quotationController';
+import { quotationController } from './quotationController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';

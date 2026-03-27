@@ -1,8 +1,8 @@
 import { Request } from 'express';
-import * as expenseService from '../services/expenseService';
+import * as expenseService from '../services/expenseService.js';
 import { pool as globalPool } from '../db/pool.js';
 import logger from '../utils/logger.js';
-import type { ExpenseDbRow, UpdateExpenseData } from '../types/expense';
+import type { ExpenseDbRow, UpdateExpenseData } from '../types/expense.js';
 import { asyncHandler, AppError, NotFoundError, ValidationError, UnauthorizedError } from '../middleware/errorHandler.js';
 import {
   CreateExpenseSchema,

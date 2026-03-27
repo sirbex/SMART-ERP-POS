@@ -1,7 +1,7 @@
 // Discount Routes - API endpoints for discount system
 
 import { Router } from 'express';
-import * as discountController from './discountController';
+import * as discountController from './discountController.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 
 const router = Router();

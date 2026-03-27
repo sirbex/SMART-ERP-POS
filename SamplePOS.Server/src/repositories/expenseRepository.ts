@@ -1,6 +1,6 @@
 import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
-import { ExpenseFilters, Expense, ExpenseDbRow, CreateExpenseData, UpdateExpenseData } from '../types/expense';
+import { ExpenseFilters, Expense, ExpenseDbRow, CreateExpenseData, UpdateExpenseData } from '../types/expense.js';
 import logger from '../utils/logger.js';
 
 /**

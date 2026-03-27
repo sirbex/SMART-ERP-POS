@@ -1,4 +1,4 @@
-import type { Product, ProductType } from '../../../../shared/types/product.type';
+import type { Product, ProductType } from '../../../../shared/types/product.type.js';
 
 /**
  * Check if a product is a service (non-inventory) item

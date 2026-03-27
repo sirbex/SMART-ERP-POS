@@ -3,7 +3,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
-import * as discountService from './discountService';
+import * as discountService from './discountService.js';
 import { DiscountSchema, ApplyDiscountSchema } from '@shared/zod/discount';
 import { asyncHandler, NotFoundError, ValidationError, ForbiddenError } from '../../middleware/errorHandler.js';
 

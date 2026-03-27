@@ -13,7 +13,7 @@
 
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
-import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository';
+import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository.js';
 import { salesService } from '../sales/salesService.js';
 import { invoiceService } from '../invoices/invoiceService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';

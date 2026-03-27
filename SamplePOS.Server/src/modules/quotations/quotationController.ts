@@ -12,8 +12,8 @@ import {
   ConvertQuotationInputSchema,
   CreateQuickQuoteInputSchema,
   QuotationListFiltersSchema,
-} from '../../../../shared/zod/quotation';
-import { quotationService } from './quotationService';
+} from '../../../../shared/zod/quotation.js';
+import { quotationService } from './quotationService.js';
 import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });

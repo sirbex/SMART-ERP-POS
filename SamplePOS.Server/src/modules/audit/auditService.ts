@@ -24,7 +24,7 @@ import {
   RecordFailedTransaction,
   ChangesDiff,
 } from '../../../../shared/types/audit.js';
-import * as auditRepo from './auditRepository';
+import * as auditRepo from './auditRepository.js';
 
 // =====================================================
 // HELPER FUNCTIONS

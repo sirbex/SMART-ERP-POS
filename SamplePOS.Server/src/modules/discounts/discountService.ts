@@ -3,8 +3,8 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
-import * as discountRepo from './discountRepository';
-import * as auditService from '../audit/auditService';
+import * as discountRepo from './discountRepository.js';
+import * as auditService from '../audit/auditService.js';
 import { calculateDiscountAmount, isDiscountAllowed, RoleDiscountLimits } from '@shared/zod/discount';
 import type { Discount, ApplyDiscount } from '@shared/zod/discount';
 import type { AuditContext } from '@shared/types/audit';
