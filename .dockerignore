@@ -1,0 +1,37 @@
+# Root dockerignore for backend build context
+.git
+*.md
+logs
+Backup
+npm-global
+server-py
+infrastructure
+docs
+config
+nginx
+scripts
+database
+*.sql
+*.ps1
+*.sh
+*.lnk
+*.slnx
+*.txt
+
+# Node modules (each project installs its own)
+**/node_modules
+**/dist
+**/coverage
+
+# Environment files
+**/.env
+**/.env.*
+
+# IDE
+.vscode
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+
+# Frontend (not needed for backend build)
+samplepos.client

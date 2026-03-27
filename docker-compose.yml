@@ -44,8 +44,8 @@ services:
   # Node.js Backend API
   backend:
     build:
-      context: ./SamplePOS.Server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: SamplePOS.Server/Dockerfile
     container_name: samplepos-backend
     restart: unless-stopped
     environment:
