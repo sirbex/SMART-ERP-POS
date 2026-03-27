@@ -57,6 +57,7 @@ services:
       DB_PORT: 5432
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
       API_PORT: 3001
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       ACCOUNTING_API_URL: http://accounting-api:5062
