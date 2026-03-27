@@ -39,6 +39,10 @@ COPY --from=builder /app/dist ./dist
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
+# Create logs and uploads directories writable by non-root user
+RUN mkdir -p /app/dist/app/logs /app/uploads /app/logs && \
+    chown -R nodejs:nodejs /app
+
 # Symlink entry point so 'node dist/server.js' still works
 # tsc outputs to dist/app/src/ when shared/ is included from outside the project
 RUN ln -sf dist/app/src/server.js dist/server.js 2>/dev/null || true
