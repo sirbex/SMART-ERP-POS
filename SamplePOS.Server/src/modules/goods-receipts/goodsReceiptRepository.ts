@@ -230,9 +230,9 @@ export const goodsReceiptRepository = {
          ROUND(pv.cost_price::numeric, 2) as "productCostPrice",
          ROUND((gri.received_quantity - COALESCE(poi.ordered_quantity, gri.received_quantity))::numeric, 2) as "qtyVariance",
          ROUND((gri.cost_price - COALESCE(poi.unit_price, pv.cost_price))::numeric, 2) as "costVariance",
-         u.name as "uomName",
-         u.symbol as "uomSymbol",
-         COALESCE(pu.conversion_factor, 1) as "conversionFactor"
+         COALESCE(u.name, def_u.name) as "uomName",
+         COALESCE(u.symbol, def_u.symbol) as "uomSymbol",
+         COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1) as "conversionFactor"
        FROM goods_receipt_items gri
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
        JOIN products p ON gri.product_id = p.id
@@ -240,6 +240,8 @@ export const goodsReceiptRepository = {
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
        LEFT JOIN uoms u ON u.id = poi.uom_id
        LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = poi.uom_id
+       LEFT JOIN product_uoms def_pu ON def_pu.product_id = gri.product_id AND def_pu.is_default = true
+       LEFT JOIN uoms def_u ON def_u.id = def_pu.uom_id
        WHERE gri.goods_receipt_id = $1
        ORDER BY gri.created_at`,
       [id]

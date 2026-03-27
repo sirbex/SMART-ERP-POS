@@ -208,10 +208,12 @@ export const purchaseOrderRepository = {
       `SELECT 
          poi.*,
          p.name as product_name,
-         u.name as uom_name
+         COALESCE(u.name, def_u.name) as uom_name
        FROM purchase_order_items poi
        JOIN products p ON poi.product_id = p.id
        LEFT JOIN uoms u ON poi.uom_id = u.id
+       LEFT JOIN product_uoms def_pu ON def_pu.product_id = p.id AND def_pu.is_default = true
+       LEFT JOIN uoms def_u ON def_u.id = def_pu.uom_id
        WHERE poi.purchase_order_id = $1 
        ORDER BY poi.created_at`,
       [id]
