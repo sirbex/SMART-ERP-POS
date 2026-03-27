@@ -12,6 +12,7 @@ const POItemSchema = z.object({
   productName: z.string().min(1),
   quantity: z.number().positive(),
   unitCost: z.number().nonnegative(),
+  uomId: z.string().uuid().optional().nullable(),
 });
 
 const CreatePOSchema = z

@@ -26,6 +26,7 @@ export interface CreatePOInput {
     productName: string;
     quantity: number;
     unitCost: number;
+    uomId?: string | null;
   }[];
 }
 
@@ -165,6 +166,7 @@ export const purchaseOrderService = {
         productName: item.productName,
         quantity: item.quantity,
         unitCost: Money.toNumber(new Decimal(item.unitCost)), // Bank-grade precision
+        uomId: item.uomId || null,
       }));
 
       const items = await purchaseOrderRepository.addPOItems(client, poItems);
@@ -312,17 +314,19 @@ export const purchaseOrderService = {
       const goodsReceipt = grResult.rows[0];
 
       // Create GR items from PO items (with 0 received quantity initially)
+      // SAP/Odoo pattern: each GR line links back to its specific PO line via po_item_id
       const grItems = items.map((item: PurchaseOrderItem & { product_id?: string; unit_price?: number }) => ({
         goods_receipt_id: goodsReceipt.id,
         product_id: item.product_id || item.productId,
         received_quantity: 0,
         cost_price: item.unit_price ?? item.unitCost,
+        po_item_id: item.id,  // Link GR line to specific PO line item
       }));
 
       const grItemPlaceholders = grItems
         .map((_, index) => {
-          const offset = index * 4;
-          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`;
+          const offset = index * 5;
+          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`;
         })
         .join(', ');
 
@@ -331,11 +335,12 @@ export const purchaseOrderService = {
         item.product_id,
         item.received_quantity,
         item.cost_price,
+        item.po_item_id,
       ]);
 
       await client.query(
         `INSERT INTO goods_receipt_items (
-          goods_receipt_id, product_id, received_quantity, cost_price
+          goods_receipt_id, product_id, received_quantity, cost_price, po_item_id
         ) VALUES ${grItemPlaceholders}`,
         grItemValues
       );

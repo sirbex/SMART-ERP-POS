@@ -214,15 +214,7 @@ export const goodsReceiptRepository = {
     }
 
     const itemsResult = await pool.query(
-      `WITH poi AS (
-         SELECT purchase_order_id, product_id,
-                SUM(ordered_quantity) as ordered_quantity,
-                AVG(unit_price) as po_unit_price,
-                (ARRAY_AGG(uom_id))[1] as uom_id
-         FROM purchase_order_items
-         GROUP BY purchase_order_id, product_id
-       )
-       SELECT 
+      `SELECT 
          gri.id,
          gri.goods_receipt_id as "goodsReceiptId",
          gri.product_id as "productId",
@@ -234,10 +226,10 @@ export const goodsReceiptRepository = {
          gri.expiry_date as "expiryDate",
          ROUND(gri.cost_price::numeric, 2) as "unitCost",
          gri.is_bonus as "isBonus",
-         ROUND(poi.po_unit_price::numeric, 2) as "poUnitPrice",
+         ROUND(poi.unit_price::numeric, 2) as "poUnitPrice",
          ROUND(pv.cost_price::numeric, 2) as "productCostPrice",
          ROUND((gri.received_quantity - COALESCE(poi.ordered_quantity, gri.received_quantity))::numeric, 2) as "qtyVariance",
-         ROUND((gri.cost_price - COALESCE(poi.po_unit_price, pv.cost_price))::numeric, 2) as "costVariance",
+         ROUND((gri.cost_price - COALESCE(poi.unit_price, pv.cost_price))::numeric, 2) as "costVariance",
          u.name as "uomName",
          u.symbol as "uomSymbol",
          COALESCE(pu.conversion_factor, 1) as "conversionFactor"
@@ -245,8 +237,7 @@ export const goodsReceiptRepository = {
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
        JOIN products p ON gri.product_id = p.id
        LEFT JOIN product_valuation pv ON pv.product_id = p.id
-       LEFT JOIN poi ON poi.purchase_order_id = gr.purchase_order_id
-                    AND poi.product_id = gri.product_id
+       LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
        LEFT JOIN uoms u ON u.id = poi.uom_id
        LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = poi.uom_id
        WHERE gri.goods_receipt_id = $1

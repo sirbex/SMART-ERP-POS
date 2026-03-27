@@ -324,8 +324,8 @@ export default function StockLevelsPage() {
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-400'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-gray-400'
                         }`}>
                         {product?.category || '\u2014'}
                       </span>
