@@ -1,7 +1,7 @@
 // Discount Repository - Database operations for discount system
 
 import { Pool } from 'pg';
-import { Discount, DiscountAuthorization } from '@shared/zod/discount';
+import { Discount, DiscountAuthorization } from '../../../../shared/zod/discount.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 
 export interface DiscountDbRow {

@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { computeUomPrices } from '@shared/utils/uom-pricing';
+import { computeUomPrices } from '../../../shared/utils/uom-pricing.js';
 
 // Types aligned with shared zod schemas
 export interface ProductUomInput {

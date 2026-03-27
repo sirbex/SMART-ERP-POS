@@ -4,7 +4,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import * as discountService from './discountService.js';
-import { DiscountSchema, ApplyDiscountSchema } from '@shared/zod/discount';
+import { DiscountSchema, ApplyDiscountSchema } from '../../../../shared/zod/discount.js';
 import { asyncHandler, NotFoundError, ValidationError, ForbiddenError } from '../../middleware/errorHandler.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });

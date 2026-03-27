@@ -5,9 +5,9 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import * as discountRepo from './discountRepository.js';
 import * as auditService from '../audit/auditService.js';
-import { calculateDiscountAmount, isDiscountAllowed, RoleDiscountLimits } from '@shared/zod/discount';
-import type { Discount, ApplyDiscount } from '@shared/zod/discount';
-import type { AuditContext } from '@shared/types/audit';
+import { calculateDiscountAmount, isDiscountAllowed, RoleDiscountLimits } from '../../../../shared/zod/discount.js';
+import type { Discount, ApplyDiscount } from '../../../../shared/zod/discount.js';
+import type { AuditContext } from '../../../../shared/types/audit.js';
 
 const ROLE_LIMITS: RoleDiscountLimits = {
   ADMIN: 100,
