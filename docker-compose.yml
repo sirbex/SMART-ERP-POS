@@ -71,7 +71,10 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - samplepos-network
+      samplepos-network:
+      app-network:
+        aliases:
+          - backend
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
@@ -161,3 +164,6 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/16
+  app-network:
+    external: true
+    name: smarterp_app-network
