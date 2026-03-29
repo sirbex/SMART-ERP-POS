@@ -38,28 +38,34 @@ export function createReportsRouter(pool: Pool) {
   // Inventory Reports
   router.get(
     '/inventory-valuation',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getInventoryValuation(req, res, p(req)))
   );
   router.get(
     '/inventory-adjustments',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getInventoryAdjustments(req, res, p(req)))
   );
   router.get(
     '/low-stock',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getLowStock(req, res, p(req)))
   );
   router.get(
     '/expiring-items',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getExpiringItems(req, res, p(req)))
   );
 
   // Sales Reports
   router.get(
     '/sales',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSalesReport(req, res, p(req)))
   );
   router.get(
     '/best-selling',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getBestSelling(req, res, p(req)))
   );
   router.get(
@@ -71,40 +77,48 @@ export function createReportsRouter(pool: Pool) {
   // Supplier Reports
   router.get(
     '/supplier-cost',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSupplierCostAnalysis(req, res, p(req)))
   );
   router.get(
     '/goods-received',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getGoodsReceived(req, res, p(req)))
   );
 
   // Payment Reports
   router.get(
     '/payments',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getPaymentReport(req, res, p(req)))
   );
   router.get(
     '/customer-payments',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getCustomerPayments(req, res, p(req)))
   );
 
   // Audit Reports
   router.get(
     '/deleted-items',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getDeletedItems(req, res, p(req)))
   );
 
   // Enhanced Reports
   router.get(
     '/purchase-order-summary',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getPurchaseOrderSummary(req, res, p(req)))
   );
   router.get(
     '/stock-movement-analysis',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getStockMovementAnalysis(req, res, p(req)))
   );
   router.get(
     '/customer-account-statement',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) =>
       reportsController.getCustomerAccountStatement(req, res, p(req))
     )
@@ -121,26 +135,32 @@ export function createReportsRouter(pool: Pool) {
   );
   router.get(
     '/supplier-payment-status',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSupplierPaymentStatus(req, res, p(req)))
   );
   router.get(
     '/top-customers',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getTopCustomers(req, res, p(req)))
   );
   router.get(
     '/customer-aging',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getCustomerAging(req, res, p(req)))
   );
   router.get(
     '/stock-aging',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getStockAging(req, res, p(req)))
   );
   router.get(
     '/waste-damage',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getWasteDamage(req, res, p(req)))
   );
   router.get(
     '/reorder-recommendations',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getReorderRecommendations(req, res, p(req)))
   );
   router.get(
@@ -152,34 +172,41 @@ export function createReportsRouter(pool: Pool) {
   // Sales Analysis Reports
   router.get(
     '/sales-by-category',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSalesByCategory(req, res, p(req)))
   );
   router.get(
     '/sales-by-payment-method',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSalesByPaymentMethod(req, res, p(req)))
   );
   router.get(
     '/hourly-sales-analysis',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getHourlySalesAnalysis(req, res, p(req)))
   );
   router.get(
     '/sales-comparison',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSalesComparison(req, res, p(req)))
   );
   router.get(
     '/customer-purchase-history',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getCustomerPurchaseHistory(req, res, p(req)))
   );
 
   // Additional Sales Reports
   router.get(
     '/sales-summary-by-date',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) =>
       reportsController.getSalesSummaryByDateReport(req, res, p(req))
     )
   );
   router.get(
     '/sales-details',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getSalesDetailsReport(req, res, p(req)))
   );
   router.get(
@@ -191,18 +218,21 @@ export function createReportsRouter(pool: Pool) {
   // Cash Register Session Reports
   router.get(
     '/cash-register/session/:sessionId',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) =>
       reportsController.getCashRegisterSessionSummary(req, res, p(req))
     )
   );
   router.get(
     '/cash-register/movement-breakdown',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) =>
       reportsController.getCashRegisterMovementBreakdown(req, res, p(req))
     )
   );
   router.get(
     '/cash-register/session-history',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) =>
       reportsController.getCashRegisterSessionHistory(req, res, p(req))
     )
@@ -211,10 +241,12 @@ export function createReportsRouter(pool: Pool) {
   // Delivery Notes, Quotations, Journal Entries, Bank Transactions Reports
   router.get(
     '/delivery-notes',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getDeliveryNoteReport(req, res, p(req)))
   );
   router.get(
     '/quotations',
+    requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getQuotationReport(req, res, p(req)))
   );
   router.get(

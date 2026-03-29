@@ -66,19 +66,19 @@ router.get('/payment-accounts', expenseController.getPaymentAccounts);
  * @route POST /api/expenses/categories
  * @desc Create new expense category
  */
-router.post('/categories', expenseController.createExpenseCategory);
+router.post('/categories', requirePermission('accounting.create'), expenseController.createExpenseCategory);
 
 /**
  * @route PUT /api/expenses/categories/:id
  * @desc Update expense category
  */
-router.put('/categories/:id', expenseController.updateExpenseCategory);
+router.put('/categories/:id', requirePermission('accounting.update'), expenseController.updateExpenseCategory);
 
 /**
  * @route DELETE /api/expenses/categories/:id
  * @desc Delete expense category
  */
-router.delete('/categories/:id', expenseController.deleteExpenseCategory);
+router.delete('/categories/:id', requirePermission('accounting.delete'), expenseController.deleteExpenseCategory);
 
 /**
  * @route GET /api/expenses/:id
@@ -90,25 +90,25 @@ router.get('/:id', expenseController.getExpenseById);
  * @route POST /api/expenses
  * @desc Create new expense
  */
-router.post('/', expenseController.createExpense);
+router.post('/', requirePermission('accounting.create'), expenseController.createExpense);
 
 /**
  * @route PUT /api/expenses/:id
  * @desc Update expense
  */
-router.put('/:id', expenseController.updateExpense);
+router.put('/:id', requirePermission('accounting.update'), expenseController.updateExpense);
 
 /**
  * @route DELETE /api/expenses/:id
  * @desc Delete expense (soft delete)
  */
-router.delete('/:id', expenseController.deleteExpense);
+router.delete('/:id', requirePermission('accounting.delete'), expenseController.deleteExpense);
 
 /**
  * @route POST /api/expenses/:id/submit
  * @desc Submit expense for approval
  */
-router.post('/:id/submit', expenseController.submitExpense);
+router.post('/:id/submit', requirePermission('accounting.create'), expenseController.submitExpense);
 
 /**
  * @route POST /api/expenses/:id/approve
@@ -138,12 +138,12 @@ router.get('/:id/documents', expenseController.getExpenseDocuments);
  * @route POST /api/expenses/:id/documents
  * @desc Upload expense document
  */
-router.post('/:id/documents', expenseController.uploadExpenseDocument);
+router.post('/:id/documents', requirePermission('accounting.create'), expenseController.uploadExpenseDocument);
 
 /**
  * @route DELETE /api/expenses/:id/documents/:docId
  * @desc Delete expense document
  */
-router.delete('/:id/documents/:docId', expenseController.deleteExpenseDocument);
+router.delete('/:id/documents/:docId', requirePermission('accounting.delete'), expenseController.deleteExpenseDocument);
 
 export default router;

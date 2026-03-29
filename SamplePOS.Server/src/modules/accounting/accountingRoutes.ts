@@ -79,26 +79,7 @@ const DateRangeQuerySchema = z.object({
 
 const router = express.Router();
 
-// =============================================================================
-// HEALTH CHECK (public)
-// =============================================================================
-
-router.get('/test', (_req, res) => {
-  res.json({ success: true, message: 'Accounting routes working!' });
-});
-
-router.get('/health', (_req, res) => {
-  res.json({
-    success: true,
-    data: {
-      status: 'healthy',
-      database: 'connected',
-      timestamp: new Date().toISOString(),
-    },
-  });
-});
-
-// All routes below require authentication
+// All routes require authentication
 router.use(authenticate);
 
 // =============================================================================

@@ -314,6 +314,14 @@ export const cashRegisterService = {
             if (session.status !== 'OPEN') {
                 throw new SessionNotOpenError(data.sessionId, session.status);
             }
+            // Ownership check: only the session owner can close their session
+            // Admins/managers must use forceCloseSession instead
+            if (session.userId !== userId) {
+                throw new CashRegisterError(
+                    'Cannot close another user\'s session. Use force-close for admin override.',
+                    'SESSION_OWNERSHIP_VIOLATION'
+                );
+            }
 
             // Close the session (calculateExpectedClosing + UPDATE atomic)
             const closed = await cashRegisterRepository.closeSession(client, data);

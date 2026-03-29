@@ -22,20 +22,20 @@ router.use(requirePermission('admin.read'));
  */
 
 // POST /api/admin/backup - Create and download database backup
-router.post('/backup', adminController.backup);
+router.post('/backup', requirePermission('admin.create'), adminController.backup);
 
 // GET /api/admin/backups - List available backup files
 router.get('/backups', adminController.listBackups);
 
 // DELETE /api/admin/backups/:fileName - Delete specific backup
-router.delete('/backups/:fileName', adminController.deleteBackup);
+router.delete('/backups/:fileName', requirePermission('admin.delete'), adminController.deleteBackup);
 
 // POST /api/admin/cleanup-backups - Delete old backups (keep last N)
-router.post('/cleanup-backups', adminController.cleanupBackups);
+router.post('/cleanup-backups', requirePermission('admin.delete'), adminController.cleanupBackups);
 
 // POST /api/admin/restore - Restore database from backup
 // Note: File upload handling to be implemented with proper middleware
-router.post('/restore', adminController.restore);
+router.post('/restore', requirePermission('admin.update'), adminController.restore);
 
 /**
  * Transaction Management
@@ -43,7 +43,7 @@ router.post('/restore', adminController.restore);
 
 // POST /api/admin/clear-transactions - Clear all transactional data
 // Requires body: { confirmation: "CLEAR ALL DATA" }
-router.post('/clear-transactions', adminController.clearTransactions);
+router.post('/clear-transactions', requirePermission('admin.delete'), adminController.clearTransactions);
 
 /**
  * Database Statistics
