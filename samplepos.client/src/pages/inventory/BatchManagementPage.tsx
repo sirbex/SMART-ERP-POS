@@ -445,8 +445,8 @@ export default function BatchManagementPage() {
                       {/* Category */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'text-gray-400'
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-400'
                           }`}>
                           {product?.category || '\u2014'}
                         </span>
@@ -477,12 +477,12 @@ export default function BatchManagementPage() {
                             {daysUntilExpiry !== null && (
                               <div
                                 className={`text-xs ${daysUntilExpiry < 0
-                                    ? 'text-red-600 font-bold'
-                                    : daysUntilExpiry <= 7
-                                      ? 'text-red-600'
-                                      : daysUntilExpiry <= 30
-                                        ? 'text-yellow-600'
-                                        : 'text-green-600'
+                                  ? 'text-red-600 font-bold'
+                                  : daysUntilExpiry <= 7
+                                    ? 'text-red-600'
+                                    : daysUntilExpiry <= 30
+                                      ? 'text-yellow-600'
+                                      : 'text-green-600'
                                   }`}
                               >
                                 {daysUntilExpiry < 0
@@ -517,10 +517,10 @@ export default function BatchManagementPage() {
                       <td className="px-4 py-4 whitespace-nowrap">
                         <span
                           className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
-                              ? 'bg-green-100 text-green-800'
-                              : batch.status === 'DEPLETED'
-                                ? 'bg-gray-100 text-gray-800'
-                                : 'bg-red-100 text-red-800'
+                            ? 'bg-green-100 text-green-800'
+                            : batch.status === 'DEPLETED'
+                              ? 'bg-gray-100 text-gray-800'
+                              : 'bg-red-100 text-red-800'
                             }`}
                         >
                           {batch.status}
@@ -699,12 +699,12 @@ function BatchDetailsModal({
                   {daysUntilExpiry !== null && (
                     <div
                       className={`text-sm font-semibold ${daysUntilExpiry < 0
+                        ? 'text-red-600'
+                        : daysUntilExpiry <= 7
                           ? 'text-red-600'
-                          : daysUntilExpiry <= 7
-                            ? 'text-red-600'
-                            : daysUntilExpiry <= 30
-                              ? 'text-yellow-600'
-                              : 'text-green-600'
+                          : daysUntilExpiry <= 30
+                            ? 'text-yellow-600'
+                            : 'text-green-600'
                         }`}
                     >
                       {daysUntilExpiry < 0

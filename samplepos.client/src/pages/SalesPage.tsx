@@ -568,8 +568,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('today')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'today'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               Today
@@ -577,8 +577,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('yesterday')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'yesterday'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               Yesterday
@@ -586,8 +586,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('this-week')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'this-week'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               This Week
@@ -595,8 +595,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('last-week')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'last-week'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               Last Week
@@ -604,8 +604,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('this-month')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'this-month'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               This Month
@@ -613,8 +613,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('last-month')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'last-month'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               Last Month
@@ -622,8 +622,8 @@ export default function SalesPage() {
             <button
               onClick={() => handleDateFilterChange('custom')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'custom'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               Custom Range
@@ -759,8 +759,8 @@ export default function SalesPage() {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors whitespace-nowrap ${activeTab === tab.id
-                      ? 'border-b-2 border-blue-600 text-blue-600 bg-blue-50'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'border-b-2 border-blue-600 text-blue-600 bg-blue-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                 >
                   <span>{tab.icon}</span>
@@ -1103,12 +1103,12 @@ function SalesTable({
                 <td className="px-4 py-3 text-sm">
                   <span
                     className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH'
-                        ? 'bg-green-100 text-green-800'
-                        : sale.paymentMethod === 'CARD'
-                          ? 'bg-blue-100 text-blue-800'
-                          : sale.paymentMethod === 'CREDIT'
-                            ? 'bg-orange-100 text-orange-800'
-                            : 'bg-gray-100 text-gray-800'
+                      ? 'bg-green-100 text-green-800'
+                      : sale.paymentMethod === 'CARD'
+                        ? 'bg-blue-100 text-blue-800'
+                        : sale.paymentMethod === 'CREDIT'
+                          ? 'bg-orange-100 text-orange-800'
+                          : 'bg-gray-100 text-gray-800'
                       }`}
                   >
                     {sale.paymentMethod}
@@ -1117,10 +1117,10 @@ function SalesTable({
                 <td className="px-4 py-3 text-sm">
                   <span
                     className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.status === 'COMPLETED'
-                        ? 'bg-green-100 text-green-800'
-                        : sale.status === 'PENDING'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-red-100 text-red-800'
+                      ? 'bg-green-100 text-green-800'
+                      : sale.status === 'PENDING'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-red-100 text-red-800'
                       }`}
                   >
                     {sale.status}
@@ -1678,28 +1678,28 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
               </div>
               <div
                 className={`rounded-lg p-4 border ${sale.status === 'COMPLETED'
-                    ? 'bg-green-50 border-green-100'
-                    : sale.status === 'PENDING'
-                      ? 'bg-yellow-50 border-yellow-100'
-                      : 'bg-red-50 border-red-100'
+                  ? 'bg-green-50 border-green-100'
+                  : sale.status === 'PENDING'
+                    ? 'bg-yellow-50 border-yellow-100'
+                    : 'bg-red-50 border-red-100'
                   }`}
               >
                 <div
                   className={`text-sm font-medium ${sale.status === 'COMPLETED'
-                      ? 'text-green-600'
-                      : sale.status === 'PENDING'
-                        ? 'text-yellow-600'
-                        : 'text-red-600'
+                    ? 'text-green-600'
+                    : sale.status === 'PENDING'
+                      ? 'text-yellow-600'
+                      : 'text-red-600'
                     }`}
                 >
                   Status
                 </div>
                 <div
                   className={`text-xl font-bold ${sale.status === 'COMPLETED'
-                      ? 'text-green-900'
-                      : sale.status === 'PENDING'
-                        ? 'text-yellow-900'
-                        : 'text-red-900'
+                    ? 'text-green-900'
+                    : sale.status === 'PENDING'
+                      ? 'text-yellow-900'
+                      : 'text-red-900'
                     }`}
                 >
                   {sale.status}
@@ -1727,14 +1727,14 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                   <span className="text-gray-500">Payment Method</span>
                   <span
                     className={`px-2 py-1 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH'
-                        ? 'bg-green-100 text-green-800'
-                        : sale.paymentMethod === 'CARD'
-                          ? 'bg-blue-100 text-blue-800'
-                          : sale.paymentMethod === 'MOBILE_MONEY'
-                            ? 'bg-purple-100 text-purple-800'
-                            : sale.paymentMethod === 'CREDIT'
-                              ? 'bg-orange-100 text-orange-800'
-                              : 'bg-gray-100 text-gray-800'
+                      ? 'bg-green-100 text-green-800'
+                      : sale.paymentMethod === 'CARD'
+                        ? 'bg-blue-100 text-blue-800'
+                        : sale.paymentMethod === 'MOBILE_MONEY'
+                          ? 'bg-purple-100 text-purple-800'
+                          : sale.paymentMethod === 'CREDIT'
+                            ? 'bg-orange-100 text-orange-800'
+                            : 'bg-gray-100 text-gray-800'
                       }`}
                   >
                     {sale.paymentMethod}
@@ -1760,15 +1760,15 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                       >
                         <span
                           className={`px-2 py-1 text-xs font-semibold rounded-full ${(payment.paymentMethod || payment.payment_method) === 'CASH'
-                              ? 'bg-green-100 text-green-800'
-                              : (payment.paymentMethod || payment.payment_method) === 'CARD'
-                                ? 'bg-blue-100 text-blue-800'
-                                : (payment.paymentMethod || payment.payment_method) ===
-                                  'MOBILE_MONEY'
-                                  ? 'bg-purple-100 text-purple-800'
-                                  : (payment.paymentMethod || payment.payment_method) === 'CREDIT'
-                                    ? 'bg-orange-100 text-orange-800'
-                                    : 'bg-gray-100 text-gray-800'
+                            ? 'bg-green-100 text-green-800'
+                            : (payment.paymentMethod || payment.payment_method) === 'CARD'
+                              ? 'bg-blue-100 text-blue-800'
+                              : (payment.paymentMethod || payment.payment_method) ===
+                                'MOBILE_MONEY'
+                                ? 'bg-purple-100 text-purple-800'
+                                : (payment.paymentMethod || payment.payment_method) === 'CREDIT'
+                                  ? 'bg-orange-100 text-orange-800'
+                                  : 'bg-gray-100 text-gray-800'
                             }`}
                         >
                           {payment.paymentMethod || payment.payment_method}

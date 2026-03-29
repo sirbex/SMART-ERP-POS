@@ -546,21 +546,19 @@ export default function SuppliersPage() {
             <div className="flex gap-2">
               <button
                 onClick={() => setViewMode('table')}
-                className={`px-3 py-1 rounded-lg ${
-                  viewMode === 'table'
+                className={`px-3 py-1 rounded-lg ${viewMode === 'table'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                  }`}
               >
                 📋 Table
               </button>
               <button
                 onClick={() => setViewMode('cards')}
-                className={`px-3 py-1 rounded-lg ${
-                  viewMode === 'cards'
+                className={`px-3 py-1 rounded-lg ${viewMode === 'cards'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                  }`}
               >
                 🗂️ Cards
               </button>
@@ -646,11 +644,10 @@ export default function SuppliersPage() {
                         {/* Status */}
                         <td className="px-4 py-4 whitespace-nowrap">
                           <span
-                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                              supplier.isActive
+                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
                                 ? 'bg-green-100 text-green-800'
                                 : 'bg-gray-100 text-gray-800'
-                            }`}
+                              }`}
                           >
                             {supplier.isActive ? '✓ Active' : '○ Inactive'}
                           </span>
@@ -709,11 +706,10 @@ export default function SuppliersPage() {
                     <div className="flex-1">
                       <h3 className="text-lg font-bold text-gray-900 mb-1">{supplier.name}</h3>
                       <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          supplier.isActive
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
                             ? 'bg-green-100 text-green-800'
                             : 'bg-gray-100 text-gray-800'
-                        }`}
+                          }`}
                       >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
                       </span>
@@ -1083,51 +1079,46 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
         <div className="flex gap-2 mb-6 border-b border-gray-200">
           <button
             onClick={() => handleTabChange('info')}
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'info'
+            className={`px-4 py-2 font-medium ${activeTab === 'info'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
-            }`}
+              }`}
           >
             📋 Information
           </button>
           <button
             onClick={() => handleTabChange('performance')}
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'performance'
+            className={`px-4 py-2 font-medium ${activeTab === 'performance'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
-            }`}
+              }`}
           >
             📊 Performance
           </button>
           <button
             onClick={() => handleTabChange('orders')}
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'orders'
+            className={`px-4 py-2 font-medium ${activeTab === 'orders'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
-            }`}
+              }`}
           >
             📦 Purchase Orders
           </button>
           <button
             onClick={() => handleTabChange('products')}
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'products'
+            className={`px-4 py-2 font-medium ${activeTab === 'products'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
-            }`}
+              }`}
           >
             🏷️ Items Supplied
           </button>
           <button
             onClick={() => handleTabChange('invoices')}
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'invoices'
+            className={`px-4 py-2 font-medium ${activeTab === 'invoices'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
-            }`}
+              }`}
           >
             📄 Invoices
           </button>
@@ -1201,11 +1192,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <label className="text-sm font-medium text-gray-500">Status</label>
                     <div className="mt-1">
                       <span
-                        className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${
-                          supplier.isActive
+                        className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${supplier.isActive
                             ? 'bg-green-100 text-green-800'
                             : 'bg-gray-100 text-gray-800'
-                        }`}
+                          }`}
                       >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
                       </span>
@@ -1357,13 +1347,12 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           </div>
                         </div>
                         <span
-                          className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                            order.status === 'COMPLETED'
+                          className={`px-3 py-1 text-xs font-semibold rounded-full ${order.status === 'COMPLETED'
                               ? 'bg-green-100 text-green-800'
                               : order.status === 'PENDING'
                                 ? 'bg-yellow-100 text-yellow-800'
                                 : 'bg-gray-100 text-gray-800'
-                          }`}
+                            }`}
                         >
                           {order.status}
                         </span>
@@ -1736,8 +1725,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                       {formatCurrency(
                                         Number(
                                           invoiceDetails.invoice.subtotal ||
-                                            invoiceDetails.invoice.totalAmount ||
-                                            0
+                                          invoiceDetails.invoice.totalAmount ||
+                                          0
                                         )
                                       )}
                                     </td>

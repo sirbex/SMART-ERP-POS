@@ -1106,8 +1106,8 @@ export default function ProductsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product.category
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'text-gray-400'
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-400'
                           }`}>
                           {product.category || '—'}
                         </span>

@@ -83,7 +83,7 @@ interface UploadSectionProps {
 
 function UploadSection({ onUploadSuccess }: UploadSectionProps) {
   const [entityType, setEntityType] = useState<ImportEntityType>('PRODUCT');
-  const [strategy, setStrategy] = useState<DuplicateStrategy>('SKIP');
+  const [strategy, setStrategy] = useState<DuplicateStrategy>('UPDATE');
   const [dragActive, setDragActive] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -206,8 +206,8 @@ function UploadSection({ onUploadSuccess }: UploadSectionProps) {
         {/* Drop zone */}
         <div
           className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${dragActive
-              ? 'border-blue-500 bg-blue-50'
-              : 'border-gray-300 hover:border-gray-400'
+            ? 'border-blue-500 bg-blue-50'
+            : 'border-gray-300 hover:border-gray-400'
             }`}
           onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
