@@ -51,7 +51,7 @@ interface DepositEntry {
 }
 
 type TabType = 'overview' | 'list' | 'groups';
-type CustomerModalTab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
+type CustomerModalTab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'edit';
 
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
