@@ -2813,16 +2813,35 @@ export default function POSPage() {
                       ) : (
                         <span className="text-xs text-gray-500">{item.uom}</span>
                       )}
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={item.quantity}
-                        onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
-                        onFocus={() => setFocusedCartIndex(idx)}
-                        className="w-16 border rounded px-2 py-1 text-right text-sm focus:ring-2 focus:ring-blue-500"
-                        aria-label={`Quantity for ${item.name}`}
-                      />
+                      <div className="flex items-center border rounded overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleQuantityChange(idx, item.quantity - 1); }}
+                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg select-none transition-colors"
+                          aria-label={`Decrease quantity for ${item.name}`}
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min="1"
+                          step="1"
+                          value={item.quantity}
+                          onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
+                          onFocus={() => setFocusedCartIndex(idx)}
+                          className="w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          aria-label={`Quantity for ${item.name}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleQuantityChange(idx, item.quantity + 1); }}
+                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg select-none transition-colors"
+                          aria-label={`Increase quantity for ${item.name}`}
+                        >
+                          +
+                        </button>
+                      </div>
                       <span className="text-xs text-gray-500">× {formatCurrency(item.unitPrice)}</span>
                       <span className="ml-auto font-semibold text-sm">
                         {formatCurrency(item.subtotal)}
@@ -3079,22 +3098,22 @@ export default function POSPage() {
           <button
             onClick={() => items.length > 0 && setShowPaymentModal(true)}
             disabled={items.length === 0}
-            className="w-full py-3.5 mb-3 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-emerald-200 border border-emerald-400"
+            className="w-full py-3 sm:py-3.5 mb-2 sm:mb-3 rounded-xl font-bold text-sm sm:text-base bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-emerald-200 border border-emerald-400"
           >
             💳 Charge {items.length > 0 && formatCurrency(grandTotal)}
-            <span className="block text-[10px] font-normal opacity-70 mt-0.5">Shift + Enter</span>
+            <span className="hidden sm:block text-[10px] font-normal opacity-70 mt-0.5">Shift + Enter</span>
           </button>
 
           {/* Quick Actions — 2×2 colored grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2.5 mb-3">
+          <div className="grid grid-cols-4 gap-1 sm:gap-2.5 mb-2 sm:mb-3">
             {/* Discount */}
             <button
               onClick={() => handleOpenDiscountDialog('cart')}
               disabled={items.length === 0}
-              className="flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-amber-50 to-amber-100 border border-amber-200 text-amber-800 text-xs sm:text-sm font-semibold hover:from-amber-100 hover:to-amber-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-1.5 sm:py-3 rounded-lg sm:rounded-xl bg-gradient-to-b from-amber-50 to-amber-100 border border-amber-200 text-amber-800 text-[10px] sm:text-sm font-semibold hover:from-amber-100 hover:to-amber-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
               title="Apply Discount (Ctrl+D)"
             >
-              <span className="text-lg">🏷️</span>
+              <span className="text-base sm:text-lg">🏷️</span>
               <span>Discount</span>
               <span className="hidden sm:block text-[9px] font-normal text-amber-500">Ctrl+D</span>
             </button>
@@ -3102,10 +3121,10 @@ export default function POSPage() {
             {/* Service Item */}
             <button
               onClick={() => setShowServiceItemDialog(true)}
-              className="flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-violet-50 to-violet-100 border border-violet-200 text-violet-800 text-xs sm:text-sm font-semibold hover:from-violet-100 hover:to-violet-200 active:scale-[0.97] transition-all shadow-sm"
+              className="flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-1.5 sm:py-3 rounded-lg sm:rounded-xl bg-gradient-to-b from-violet-50 to-violet-100 border border-violet-200 text-violet-800 text-[10px] sm:text-sm font-semibold hover:from-violet-100 hover:to-violet-200 active:scale-[0.97] transition-all shadow-sm"
               title="Add Service / Non-Inventory Item (Ctrl+J)"
             >
-              <span className="text-lg">🛠️</span>
+              <span className="text-base sm:text-lg">🛠️</span>
               <span>Service</span>
               <span className="hidden sm:block text-[9px] font-normal text-violet-500">Ctrl+J</span>
             </button>
@@ -3114,10 +3133,10 @@ export default function POSPage() {
             <button
               onClick={handleHoldRetrieveToggle}
               disabled={items.length === 0 && heldOrdersCount === 0}
-              className="relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-orange-50 to-orange-100 border border-orange-200 text-orange-800 text-xs sm:text-sm font-semibold hover:from-orange-100 hover:to-orange-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-1.5 sm:py-3 rounded-lg sm:rounded-xl bg-gradient-to-b from-orange-50 to-orange-100 border border-orange-200 text-orange-800 text-[10px] sm:text-sm font-semibold hover:from-orange-100 hover:to-orange-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
               title={items.length > 0 ? 'Hold Cart (Ctrl+H)' : `Retrieve Holds (Ctrl+H)`}
             >
-              <span className="text-lg">{items.length > 0 ? '💾' : '📦'}</span>
+              <span className="text-base sm:text-lg">{items.length > 0 ? '💾' : '📦'}</span>
               <span>{items.length > 0 ? 'Hold' : 'Retrieve'}</span>
               <span className="hidden sm:block text-[9px] font-normal text-orange-500">Ctrl+H</span>
               {heldOrdersCount > 0 && (
@@ -3131,10 +3150,10 @@ export default function POSPage() {
             <button
               onClick={handleQuoteToggle}
               disabled={items.length === 0 && quotesCount === 0}
-              className="relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-2 sm:py-3 rounded-xl bg-gradient-to-b from-sky-50 to-sky-100 border border-sky-200 text-sky-800 text-xs sm:text-sm font-semibold hover:from-sky-100 hover:to-sky-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-1.5 sm:py-3 rounded-lg sm:rounded-xl bg-gradient-to-b from-sky-50 to-sky-100 border border-sky-200 text-sky-800 text-[10px] sm:text-sm font-semibold hover:from-sky-100 hover:to-sky-200 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
               title={items.length > 0 ? 'Save Quote (Ctrl+Q)' : 'Load Quote (Ctrl+Q)'}
             >
-              <span className="text-lg">{items.length > 0 ? '📝' : '📋'}</span>
+              <span className="text-base sm:text-lg">{items.length > 0 ? '📝' : '📋'}</span>
               <span>{items.length > 0 ? 'Quote' : 'Load Quote'}</span>
               <span className="hidden sm:block text-[9px] font-normal text-sky-500">Ctrl+Q</span>
               {quotesCount > 0 && items.length === 0 && (
@@ -4235,8 +4254,8 @@ export default function POSPage() {
         </POSModal>
       )}
 
-      {/* Keyboard shortcuts help bar */}
-      <footer className="px-6 py-2 bg-gray-100 border-t text-xs text-gray-500 flex gap-4 items-center">
+      {/* Keyboard shortcuts help bar — hidden on mobile */}
+      <footer className="hidden sm:flex px-6 py-2 bg-gray-100 border-t text-xs text-gray-500 gap-4 items-center">
         <span>/: Focus Search</span>
         <span>↑↓: Navigate</span>
         <span>→/Enter: Select/Add</span>
