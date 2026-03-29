@@ -113,22 +113,22 @@ export default function CustomersPage() {
     <Layout>
       <div className="p-6">
         {/* Header */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Customer Center</h1>
-            <p className="text-gray-600 mt-1">Manage customers, track balances, and view accounting</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Customer Center</h1>
+            <p className="text-sm sm:text-base text-gray-600 mt-1">Manage customers, track balances, and view accounting</p>
           </div>
           <button
             onClick={() => setShowQuickAdd(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 whitespace-nowrap self-start sm:self-auto"
           >
             + New Customer
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="-mb-px flex space-x-8">
+        <div className="border-b border-gray-200 mb-6 overflow-x-auto">
+          <nav className="-mb-px flex space-x-4 sm:space-x-8 min-w-max">
             <button
               onClick={() => setActiveTab('overview')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
@@ -314,7 +314,7 @@ export default function CustomersPage() {
           <div>
             {/* Search and Filters */}
             <div className="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
                 <div className="flex-1">
                   <input
                     type="text"
@@ -324,12 +324,14 @@ export default function CustomersPage() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-                <button className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500">
-                  🔍 Filter
-                </button>
-                <button className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500">
-                  📊 Export
-                </button>
+                <div className="flex gap-2">
+                  <button className="flex-1 sm:flex-none px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500">
+                    🔍 Filter
+                  </button>
+                  <button className="flex-1 sm:flex-none px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500">
+                    📊 Export
+                  </button>
+                </div>
               </div>
             </div>
 

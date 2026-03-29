@@ -252,8 +252,8 @@ export default function CustomerDetailModal({
                     </div>
 
                     {/* Tabs */}
-                    <div className="border-b border-gray-200 px-6 bg-white">
-                        <nav className="-mb-px flex space-x-6">
+                    <div className="border-b border-gray-200 px-4 sm:px-6 bg-white overflow-x-auto">
+                        <nav className="-mb-px flex space-x-3 sm:space-x-6 min-w-max">
                             {(['overview', 'invoices', 'transactions', 'deposits', 'edit'] as Tab[]).map((t) => (
                                 <button
                                     key={t}

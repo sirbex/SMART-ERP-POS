@@ -383,21 +383,21 @@ export default function SuppliersPage() {
     <Layout>
       <div className="p-6">
         {/* Header */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Supplier Management</h2>
-            <p className="text-gray-600 mt-1">Manage your suppliers and vendor relationships</p>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Supplier Management</h2>
+            <p className="text-sm text-gray-600 mt-1">Manage your suppliers and vendor relationships</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 self-start sm:self-auto">
             <button
               onClick={() => setShowExportOptions(!showExportOptions)}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+              className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1 sm:gap-2 text-sm"
             >
               📤 Export
             </button>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1 sm:gap-2 text-sm"
             >
               ➕ Add Supplier
             </button>
@@ -570,7 +570,40 @@ export default function SuppliersPage() {
         {viewMode === 'table' ? (
           /* Table View */
           <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Mobile Card View */}
+            <div className="block sm:hidden space-y-3 p-3">
+              {suppliers.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  {searchQuery ? 'No suppliers match your search' : 'No suppliers yet. Add your first supplier!'}
+                </div>
+              ) : (
+                suppliers.map((supplier: Supplier) => (
+                  <div key={supplier.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-medium text-gray-900">{supplier.name}</div>
+                      <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${supplier.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                        {supplier.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    {supplier.contactPerson && <div className="text-sm text-gray-600 mb-1">👤 {supplier.contactPerson}</div>}
+                    {supplier.phone && <div className="text-sm text-gray-600 mb-1">📞 {supplier.phone}</div>}
+                    {supplier.email && <div className="text-sm text-gray-600 mb-1 truncate">📧 {supplier.email}</div>}
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                        {supplier.paymentTerms || 'NET30'}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 border-t border-gray-100 pt-2">
+                      <button onClick={() => setViewingSupplier(supplier)} className="flex-1 text-xs text-gray-600 hover:text-gray-900 font-medium py-1">👁️ View</button>
+                      <button onClick={() => setEditingSupplier(supplier)} className="flex-1 text-xs text-blue-600 hover:text-blue-900 font-medium py-1">✏️ Edit</button>
+                      <button onClick={() => handleDelete(supplier.id, supplier.name)} className="flex-1 text-xs text-red-600 hover:text-red-900 font-medium py-1">🗑️ Delete</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            {/* Desktop Table View */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
@@ -1076,19 +1109,19 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-gray-200">
+        <div className="flex gap-1 sm:gap-2 mb-6 border-b border-gray-200 overflow-x-auto">
           <button
             onClick={() => handleTabChange('info')}
-            className={`px-4 py-2 font-medium ${activeTab === 'info'
+            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'info'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
               }`}
           >
-            📋 Information
+            📋 Info
           </button>
           <button
             onClick={() => handleTabChange('performance')}
-            className={`px-4 py-2 font-medium ${activeTab === 'performance'
+            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'performance'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -1097,25 +1130,25 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           </button>
           <button
             onClick={() => handleTabChange('orders')}
-            className={`px-4 py-2 font-medium ${activeTab === 'orders'
+            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'orders'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
               }`}
           >
-            📦 Purchase Orders
+            📦 Orders
           </button>
           <button
             onClick={() => handleTabChange('products')}
-            className={`px-4 py-2 font-medium ${activeTab === 'products'
+            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'products'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
               }`}
           >
-            🏷️ Items Supplied
+            🏷️ Items
           </button>
           <button
             onClick={() => handleTabChange('invoices')}
-            className={`px-4 py-2 font-medium ${activeTab === 'invoices'
+            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'invoices'
                 ? 'text-blue-600 border-b-2 border-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
               }`}
