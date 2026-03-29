@@ -118,36 +118,36 @@ export default function SystemSettingsTab() {
             )}
 
             <Tabs.Root value={activeTab} onValueChange={setActiveTab}>
-                <Tabs.List className="flex border-b border-gray-200">
+                <Tabs.List className="flex border-b border-gray-200 overflow-x-auto">
                     <Tabs.Trigger
                         value="general"
-                        className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
                     >
                         General
                     </Tabs.Trigger>
                     <Tabs.Trigger
                         value="tax"
-                        className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
                     >
-                        Tax Management
+                        Tax
                     </Tabs.Trigger>
                     <Tabs.Trigger
                         value="printing"
-                        className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
                     >
-                        Receipt Printing
+                        Printing
                     </Tabs.Trigger>
                     <Tabs.Trigger
                         value="alerts"
-                        className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
                     >
                         Alerts
                     </Tabs.Trigger>
                     <Tabs.Trigger
                         value="registers"
-                        className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
                     >
-                        Cash Registers
+                        Registers
                     </Tabs.Trigger>
                 </Tabs.List>
 

@@ -37,42 +37,42 @@ export default function SettingsPage() {
 
           {/* Tabs */}
           <Tabs.Root value={activeTab} onValueChange={setActiveTab}>
-            <Tabs.List className="flex gap-2 border-b border-gray-200 mb-8">
+            <Tabs.List className="flex gap-1 sm:gap-2 border-b border-gray-200 mb-8 overflow-x-auto">
               <Tabs.Trigger
                 value="invoice"
-                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
               >
-                Invoice Settings
+                Invoice
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="company"
-                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
               >
-                Company Profile
+                Company
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="users"
-                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
               >
-                User Management
+                Users
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="system"
-                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
               >
-                System Settings
+                System
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="data"
-                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-red-600 data-[state=active]:border-red-600 transition-colors"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-red-600 data-[state=active]:border-red-600 transition-colors whitespace-nowrap"
               >
-                Data Management
+                Data
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="offline"
-                className="px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
               >
-                Offline &amp; Sync
+                Offline
               </Tabs.Trigger>
             </Tabs.List>
 

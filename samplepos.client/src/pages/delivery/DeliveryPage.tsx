@@ -72,20 +72,20 @@ export default function DeliveryPage() {
         </div>
 
         {/* Tabs */}
-        <div className="mb-6 border-b border-gray-200">
-          <nav className="flex gap-1" aria-label="Delivery tabs">
+        <div className="mb-6 border-b border-gray-200 overflow-x-auto">
+          <nav className="flex gap-1 min-w-max" aria-label="Delivery tabs">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${activeTab === tab.id
+                className={`px-3 sm:px-4 py-3 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${activeTab === tab.id
                   ? 'bg-white text-blue-700 border border-gray-200 border-b-white -mb-px'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                   }`}
                 aria-selected={activeTab === tab.id}
                 role="tab"
               >
-                <span className="mr-2">{tab.icon}</span>
+                <span className="mr-1 sm:mr-2">{tab.icon}</span>
                 {tab.label}
               </button>
             ))}
