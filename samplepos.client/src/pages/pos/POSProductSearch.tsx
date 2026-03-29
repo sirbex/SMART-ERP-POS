@@ -431,11 +431,12 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                   className={`w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 flex flex-col gap-1 transition-colors ${index === selectedIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
                     }`}
                   onClick={() => {
-                    // If product has 0 or 1 UoM, directly select it
-                    // If product has multiple UoMs, show selection modal
+                    // Clear search immediately so the user can type the next item
+                    setSearch('');
+                    setSelectedIndex(0);
+
                     if (!p.uoms || p.uoms.length <= 1) {
                       onSelect(p);
-                      // Restore focus to search input after adding to cart
                       setTimeout(() => searchInputRef.current?.focus(), 0);
                     } else {
                       setSelected(p);
