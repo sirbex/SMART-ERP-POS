@@ -111,7 +111,7 @@ export default function CustomersPage() {
 
   return (
     <Layout>
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
           <div>
@@ -163,72 +163,118 @@ export default function CustomersPage() {
         {activeTab === 'overview' && (
           <div>
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6 border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Total Customers</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-2">{totalCustomers}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Customers</p>
+                    <p className="text-xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{totalCustomers}</p>
                   </div>
-                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">👥</span>
+                  <div className="w-8 h-8 sm:w-12 sm:h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-base sm:text-2xl">👥</span>
                   </div>
                 </div>
-                <p className="text-xs text-green-600 mt-3">↑ {activeCustomers} active</p>
+                <p className="text-xs text-green-600 mt-2 sm:mt-3">↑ {activeCustomers} active</p>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6 border border-gray-200">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Total AR Balance</p>
-                    <p className={`text-3xl font-bold mt-2 ${totalBalance > 0 ? 'text-red-600' : totalBalance < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total AR Balance</p>
+                    <p className={`text-xl sm:text-3xl font-bold mt-1 sm:mt-2 truncate ${totalBalance > 0 ? 'text-red-600' : totalBalance < 0 ? 'text-green-600' : 'text-gray-900'}`}>
                       {formatCurrency(Math.abs(totalBalance))}
-                      {totalBalance < 0 && <span className="text-sm ml-1">(CR)</span>}
+                      {totalBalance < 0 && <span className="text-xs sm:text-sm ml-1">(CR)</span>}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">💰</span>
+                  <div className="w-8 h-8 sm:w-12 sm:h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-base sm:text-2xl">💰</span>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-3">Total receivables</p>
+                <p className="text-xs text-gray-500 mt-2 sm:mt-3">Total receivables</p>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6 border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Customers with Debt</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-2">{customersWithDebt}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">With Debt</p>
+                    <p className="text-xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{customersWithDebt}</p>
                   </div>
-                  <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">⚠️</span>
+                  <div className="w-8 h-8 sm:w-12 sm:h-12 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-base sm:text-2xl">⚠️</span>
                   </div>
                 </div>
-                <p className="text-xs text-yellow-600 mt-3">Require attention</p>
+                <p className="text-xs text-yellow-600 mt-2 sm:mt-3">Require attention</p>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6 border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Recent Activity</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-2">-</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Recent Activity</p>
+                    <p className="text-xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">-</p>
                   </div>
-                  <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">📊</span>
+                  <div className="w-8 h-8 sm:w-12 sm:h-12 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-base sm:text-2xl">📊</span>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-3">Last 7 days</p>
+                <p className="text-xs text-gray-500 mt-2 sm:mt-3">Last 7 days</p>
               </div>
             </div>
 
             {/* Recent Customers */}
-            <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow border border-gray-200 p-4 sm:p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Customers</h2>
               {isLoading ? (
                 <div className="text-center py-8 text-gray-500">Loading...</div>
               ) : filteredCustomers.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">No customers yet</div>
               ) : (
-                <div className="overflow-x-auto">
+                <>
+                  {/* Mobile Card View */}
+                  <div className="block sm:hidden space-y-3">
+                    {filteredCustomers.slice(0, 10).map((customer: Customer) => (
+                      <div
+                        key={customer.id}
+                        className="border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50"
+                        onClick={() => { setSelectedCustomerId(customer.id); setDetailModalTab('overview'); setDetailModalOpen(true); }}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                              <span className="text-blue-600 font-semibold text-xs">{customer.name.charAt(0).toUpperCase()}</span>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-medium text-gray-900 text-sm truncate">{customer.name}</div>
+                              <div className="text-xs text-gray-500 truncate">{customer.phone || customer.email || 'No contact'}</div>
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${customer.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {customer.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div>
+                            <div className="text-gray-500">Balance</div>
+                            <div className={`font-semibold ${toNumber(customer.balance) > 0 ? 'text-red-600' : toNumber(customer.balance) < 0 ? 'text-green-600' : 'text-gray-600'}`}>
+                              {formatCurrency(Math.abs(toNumber(customer.balance)))}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500">Deposits</div>
+                            <div className={`font-semibold ${toNumber(customer.depositBalance) > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                              {formatCurrency(toNumber(customer.depositBalance))}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500">Limit</div>
+                            <div className="text-gray-600">{formatCurrency(customer.creditLimit)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden sm:block overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead>
                       <tr className="bg-gray-50">
@@ -303,7 +349,8 @@ export default function CustomersPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                  </div>
+                </>
               )}
             </div>
           </div>

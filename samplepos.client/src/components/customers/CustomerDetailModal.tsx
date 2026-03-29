@@ -230,21 +230,21 @@ export default function CustomerDetailModal({
                     className="relative bg-white w-full max-w-[95vw] sm:max-w-5xl rounded-lg shadow-xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col"
                 >
                     {/* Header */}
-                    <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between bg-gray-50">
-                        <div className="flex items-center space-x-4">
-                            <div className="h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center">
-                                <span className="text-blue-600 font-bold text-lg">
+                    <div className="border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4 flex items-start sm:items-center justify-between bg-gray-50 gap-3">
+                        <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
+                            <div className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                <span className="text-blue-600 font-bold text-base sm:text-lg">
                                     {c?.name?.charAt(0)?.toUpperCase() || '?'}
                                 </span>
                             </div>
-                            <div>
-                                <h2 className="text-xl font-semibold text-gray-900">{c?.name || 'Loading...'}</h2>
-                                <p className="text-sm text-gray-500">{c?.email || c?.phone || 'No contact info'}</p>
+                            <div className="min-w-0">
+                                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">{c?.name || 'Loading...'}</h2>
+                                <p className="text-xs sm:text-sm text-gray-500 truncate">{c?.email || c?.phone || 'No contact info'}</p>
                             </div>
                         </div>
                         <button
                             onClick={onClose}
-                            className="p-2 rounded hover:bg-gray-200 transition-colors"
+                            className="p-2 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
                             aria-label="Close"
                         >
                             <span className="text-xl">✕</span>
@@ -270,7 +270,7 @@ export default function CustomerDetailModal({
                     </div>
 
                     {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-6">
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-6">
                         {isLoadingCustomer ? (
                             <div className="flex items-center justify-center py-12">
                                 <div className="text-gray-500">Loading customer details...</div>
@@ -288,7 +288,7 @@ export default function CustomerDetailModal({
                                                 <div className="text-sm text-gray-600">
                                                     {toNumber(c.balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}
                                                 </div>
-                                                <div className={`text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : toNumber(c.balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                                                <div className={`text-xl sm:text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : toNumber(c.balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
                                                     {formatCurrency(Math.abs(toNumber(c.balance)))}
                                                 </div>
                                                 {toNumber(c.balance) < 0 && (
@@ -297,7 +297,7 @@ export default function CustomerDetailModal({
                                             </div>
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Credit Limit</div>
-                                                <div className="text-2xl font-bold text-gray-900">
+                                                <div className="text-xl sm:text-2xl font-bold text-gray-900">
                                                     {formatCurrency(c.creditLimit || 0)}
                                                 </div>
                                             </div>
@@ -315,7 +315,7 @@ export default function CustomerDetailModal({
                                         {/* Customer Info */}
                                         <div className="bg-white rounded-lg border border-gray-200 p-4">
                                             <h3 className="text-lg font-semibold text-gray-900 mb-4">Customer Information</h3>
-                                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                                                 <div>
                                                     <span className="text-gray-500">Name:</span>
                                                     <span className="ml-2 text-gray-900 font-medium">{c.name}</span>
@@ -349,17 +349,17 @@ export default function CustomerDetailModal({
                                         {sum && (
                                             <div className="bg-white rounded-lg border border-gray-200 p-4">
                                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Activity Summary</h3>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                                    <div className="text-center p-3 bg-blue-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-blue-600">{sum.totalOrders || sum.totalInvoices || sum.totalSales || 0}</div>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-sm">
+                                                    <div className="text-center p-2 sm:p-3 bg-blue-50 rounded-lg">
+                                                        <div className="text-xl sm:text-2xl font-bold text-blue-600">{sum.totalOrders || sum.totalInvoices || sum.totalSales || 0}</div>
                                                         <div className="text-gray-600">Total Invoices</div>
                                                     </div>
-                                                    <div className="text-center p-3 bg-green-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-green-600">{formatCurrency(Number(sum.lifetimeValue || sum.totalSpent) || 0)}</div>
+                                                    <div className="text-center p-2 sm:p-3 bg-green-50 rounded-lg">
+                                                        <div className="text-xl sm:text-2xl font-bold text-green-600">{formatCurrency(Number(sum.lifetimeValue || sum.totalSpent) || 0)}</div>
                                                         <div className="text-gray-600">Lifetime Value</div>
                                                     </div>
-                                                    <div className="text-center p-3 bg-purple-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-purple-600">{formatCurrency(
+                                                    <div className="text-center p-2 sm:p-3 bg-purple-50 rounded-lg">
+                                                        <div className="text-xl sm:text-2xl font-bold text-purple-600">{formatCurrency(
                                                             (() => {
                                                                 const total = Number(sum.lifetimeValue || sum.totalSpent) || 0;
                                                                 const count = Number(sum.totalOrders || sum.totalInvoices || sum.totalSales) || 1;
@@ -368,8 +368,8 @@ export default function CustomerDetailModal({
                                                         )}</div>
                                                         <div className="text-gray-600">Avg Invoice</div>
                                                     </div>
-                                                    <div className="text-center p-3 bg-yellow-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-yellow-600">{Number(sum.pendingInvoices) || 0}</div>
+                                                    <div className="text-center p-2 sm:p-3 bg-yellow-50 rounded-lg">
+                                                        <div className="text-xl sm:text-2xl font-bold text-yellow-600">{Number(sum.pendingInvoices) || 0}</div>
                                                         <div className="text-gray-600">Pending Invoices</div>
                                                     </div>
                                                 </div>
@@ -416,7 +416,60 @@ export default function CustomerDetailModal({
                                             <div className="text-center py-10 text-gray-500">No invoices found for this customer</div>
                                         ) : (
                                             <>
-                                                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                                {/* Mobile Invoice Cards */}
+                                                <div className="block sm:hidden space-y-3">
+                                                    {invoices.map((inv: InvoiceRow) => {
+                                                        const total = Number(inv.totalAmount || inv.total_amount || 0);
+                                                        const paid = Number(inv.amountPaid || inv.amount_paid || 0);
+                                                        const outstanding = new Decimal(total).minus(paid).toNumber();
+                                                        const status = (inv.status || '').toUpperCase();
+                                                        const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
+                                                        const statusColor = status === 'PAID' ? 'bg-green-100 text-green-800' : (status.includes('PARTIAL') ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
+                                                        return (
+                                                            <div key={inv.id} className="border border-gray-200 rounded-lg p-3">
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <span className="text-sm font-medium text-gray-900">{inv.invoiceNumber || inv.invoice_number}</span>
+                                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>{statusLabel}</span>
+                                                                </div>
+                                                                <div className="text-xs text-gray-500 mb-2">
+                                                                    {inv.issueDate || inv.issue_date ? new Date(String(inv.issueDate || inv.issue_date)).toLocaleDateString() : '-'}
+                                                                </div>
+                                                                <div className="grid grid-cols-3 gap-2 text-center text-xs mb-2">
+                                                                    <div>
+                                                                        <div className="text-gray-500">Total</div>
+                                                                        <div className="font-semibold">{formatCurrency(total)}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-gray-500">Paid</div>
+                                                                        <div className="text-gray-600">{formatCurrency(paid)}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-gray-500">Due</div>
+                                                                        <div className="font-semibold text-red-600">{formatCurrency(outstanding)}</div>
+                                                                    </div>
+                                                                </div>
+                                                                {status !== 'PAID' && outstanding > 0 && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setSelectedInvoice({ ...inv, outstanding });
+                                                                            setPayAmount('');
+                                                                            setPayMethod('CASH');
+                                                                            setPayRefNum('');
+                                                                            setPayNotes('');
+                                                                            setPaymentOpen(true);
+                                                                        }}
+                                                                        className="w-full py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                                                    >
+                                                                        Receive Payment
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+
+                                                {/* Desktop Invoice Table */}
+                                                <div className="hidden sm:block overflow-x-auto border border-gray-200 rounded-lg">
                                                     <table className="min-w-full divide-y divide-gray-200">
                                                         <thead className="bg-gray-50">
                                                             <tr>
@@ -598,32 +651,35 @@ export default function CustomerDetailModal({
                                 {/* Transactions Tab (Statement) */}
                                 {tab === 'transactions' && (
                                     <div className="space-y-4">
-                                        <div className="flex flex-wrap items-end gap-3">
-                                            <div>
-                                                <label className="block text-xs text-gray-600">Start Date</label>
-                                                <DatePicker
-                                                    value={stmtStart}
-                                                    onChange={(date) => { setStmtStart(date); setStmtPage(1); }}
-                                                    placeholder="Start date"
-                                                    maxDate={stmtEnd ? new Date(stmtEnd) : undefined}
-                                                />
+                                        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3">
+                                            <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3">
+                                                <div>
+                                                    <label className="block text-xs text-gray-600">Start Date</label>
+                                                    <DatePicker
+                                                        value={stmtStart}
+                                                        onChange={(date) => { setStmtStart(date); setStmtPage(1); }}
+                                                        placeholder="Start date"
+                                                        maxDate={stmtEnd ? new Date(stmtEnd) : undefined}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-gray-600">End Date</label>
+                                                    <DatePicker
+                                                        value={stmtEnd}
+                                                        onChange={(date) => { setStmtEnd(date); setStmtPage(1); }}
+                                                        placeholder="End date"
+                                                        minDate={stmtStart ? new Date(stmtStart) : undefined}
+                                                    />
+                                                </div>
                                             </div>
-                                            <div>
-                                                <label className="block text-xs text-gray-600">End Date</label>
-                                                <DatePicker
-                                                    value={stmtEnd}
-                                                    onChange={(date) => { setStmtEnd(date); setStmtPage(1); }}
-                                                    placeholder="End date"
-                                                    minDate={stmtStart ? new Date(stmtStart) : undefined}
-                                                />
-                                            </div>
-                                            <button
-                                                onClick={() => { setStmtStart(''); setStmtEnd(''); setStmtPage(1); }}
-                                                className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50"
-                                            >
-                                                Reset
-                                            </button>
-                                            <div className="flex gap-2 ml-auto">
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => { setStmtStart(''); setStmtEnd(''); setStmtPage(1); }}
+                                                    className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
+                                                >
+                                                    Reset
+                                                </button>
+                                                <div className="flex gap-2 sm:ml-auto">
                                                 <button
                                                     onClick={() => {
                                                         const params = [
@@ -650,6 +706,7 @@ export default function CustomerDetailModal({
                                                 >
                                                     Export PDF
                                                 </button>
+                                            </div>
                                             </div>
                                         </div>
 
@@ -680,8 +737,51 @@ export default function CustomerDetailModal({
                                             </div>
                                         ) : null}
 
-                                        {/* Statement Table */}
-                                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                        {/* Statement - Mobile Cards */}
+                                        <div className="block sm:hidden space-y-3">
+                                            {!statement || ((statement as StatementResponse).entries || []).length === 0 ? (
+                                                <div className="text-center py-8 text-gray-500">No transactions in this period</div>
+                                            ) : ((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => (
+                                                <div key={idx} className="border border-gray-200 rounded-lg p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs text-gray-500">{new Date(e.date).toLocaleDateString()}</span>
+                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${e.type === 'INVOICE' ? 'bg-blue-100 text-blue-800' :
+                                                            e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
+                                                                'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                            {e.type}
+                                                        </span>
+                                                    </div>
+                                                    {(e.reference || e.description) && (
+                                                        <div className="text-xs text-gray-600 mb-2 truncate">
+                                                            {e.reference && <span className="font-medium">{e.reference}</span>}
+                                                            {e.reference && e.description && ' — '}
+                                                            {e.description}
+                                                        </div>
+                                                    )}
+                                                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                                                        <div>
+                                                            <div className="text-gray-500">Debit</div>
+                                                            <div className="text-red-600 font-medium">{e.debit ? formatCurrency(Number(e.debit)) : '-'}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-gray-500">Credit</div>
+                                                            <div className="text-green-600 font-medium">{e.credit ? formatCurrency(Number(e.credit)) : '-'}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-gray-500">Balance</div>
+                                                            <div className={`font-semibold ${Number(e.balanceAfter || 0) > 0 ? 'text-red-600' : Number(e.balanceAfter || 0) < 0 ? 'text-green-600' : ''}`}>
+                                                                {formatCurrency(Math.abs(Number(e.balanceAfter || 0)))}
+                                                                {Number(e.balanceAfter || 0) < 0 && <span className="ml-0.5">(CR)</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Statement - Desktop Table */}
+                                        <div className="hidden sm:block overflow-x-auto border border-gray-200 rounded-lg">
                                             <table className="min-w-full divide-y divide-gray-200">
                                                 <thead className="bg-gray-50">
                                                     <tr>
