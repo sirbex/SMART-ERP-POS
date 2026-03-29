@@ -547,8 +547,8 @@ export default function SuppliersPage() {
               <button
                 onClick={() => setViewMode('table')}
                 className={`px-3 py-1 rounded-lg ${viewMode === 'table'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
               >
                 📋 Table
@@ -556,8 +556,8 @@ export default function SuppliersPage() {
               <button
                 onClick={() => setViewMode('cards')}
                 className={`px-3 py-1 rounded-lg ${viewMode === 'cards'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
               >
                 🗂️ Cards
@@ -678,8 +678,8 @@ export default function SuppliersPage() {
                         <td className="px-4 py-4 whitespace-nowrap">
                           <span
                             className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-gray-100 text-gray-800'
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-800'
                               }`}
                           >
                             {supplier.isActive ? '✓ Active' : '○ Inactive'}
@@ -740,8 +740,8 @@ export default function SuppliersPage() {
                       <h3 className="text-lg font-bold text-gray-900 mb-1">{supplier.name}</h3>
                       <span
                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
                           }`}
                       >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
@@ -1113,8 +1113,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           <button
             onClick={() => handleTabChange('info')}
             className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'info'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-900'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
               }`}
           >
             📋 Info
@@ -1122,8 +1122,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           <button
             onClick={() => handleTabChange('performance')}
             className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'performance'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-900'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
               }`}
           >
             📊 Performance
@@ -1131,8 +1131,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           <button
             onClick={() => handleTabChange('orders')}
             className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'orders'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-900'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
               }`}
           >
             📦 Orders
@@ -1140,8 +1140,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           <button
             onClick={() => handleTabChange('products')}
             className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'products'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-900'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
               }`}
           >
             🏷️ Items
@@ -1149,8 +1149,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           <button
             onClick={() => handleTabChange('invoices')}
             className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'invoices'
-                ? 'text-blue-600 border-b-2 border-blue-600'
-                : 'text-gray-600 hover:text-gray-900'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
               }`}
           >
             📄 Invoices
@@ -1226,8 +1226,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <div className="mt-1">
                       <span
                         className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${supplier.isActive
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
                           }`}
                       >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
@@ -1381,10 +1381,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                         </div>
                         <span
                           className={`px-3 py-1 text-xs font-semibold rounded-full ${order.status === 'COMPLETED'
-                              ? 'bg-green-100 text-green-800'
-                              : order.status === 'PENDING'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-gray-100 text-gray-800'
+                            ? 'bg-green-100 text-green-800'
+                            : order.status === 'PENDING'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-gray-100 text-gray-800'
                             }`}
                         >
                           {order.status}

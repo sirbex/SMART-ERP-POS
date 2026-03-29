@@ -959,8 +959,8 @@ function RegisterManagement() {
                                             <td className="px-6 py-3 text-sm text-gray-600">{register.location || '—'}</td>
                                             <td className="px-6 py-3">
                                                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${register.isActive
-                                                        ? 'bg-green-100 text-green-800'
-                                                        : 'bg-gray-100 text-gray-600'
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : 'bg-gray-100 text-gray-600'
                                                     }`}>
                                                     <span className={`w-1.5 h-1.5 rounded-full ${register.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
                                                     {register.isActive ? 'Active' : 'Inactive'}
@@ -988,8 +988,8 @@ function RegisterManagement() {
                                                     onClick={() => handleToggleActive(register)}
                                                     disabled={updateRegister.isPending}
                                                     className={`text-sm font-medium ${register.isActive
-                                                            ? 'text-red-600 hover:text-red-800'
-                                                            : 'text-green-600 hover:text-green-800'
+                                                        ? 'text-red-600 hover:text-red-800'
+                                                        : 'text-green-600 hover:text-green-800'
                                                         }`}
                                                 >
                                                     {register.isActive ? 'Deactivate' : 'Activate'}

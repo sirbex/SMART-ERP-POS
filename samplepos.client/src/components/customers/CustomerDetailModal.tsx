@@ -680,33 +680,33 @@ export default function CustomerDetailModal({
                                                     Reset
                                                 </button>
                                                 <div className="flex gap-2 sm:ml-auto">
-                                                <button
-                                                    onClick={() => {
-                                                        const params = [
-                                                            stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
-                                                            stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
-                                                        ].filter(Boolean).join('&');
-                                                        const url = `/customers/${customerId}/statement/export.csv${params ? '?' + params : ''}`;
-                                                        downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.csv`);
-                                                    }}
-                                                    className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
-                                                >
-                                                    Export CSV
-                                                </button>
-                                                <button
-                                                    onClick={() => {
-                                                        const params = [
-                                                            stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
-                                                            stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
-                                                        ].filter(Boolean).join('&');
-                                                        const url = `/customers/${customerId}/statement/export.pdf${params ? '?' + params : ''}`;
-                                                        downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.pdf`);
-                                                    }}
-                                                    className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
-                                                >
-                                                    Export PDF
-                                                </button>
-                                            </div>
+                                                    <button
+                                                        onClick={() => {
+                                                            const params = [
+                                                                stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
+                                                                stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
+                                                            ].filter(Boolean).join('&');
+                                                            const url = `/customers/${customerId}/statement/export.csv${params ? '?' + params : ''}`;
+                                                            downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.csv`);
+                                                        }}
+                                                        className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
+                                                    >
+                                                        Export CSV
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            const params = [
+                                                                stmtStart ? `start=${new Date(stmtStart).toISOString()}` : '',
+                                                                stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
+                                                            ].filter(Boolean).join('&');
+                                                            const url = `/customers/${customerId}/statement/export.pdf${params ? '?' + params : ''}`;
+                                                            downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                                                        }}
+                                                        className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
+                                                    >
+                                                        Export PDF
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
 

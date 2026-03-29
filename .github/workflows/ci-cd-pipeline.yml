@@ -420,7 +420,8 @@ jobs:
       - name: Build backend Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ./SamplePOS.Server
+          context: .
+          file: ./SamplePOS.Server/Dockerfile.deploy
           push: false
           tags: samplepos-backend:ci
           cache-from: type=gha
@@ -429,7 +430,8 @@ jobs:
       - name: Build frontend Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ./samplepos.client
+          context: .
+          file: ./samplepos.client/Dockerfile.deploy
           push: false
           tags: samplepos-frontend:ci
           cache-from: type=gha

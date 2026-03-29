@@ -389,7 +389,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
           if (uRes.data.success && uRes.data.data) setUsage(uRes.data.data);
           if (lRes.data.success && lRes.data.data) setLimits(lRes.data.data);
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => { if (!cancelled) setLoading((l) => ({ ...l, usage: false })); });
     }
     if (tab === 'billing') {
@@ -403,14 +403,14 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
           if (billingRes.data.success && billingRes.data.data) setBilling(billingRes.data.data);
           if (eventsRes.data.success && eventsRes.data.data) setBillingEvents(eventsRes.data.data);
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => { if (!cancelled) setLoading((l) => ({ ...l, billing: false })); });
     }
     if (tab === 'audit') {
       setLoading((l) => ({ ...l, audit: true }));
       platformApi.tenants.getAuditLog(tenant.id, 100)
         .then((res) => { if (!cancelled && res.data.success && res.data.data) setAuditLog(res.data.data); })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => { if (!cancelled) setLoading((l) => ({ ...l, audit: false })); });
     }
     return () => { cancelled = true; };
@@ -424,9 +424,9 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
 
   const drawerTabs: { key: DrawerTab; label: string; icon: React.ElementType }[] = [
     { key: 'overview', label: 'Overview', icon: Building2 },
-    { key: 'usage',    label: 'Usage',    icon: Shield },
-    { key: 'billing',  label: 'Billing',  icon: DollarSign },
-    { key: 'audit',    label: 'Audit',    icon: Clock },
+    { key: 'usage', label: 'Usage', icon: Shield },
+    { key: 'billing', label: 'Billing', icon: DollarSign },
+    { key: 'audit', label: 'Audit', icon: Clock },
   ];
 
   return (
@@ -635,12 +635,11 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Status</p>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          billing.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' :
-                          billing.status === 'TRIALING' ? 'bg-blue-100 text-blue-700' :
-                          billing.status === 'PAST_DUE' ? 'bg-amber-100 text-amber-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>{billing.status}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${billing.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' :
+                            billing.status === 'TRIALING' ? 'bg-blue-100 text-blue-700' :
+                              billing.status === 'PAST_DUE' ? 'bg-amber-100 text-amber-700' :
+                                'bg-red-100 text-red-700'
+                          }`}>{billing.status}</span>
                       </div>
                     </div>
                     <div className="bg-slate-50 rounded-lg p-4">
