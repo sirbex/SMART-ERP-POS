@@ -711,10 +711,25 @@ export async function bulkInsertProducts(
         puIdx += 2;
       }
       if (puPlaceholders.length > 0) {
+        // Clear existing default flags for products we're about to upsert,
+        // so the new is_default=true row doesn't violate ux_product_uoms_default.
+        const productIdsToSync = syncRows
+          .map((r) => skuToProductId.get(r.sku.toLowerCase()))
+          .filter((pid): pid is string => !!pid);
+        if (productIdsToSync.length > 0) {
+          await client.query(
+            `UPDATE product_uoms SET is_default = false
+             WHERE product_id = ANY($1::uuid[]) AND is_default = true`,
+            [productIdsToSync]
+          );
+        }
+
         await client.query(
           `INSERT INTO product_uoms (product_id, uom_id, conversion_factor, is_default)
            VALUES ${puPlaceholders.join(', ')}
-           ON CONFLICT (product_id, uom_id) DO NOTHING`,
+           ON CONFLICT (product_id, uom_id) DO UPDATE SET
+             is_default = true,
+             updated_at = NOW()`,
           puValues
         );
       }
