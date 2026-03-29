@@ -7,7 +7,7 @@ npm-global
 server-py
 infrastructure
 docs
-nginx
+nginx/
 scripts
 database
 *.sql
@@ -16,6 +16,8 @@ database
 *.lnk
 *.slnx
 *.txt
+# Allow frontend nginx config needed by Dockerfile.deploy
+!samplepos.client/nginx.conf
 
 # Node modules (each project installs its own)
 **/node_modules
