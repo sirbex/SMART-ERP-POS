@@ -1214,13 +1214,14 @@ export const salesService = {
               }
 
               // Recalculate customer balance from invoices (SINGLE SOURCE OF TRUTH)
+              // Canonical formula: exclude Paid, Cancelled, Voided, Draft
               await client.query(
                 `UPDATE customers 
                  SET balance = (
                    SELECT COALESCE(SUM("OutstandingBalance"), 0)
                    FROM invoices
                    WHERE "CustomerId" = $1
-                   AND "Status" != 'Paid'
+                   AND "Status" NOT IN ('Paid', 'Cancelled', 'Voided', 'Draft')
                  )
                  WHERE id = $1`,
                 [input.customerId]

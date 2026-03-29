@@ -35,6 +35,7 @@ import { createHoldRoutes } from './modules/pos/holdRoutes.js';
 import { createOfflineSyncRoutes } from './modules/pos/offlineSyncRoutes.js';
 import quotationRoutes from './modules/quotations/quotationRoutes.js';
 import deliveryRoutes from './modules/delivery/deliveryRoutes.js';
+import deliveryNoteRoutes from './modules/delivery-notes/deliveryNoteRoutes.js';
 import { importRoutes } from './modules/import/importRoutes.js';
 import { accountingRoutes } from './modules/accounting/accountingRoutes.js';
 import depositsRoutes from './modules/deposits/depositsRoutes.js';
@@ -302,6 +303,7 @@ app.use('/api/cash-registers', cashRegisterRoutes); // Cash register management
 app.use('/api/rbac', createRbacRoutes(pool)); // Role-based access control
 app.use('/api', quotationRoutes);
 app.use('/api/delivery', deliveryRoutes);
+app.use('/api/delivery-notes', deliveryNoteRoutes);
 app.use('/api/import', importRoutes);
 // Accounting routes moved above for better priority
 

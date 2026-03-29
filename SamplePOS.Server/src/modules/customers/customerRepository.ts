@@ -398,11 +398,12 @@ export async function findCustomerTransactions(
  */
 export async function countCustomerTransactions(customerId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<number> {
   const pool = dbPool || globalPool;
-  // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
+  // Count from invoices (AR ledger) + payments — same source as statement
   const result = await pool.query(
     `SELECT COUNT(*) as total FROM (
-      SELECT s.id FROM sales s 
-      WHERE s.customer_id = $1 AND s.payment_method = 'CREDIT'
+      SELECT i."Id" FROM invoices i
+      WHERE i."CustomerId" = $1
+        AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
       UNION ALL
       SELECT ip.id FROM invoice_payments ip
       INNER JOIN invoices i ON i."Id" = ip.invoice_id
@@ -419,12 +420,15 @@ export async function countCustomerTransactions(customerId: string, dbPool?: pg.
  */
 export async function getOpeningBalance(customerId: string, start: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<number> {
   const pool = dbPool || globalPool;
-  // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
+  // Derive opening balance from invoices (AR ledger) — same source as fn_recalculate_customer_ar_balance
+  // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
     `WITH debits AS (
-       SELECT COALESCE(SUM(s.total_amount),0) AS amt
-       FROM sales s
-       WHERE s.customer_id = $1 AND s.payment_method = 'CREDIT' AND s.sale_date < $2
+       SELECT COALESCE(SUM(i."TotalAmount"),0) AS amt
+       FROM invoices i
+       WHERE i."CustomerId" = $1
+         AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
+         AND i."InvoiceDate" < $2
      ),
      credits AS (
        SELECT COALESCE(SUM(ip.amount),0) AS amt
@@ -446,18 +450,21 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
  */
 export async function getStatementEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
   const pool = dbPool || globalPool;
-  // Note: invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
+  // Derive entries from invoices (AR ledger) — same source as fn_recalculate_customer_ar_balance
+  // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
     `(
       SELECT 
-        s.sale_date as date,
+        i."InvoiceDate" as date,
         'INVOICE' as type,
-        s.sale_number as reference,
-        CONCAT('Sale #', s.sale_number) as description,
-        s.total_amount as debit,
+        i."InvoiceNumber" as reference,
+        CONCAT('Invoice ', i."InvoiceNumber") as description,
+        i."TotalAmount" as debit,
         0::numeric as credit
-      FROM sales s
-      WHERE s.customer_id = $1 AND s.payment_method = 'CREDIT' AND s.sale_date >= $2 AND s.sale_date <= $3
+      FROM invoices i
+      WHERE i."CustomerId" = $1
+        AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
+        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
     )
     UNION ALL
     (
@@ -569,6 +576,7 @@ export interface CustomerSummary {
   creditUsed: number;
   creditAvailable: number;
   lastPurchaseDate?: Date;
+  pendingInvoices: number;
 }
 
 export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<CustomerSummary> {
@@ -578,27 +586,45 @@ export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | 
     throw new Error(`Customer with ID ${customerId} not found`);
   }
 
-  const salesResult = await pool.query(
+  // Derive summary from invoices (AR ledger) — covers both POS credit sales and DN→Invoice flow
+  const invoiceResult = await pool.query(
     `SELECT 
       COUNT(*) as "totalInvoices",
-      COALESCE(SUM(total_amount), 0) as "totalSpent",
-      MAX(sale_date) as "lastPurchaseDate"
-    FROM sales 
-    WHERE customer_id = $1`,
+      COALESCE(SUM("TotalAmount"), 0) as "totalSpent",
+      MAX("InvoiceDate") as "lastPurchaseDate"
+    FROM invoices 
+    WHERE "CustomerId" = $1
+      AND "Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')`,
     [customerId]
   );
 
-  const summary = salesResult.rows[0];
-  const creditUsed = customer.balance < 0 ? Math.abs(customer.balance) : 0;
-  const creditAvailable = customer.creditLimit - creditUsed;
+  // Count pending (unpaid/partially paid) invoices
+  const pendingResult = await pool.query(
+    `SELECT COUNT(*) as "pendingCount"
+    FROM invoices
+    WHERE "CustomerId" = $1
+      AND "Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT', 'Paid', 'PAID')`,
+    [customerId]
+  );
+
+  const summary = invoiceResult.rows[0];
+  const pendingInvoices = parseInt(pendingResult.rows[0]?.pendingCount || '0', 10);
+  // customer.balance = SUM(invoiced) - SUM(paid) from AR trigger
+  // Positive → customer owes money, Negative → customer overpaid (credit balance)
+  const balance = typeof customer.balance === 'string' ? parseFloat(customer.balance) : (customer.balance || 0);
+  const creditLimit = typeof customer.creditLimit === 'string' ? parseFloat(String(customer.creditLimit)) : (customer.creditLimit || 0);
+  const outstandingBalance = balance > 0 ? balance : 0;
+  const creditUsed = outstandingBalance;
+  const creditAvailable = Math.max(0, creditLimit - creditUsed);
 
   return {
     totalSales: parseInt(summary.totalInvoices, 10),
     totalSpent: parseFloat(summary.totalSpent),
     totalInvoices: parseInt(summary.totalInvoices, 10),
-    outstandingBalance: customer.balance < 0 ? Math.abs(customer.balance) : 0,
+    outstandingBalance,
     creditUsed,
     creditAvailable,
     lastPurchaseDate: summary.lastPurchaseDate || undefined,
+    pendingInvoices,
   };
 }

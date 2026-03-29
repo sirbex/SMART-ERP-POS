@@ -12,6 +12,8 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { ResponsiveGrid } from '../../components/ui/ResponsiveGrid';
 import { useStockLevels, useAdjustInventory } from '../../hooks/useInventory';
 import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
@@ -721,105 +723,107 @@ export default function InventoryAdjustmentsPage() {
 
       {/* Batches Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Product
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Category
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Batch Number
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Quantity
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Expiry Date
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredBatches.length === 0 ? (
+        <ResponsiveTableWrapper>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
-                <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                  {searchTerm ? 'No batches match your search' : 'No inventory batches found'}
-                </td>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Product
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Category
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Batch Number
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Quantity
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Expiry Date
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
-            ) : (
-              paginatedBatches.map((batch: Batch) => (
-                <tr key={batch.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-medium text-gray-900">{batch.product_name}</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    {productCategoryMap.get(batch.product_id) ? (
-                      <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700">
-                        {productCategoryMap.get(batch.product_id)}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{batch.batch_number}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    <span className="font-semibold">{batch.remaining_quantity.toFixed(2)}</span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {batch.expiry_date ? formatDisplayDate(batch.expiry_date) : 'N/A'}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {batch.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm space-x-2">
-                    <button
-                      onClick={() => handleOpenAdjustModal(batch)}
-                      className="text-blue-600 hover:text-blue-900 font-medium"
-                    >
-                      Adjust
-                    </button>
-                    <button
-                      onClick={() => {
-                        handleOpenAdjustModal(batch);
-                        // Set category after modal opens
-                        setTimeout(() => {
-                          setMovementCategory('DAMAGE');
-                          setAdjustmentType('decrease');
-                        }, 0);
-                      }}
-                      className="text-orange-600 hover:text-orange-900 font-medium"
-                    >
-                      Damage
-                    </button>
-                    <button
-                      onClick={() =>
-                        navigate(`/inventory/stock-movements?product=${batch.product_id}`)
-                      }
-                      className="text-gray-600 hover:text-gray-900 font-medium"
-                    >
-                      History
-                    </button>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredBatches.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    {searchTerm ? 'No batches match your search' : 'No inventory batches found'}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                paginatedBatches.map((batch: Batch) => (
+                  <tr key={batch.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <div className="text-sm font-medium text-gray-900">{batch.product_name}</div>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      {productCategoryMap.get(batch.product_id) ? (
+                        <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700">
+                          {productCategoryMap.get(batch.product_id)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{batch.batch_number}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      <span className="font-semibold">{batch.remaining_quantity.toFixed(2)}</span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {batch.expiry_date ? formatDisplayDate(batch.expiry_date) : 'N/A'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
+                          }`}
+                      >
+                        {batch.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm space-x-2">
+                      <button
+                        onClick={() => handleOpenAdjustModal(batch)}
+                        className="text-blue-600 hover:text-blue-900 font-medium"
+                      >
+                        Adjust
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleOpenAdjustModal(batch);
+                          // Set category after modal opens
+                          setTimeout(() => {
+                            setMovementCategory('DAMAGE');
+                            setAdjustmentType('decrease');
+                          }, 0);
+                        }}
+                        className="text-orange-600 hover:text-orange-900 font-medium"
+                      >
+                        Damage
+                      </button>
+                      <button
+                        onClick={() =>
+                          navigate(`/inventory/stock-movements?product=${batch.product_id}`)
+                        }
+                        className="text-gray-600 hover:text-gray-900 font-medium"
+                      >
+                        History
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
       </div>
 
       {/* Batch Table Pagination */}
@@ -899,7 +903,7 @@ export default function InventoryAdjustmentsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Movement Category
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <ResponsiveGrid cols={3} className="gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -939,7 +943,7 @@ export default function InventoryAdjustmentsPage() {
                   >
                     ⏰ Expiry
                   </button>
-                </div>
+                </ResponsiveGrid>
               </div>
 
               {/* Adjustment Type - only for ADJUSTMENT category */}
@@ -1127,7 +1131,7 @@ export default function InventoryAdjustmentsPage() {
 
             {/* Statistics Bar */}
             <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
-              <div className="grid grid-cols-4 gap-4 text-center">
+              <ResponsiveGrid cols={4} className="gap-4 text-center">
                 <div>
                   <div className="text-sm text-gray-600">Total Items</div>
                   <div className="text-xl font-bold text-gray-900">{physicalCountStats.total}</div>
@@ -1144,7 +1148,7 @@ export default function InventoryAdjustmentsPage() {
                   <div className="text-sm text-gray-600">Discrepancies</div>
                   <div className="text-xl font-bold text-red-600">{physicalCountStats.discrepancies}</div>
                 </div>
-              </div>
+              </ResponsiveGrid>
             </div>
 
             {/* Count Reason */}
@@ -1205,63 +1209,65 @@ export default function InventoryAdjustmentsPage() {
                   No items match your search or filter criteria.
                 </div>
               ) : (
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Expected Qty</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Counted Qty</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Difference</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {paginatedPhysicalCountItems.map((item) => {
-                      const countedValue = countedQuantities[item.id];
-                      const counted = countedValue !== undefined && countedValue !== '' ? parseFloat(countedValue) : null;
-                      const difference = counted !== null ? counted - item.expected_quantity : null;
-                      const hasDifference = difference !== null && Math.abs(difference) > 0.001;
+                <ResponsiveTableWrapper>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Expected Qty</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Counted Qty</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Difference</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {paginatedPhysicalCountItems.map((item) => {
+                        const countedValue = countedQuantities[item.id];
+                        const counted = countedValue !== undefined && countedValue !== '' ? parseFloat(countedValue) : null;
+                        const difference = counted !== null ? counted - item.expected_quantity : null;
+                        const hasDifference = difference !== null && Math.abs(difference) > 0.001;
 
-                      return (
-                        <tr key={item.id} className={hasDifference ? 'bg-yellow-50' : !item.has_stock ? 'bg-gray-50' : ''}>
-                          <td className="px-4 py-3 text-sm">
-                            <div className="font-medium text-gray-900">{item.product_name}</div>
-                            {!item.has_stock && (
-                              <div className="text-xs text-gray-500">No stock on record</div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{item.sku}</td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
-                            {item.expected_quantity.toFixed(2)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right">
-                            <input
-                              type="number"
-                              value={countedValue || ''}
-                              onChange={(e) => handleCountedQtyChange(item.id, e.target.value)}
-                              step="0.01"
-                              min="0"
-                              placeholder="0.00"
-                              className="w-32 px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                              disabled={isProcessingCount}
-                            />
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right">
-                            {difference !== null ? (
-                              <span className={`font-medium ${Math.abs(difference) < 0.001 ? 'text-green-600' :
-                                difference > 0 ? 'text-blue-600' : 'text-red-600'
-                                }`}>
-                                {difference > 0 ? '+' : ''}{difference.toFixed(2)}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                        return (
+                          <tr key={item.id} className={hasDifference ? 'bg-yellow-50' : !item.has_stock ? 'bg-gray-50' : ''}>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="font-medium text-gray-900">{item.product_name}</div>
+                              {!item.has_stock && (
+                                <div className="text-xs text-gray-500">No stock on record</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{item.sku}</td>
+                            <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
+                              {item.expected_quantity.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              <input
+                                type="number"
+                                value={countedValue || ''}
+                                onChange={(e) => handleCountedQtyChange(item.id, e.target.value)}
+                                step="0.01"
+                                min="0"
+                                placeholder="0.00"
+                                className="w-32 px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                disabled={isProcessingCount}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              {difference !== null ? (
+                                <span className={`font-medium ${Math.abs(difference) < 0.001 ? 'text-green-600' :
+                                  difference > 0 ? 'text-blue-600' : 'text-red-600'
+                                  }`}>
+                                  {difference > 0 ? '+' : ''}{difference.toFixed(2)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </ResponsiveTableWrapper>
               )}
             </div>
 

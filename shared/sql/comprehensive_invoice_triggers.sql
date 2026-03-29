@@ -48,18 +48,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 1B. Recalculate customer AR balance from all unpaid invoices
+-- 1B. Recalculate customer AR balance from all ISSUED invoices
+-- CANONICAL FORMULA: Used by all trigger functions and app code
+-- Draft invoices are NOT yet issued to customers → excluded from AR
 CREATE OR REPLACE FUNCTION fn_recalculate_customer_ar_balance(p_customer_id UUID)
 RETURNS VOID AS $$
 DECLARE
     v_total_outstanding NUMERIC;
 BEGIN
-    -- Sum outstanding balances from all invoices for this customer
+    -- Sum outstanding balances from all ISSUED invoices for this customer
     SELECT COALESCE(SUM("OutstandingBalance"), 0)
     INTO v_total_outstanding
     FROM invoices
     WHERE "CustomerId" = p_customer_id
-      AND "Status" NOT IN ('Cancelled', 'Voided');
+      AND "Status" NOT IN ('Paid', 'Cancelled', 'Voided', 'Draft');
     
     -- Update customer balance (customers table uses snake_case)
     UPDATE customers

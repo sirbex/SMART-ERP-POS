@@ -582,9 +582,13 @@ export default function CustomerDetailPage() {
         {customer ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
-              <p className="text-sm text-gray-600">Balance</p>
-              <p className={`text-2xl font-bold ${toNumber(c.balance) < 0 ? 'text-red-600' : toNumber(c.balance) > 0 ? 'text-green-600' : 'text-gray-900'}`}>{formatCurrency(typeof c.balance === 'string' ? c.balance : Number(c.balance))}</p>
-              <p className="text-xs text-gray-500 mt-1">Customer account balance</p>
+              <p className="text-sm text-gray-600">{toNumber(c.balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}</p>
+              <p className={`text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : toNumber(c.balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                {formatCurrency(Math.abs(toNumber(c.balance)))}
+              </p>
+              {toNumber(c.balance) < 0 && <p className="text-xs text-green-600 mt-1">Overpaid — credit on account</p>}
+              {toNumber(c.balance) > 0 && <p className="text-xs text-gray-500 mt-1">Outstanding receivable</p>}
+              {toNumber(c.balance) === 0 && <p className="text-xs text-gray-500 mt-1">Account settled</p>}
             </div>
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
               <p className="text-sm text-gray-600">Credit Limit</p>
@@ -908,11 +912,17 @@ export default function CustomerDetailPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Opening Balance</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).openingBalance || 0))}</div>
+                      <div className={`text-lg font-semibold ${Number((statement as StatementResponse).openingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).openingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                        {formatCurrency(Math.abs(Number((statement as StatementResponse).openingBalance || 0)))}
+                        {Number((statement as StatementResponse).openingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                      </div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Closing Balance</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).closingBalance || 0))}</div>
+                      <div className={`text-lg font-semibold ${Number((statement as StatementResponse).closingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).closingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                        {formatCurrency(Math.abs(Number((statement as StatementResponse).closingBalance || 0)))}
+                        {Number((statement as StatementResponse).closingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                      </div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Period</div>
@@ -979,7 +989,8 @@ export default function CustomerDetailPage() {
                                   balanceAfter < 0 ? 'text-green-600' :
                                     'text-gray-900'
                                   }`}>
-                                  {formatCurrency(balanceAfter)}
+                                  {formatCurrency(Math.abs(balanceAfter))}
+                                  {balanceAfter < 0 && <span className="text-xs ml-1">(CR)</span>}
                                 </span>
                               </td>
                             </tr>

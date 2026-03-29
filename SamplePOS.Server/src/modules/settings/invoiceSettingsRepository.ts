@@ -16,6 +16,7 @@ export interface InvoiceSettings {
   showCompanyLogo: boolean;
   showTaxBreakdown: boolean;
   showPaymentInstructions: boolean;
+  showPricesOnDnPdf: boolean;
   paymentAccounts: Array<{
     id: string;
     type: 'BANK' | 'MOBILE_MONEY' | 'WALLET';
@@ -51,6 +52,7 @@ export async function getInvoiceSettings(pool: Pool): Promise<InvoiceSettings | 
       show_company_logo as "showCompanyLogo",
       show_tax_breakdown as "showTaxBreakdown",
       show_payment_instructions as "showPaymentInstructions",
+      show_prices_on_dn_pdf as "showPricesOnDnPdf",
       payment_accounts as "paymentAccounts",
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
@@ -103,6 +105,7 @@ export async function initializeDefaults(pool: Pool): Promise<InvoiceSettings> {
       show_company_logo as "showCompanyLogo",
       show_tax_breakdown as "showTaxBreakdown",
       show_payment_instructions as "showPaymentInstructions",
+      show_prices_on_dn_pdf as "showPricesOnDnPdf",
       payment_accounts as "paymentAccounts",
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
@@ -171,6 +174,10 @@ export async function updateInvoiceSettings(
     fields.push(`show_payment_instructions = $${paramIndex++}`);
     values.push(data.showPaymentInstructions);
   }
+  if (data.showPricesOnDnPdf !== undefined) {
+    fields.push(`show_prices_on_dn_pdf = $${paramIndex++}`);
+    values.push(data.showPricesOnDnPdf);
+  }
   if (data.paymentAccounts !== undefined) {
     fields.push(`payment_accounts = $${paramIndex++}`);
     values.push(JSON.stringify(data.paymentAccounts));
@@ -207,6 +214,7 @@ export async function updateInvoiceSettings(
       show_company_logo as "showCompanyLogo",
       show_tax_breakdown as "showTaxBreakdown",
       show_payment_instructions as "showPaymentInstructions",
+      show_prices_on_dn_pdf as "showPricesOnDnPdf",
       payment_accounts as "paymentAccounts",
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",

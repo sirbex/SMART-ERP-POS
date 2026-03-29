@@ -334,14 +334,14 @@ export const invoiceService = {
       }
 
       // BR-INV-003: Recalculate customer balance from invoices
-      // New invoice affects outstanding balance — update customer.balance
+      // Draft/Cancelled invoices must NOT affect AR balance
       await client.query(
         `UPDATE customers 
          SET balance = (
            SELECT COALESCE(SUM("OutstandingBalance"), 0)
            FROM invoices
            WHERE "CustomerId" = $1
-           AND "Status" != 'Paid'
+           AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
          )
          WHERE id = $1`,
         [input.customerId]
@@ -670,8 +670,8 @@ export const invoiceService = {
       }
 
       // BR-INV-003: Recalculate customer balance from invoices (SINGLE SOURCE OF TRUTH)
-      // Customer balance = total outstanding across all their unpaid invoices
-      // This is the authoritative calculation - invoices are the source of truth for debt
+      // Customer balance = total outstanding across all their non-draft/cancelled invoices
+      // Draft/Cancelled invoices must NOT affect AR balance
       if (inv.customer_id) {
         const balanceResult = await client.query(
           `UPDATE customers 
@@ -679,7 +679,7 @@ export const invoiceService = {
              SELECT COALESCE(SUM("OutstandingBalance"), 0)
              FROM invoices
              WHERE "CustomerId" = $1
-             AND "Status" != 'Paid'
+             AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
            )
            WHERE id = $1
            RETURNING balance`,

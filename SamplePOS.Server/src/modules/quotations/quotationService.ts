@@ -61,6 +61,7 @@ export interface Quotation {
   createdAt: Date;
   updatedAt: Date;
   version?: number;
+  fulfillmentMode: 'RETAIL' | 'WHOLESALE';
 }
 
 export interface QuotationItem {
@@ -136,6 +137,7 @@ function normalizeQuotation(row: QuotationDbRow & { converted_to_sale_number?: s
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version,
+    fulfillmentMode: row.fulfillment_mode || 'RETAIL',
   };
 }
 
@@ -193,6 +195,7 @@ export const quotationService = {
       deliveryTerms?: string | null;
       internalNotes?: string | null;
       requiresApproval?: boolean;
+      fulfillmentMode?: 'RETAIL' | 'WHOLESALE';
       items: Array<{
         productId?: string | null;
         itemType: 'product' | 'service' | 'custom';
@@ -511,6 +514,15 @@ export const quotationService = {
       }
 
       const { quotation, items } = quoteData;
+
+      // BR-QUOTE-010: WHOLESALE quotations cannot be converted to a sale.
+      // They follow the Delivery Note → Invoice path instead.
+      if (quotation.fulfillment_mode === 'WHOLESALE') {
+        throw new Error(
+          `Quotation ${quotation.quote_number} is WHOLESALE. ` +
+          `Use Delivery Notes → Invoice instead of converting to a sale.`
+        );
+      }
 
       // BR-QUOTE-001: Check conversion eligibility
       const canConvert = await quotationRepository.canConvertQuotation(pool, quotationId);

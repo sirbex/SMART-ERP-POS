@@ -53,6 +53,7 @@ import JournalEntriesPage from './pages/JournalEntriesPage';
 import PeriodManagementPage from './pages/PeriodManagementPage';
 import BankingPage from './pages/accounting/BankingPage';
 import DeliveryPage from './pages/delivery/DeliveryPage';
+import DeliveryNotesPage from './pages/delivery-notes/DeliveryNotesPage';
 import ImportPage from './pages/ImportPage';
 import BarcodeLookupPage from './pages/inventory/BarcodeLookupPage';
 
@@ -503,6 +504,16 @@ function App() {
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
                       <DeliveryPage />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* Wholesale Delivery Notes - ADMIN, MANAGER */}
+                <Route
+                  path="/delivery-notes"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <DeliveryNotesPage />
                     </ProtectedRoute>
                   }
                 />

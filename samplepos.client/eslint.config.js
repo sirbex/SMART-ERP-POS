@@ -23,6 +23,15 @@ export default defineConfig([
       'react/forbid-dom-props': 'off', // Allow inline styles for print layouts
       'jsx-a11y/select-has-accessible-name': 'off', // Temp components have accessible names
       'jsx-a11y/control-has-associated-label': 'off', // Temp components are properly labeled
+
+      // Responsive guards — enforce wrapper primitives
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "JSXOpeningElement[name.name='table']:not(:has(JSXOpeningElement[name.name='ResponsiveTableWrapper']))",
+          message: 'Wrap <table> in <ResponsiveTableWrapper> for mobile scroll support.',
+        },
+      ],
     },
   },
 ])

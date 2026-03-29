@@ -203,10 +203,10 @@ export const reportsService = {
         ),
         overallMargin: totalPotentialRevenue.greaterThan(0)
           ? totalPotentialProfit
-              .dividedBy(totalPotentialRevenue)
-              .times(100)
-              .toDecimalPlaces(2)
-              .toNumber()
+            .dividedBy(totalPotentialRevenue)
+            .times(100)
+            .toDecimalPlaces(2)
+            .toNumber()
           : 0,
         valuationMethod: options.valuationMethod || 'FIFO',
       },
@@ -1280,10 +1280,10 @@ export const reportsService = {
       averageMarginPercent:
         data.length > 0
           ? data
-              .reduce((sum, p) => sum.plus(p.profitMarginPercent), new Decimal(0))
-              .dividedBy(data.length)
-              .toDecimalPlaces(2)
-              .toNumber()
+            .reduce((sum, p) => sum.plus(p.profitMarginPercent), new Decimal(0))
+            .dividedBy(data.length)
+            .toDecimalPlaces(2)
+            .toNumber()
           : 0,
     };
 
@@ -1565,11 +1565,11 @@ export const reportsService = {
       averageOrderValue:
         data.length > 0
           ? new Decimal(
-              data.reduce((sum, c) => new Decimal(sum).plus(c.totalRevenue), new Decimal(0))
-            )
-              .div(data.reduce((sum, c) => sum + c.totalPurchases, 0))
-              .toDecimalPlaces(2)
-              .toNumber()
+            data.reduce((sum, c) => new Decimal(sum).plus(c.totalRevenue), new Decimal(0))
+          )
+            .div(data.reduce((sum, c) => sum + c.totalPurchases, 0))
+            .toDecimalPlaces(2)
+            .toNumber()
           : 0,
     };
 
@@ -1852,9 +1852,9 @@ export const reportsService = {
       avgLeadTimeDays:
         data.length > 0
           ? new Decimal(data.reduce((sum, p) => sum + p.leadTimeDays, 0))
-              .dividedBy(data.length)
-              .toDecimalPlaces(1)
-              .toNumber()
+            .dividedBy(data.length)
+            .toDecimalPlaces(1)
+            .toNumber()
           : 0,
     };
 
@@ -2141,10 +2141,10 @@ export const reportsService = {
       averagePurchaseValue:
         data.length > 0
           ? data
-              .reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0))
-              .dividedBy(data.length)
-              .toDecimalPlaces(2)
-              .toNumber()
+            .reduce((sum: Decimal, item) => sum.plus(item.totalAmount), new Decimal(0))
+            .dividedBy(data.length)
+            .toDecimalPlaces(2)
+            .toNumber()
           : 0,
     };
 
@@ -2199,23 +2199,23 @@ export const reportsService = {
         currentRatio:
           data.cashPosition.totalCashIn > 0
             ? new Decimal(data.cashPosition.totalCashIn)
-                .div(Math.max(data.cashPosition.newCreditExtended, 1))
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(Math.max(data.cashPosition.newCreditExtended, 1))
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         quickRatio:
           data.cashPosition.totalCashIn > 0
             ? new Decimal(data.cashPosition.totalCashIn)
-                .div(Math.max(data.cashPosition.outstandingReceivables, 1))
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(Math.max(data.cashPosition.outstandingReceivables, 1))
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         cashTurnoverRatio:
           data.salesPerformance.totalRevenue > 0
             ? new Decimal(data.cashPosition.totalCashIn)
-                .div(data.salesPerformance.totalRevenue)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.salesPerformance.totalRevenue)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
       },
 
@@ -2225,18 +2225,18 @@ export const reportsService = {
         netProfitRatio:
           data.salesPerformance.totalRevenue > 0
             ? new Decimal(data.salesPerformance.grossProfit)
-                .div(data.salesPerformance.totalRevenue)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.salesPerformance.totalRevenue)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         returnOnSales:
           data.salesPerformance.totalRevenue > 0
             ? new Decimal(data.salesPerformance.grossProfit)
-                .div(data.salesPerformance.totalRevenue)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.salesPerformance.totalRevenue)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
       },
 
@@ -2245,24 +2245,24 @@ export const reportsService = {
         assetTurnover:
           data.inventoryHealth.inventoryValue > 0
             ? new Decimal(data.salesPerformance.totalRevenue)
-                .div(data.inventoryHealth.inventoryValue)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.inventoryHealth.inventoryValue)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         inventoryTurnover:
           data.inventoryHealth.inventoryValue > 0
             ? new Decimal(data.salesPerformance.totalCost)
-                .div(data.inventoryHealth.inventoryValue)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.inventoryHealth.inventoryValue)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         receivablesToSalesRatio:
           data.salesPerformance.totalRevenue > 0
             ? new Decimal(data.customerMetrics.totalReceivables)
-                .div(data.salesPerformance.totalRevenue)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.salesPerformance.totalRevenue)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
       },
 
@@ -2271,25 +2271,25 @@ export const reportsService = {
         customerRetentionIndicator:
           data.customerMetrics.totalCustomers > 0
             ? new Decimal(data.salesPerformance.uniqueCustomers)
-                .div(data.customerMetrics.totalCustomers)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.customerMetrics.totalCustomers)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         averageCustomerValue:
           data.salesPerformance.uniqueCustomers > 0
             ? new Decimal(data.salesPerformance.totalRevenue)
-                .div(data.salesPerformance.uniqueCustomers)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.salesPerformance.uniqueCustomers)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         creditUtilizationRate:
           data.customerMetrics.totalCustomers > 0
             ? new Decimal(data.customerMetrics.customersWithBalance)
-                .div(data.customerMetrics.totalCustomers)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.customerMetrics.totalCustomers)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
       },
 
@@ -2298,26 +2298,26 @@ export const reportsService = {
         concentrationRisk:
           data.salesPerformance.customerRevenue > 0
             ? new Decimal(data.salesPerformance.customerRevenue)
-                .div(data.salesPerformance.totalRevenue)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.salesPerformance.totalRevenue)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         badDebtRisk:
           data.customerMetrics.totalReceivables > 0
             ? new Decimal(data.customerMetrics.totalReceivables)
-                .div(Math.max(data.salesPerformance.totalRevenue * 30, 1)) // 30 days of sales
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(Math.max(data.salesPerformance.totalRevenue * 30, 1)) // 30 days of sales
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
         inventoryObsolescenceRisk:
           data.inventoryHealth.totalProducts > 0
             ? new Decimal(data.inventoryHealth.lowStockItems + data.inventoryHealth.expiringUnits)
-                .div(data.inventoryHealth.totalProducts)
-                .mul(100)
-                .toDecimalPlaces(2)
-                .toNumber()
+              .div(data.inventoryHealth.totalProducts)
+              .mul(100)
+              .toDecimalPlaces(2)
+              .toNumber()
             : 0,
       },
 
@@ -2433,6 +2433,224 @@ export const reportsService = {
         ).length,
       },
       recordCount: 1,
+      executionTimeMs: executionTime,
+    };
+  },
+
+  // ── Delivery Notes Report ──
+  async generateDeliveryNoteReport(pool: Pool, options: {
+    startDate: Date; endDate: Date;
+    customerId?: string; status?: string;
+    format?: 'json' | 'pdf' | 'csv'; userId?: string;
+  }) {
+    const startTime = Date.now();
+
+    const data = await reportsRepository.getDeliveryNoteReport(pool, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+      customerId: options.customerId,
+      status: options.status,
+    });
+
+    const totalValue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalAmount), new Decimal(0)
+    );
+    const postedCount = data.filter(d => d.status === 'POSTED').length;
+    const draftCount = data.filter(d => d.status === 'DRAFT').length;
+
+    const executionTime = Date.now() - startTime;
+
+    await reportsRepository.logReportRun(pool, {
+      reportType: 'DELIVERY_NOTES', reportName: 'Delivery Notes Report',
+      parameters: options, generatedById: options.userId || null,
+      startDate: options.startDate, endDate: options.endDate,
+      recordCount: data.length, fileFormat: options.format || 'json',
+      executionTimeMs: executionTime,
+    });
+
+    return {
+      reportType: 'DELIVERY_NOTES' as const,
+      reportName: 'Delivery Notes Report',
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }),
+      parameters: options,
+      data,
+      summary: {
+        totalDeliveryNotes: data.length,
+        totalValue: totalValue.toDecimalPlaces(2).toNumber(),
+        postedCount,
+        draftCount,
+      },
+      recordCount: data.length,
+      executionTimeMs: executionTime,
+    };
+  },
+
+  // ── Quotation Report ──
+  async generateQuotationReport(pool: Pool, options: {
+    startDate: Date; endDate: Date;
+    customerId?: string; status?: string; quoteType?: string;
+    format?: 'json' | 'pdf' | 'csv'; userId?: string;
+  }) {
+    const startTime = Date.now();
+
+    const data = await reportsRepository.getQuotationReport(pool, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+      customerId: options.customerId,
+      status: options.status,
+      quoteType: options.quoteType,
+    });
+
+    const totalValue = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalAmount), new Decimal(0)
+    );
+    const convertedCount = data.filter(d => d.status === 'CONVERTED').length;
+    const conversionRate = data.length > 0
+      ? new Decimal(convertedCount).div(data.length).times(100).toDecimalPlaces(1).toNumber()
+      : 0;
+
+    const executionTime = Date.now() - startTime;
+
+    await reportsRepository.logReportRun(pool, {
+      reportType: 'QUOTATIONS', reportName: 'Quotation Report',
+      parameters: options, generatedById: options.userId || null,
+      startDate: options.startDate, endDate: options.endDate,
+      recordCount: data.length, fileFormat: options.format || 'json',
+      executionTimeMs: executionTime,
+    });
+
+    return {
+      reportType: 'QUOTATIONS' as const,
+      reportName: 'Quotation Report',
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }),
+      parameters: options,
+      data,
+      summary: {
+        totalQuotations: data.length,
+        totalValue: totalValue.toDecimalPlaces(2).toNumber(),
+        convertedCount,
+        conversionRate,
+        statusBreakdown: Object.fromEntries(
+          ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CONVERTED', 'CANCELLED']
+            .map(s => [s, data.filter(d => d.status === s).length])
+            .filter(([, v]) => (v as number) > 0)
+        ),
+      },
+      recordCount: data.length,
+      executionTimeMs: executionTime,
+    };
+  },
+
+  // ── Manual Journal Entry Report ──
+  async generateManualJournalEntryReport(pool: Pool, options: {
+    startDate: Date; endDate: Date;
+    status?: string;
+    format?: 'json' | 'pdf' | 'csv'; userId?: string;
+  }) {
+    const startTime = Date.now();
+
+    const data = await reportsRepository.getManualJournalEntryReport(pool, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+      status: options.status,
+    });
+
+    const totalDebit = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalDebit), new Decimal(0)
+    );
+    const totalCredit = data.reduce(
+      (sum, item) => new Decimal(sum).plus(item.totalCredit), new Decimal(0)
+    );
+
+    const executionTime = Date.now() - startTime;
+
+    await reportsRepository.logReportRun(pool, {
+      reportType: 'MANUAL_JOURNAL_ENTRIES', reportName: 'Manual Journal Entries Report',
+      parameters: options, generatedById: options.userId || null,
+      startDate: options.startDate, endDate: options.endDate,
+      recordCount: data.length, fileFormat: options.format || 'json',
+      executionTimeMs: executionTime,
+    });
+
+    return {
+      reportType: 'MANUAL_JOURNAL_ENTRIES' as const,
+      reportName: 'Manual Journal Entries Report',
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }),
+      parameters: options,
+      data,
+      summary: {
+        totalEntries: data.length,
+        totalDebit: totalDebit.toDecimalPlaces(2).toNumber(),
+        totalCredit: totalCredit.toDecimalPlaces(2).toNumber(),
+        postedCount: data.filter(d => d.status === 'POSTED').length,
+        reversedCount: data.filter(d => d.status === 'REVERSED').length,
+      },
+      recordCount: data.length,
+      executionTimeMs: executionTime,
+    };
+  },
+
+  // ── Bank Transaction Report ──
+  async generateBankTransactionReport(pool: Pool, options: {
+    startDate: Date; endDate: Date;
+    bankAccountId?: string; type?: string; isReconciled?: boolean;
+    format?: 'json' | 'pdf' | 'csv'; userId?: string;
+  }) {
+    const startTime = Date.now();
+
+    const data = await reportsRepository.getBankTransactionReport(pool, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+      bankAccountId: options.bankAccountId,
+      type: options.type,
+      isReconciled: options.isReconciled,
+    });
+
+    const totalDeposits = data
+      .filter(d => ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(d.type))
+      .reduce((sum, d) => new Decimal(sum).plus(d.amount), new Decimal(0));
+    const totalWithdrawals = data
+      .filter(d => ['WITHDRAWAL', 'TRANSFER_OUT', 'FEE'].includes(d.type))
+      .reduce((sum, d) => new Decimal(sum).plus(d.amount), new Decimal(0));
+    const reconciledCount = data.filter(d => d.isReconciled).length;
+
+    const executionTime = Date.now() - startTime;
+
+    await reportsRepository.logReportRun(pool, {
+      reportType: 'BANK_TRANSACTIONS', reportName: 'Bank Transactions Report',
+      parameters: options, generatedById: options.userId || null,
+      startDate: options.startDate, endDate: options.endDate,
+      recordCount: data.length, fileFormat: options.format || 'json',
+      executionTimeMs: executionTime,
+    });
+
+    return {
+      reportType: 'BANK_TRANSACTIONS' as const,
+      reportName: 'Bank Transactions Report',
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }),
+      parameters: options,
+      data,
+      summary: {
+        totalTransactions: data.length,
+        totalDeposits: totalDeposits.toDecimalPlaces(2).toNumber(),
+        totalWithdrawals: totalWithdrawals.toDecimalPlaces(2).toNumber(),
+        netFlow: totalDeposits.minus(totalWithdrawals).toDecimalPlaces(2).toNumber(),
+        reconciledCount,
+        unreconciledCount: data.length - reconciledCount,
+      },
+      recordCount: data.length,
       executionTimeMs: executionTime,
     };
   },

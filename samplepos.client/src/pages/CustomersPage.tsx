@@ -180,8 +180,11 @@ export default function CustomersPage() {
               <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Total Balance</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-2">{formatCurrency(totalBalance)}</p>
+                    <p className="text-sm font-medium text-gray-600">Total AR Balance</p>
+                    <p className={`text-3xl font-bold mt-2 ${totalBalance > 0 ? 'text-red-600' : totalBalance < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                      {formatCurrency(Math.abs(totalBalance))}
+                      {totalBalance < 0 && <span className="text-sm ml-1">(CR)</span>}
+                    </p>
                   </div>
                   <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                     <span className="text-2xl">💰</span>
@@ -271,10 +274,11 @@ export default function CustomersPage() {
                           </td>
                           <td className="px-4 py-3">
                             <span
-                              className={`font-medium ${toNumber(customer.balance) > 0 ? 'text-red-600' : 'text-green-600'
+                              className={`font-medium ${toNumber(customer.balance) > 0 ? 'text-red-600' : toNumber(customer.balance) < 0 ? 'text-green-600' : 'text-gray-600'
                                 }`}
                             >
-                              {formatCurrency(typeof customer.balance === 'string' ? customer.balance : Number(customer.balance))}
+                              {formatCurrency(Math.abs(toNumber(customer.balance)))}
+                              {toNumber(customer.balance) < 0 && <span className="text-xs ml-1">(CR)</span>}
                             </span>
                           </td>
                           <td className="px-4 py-3">
@@ -401,11 +405,12 @@ export default function CustomersPage() {
                                 className={`font-semibold ${toNumber(customer.balance) > 0
                                   ? 'text-red-600'
                                   : toNumber(customer.balance) < 0
-                                    ? 'text-yellow-600'
+                                    ? 'text-green-600'
                                     : 'text-gray-600'
                                   }`}
                               >
-                                {formatCurrency(typeof customer.balance === 'string' ? customer.balance : Number(customer.balance))}
+                                {formatCurrency(Math.abs(toNumber(customer.balance)))}
+                                {toNumber(customer.balance) < 0 && <span className="text-xs ml-1">(CR)</span>}
                               </div>
                             </td>
                             <td className="px-6 py-4">
@@ -562,12 +567,18 @@ export default function CustomersPage() {
                   {/* Invoice/Liability Summary Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
-                      <div className="text-xs text-gray-600">Opening Balance (Owed)</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).openingBalance || 0))}</div>
+                      <div className="text-xs text-gray-600">Opening Balance</div>
+                      <div className={`text-lg font-semibold ${Number((statement as StatementResponse).openingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).openingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                        {formatCurrency(Math.abs(Number((statement as StatementResponse).openingBalance || 0)))}
+                        {Number((statement as StatementResponse).openingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                      </div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
-                      <div className="text-xs text-gray-600">Closing Balance (Owed)</div>
-                      <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).closingBalance || 0))}</div>
+                      <div className="text-xs text-gray-600">Closing Balance</div>
+                      <div className={`text-lg font-semibold ${Number((statement as StatementResponse).closingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).closingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                        {formatCurrency(Math.abs(Number((statement as StatementResponse).closingBalance || 0)))}
+                        {Number((statement as StatementResponse).closingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                      </div>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-3">
                       <div className="text-xs text-gray-600">Period</div>
@@ -636,7 +647,10 @@ export default function CustomersPage() {
                             <td className="px-6 py-4 text-sm text-gray-600">{e.description || '-'}</td>
                             <td className="px-6 py-4 text-sm text-right text-red-600">{e.debit ? formatCurrency(Number(e.debit)) : '-'}</td>
                             <td className="px-6 py-4 text-sm text-right text-green-600">{e.credit ? formatCurrency(Number(e.credit)) : '-'}</td>
-                            <td className="px-6 py-4 text-sm text-right font-semibold">{formatCurrency(Number(e.balanceAfter || 0))}</td>
+                            <td className={`px-6 py-4 text-sm text-right font-semibold ${Number(e.balanceAfter || 0) > 0 ? 'text-red-600' : Number(e.balanceAfter || 0) < 0 ? 'text-green-600' : ''}`}>
+                              {formatCurrency(Math.abs(Number(e.balanceAfter || 0)))}
+                              {Number(e.balanceAfter || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

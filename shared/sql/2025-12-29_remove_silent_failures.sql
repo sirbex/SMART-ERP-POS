@@ -42,33 +42,26 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 1B. fn_recalculate_customer_ar_balance - MUST FAIL ON ERROR
+-- CANONICAL FORMULA: SUM(OutstandingBalance) excluding Paid/Cancelled/Voided/Draft
 CREATE OR REPLACE FUNCTION fn_recalculate_customer_ar_balance(p_customer_id UUID)
 RETURNS VOID AS $$
 DECLARE
-    v_total_invoiced NUMERIC;
-    v_total_paid NUMERIC;
-    v_new_ar_balance NUMERIC;
+    v_total_outstanding NUMERIC;
 BEGIN
-    SELECT COALESCE(SUM("TotalAmount"), 0)
-    INTO v_total_invoiced
+    -- Sum outstanding balances from all ISSUED invoices
+    -- Draft invoices are NOT yet issued → excluded from AR
+    SELECT COALESCE(SUM("OutstandingBalance"), 0)
+    INTO v_total_outstanding
     FROM invoices
     WHERE "CustomerId" = p_customer_id
-      AND "Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT');
-    
-    SELECT COALESCE(SUM(amount), 0)
-    INTO v_total_paid
-    FROM invoice_payments ip
-    JOIN invoices i ON ip.invoice_id = i."Id"
-    WHERE i."CustomerId" = p_customer_id;
-    
-    v_new_ar_balance := v_total_invoiced - v_total_paid;
+      AND "Status" NOT IN ('Paid', 'Cancelled', 'Voided', 'Draft');
     
     UPDATE customers
-    SET balance = v_new_ar_balance,
+    SET balance = v_total_outstanding,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = p_customer_id;
     
-    RAISE NOTICE 'Customer % AR balance recalculated to %', p_customer_id, v_new_ar_balance;
+    RAISE NOTICE 'Customer % AR balance recalculated to %', p_customer_id, v_total_outstanding;
     -- REMOVED: EXCEPTION WHEN OTHERS THEN block - errors must propagate
 END;
 $$ LANGUAGE plpgsql;

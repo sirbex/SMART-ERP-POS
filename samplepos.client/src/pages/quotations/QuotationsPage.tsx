@@ -330,6 +330,11 @@ export default function QuotationsPage() {
                         >
                           {quote.quoteType === 'quick' ? 'Quick (POS)' : 'Standard'}
                         </span>
+                        {quote.fulfillmentMode === 'WHOLESALE' && (
+                          <span className="ml-1 px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
+                            Wholesale
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-semibold text-gray-900">

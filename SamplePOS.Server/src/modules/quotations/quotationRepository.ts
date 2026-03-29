@@ -53,6 +53,7 @@ export interface QuotationDbRow {
   created_at: Date;
   updated_at: Date;
   version: number;
+  fulfillment_mode: 'RETAIL' | 'WHOLESALE';
 }
 
 export interface QuotationItemDbRow {
@@ -122,6 +123,7 @@ export const quotationRepository = {
       deliveryTerms?: string | null;
       internalNotes?: string | null;
       requiresApproval?: boolean;
+      fulfillmentMode?: 'RETAIL' | 'WHOLESALE';
     }
   ): Promise<QuotationDbRow> {
     const quoteNumber = await this.generateQuoteNumber(client);
@@ -132,10 +134,10 @@ export const quotationRepository = {
         customer_email, reference, description, subtotal, discount_amount,
         tax_amount, total_amount, valid_from, valid_until, created_by_id,
         assigned_to_id, terms_and_conditions, payment_terms, delivery_terms,
-        internal_notes, requires_approval
+        internal_notes, requires_approval, fulfillment_mode
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
       ) RETURNING *`,
       [
         quoteNumber,
@@ -159,6 +161,7 @@ export const quotationRepository = {
         data.deliveryTerms || null,
         data.internalNotes || null,
         data.requiresApproval || false,
+        data.fulfillmentMode || 'RETAIL',
       ]
     );
 

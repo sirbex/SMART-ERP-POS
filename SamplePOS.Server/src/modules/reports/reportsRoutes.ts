@@ -208,6 +208,26 @@ export function createReportsRouter(pool: Pool) {
     )
   );
 
+  // Delivery Notes, Quotations, Journal Entries, Bank Transactions Reports
+  router.get(
+    '/delivery-notes',
+    asyncHandler(async (req, res) => reportsController.getDeliveryNoteReport(req, res, p(req)))
+  );
+  router.get(
+    '/quotations',
+    asyncHandler(async (req, res) => reportsController.getQuotationReport(req, res, p(req)))
+  );
+  router.get(
+    '/manual-journal-entries',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getManualJournalEntryReport(req, res, p(req)))
+  );
+  router.get(
+    '/bank-transactions',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getBankTransactionReport(req, res, p(req)))
+  );
+
   // ── Demand Forecasting (Self-Learning Engine) ────────
   // Manual trigger: run daily demand stats refresh now (admin/manager only)
   router.post(

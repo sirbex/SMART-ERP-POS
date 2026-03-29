@@ -89,6 +89,10 @@ import {
   SalesComparisonParamsSchema,
   CustomerPurchaseHistoryParamsSchema,
   BusinessPositionParamsSchema,
+  DeliveryNoteReportParamsSchema,
+  QuotationReportParamsSchema,
+  ManualJournalEntryReportParamsSchema,
+  BankTransactionReportParamsSchema,
 } from '../../../../shared/zod/reports.js';
 import { z } from 'zod';
 
@@ -2554,6 +2558,34 @@ export const reportsController = {
         category: 'INVENTORY',
         parameters: ['category_id', 'days_to_analyze'],
       },
+      {
+        id: 'delivery-notes',
+        name: 'Delivery Notes',
+        description: 'Delivery note listing with fulfillment status',
+        category: 'SALES',
+        parameters: ['start_date', 'end_date', 'customer_id', 'status'],
+      },
+      {
+        id: 'quotations',
+        name: 'Quotations',
+        description: 'Quotation summary with conversion tracking',
+        category: 'SALES',
+        parameters: ['start_date', 'end_date', 'customer_id', 'status', 'quote_type'],
+      },
+      {
+        id: 'manual-journal-entries',
+        name: 'Manual Journal Entries',
+        description: 'Manual journal entry audit log',
+        category: 'FINANCIAL',
+        parameters: ['start_date', 'end_date', 'status'],
+      },
+      {
+        id: 'bank-transactions',
+        name: 'Bank Transactions',
+        description: 'Bank transaction listing with reconciliation status',
+        category: 'FINANCIAL',
+        parameters: ['start_date', 'end_date', 'bank_account_id', 'type', 'is_reconciled'],
+      },
     ];
 
     res.json({ success: true, data: reportTypes });
@@ -3125,46 +3157,46 @@ export const reportsController = {
     const summary =
       result.length > 0
         ? {
-            totalRevenue: result
-              .reduce(
-                (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_revenue || 0),
-                new Decimal(0)
-              )
-              .toDecimalPlaces(2)
-              .toNumber(),
-            totalProfit: result
-              .reduce(
-                (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_profit || 0),
-                new Decimal(0)
-              )
-              .toDecimalPlaces(2)
-              .toNumber(),
-            totalTransactions: result.reduce(
-              (sum: number, item: Record<string, unknown>) =>
-                sum + parseInt(String(item.transaction_count ?? '0'), 10),
-              0
-            ),
-            averageRevenue:
-              result.length > 0
-                ? result
-                    .reduce(
-                      (sum: Decimal, item: Record<string, unknown>) =>
-                        sum.plus(Number(item.total_revenue) || 0),
-                      new Decimal(0)
-                    )
-                    .dividedBy(result.length)
-                    .toDecimalPlaces(2)
-                    .toNumber()
-                : 0,
-            periodCount: result.length,
-          }
+          totalRevenue: result
+            .reduce(
+              (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_revenue || 0),
+              new Decimal(0)
+            )
+            .toDecimalPlaces(2)
+            .toNumber(),
+          totalProfit: result
+            .reduce(
+              (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_profit || 0),
+              new Decimal(0)
+            )
+            .toDecimalPlaces(2)
+            .toNumber(),
+          totalTransactions: result.reduce(
+            (sum: number, item: Record<string, unknown>) =>
+              sum + parseInt(String(item.transaction_count ?? '0'), 10),
+            0
+          ),
+          averageRevenue:
+            result.length > 0
+              ? result
+                .reduce(
+                  (sum: Decimal, item: Record<string, unknown>) =>
+                    sum.plus(Number(item.total_revenue) || 0),
+                  new Decimal(0)
+                )
+                .dividedBy(result.length)
+                .toDecimalPlaces(2)
+                .toNumber()
+              : 0,
+          periodCount: result.length,
+        }
         : {
-            totalRevenue: 0,
-            totalProfit: 0,
-            totalTransactions: 0,
-            averageRevenue: 0,
-            periodCount: 0,
-          };
+          totalRevenue: 0,
+          totalProfit: 0,
+          totalTransactions: 0,
+          averageRevenue: 0,
+          periodCount: 0,
+        };
 
     // PDF export
     if (format === 'pdf') {
@@ -3300,41 +3332,41 @@ export const reportsController = {
     const summary =
       result.length > 0
         ? {
-            totalQuantity: result
-              .reduce(
-                (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_quantity || 0),
-                new Decimal(0)
-              )
-              .toDecimalPlaces(3)
-              .toNumber(),
-            totalRevenue: result
-              .reduce(
-                (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_revenue || 0),
-                new Decimal(0)
-              )
-              .toDecimalPlaces(2)
-              .toNumber(),
-            avgProfitMargin:
-              result.length > 0
-                ? result
-                    .reduce(
-                      (sum: Decimal, item: Record<string, unknown>) =>
-                        sum.plus(item.profit_margin_percent || 0),
-                      new Decimal(0)
-                    )
-                    .dividedBy(result.length)
-                    .toDecimalPlaces(2)
-                    .toNumber() + '%'
-                : '0%',
-            uniqueProducts: new Set(
-              result.map((item: Record<string, unknown>) => item.product_name)
-            ).size,
-            transactionCount: result.reduce(
-              (sum: number, item: Record<string, unknown>) =>
-                sum + parseInt(String(item.transaction_count ?? '0'), 10),
-              0
-            ),
-          }
+          totalQuantity: result
+            .reduce(
+              (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_quantity || 0),
+              new Decimal(0)
+            )
+            .toDecimalPlaces(3)
+            .toNumber(),
+          totalRevenue: result
+            .reduce(
+              (sum: Decimal, item: Record<string, unknown>) => sum.plus(item.total_revenue || 0),
+              new Decimal(0)
+            )
+            .toDecimalPlaces(2)
+            .toNumber(),
+          avgProfitMargin:
+            result.length > 0
+              ? result
+                .reduce(
+                  (sum: Decimal, item: Record<string, unknown>) =>
+                    sum.plus(item.profit_margin_percent || 0),
+                  new Decimal(0)
+                )
+                .dividedBy(result.length)
+                .toDecimalPlaces(2)
+                .toNumber() + '%'
+              : '0%',
+          uniqueProducts: new Set(
+            result.map((item: Record<string, unknown>) => item.product_name)
+          ).size,
+          transactionCount: result.reduce(
+            (sum: number, item: Record<string, unknown>) =>
+              sum + parseInt(String(item.transaction_count ?? '0'), 10),
+            0
+          ),
+        }
         : {};
 
     // Handle PDF format
@@ -3466,48 +3498,48 @@ export const reportsController = {
     const summary =
       result.length > 0
         ? {
-            totalTransactions: result.reduce(
-              (sum: number, item: Record<string, unknown>) =>
-                sum + parseInt(String(item.total_transactions ?? '0'), 10),
-              0
-            ),
-            totalRevenue: result
-              .reduce(
-                (sum: Decimal, item: Record<string, unknown>) =>
-                  sum.plus(Number(item.total_revenue) || 0),
-                new Decimal(0)
-              )
-              .toDecimalPlaces(2)
-              .toNumber(),
-            totalProfit: result
-              .reduce(
-                (sum: Decimal, item: Record<string, unknown>) =>
-                  sum.plus(Number(item.total_profit) || 0),
-                new Decimal(0)
-              )
-              .toDecimalPlaces(2)
-              .toNumber(),
-            averageTransactionValue:
-              result.length > 0
-                ? result
-                    .reduce(
-                      (sum: Decimal, item: Record<string, unknown>) =>
-                        sum.plus(Number(item.avg_transaction_value) || 0),
-                      new Decimal(0)
-                    )
-                    .dividedBy(result.length)
-                    .toDecimalPlaces(2)
-                    .toNumber()
-                : 0,
-            totalCashiers: result.length,
-          }
+          totalTransactions: result.reduce(
+            (sum: number, item: Record<string, unknown>) =>
+              sum + parseInt(String(item.total_transactions ?? '0'), 10),
+            0
+          ),
+          totalRevenue: result
+            .reduce(
+              (sum: Decimal, item: Record<string, unknown>) =>
+                sum.plus(Number(item.total_revenue) || 0),
+              new Decimal(0)
+            )
+            .toDecimalPlaces(2)
+            .toNumber(),
+          totalProfit: result
+            .reduce(
+              (sum: Decimal, item: Record<string, unknown>) =>
+                sum.plus(Number(item.total_profit) || 0),
+              new Decimal(0)
+            )
+            .toDecimalPlaces(2)
+            .toNumber(),
+          averageTransactionValue:
+            result.length > 0
+              ? result
+                .reduce(
+                  (sum: Decimal, item: Record<string, unknown>) =>
+                    sum.plus(Number(item.avg_transaction_value) || 0),
+                  new Decimal(0)
+                )
+                .dividedBy(result.length)
+                .toDecimalPlaces(2)
+                .toNumber()
+              : 0,
+          totalCashiers: result.length,
+        }
         : {
-            totalTransactions: 0,
-            totalRevenue: 0,
-            totalProfit: 0,
-            averageTransactionValue: 0,
-            totalCashiers: 0,
-          };
+          totalTransactions: 0,
+          totalRevenue: 0,
+          totalProfit: 0,
+          averageTransactionValue: 0,
+          totalCashiers: 0,
+        };
 
     // PDF export
     if (format === 'pdf') {
@@ -3957,6 +3989,47 @@ export const reportsController = {
         };
         return await reportsController.getCashRegisterSessionHistory(modifiedReq, res, pool);
 
+      case 'DELIVERY_NOTES':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          customer_id: params.customerId,
+          status: params.status,
+          format: params.format,
+        };
+        return await reportsController.getDeliveryNoteReport(modifiedReq, res, pool);
+
+      case 'QUOTATIONS':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          customer_id: params.customerId,
+          status: params.status,
+          quote_type: params.quoteType,
+          format: params.format,
+        };
+        return await reportsController.getQuotationReport(modifiedReq, res, pool);
+
+      case 'MANUAL_JOURNAL_ENTRIES':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          status: params.status,
+          format: params.format,
+        };
+        return await reportsController.getManualJournalEntryReport(modifiedReq, res, pool);
+
+      case 'BANK_TRANSACTIONS':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          bank_account_id: params.bankAccountId,
+          type: params.type,
+          is_reconciled: params.isReconciled,
+          format: params.format,
+        };
+        return await reportsController.getBankTransactionReport(modifiedReq, res, pool);
+
       default:
         return res.status(400).json({
           success: false,
@@ -4227,6 +4300,239 @@ export const reportsController = {
       totalSessions: report.summary.totalSessions,
     });
 
+    res.json({ success: true, data: report });
+  },
+
+  // ── Delivery Notes Report ──
+  async getDeliveryNoteReport(req: Request, res: Response, pool: Pool) {
+    const params = DeliveryNoteReportParamsSchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateDeliveryNoteReport(pool, {
+      startDate: new Date(params.start_date),
+      endDate: adjustEndDate(params.end_date),
+      customerId: params.customer_id,
+      status: params.status,
+      format: params.format,
+      userId,
+    });
+
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = new Date().toLocaleDateString('en-CA');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="delivery-notes-${date}.pdf"`);
+      doc.pipe(res);
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Delivery Notes Report',
+        subtitle: `${params.start_date} to ${params.end_date}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total DNs', value: String(report.summary.totalDeliveryNotes), color: PDFColors.primary },
+        { label: 'Total Value', value: formatCurrencyPDF(report.summary.totalValue), color: PDFColors.success },
+        { label: 'Posted', value: String(report.summary.postedCount), color: PDFColors.info },
+        { label: 'Draft', value: String(report.summary.draftCount), color: PDFColors.warning },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'DN Number', key: 'deliveryNoteNumber', width: 0.15 },
+        { header: 'Customer', key: 'customerName', width: 0.2 },
+        { header: 'Date', key: 'deliveryDate', width: 0.1 },
+        { header: 'Status', key: 'status', width: 0.1 },
+        { header: 'Lines', key: 'lineCount', width: 0.07, align: 'right' },
+        { header: 'Total', key: 'totalAmount', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Quote', key: 'quotationNumber', width: 0.12 },
+        { header: 'Driver', key: 'driverName', width: 0.13 },
+      ];
+
+      pdfGen.addTable(columns, report.data);
+      pdfGen.end();
+      return;
+    }
+
+    logger.info('Delivery notes report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  // ── Quotation Report ──
+  async getQuotationReport(req: Request, res: Response, pool: Pool) {
+    const params = QuotationReportParamsSchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateQuotationReport(pool, {
+      startDate: new Date(params.start_date),
+      endDate: adjustEndDate(params.end_date),
+      customerId: params.customer_id,
+      status: params.status,
+      quoteType: params.quote_type,
+      format: params.format,
+      userId,
+    });
+
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = new Date().toLocaleDateString('en-CA');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="quotations-${date}.pdf"`);
+      doc.pipe(res);
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Quotation Report',
+        subtitle: `${params.start_date} to ${params.end_date}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total Quotes', value: String(report.summary.totalQuotations), color: PDFColors.primary },
+        { label: 'Total Value', value: formatCurrencyPDF(report.summary.totalValue), color: PDFColors.success },
+        { label: 'Converted', value: String(report.summary.convertedCount), color: PDFColors.info },
+        { label: 'Conversion Rate', value: `${report.summary.conversionRate}%`, color: PDFColors.secondary },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Quote #', key: 'quoteNumber', width: 0.14 },
+        { header: 'Customer', key: 'customerName', width: 0.2 },
+        { header: 'Type', key: 'quoteType', width: 0.08 },
+        { header: 'Status', key: 'status', width: 0.1 },
+        { header: 'Subtotal', key: 'subtotal', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Tax', key: 'taxAmount', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Total', key: 'totalAmount', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Valid Until', key: 'validUntil', width: 0.13 },
+      ];
+
+      pdfGen.addTable(columns, report.data);
+      pdfGen.end();
+      return;
+    }
+
+    logger.info('Quotation report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  // ── Manual Journal Entry Report ──
+  async getManualJournalEntryReport(req: Request, res: Response, pool: Pool) {
+    const params = ManualJournalEntryReportParamsSchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateManualJournalEntryReport(pool, {
+      startDate: new Date(params.start_date),
+      endDate: adjustEndDate(params.end_date),
+      status: params.status,
+      format: params.format,
+      userId,
+    });
+
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = new Date().toLocaleDateString('en-CA');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="journal-entries-${date}.pdf"`);
+      doc.pipe(res);
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Manual Journal Entries Report',
+        subtitle: `${params.start_date} to ${params.end_date}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total Entries', value: String(report.summary.totalEntries), color: PDFColors.primary },
+        { label: 'Total Debit', value: formatCurrencyPDF(report.summary.totalDebit), color: PDFColors.success },
+        { label: 'Total Credit', value: formatCurrencyPDF(report.summary.totalCredit), color: PDFColors.info },
+        { label: 'Reversed', value: String(report.summary.reversedCount), color: PDFColors.warning },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Entry #', key: 'entryNumber', width: 0.12 },
+        { header: 'Date', key: 'entryDate', width: 0.1 },
+        { header: 'Narration', key: 'narration', width: 0.28 },
+        { header: 'Reference', key: 'reference', width: 0.1 },
+        { header: 'Debit', key: 'totalDebit', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Credit', key: 'totalCredit', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Status', key: 'status', width: 0.08 },
+        { header: 'Lines', key: 'lineCount', width: 0.08, align: 'right' },
+      ];
+
+      pdfGen.addTable(columns, report.data);
+      pdfGen.end();
+      return;
+    }
+
+    logger.info('Manual journal entries report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  // ── Bank Transaction Report ──
+  async getBankTransactionReport(req: Request, res: Response, pool: Pool) {
+    const params = BankTransactionReportParamsSchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateBankTransactionReport(pool, {
+      startDate: new Date(params.start_date),
+      endDate: adjustEndDate(params.end_date),
+      bankAccountId: params.bank_account_id,
+      type: params.type,
+      isReconciled: params.is_reconciled === 'true' ? true : params.is_reconciled === 'false' ? false : undefined,
+      format: params.format,
+      userId,
+    });
+
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = new Date().toLocaleDateString('en-CA');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="bank-transactions-${date}.pdf"`);
+      doc.pipe(res);
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Bank Transactions Report',
+        subtitle: `${params.start_date} to ${params.end_date}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Transactions', value: String(report.summary.totalTransactions), color: PDFColors.primary },
+        { label: 'Total Deposits', value: formatCurrencyPDF(report.summary.totalDeposits), color: PDFColors.success },
+        { label: 'Total Withdrawals', value: formatCurrencyPDF(report.summary.totalWithdrawals), color: PDFColors.danger },
+        { label: 'Net Flow', value: formatCurrencyPDF(report.summary.netFlow), color: PDFColors.info },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Txn #', key: 'transactionNumber', width: 0.12 },
+        { header: 'Account', key: 'bankAccountName', width: 0.15 },
+        { header: 'Date', key: 'transactionDate', width: 0.1 },
+        { header: 'Type', key: 'type', width: 0.1 },
+        { header: 'Description', key: 'description', width: 0.2 },
+        { header: 'Amount', key: 'amount', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Balance', key: 'runningBalance', width: 0.12, align: 'right', format: (v) => v != null ? formatCurrencyPDF(v as number) : '—' },
+        { header: 'Recon', key: 'isReconciled', width: 0.08, format: (v) => v ? 'Yes' : 'No' },
+      ];
+
+      pdfGen.addTable(columns, report.data);
+      pdfGen.end();
+      return;
+    }
+
+    logger.info('Bank transactions report generated', { userId, recordCount: report.recordCount });
     res.json({ success: true, data: report });
   },
 };

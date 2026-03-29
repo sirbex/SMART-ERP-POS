@@ -38,6 +38,10 @@ import type {
   CashRegisterSessionSummaryData,
   CashRegisterMovementBreakdownData,
   CashRegisterSessionHistoryData,
+  DeliveryNoteReportRow,
+  QuotationReportRow,
+  ManualJournalEntryReportRow,
+  BankTransactionReportRow,
 } from './reportTypes.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
@@ -3395,5 +3399,273 @@ export const reportsRepository = {
         sessions: [],
       };
     }
+  },
+
+  // ── Delivery Notes Report ──
+  async getDeliveryNoteReport(
+    pool: Pool,
+    options: {
+      startDate: Date;
+      endDate: Date;
+      customerId?: string;
+      status?: string;
+    }
+  ): Promise<DeliveryNoteReportRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
+    let filters = '';
+
+    if (options.customerId) {
+      params.push(options.customerId);
+      filters += ` AND dn.customer_id = $${params.length}`;
+    }
+    if (options.status) {
+      params.push(options.status);
+      filters += ` AND dn.status = $${params.length}`;
+    }
+
+    const query = `
+      SELECT
+        dn.id as delivery_note_id,
+        dn.delivery_note_number,
+        q.quote_number as quotation_number,
+        dn.customer_name,
+        dn.delivery_date,
+        dn.status,
+        dn.total_amount,
+        COUNT(dnl.id) as line_count,
+        dn.driver_name,
+        dn.vehicle_number,
+        dn.created_at,
+        dn.posted_at
+      FROM delivery_notes dn
+      LEFT JOIN quotations q ON q.id = dn.quotation_id
+      LEFT JOIN delivery_note_lines dnl ON dnl.delivery_note_id = dn.id
+      WHERE dn.delivery_date BETWEEN DATE($1) AND DATE($2)
+        ${filters}
+      GROUP BY dn.id, dn.delivery_note_number, q.quote_number, dn.customer_name,
+               dn.delivery_date, dn.status, dn.total_amount, dn.driver_name,
+               dn.vehicle_number, dn.created_at, dn.posted_at
+      ORDER BY dn.delivery_date DESC, dn.created_at DESC
+    `;
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map((row) => ({
+      deliveryNoteId: row.delivery_note_id,
+      deliveryNoteNumber: row.delivery_note_number,
+      quotationNumber: row.quotation_number || 'N/A',
+      customerName: row.customer_name,
+      deliveryDate: formatDateOnly(row.delivery_date),
+      status: row.status,
+      totalAmount: new Decimal(row.total_amount || 0).toDecimalPlaces(2).toNumber(),
+      lineCount: parseInt(row.line_count, 10),
+      driverName: row.driver_name,
+      vehicleNumber: row.vehicle_number,
+      createdAt: formatDate(row.created_at),
+      postedAt: formatDate(row.posted_at),
+    }));
+  },
+
+  // ── Quotation Report ──
+  async getQuotationReport(
+    pool: Pool,
+    options: {
+      startDate: Date;
+      endDate: Date;
+      customerId?: string;
+      status?: string;
+      quoteType?: string;
+    }
+  ): Promise<QuotationReportRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
+    let filters = '';
+
+    if (options.customerId) {
+      params.push(options.customerId);
+      filters += ` AND q.customer_id = $${params.length}`;
+    }
+    if (options.status) {
+      params.push(options.status);
+      filters += ` AND q.status::text = $${params.length}`;
+    }
+    if (options.quoteType) {
+      params.push(options.quoteType);
+      filters += ` AND q.quote_type::text = $${params.length}`;
+    }
+
+    const query = `
+      SELECT
+        q.id as quotation_id,
+        q.quote_number,
+        q.customer_name,
+        q.quote_type::text as quote_type,
+        q.status::text as status,
+        q.subtotal,
+        q.discount_amount,
+        q.tax_amount,
+        q.total_amount,
+        q.valid_from,
+        q.valid_until,
+        COUNT(qi.id) as line_count,
+        s.sale_number as converted_to_sale,
+        i.\"InvoiceNumber\" as converted_to_invoice,
+        q.created_at
+      FROM quotations q
+      LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
+      LEFT JOIN sales s ON s.id = q.converted_to_sale_id
+      LEFT JOIN invoices i ON i.\"Id\" = q.converted_to_invoice_id
+      WHERE q.created_at::date BETWEEN DATE($1) AND DATE($2)
+        ${filters}
+      GROUP BY q.id, q.quote_number, q.customer_name, q.quote_type, q.status,
+               q.subtotal, q.discount_amount, q.tax_amount, q.total_amount,
+               q.valid_from, q.valid_until, s.sale_number, i.\"InvoiceNumber\",
+               q.created_at
+      ORDER BY q.created_at DESC
+    `;
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map((row) => ({
+      quotationId: row.quotation_id,
+      quoteNumber: row.quote_number,
+      customerName: row.customer_name,
+      quoteType: row.quote_type,
+      status: row.status,
+      subtotal: new Decimal(row.subtotal || 0).toDecimalPlaces(2).toNumber(),
+      discountAmount: new Decimal(row.discount_amount || 0).toDecimalPlaces(2).toNumber(),
+      taxAmount: new Decimal(row.tax_amount || 0).toDecimalPlaces(2).toNumber(),
+      totalAmount: new Decimal(row.total_amount || 0).toDecimalPlaces(2).toNumber(),
+      validFrom: formatDateOnly(row.valid_from),
+      validUntil: formatDateOnly(row.valid_until),
+      lineCount: parseInt(row.line_count, 10),
+      convertedToSale: row.converted_to_sale,
+      convertedToInvoice: row.converted_to_invoice,
+      createdAt: formatDate(row.created_at),
+    }));
+  },
+
+  // ── Manual Journal Entry Report ──
+  async getManualJournalEntryReport(
+    pool: Pool,
+    options: {
+      startDate: Date;
+      endDate: Date;
+      status?: string;
+    }
+  ): Promise<ManualJournalEntryReportRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
+    let filters = '';
+
+    if (options.status) {
+      params.push(options.status);
+      filters += ` AND mje.status = $${params.length}`;
+    }
+
+    const query = `
+      SELECT
+        mje.id as entry_id,
+        mje.entry_number,
+        mje.entry_date,
+        mje.narration,
+        mje.reference,
+        mje.total_debit,
+        mje.total_credit,
+        mje.status,
+        COUNT(mjel.id) as line_count,
+        mje.created_by,
+        mje.created_at
+      FROM manual_journal_entries mje
+      LEFT JOIN manual_journal_entry_lines mjel ON mjel.journal_entry_id = mje.id
+      WHERE mje.entry_date BETWEEN DATE($1) AND DATE($2)
+        ${filters}
+      GROUP BY mje.id, mje.entry_number, mje.entry_date, mje.narration,
+               mje.reference, mje.total_debit, mje.total_credit, mje.status,
+               mje.created_by, mje.created_at
+      ORDER BY mje.entry_date DESC, mje.created_at DESC
+    `;
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map((row) => ({
+      entryId: row.entry_id,
+      entryNumber: row.entry_number,
+      entryDate: formatDateOnly(row.entry_date),
+      narration: row.narration,
+      reference: row.reference,
+      totalDebit: new Decimal(row.total_debit || 0).toDecimalPlaces(2).toNumber(),
+      totalCredit: new Decimal(row.total_credit || 0).toDecimalPlaces(2).toNumber(),
+      status: row.status,
+      lineCount: parseInt(row.line_count, 10),
+      createdBy: row.created_by,
+      createdAt: formatDate(row.created_at),
+    }));
+  },
+
+  // ── Bank Transaction Report ──
+  async getBankTransactionReport(
+    pool: Pool,
+    options: {
+      startDate: Date;
+      endDate: Date;
+      bankAccountId?: string;
+      type?: string;
+      isReconciled?: boolean;
+    }
+  ): Promise<BankTransactionReportRow[]> {
+    const params: unknown[] = [options.startDate, options.endDate];
+    let filters = '';
+
+    if (options.bankAccountId) {
+      params.push(options.bankAccountId);
+      filters += ` AND bt.bank_account_id = $${params.length}`;
+    }
+    if (options.type) {
+      params.push(options.type);
+      filters += ` AND bt.type = $${params.length}`;
+    }
+    if (options.isReconciled !== undefined) {
+      params.push(options.isReconciled);
+      filters += ` AND bt.is_reconciled = $${params.length}`;
+    }
+
+    const query = `
+      SELECT
+        bt.id as transaction_id,
+        bt.transaction_number,
+        ba.name as bank_account_name,
+        bt.transaction_date,
+        bt.type,
+        bt.description,
+        bt.reference,
+        bt.amount,
+        bt.running_balance,
+        bt.source_type,
+        bt.is_reconciled,
+        bt.created_at
+      FROM bank_transactions bt
+      INNER JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+      WHERE bt.transaction_date BETWEEN DATE($1) AND DATE($2)
+        AND bt.is_reversed = FALSE
+        ${filters}
+    `;
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map((row) => ({
+      transactionId: row.transaction_id,
+      transactionNumber: row.transaction_number,
+      bankAccountName: row.bank_account_name,
+      transactionDate: formatDateOnly(row.transaction_date),
+      type: row.type,
+      description: row.description,
+      reference: row.reference,
+      amount: new Decimal(row.amount || 0).toDecimalPlaces(2).toNumber(),
+      runningBalance: row.running_balance
+        ? new Decimal(row.running_balance).toDecimalPlaces(2).toNumber()
+        : null,
+      sourceType: row.source_type,
+      isReconciled: row.is_reconciled,
+      createdAt: formatDate(row.created_at),
+    }));
   },
 };

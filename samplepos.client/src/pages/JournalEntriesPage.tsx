@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, CheckCircle, X } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
+import { ResponsiveTableWrapper } from '../components/ui/ResponsiveTableWrapper';
 
 // Auth helper for fetch calls
 const authHeaders = (): HeadersInit => {
@@ -406,63 +407,65 @@ export default function JournalEntriesPage() {
                         <p>No journal entries found</p>
                     </div>
                 ) : (
-                    <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="text-left px-6 py-3 text-sm font-medium text-gray-500">Date</th>
-                                <th className="text-left px-6 py-3 text-sm font-medium text-gray-500">Entry #</th>
-                                <th className="text-left px-6 py-3 text-sm font-medium text-gray-500">Description</th>
-                                <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">Debits</th>
-                                <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">Credits</th>
-                                <th className="text-center px-6 py-3 text-sm font-medium text-gray-500">Status</th>
-                                <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {entries.map((entry: JournalEntryListItem) => (
-                                <tr key={entry.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4">{entry.entryDate}</td>
-                                    <td className="px-6 py-4 font-mono text-sm">{entry.entryNumber || entry.reference || '-'}</td>
-                                    <td className="px-6 py-4">{entry.narration}</td>
-                                    <td className="px-6 py-4 text-right">{formatCurrency(entry.totalDebit)}</td>
-                                    <td className="px-6 py-4 text-right">{formatCurrency(entry.totalCredit)}</td>
-                                    <td className="px-6 py-4 text-center">
-                                        {entry.reference?.startsWith('REV-') ? (
-                                            <span className="px-2 py-1 rounded text-xs font-medium bg-orange-100 text-orange-800">
-                                                REVERSAL
-                                            </span>
-                                        ) : (
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${entry.status === 'POSTED' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                {entry.status}
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <div className="flex items-center justify-end space-x-2">
-                                            <button
-                                                onClick={() => setSelectedEntry(entry.id)}
-                                                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                                            >
-                                                View
-                                            </button>
-                                            {entry.status === 'POSTED' && !entry.reference?.startsWith('REV-') && (
-                                                <button
-                                                    onClick={() => {
-                                                        setShowReverseModal(entry.id);
-                                                        setError(null);
-                                                    }}
-                                                    className="text-red-600 hover:text-red-700 text-sm font-medium flex items-center space-x-1"
-                                                >
-                                                    <RotateCcw className="h-3 w-3" />
-                                                    <span>Reverse</span>
-                                                </button>
-                                            )}
-                                        </div>
-                                    </td>
+                    <ResponsiveTableWrapper>
+                        <table className="w-full">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="text-left px-6 py-3 text-sm font-medium text-gray-500">Date</th>
+                                    <th className="text-left px-6 py-3 text-sm font-medium text-gray-500">Entry #</th>
+                                    <th className="text-left px-6 py-3 text-sm font-medium text-gray-500">Description</th>
+                                    <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">Debits</th>
+                                    <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">Credits</th>
+                                    <th className="text-center px-6 py-3 text-sm font-medium text-gray-500">Status</th>
+                                    <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">Actions</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y">
+                                {entries.map((entry: JournalEntryListItem) => (
+                                    <tr key={entry.id} className="hover:bg-gray-50">
+                                        <td className="px-6 py-4">{entry.entryDate}</td>
+                                        <td className="px-6 py-4 font-mono text-sm">{entry.entryNumber || entry.reference || '-'}</td>
+                                        <td className="px-6 py-4">{entry.narration}</td>
+                                        <td className="px-6 py-4 text-right">{formatCurrency(entry.totalDebit)}</td>
+                                        <td className="px-6 py-4 text-right">{formatCurrency(entry.totalCredit)}</td>
+                                        <td className="px-6 py-4 text-center">
+                                            {entry.reference?.startsWith('REV-') ? (
+                                                <span className="px-2 py-1 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                                    REVERSAL
+                                                </span>
+                                            ) : (
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${entry.status === 'POSTED' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {entry.status}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <div className="flex items-center justify-end space-x-2">
+                                                <button
+                                                    onClick={() => setSelectedEntry(entry.id)}
+                                                    className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                                                >
+                                                    View
+                                                </button>
+                                                {entry.status === 'POSTED' && !entry.reference?.startsWith('REV-') && (
+                                                    <button
+                                                        onClick={() => {
+                                                            setShowReverseModal(entry.id);
+                                                            setError(null);
+                                                        }}
+                                                        className="text-red-600 hover:text-red-700 text-sm font-medium flex items-center space-x-1"
+                                                    >
+                                                        <RotateCcw className="h-3 w-3" />
+                                                        <span>Reverse</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </ResponsiveTableWrapper>
                 )}
             </div>
 
@@ -545,111 +548,113 @@ export default function JournalEntriesPage() {
                                         <span>Add Line</span>
                                     </button>
                                 </div>
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="text-left px-3 py-2">Account</th>
-                                            <th className="text-left px-3 py-2">Description</th>
-                                            <th className="text-right px-3 py-2 w-32">Debit</th>
-                                            <th className="text-right px-3 py-2 w-32">Credit</th>
-                                            <th className="w-10"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {form.lines.map((line, idx) => (
-                                            <tr key={idx} className="border-b">
-                                                <td className="px-3 py-2">
-                                                    <select
-                                                        value={line.accountId}
-                                                        onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
-                                                        className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
-                                                        title={`Select account for line ${idx + 1}`}
-                                                        aria-label={`Account for line ${idx + 1}`}
-                                                    >
-                                                        <option value="">Select account...</option>
-                                                        {(accounts as Account[]).map((acc) => (
-                                                            <option key={acc.id} value={acc.id}>
-                                                                {acc.accountNumber} - {acc.accountName}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <input
-                                                        type="text"
-                                                        value={line.description}
-                                                        onChange={(e) => updateLine(idx, 'description', e.target.value)}
-                                                        placeholder="Line description"
-                                                        className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <input
-                                                        type="number"
-                                                        value={line.debitAmount || ''}
-                                                        onChange={(e) => {
-                                                            updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0);
-                                                            if (parseFloat(e.target.value) > 0) updateLine(idx, 'creditAmount', 0);
-                                                        }}
-                                                        placeholder="0.00"
-                                                        min="0"
-                                                        step="0.01"
-                                                        className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <input
-                                                        type="number"
-                                                        value={line.creditAmount || ''}
-                                                        onChange={(e) => {
-                                                            updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0);
-                                                            if (parseFloat(e.target.value) > 0) updateLine(idx, 'debitAmount', 0);
-                                                        }}
-                                                        placeholder="0.00"
-                                                        min="0"
-                                                        step="0.01"
-                                                        className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    {form.lines.length > 2 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => removeLine(idx)}
-                                                            className="text-red-400 hover:text-red-600"
-                                                            title="Remove line"
-                                                            aria-label={`Remove line ${idx + 1}`}
+                                <ResponsiveTableWrapper>
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="text-left px-3 py-2">Account</th>
+                                                <th className="text-left px-3 py-2">Description</th>
+                                                <th className="text-right px-3 py-2 w-32">Debit</th>
+                                                <th className="text-right px-3 py-2 w-32">Credit</th>
+                                                <th className="w-10"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {form.lines.map((line, idx) => (
+                                                <tr key={idx} className="border-b">
+                                                    <td className="px-3 py-2">
+                                                        <select
+                                                            value={line.accountId}
+                                                            onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
+                                                            className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
+                                                            title={`Select account for line ${idx + 1}`}
+                                                            aria-label={`Account for line ${idx + 1}`}
                                                         >
-                                                            <X className="h-4 w-4" />
-                                                        </button>
+                                                            <option value="">Select account...</option>
+                                                            {(accounts as Account[]).map((acc) => (
+                                                                <option key={acc.id} value={acc.id}>
+                                                                    {acc.accountNumber} - {acc.accountName}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        <input
+                                                            type="text"
+                                                            value={line.description}
+                                                            onChange={(e) => updateLine(idx, 'description', e.target.value)}
+                                                            placeholder="Line description"
+                                                            className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
+                                                        />
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        <input
+                                                            type="number"
+                                                            value={line.debitAmount || ''}
+                                                            onChange={(e) => {
+                                                                updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0);
+                                                                if (parseFloat(e.target.value) > 0) updateLine(idx, 'creditAmount', 0);
+                                                            }}
+                                                            placeholder="0.00"
+                                                            min="0"
+                                                            step="0.01"
+                                                            className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
+                                                        />
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        <input
+                                                            type="number"
+                                                            value={line.creditAmount || ''}
+                                                            onChange={(e) => {
+                                                                updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0);
+                                                                if (parseFloat(e.target.value) > 0) updateLine(idx, 'debitAmount', 0);
+                                                            }}
+                                                            placeholder="0.00"
+                                                            min="0"
+                                                            step="0.01"
+                                                            className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
+                                                        />
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {form.lines.length > 2 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeLine(idx)}
+                                                                className="text-red-400 hover:text-red-600"
+                                                                title="Remove line"
+                                                                aria-label={`Remove line ${idx + 1}`}
+                                                            >
+                                                                <X className="h-4 w-4" />
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-gray-50 font-semibold">
+                                            <tr>
+                                                <td colSpan={2} className="px-3 py-2 text-right">Totals:</td>
+                                                <td className="px-3 py-2 text-right">{formatCurrency(totalDebits)}</td>
+                                                <td className="px-3 py-2 text-right">{formatCurrency(totalCredits)}</td>
+                                                <td></td>
+                                            </tr>
+                                            <tr>
+                                                <td colSpan={2} className="px-3 py-2 text-right">Difference:</td>
+                                                <td colSpan={2} className={`px-3 py-2 text-center ${isBalanced ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {isBalanced ? (
+                                                        <span className="flex items-center justify-center space-x-1">
+                                                            <CheckCircle className="h-4 w-4" />
+                                                            <span>Balanced</span>
+                                                        </span>
+                                                    ) : (
+                                                        formatCurrency(Math.abs(totalDebits - totalCredits))
                                                     )}
                                                 </td>
+                                                <td></td>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                    <tfoot className="bg-gray-50 font-semibold">
-                                        <tr>
-                                            <td colSpan={2} className="px-3 py-2 text-right">Totals:</td>
-                                            <td className="px-3 py-2 text-right">{formatCurrency(totalDebits)}</td>
-                                            <td className="px-3 py-2 text-right">{formatCurrency(totalCredits)}</td>
-                                            <td></td>
-                                        </tr>
-                                        <tr>
-                                            <td colSpan={2} className="px-3 py-2 text-right">Difference:</td>
-                                            <td colSpan={2} className={`px-3 py-2 text-center ${isBalanced ? 'text-green-600' : 'text-red-600'}`}>
-                                                {isBalanced ? (
-                                                    <span className="flex items-center justify-center space-x-1">
-                                                        <CheckCircle className="h-4 w-4" />
-                                                        <span>Balanced</span>
-                                                    </span>
-                                                ) : (
-                                                    formatCurrency(Math.abs(totalDebits - totalCredits))
-                                                )}
-                                            </td>
-                                            <td></td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
+                                        </tfoot>
+                                    </table>
+                                </ResponsiveTableWrapper>
                             </div>
 
                             {/* Actions */}
@@ -788,33 +793,35 @@ export default function JournalEntriesPage() {
                                     <p className="font-medium">{detail.narration}</p>
                                 </div>
 
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="text-left px-4 py-2">Account</th>
-                                            <th className="text-left px-4 py-2">Description</th>
-                                            <th className="text-right px-4 py-2">Debit</th>
-                                            <th className="text-right px-4 py-2">Credit</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {detail.lines?.map((line: JournalEntryDetailLine, idx: number) => (
-                                            <tr key={idx}>
-                                                <td className="px-4 py-2">{line.accountCode} - {line.accountName}</td>
-                                                <td className="px-4 py-2">{line.description || '-'}</td>
-                                                <td className="px-4 py-2 text-right">{line.debitAmount ? formatCurrency(line.debitAmount) : '-'}</td>
-                                                <td className="px-4 py-2 text-right">{line.creditAmount ? formatCurrency(line.creditAmount) : '-'}</td>
+                                <ResponsiveTableWrapper>
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="text-left px-4 py-2">Account</th>
+                                                <th className="text-left px-4 py-2">Description</th>
+                                                <th className="text-right px-4 py-2">Debit</th>
+                                                <th className="text-right px-4 py-2">Credit</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                    <tfoot className="bg-gray-50 font-semibold">
-                                        <tr>
-                                            <td colSpan={2} className="px-4 py-2 text-right">Totals:</td>
-                                            <td className="px-4 py-2 text-right">{formatCurrency(detail.totalDebit)}</td>
-                                            <td className="px-4 py-2 text-right">{formatCurrency(detail.totalCredit)}</td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {detail.lines?.map((line: JournalEntryDetailLine, idx: number) => (
+                                                <tr key={idx}>
+                                                    <td className="px-4 py-2">{line.accountCode} - {line.accountName}</td>
+                                                    <td className="px-4 py-2">{line.description || '-'}</td>
+                                                    <td className="px-4 py-2 text-right">{line.debitAmount ? formatCurrency(line.debitAmount) : '-'}</td>
+                                                    <td className="px-4 py-2 text-right">{line.creditAmount ? formatCurrency(line.creditAmount) : '-'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-gray-50 font-semibold">
+                                            <tr>
+                                                <td colSpan={2} className="px-4 py-2 text-right">Totals:</td>
+                                                <td className="px-4 py-2 text-right">{formatCurrency(detail.totalDebit)}</td>
+                                                <td className="px-4 py-2 text-right">{formatCurrency(detail.totalCredit)}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </ResponsiveTableWrapper>
                             </div>
                         ) : null}
                     </div>

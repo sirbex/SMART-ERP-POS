@@ -42,6 +42,11 @@ export const ReportTypeEnum = z.enum([
   'CASH_REGISTER_SESSION_SUMMARY',
   'CASH_REGISTER_MOVEMENT_BREAKDOWN',
   'CASH_REGISTER_SESSION_HISTORY',
+  // Delivery, quotation, accounting, banking reports
+  'DELIVERY_NOTES',
+  'QUOTATIONS',
+  'MANUAL_JOURNAL_ENTRIES',
+  'BANK_TRANSACTIONS',
 ]);
 export type ReportType = z.infer<typeof ReportTypeEnum>;
 
@@ -1153,3 +1158,40 @@ export type CashRegisterSessionHistoryResponse = z.infer<typeof CashRegisterSess
 
 export type BusinessPositionParams = z.infer<typeof BusinessPositionParamsSchema>;
 export type BusinessPosition = z.infer<typeof BusinessPositionSchema>;
+
+// ── Delivery Notes Report ──
+export const DeliveryNoteReportParamsSchema = z.object({
+  start_date: z.string().min(1, 'Start date is required'),
+  end_date: z.string().min(1, 'End date is required'),
+  customer_id: z.string().uuid().optional(),
+  status: z.enum(['DRAFT', 'POSTED']).optional(),
+  format: z.enum(['json', 'pdf', 'csv']).optional(),
+});
+
+// ── Quotation Report ──
+export const QuotationReportParamsSchema = z.object({
+  start_date: z.string().min(1, 'Start date is required'),
+  end_date: z.string().min(1, 'End date is required'),
+  customer_id: z.string().uuid().optional(),
+  status: z.enum(['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CONVERTED', 'CANCELLED']).optional(),
+  quote_type: z.enum(['quick', 'standard']).optional(),
+  format: z.enum(['json', 'pdf', 'csv']).optional(),
+});
+
+// ── Manual Journal Entry Report ──
+export const ManualJournalEntryReportParamsSchema = z.object({
+  start_date: z.string().min(1, 'Start date is required'),
+  end_date: z.string().min(1, 'End date is required'),
+  status: z.enum(['POSTED', 'REVERSED']).optional(),
+  format: z.enum(['json', 'pdf', 'csv']).optional(),
+});
+
+// ── Bank Transaction Report ──
+export const BankTransactionReportParamsSchema = z.object({
+  start_date: z.string().min(1, 'Start date is required'),
+  end_date: z.string().min(1, 'End date is required'),
+  bank_account_id: z.string().uuid().optional(),
+  type: z.enum(['DEPOSIT', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT', 'FEE', 'INTEREST']).optional(),
+  is_reconciled: z.enum(['true', 'false']).optional(),
+  format: z.enum(['json', 'pdf', 'csv']).optional(),
+});

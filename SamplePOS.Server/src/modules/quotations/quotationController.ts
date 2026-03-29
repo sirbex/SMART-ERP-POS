@@ -45,6 +45,7 @@ export const quotationController = {
         return d.toLocaleDateString('en-CA');
       })(),
       createdById: userId,
+      fulfillmentMode: validatedData.fulfillmentMode || 'RETAIL',
       items: validatedData.items,
     });
 

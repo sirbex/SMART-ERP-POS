@@ -596,3 +596,69 @@ export interface CustomerPurchaseHistoryRow {
     status: string;
     customerName?: string;
 }
+
+// ── Delivery Notes Report ──
+export interface DeliveryNoteReportRow {
+    deliveryNoteId: string;
+    deliveryNoteNumber: string;
+    quotationNumber: string;
+    customerName: string;
+    deliveryDate: string | null;
+    status: string;
+    totalAmount: number;
+    lineCount: number;
+    driverName: string | null;
+    vehicleNumber: string | null;
+    createdAt: string | null;
+    postedAt: string | null;
+}
+
+// ── Quotation Report ──
+export interface QuotationReportRow {
+    quotationId: string;
+    quoteNumber: string;
+    customerName: string;
+    quoteType: string;
+    status: string;
+    subtotal: number;
+    discountAmount: number;
+    taxAmount: number;
+    totalAmount: number;
+    validFrom: string | null;
+    validUntil: string | null;
+    lineCount: number;
+    convertedToSale: string | null;
+    convertedToInvoice: string | null;
+    createdAt: string | null;
+}
+
+// ── Manual Journal Entry Report ──
+export interface ManualJournalEntryReportRow {
+    entryId: string;
+    entryNumber: string;
+    entryDate: string | null;
+    narration: string;
+    reference: string | null;
+    totalDebit: number;
+    totalCredit: number;
+    status: string;
+    lineCount: number;
+    createdBy: string | null;
+    createdAt: string | null;
+}
+
+// ── Bank Transaction Report ──
+export interface BankTransactionReportRow {
+    transactionId: string;
+    transactionNumber: string;
+    bankAccountName: string;
+    transactionDate: string | null;
+    type: string;
+    description: string;
+    reference: string | null;
+    amount: number;
+    runningBalance: number | null;
+    sourceType: string | null;
+    isReconciled: boolean;
+    createdAt: string | null;
+}

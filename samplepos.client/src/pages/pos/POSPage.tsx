@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import Decimal from 'decimal.js';
+import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import POSProductSearch, { POSProductSearchHandle } from './POSProductSearch';
 import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
@@ -2559,8 +2560,8 @@ export default function POSPage() {
                       to={item.path}
                       onClick={() => setShowNavDrawer(false)}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${location.pathname === item.path || location.pathname.startsWith(item.path + '/')
-                          ? 'bg-blue-50 text-blue-700 font-medium'
-                          : 'text-gray-700 hover:bg-gray-100'
+                        ? 'bg-blue-50 text-blue-700 font-medium'
+                        : 'text-gray-700 hover:bg-gray-100'
                         }`}
                     >
                       <span className="text-xl">{item.icon}</span>
@@ -2856,151 +2857,153 @@ export default function POSPage() {
 
           {/* Desktop table layout */}
           <div className="hidden md:block">
-            <table className="w-full text-xs sm:text-sm border rounded shadow bg-white">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-2 py-2 text-left">Product</th>
-                  <th className="px-2 py-2 text-left">UoM</th>
-                  <th className="px-2 py-2 text-right">Qty</th>
-                  <th className="px-2 py-2 text-right">Unit Price</th>
-                  <th className="px-2 py-2 text-right">Subtotal</th>
-                  <th className="px-2 py-2 text-right hidden sm:table-cell">Margin</th>
-                  <th className="px-2 py-2 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.length === 0 ? (
+            <ResponsiveTableWrapper>
+              <table className="w-full text-xs sm:text-sm border rounded shadow bg-white">
+                <thead className="bg-gray-100">
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-gray-400">
-                      No items in cart
-                    </td>
+                    <th className="px-2 py-2 text-left">Product</th>
+                    <th className="px-2 py-2 text-left">UoM</th>
+                    <th className="px-2 py-2 text-right">Qty</th>
+                    <th className="px-2 py-2 text-right">Unit Price</th>
+                    <th className="px-2 py-2 text-right">Subtotal</th>
+                    <th className="px-2 py-2 text-right hidden sm:table-cell">Margin</th>
+                    <th className="px-2 py-2 text-center">Actions</th>
                   </tr>
-                ) : (
-                  items.map((item, idx) => (
-                    <tr
-                      key={`${item.id}-${item.selectedUomId}-${idx}`}
-                      ref={(el) => {
-                        cartRowRefs.current[idx] = el;
-                      }}
-                      className={`border-b hover:bg-gray-50 transition-colors ${idx === focusedCartIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
-                        }`}
-                      onClick={() => setFocusedCartIndex(idx)}
-                    >
-                      <td className="px-2 py-2">
-                        <div className="flex items-center gap-2">
-                          <div>
-                            <div className="font-medium text-gray-900">{item.name}</div>
-                            <div className="text-xs text-gray-500">SKU: {item.sku}</div>
-                            <div className="text-xs text-gray-500 sm:hidden">
-                              Margin: {item.marginPct.toFixed(1)}%
-                            </div>
-                          </div>
-                          {item.productType === 'service' && <ServiceBadge />}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2">
-                        {item.availableUoms && item.availableUoms.length > 1 ? (
-                          <select
-                            value={item.selectedUomId || ''}
-                            onChange={(e) => handleUomChange(idx, e.target.value)}
-                            onFocus={() => setFocusedCartIndex(idx)}
-                            className="border rounded px-1 sm:px-2 py-1 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 w-full"
-                            aria-label={`Unit of measure for ${item.name}`}
-                          >
-                            {item.availableUoms.map((u) => (
-                              <option key={u.uomId} value={u.uomId}>
-                                {u.symbol || u.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-gray-700 text-xs sm:text-sm">{item.uom}</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={item.quantity}
-                          onChange={(e) =>
-                            handleQuantityChange(idx, parseFloat(e.target.value) || 0)
-                          }
-                          onFocus={() => setFocusedCartIndex(idx)}
-                          className="w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
-                          aria-label={`Quantity for ${item.name}`}
-                        />
-                      </td>
-                      <td className="px-2 py-2 text-right text-xs sm:text-sm">
-                        {formatCurrency(item.unitPrice)}
-                      </td>
-                      <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">
-                        {item.discount ? (
-                          <div>
-                            <span className="line-through text-gray-400 text-[10px]">
-                              {formatCurrency(item.quantity * item.unitPrice)}
-                            </span>
-                            <br />
-                            <span>{formatCurrency(item.subtotal)}</span>
-                            <span className="text-red-500 text-[10px] ml-1">
-                              (-{formatCurrency(item.discount.amount)})
-                            </span>
-                          </div>
-                        ) : (
-                          formatCurrency(item.subtotal)
-                        )}
-                      </td>
-                      <td
-                        className={
-                          'px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm ' +
-                          (item.marginPct < 10
-                            ? 'text-red-600'
-                            : item.marginPct < 20
-                              ? 'text-yellow-600'
-                              : 'text-green-600')
-                        }
-                      >
-                        {item.marginPct.toFixed(1)}%
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {item.discount ? (
-                            <button
-                              onClick={() => handleRemoveDiscount('item', idx)}
-                              onFocus={() => setFocusedCartIndex(idx)}
-                              className="text-red-500 hover:text-red-700 text-xs px-1 py-0.5 rounded border border-red-200 hover:border-red-400"
-                              aria-label={`Remove discount from ${item.name}`}
-                              title="Remove item discount"
-                            >
-                              ✕%
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleOpenDiscountDialog('item', idx)}
-                              onFocus={() => setFocusedCartIndex(idx)}
-                              className="text-amber-600 hover:text-amber-800 text-xs px-1 py-0.5 rounded border border-amber-200 hover:border-amber-400"
-                              aria-label={`Add discount to ${item.name}`}
-                              title="Item discount"
-                            >
-                              %
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
-                            onFocus={() => setFocusedCartIndex(idx)}
-                            className="text-red-600 hover:text-red-800 font-bold text-xl px-2"
-                            aria-label={`Remove ${item.name}`}
-                            title="Remove item"
-                          >
-                            ×
-                          </button>
-                        </div>
+                </thead>
+                <tbody>
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-gray-400">
+                        No items in cart
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    items.map((item, idx) => (
+                      <tr
+                        key={`${item.id}-${item.selectedUomId}-${idx}`}
+                        ref={(el) => {
+                          cartRowRefs.current[idx] = el;
+                        }}
+                        className={`border-b hover:bg-gray-50 transition-colors ${idx === focusedCartIndex ? 'bg-blue-100 dark:bg-blue-800' : ''
+                          }`}
+                        onClick={() => setFocusedCartIndex(idx)}
+                      >
+                        <td className="px-2 py-2">
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <div className="font-medium text-gray-900">{item.name}</div>
+                              <div className="text-xs text-gray-500">SKU: {item.sku}</div>
+                              <div className="text-xs text-gray-500 sm:hidden">
+                                Margin: {item.marginPct.toFixed(1)}%
+                              </div>
+                            </div>
+                            {item.productType === 'service' && <ServiceBadge />}
+                          </div>
+                        </td>
+                        <td className="px-2 py-2">
+                          {item.availableUoms && item.availableUoms.length > 1 ? (
+                            <select
+                              value={item.selectedUomId || ''}
+                              onChange={(e) => handleUomChange(idx, e.target.value)}
+                              onFocus={() => setFocusedCartIndex(idx)}
+                              className="border rounded px-1 sm:px-2 py-1 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 w-full"
+                              aria-label={`Unit of measure for ${item.name}`}
+                            >
+                              {item.availableUoms.map((u) => (
+                                <option key={u.uomId} value={u.uomId}>
+                                  {u.symbol || u.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-gray-700 text-xs sm:text-sm">{item.uom}</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={item.quantity}
+                            onChange={(e) =>
+                              handleQuantityChange(idx, parseFloat(e.target.value) || 0)
+                            }
+                            onFocus={() => setFocusedCartIndex(idx)}
+                            className="w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
+                            aria-label={`Quantity for ${item.name}`}
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right text-xs sm:text-sm">
+                          {formatCurrency(item.unitPrice)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">
+                          {item.discount ? (
+                            <div>
+                              <span className="line-through text-gray-400 text-[10px]">
+                                {formatCurrency(item.quantity * item.unitPrice)}
+                              </span>
+                              <br />
+                              <span>{formatCurrency(item.subtotal)}</span>
+                              <span className="text-red-500 text-[10px] ml-1">
+                                (-{formatCurrency(item.discount.amount)})
+                              </span>
+                            </div>
+                          ) : (
+                            formatCurrency(item.subtotal)
+                          )}
+                        </td>
+                        <td
+                          className={
+                            'px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm ' +
+                            (item.marginPct < 10
+                              ? 'text-red-600'
+                              : item.marginPct < 20
+                                ? 'text-yellow-600'
+                                : 'text-green-600')
+                          }
+                        >
+                          {item.marginPct.toFixed(1)}%
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {item.discount ? (
+                              <button
+                                onClick={() => handleRemoveDiscount('item', idx)}
+                                onFocus={() => setFocusedCartIndex(idx)}
+                                className="text-red-500 hover:text-red-700 text-xs px-1 py-0.5 rounded border border-red-200 hover:border-red-400"
+                                aria-label={`Remove discount from ${item.name}`}
+                                title="Remove item discount"
+                              >
+                                ✕%
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleOpenDiscountDialog('item', idx)}
+                                onFocus={() => setFocusedCartIndex(idx)}
+                                className="text-amber-600 hover:text-amber-800 text-xs px-1 py-0.5 rounded border border-amber-200 hover:border-amber-400"
+                                aria-label={`Add discount to ${item.name}`}
+                                title="Item discount"
+                              >
+                                %
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
+                              onFocus={() => setFocusedCartIndex(idx)}
+                              className="text-red-600 hover:text-red-800 font-bold text-xl px-2"
+                              aria-label={`Remove ${item.name}`}
+                              title="Remove item"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </ResponsiveTableWrapper>
           </div>
         </section>
 

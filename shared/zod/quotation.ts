@@ -24,6 +24,9 @@ export type QuoteType = z.infer<typeof QuoteTypeEnum>;
 export const QuoteItemTypeEnum = z.enum(['product', 'service', 'custom']);
 export type QuoteItemType = z.infer<typeof QuoteItemTypeEnum>;
 
+export const FulfillmentModeEnum = z.enum(['RETAIL', 'WHOLESALE']);
+export type FulfillmentMode = z.infer<typeof FulfillmentModeEnum>;
+
 // ============================================================================
 // QUOTATION ITEM SCHEMA (read model)
 // ============================================================================
@@ -94,6 +97,7 @@ export const QuotationSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   version: z.number().int().optional(),
+  fulfillmentMode: FulfillmentModeEnum.default('RETAIL'),
 }).strict();
 
 // ============================================================================
@@ -132,6 +136,7 @@ export const CreateQuotationInputSchema = z.object({
   validFrom: z.string().optional(),
   validUntil: z.string().optional(),
   notes: z.string().optional(),
+  fulfillmentMode: FulfillmentModeEnum.optional().default('RETAIL'),
   items: z.array(QuotationItemInputSchema).min(1, 'At least one item is required'),
 }).strict();
 

@@ -45,6 +45,7 @@ interface InvoiceSettings {
   showCompanyLogo: boolean;
   showTaxBreakdown: boolean;
   showPaymentInstructions: boolean;
+  showPricesOnDnPdf: boolean;
   paymentAccounts: PaymentAccount[];
   paymentInstructions: string | null;
   termsAndConditions: string | null;
@@ -195,6 +196,7 @@ export default function InvoiceSettingsTab() {
       showCompanyLogo: formData.get('showCompanyLogo') === 'on',
       showTaxBreakdown: formData.get('showTaxBreakdown') === 'on',
       showPaymentInstructions: formData.get('showPaymentInstructions') === 'on',
+      showPricesOnDnPdf: formData.get('showPricesOnDnPdf') === 'on',
       paymentAccounts: paymentAccounts.filter(a => a.provider && a.accountName && a.accountNumber),
       paymentInstructions: getFormValue('paymentInstructions'),
       termsAndConditions: getFormValue('termsAndConditions'),
@@ -541,6 +543,23 @@ export default function InvoiceSettingsTab() {
               id="showPaymentInstructions"
               name="showPaymentInstructions"
               defaultChecked={settings.showPaymentInstructions}
+              className="w-12 h-6 bg-gray-300 rounded-full relative data-[state=checked]:bg-blue-600 transition-colors cursor-pointer"
+            >
+              <Switch.Thumb className="block w-5 h-5 bg-white rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[26px]" />
+            </Switch.Root>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Label.Root className="font-medium text-gray-900" htmlFor="showPricesOnDnPdf">
+                Show Prices on Delivery Note PDF
+              </Label.Root>
+              <p className="text-sm text-gray-600">Display unit prices, line totals, and grand total on delivery note PDFs</p>
+            </div>
+            <Switch.Root
+              id="showPricesOnDnPdf"
+              name="showPricesOnDnPdf"
+              defaultChecked={settings.showPricesOnDnPdf}
               className="w-12 h-6 bg-gray-300 rounded-full relative data-[state=checked]:bg-blue-600 transition-colors cursor-pointer"
             >
               <Switch.Thumb className="block w-5 h-5 bg-white rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[26px]" />

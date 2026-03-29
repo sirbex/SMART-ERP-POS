@@ -10,12 +10,13 @@ import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
 import type { Customer } from '@shared/zod/customer';
-import type { CreateQuotationInput } from '@shared/types/quotation';
+import type { CreateQuotationInput, FulfillmentMode } from '@shared/types/quotation';
 import { AxiosError } from 'axios';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
+import { ResponsiveFormGrid } from '../../components/ui/ResponsiveFormGrid';
 import Decimal from 'decimal.js';
 
 interface QuoteItem {
@@ -68,6 +69,9 @@ export default function NewQuotationPage() {
     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA')
   );
   const [items, setItems] = useState<QuoteItem[]>([]);
+
+  // Fulfillment mode
+  const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>('RETAIL');
 
   // Advanced fields (optional)
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -225,6 +229,7 @@ export default function NewQuotationPage() {
 
     const quotationData = {
       quoteType: 'standard' as const,
+      fulfillmentMode,
       customerId: selectedCustomer?.id,
       customerName: customerName || selectedCustomer?.name,
       customerPhone: (customerPhone || selectedCustomer?.phone) || undefined,
@@ -324,6 +329,35 @@ export default function NewQuotationPage() {
                 Customer Information
               </h2>
 
+              {/* Fulfillment Mode Toggle */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fulfillment Mode</label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFulfillmentMode('RETAIL')}
+                    className={`flex-1 py-3 px-4 rounded-lg border-2 font-semibold transition-colors ${fulfillmentMode === 'RETAIL'
+                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
+                      }`}
+                  >
+                    🛒 Retail
+                    <span className="block text-xs font-normal mt-1">Quote → POS Sale → Invoice</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFulfillmentMode('WHOLESALE')}
+                    className={`flex-1 py-3 px-4 rounded-lg border-2 font-semibold transition-colors ${fulfillmentMode === 'WHOLESALE'
+                        ? 'border-orange-600 bg-orange-50 text-orange-700'
+                        : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
+                      }`}
+                  >
+                    🏭 Wholesale
+                    <span className="block text-xs font-normal mt-1">Quote → Delivery Notes → Invoice</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Customer Selector */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -356,7 +390,7 @@ export default function NewQuotationPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <ResponsiveFormGrid>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                     <input
@@ -377,7 +411,7 @@ export default function NewQuotationPage() {
                       placeholder="customer@example.com"
                     />
                   </div>
-                </div>
+                </ResponsiveFormGrid>
               </div>
 
               {/* Optional Details */}
@@ -391,7 +425,7 @@ export default function NewQuotationPage() {
                 </button>
 
                 {showAdvanced && (
-                  <div className="mt-4 grid grid-cols-2 gap-4">
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
                       <input
@@ -514,9 +548,9 @@ export default function NewQuotationPage() {
                   <div className="space-y-3">
                     {items.map((item, index) => (
                       <div key={item.id} className="border border-gray-300 rounded-lg p-4 hover:border-blue-300">
-                        <div className="grid grid-cols-12 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
                           {/* Description */}
-                          <div className="col-span-5">
+                          <div className="sm:col-span-5">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
                             <input
                               type="text"
@@ -529,7 +563,7 @@ export default function NewQuotationPage() {
                           </div>
 
                           {/* Quantity */}
-                          <div className="col-span-2">
+                          <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Quantity</label>
                             <input
                               type="number"
@@ -544,7 +578,7 @@ export default function NewQuotationPage() {
                           </div>
 
                           {/* Unit Price */}
-                          <div className="col-span-2">
+                          <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Unit Price</label>
                             <input
                               type="number"
@@ -559,7 +593,7 @@ export default function NewQuotationPage() {
                           </div>
 
                           {/* Total */}
-                          <div className="col-span-2">
+                          <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Total</label>
                             <div className="px-3 py-2 text-sm bg-gray-50 border border-gray-300 rounded-lg font-semibold text-gray-900">
                               {formatCurrency(calculateItemTotal(item))}
@@ -567,7 +601,7 @@ export default function NewQuotationPage() {
                           </div>
 
                           {/* Remove Button */}
-                          <div className="col-span-1 flex items-end">
+                          <div className="sm:col-span-1 flex items-end">
                             <button
                               type="button"
                               onClick={() => removeItem(index)}
@@ -680,7 +714,7 @@ export default function NewQuotationPage() {
               <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 mb-6 border border-blue-200">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Quotation Summary</h3>
 
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Customer Info */}
                   <div>
                     <div className="text-sm text-gray-600 mb-1">Customer</div>

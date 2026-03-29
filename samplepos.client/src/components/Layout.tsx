@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 
 interface LayoutProps {
@@ -19,6 +20,7 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
 
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
@@ -28,6 +30,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600' },
     { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600' },
     { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500' },
+    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📦', color: 'text-orange-600' },
     { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600' },
     { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600' },
     { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600' },
@@ -67,8 +70,8 @@ export default function Layout({ children }: LayoutProps) {
       >
         {/* Logo Section */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200">
-          {(sidebarOpen || window.innerWidth >= 1024) ? (
-            <h1 className={`${sidebarOpen || window.innerWidth >= 1024 ? 'text-2xl' : 'text-xl'} font-bold text-gray-900`}>
+          {(sidebarOpen || isDesktop) ? (
+            <h1 className={`${sidebarOpen || isDesktop ? 'text-2xl' : 'text-xl'} font-bold text-gray-900`}>
               {sidebarOpen ? 'SMART ERP' : 'SE'}
             </h1>
           ) : (
@@ -101,15 +104,15 @@ export default function Layout({ children }: LayoutProps) {
                     ? 'bg-blue-50 text-blue-700 font-medium'
                     : 'text-gray-700 hover:bg-gray-100'
                     }`}
-                  title={!sidebarOpen && window.innerWidth >= 1024 ? item.name : undefined}
+                  title={!sidebarOpen && isDesktop ? item.name : undefined}
                   onClick={() => {
-                    if (window.innerWidth < 1024) {
+                    if (!isDesktop) {
                       setSidebarOpen(false);
                     }
                   }}
                 >
                   <span className={`text-2xl ${item.color}`}>{item.icon}</span>
-                  {(sidebarOpen || window.innerWidth < 1024) && (
+                  {(sidebarOpen || !isDesktop) && (
                     <span className="text-sm whitespace-nowrap">{item.name}</span>
                   )}
                 </Link>

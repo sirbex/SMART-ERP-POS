@@ -113,6 +113,23 @@ export const adminRepository = {
 
       deletedRecords.journal_entry_lines = await safeDelete('journal_entry_lines', step++);
       deletedRecords.journal_entries = await safeDelete('journal_entries', step++);
+
+      // Manual journal entries (clear self-referential FK first)
+      try {
+        await client.query('SAVEPOINT sp_clear_manual_journal_refs');
+        await client.query(`
+          UPDATE manual_journal_entries 
+          SET reversed_by_entry_id = NULL
+          WHERE reversed_by_entry_id IS NOT NULL
+        `);
+        await client.query('RELEASE SAVEPOINT sp_clear_manual_journal_refs');
+      } catch (error: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT sp_clear_manual_journal_refs');
+        logger.warn(`Clear manual_journal_entries self-refs skipped: ${(error instanceof Error ? error.message : String(error))}`);
+      }
+      deletedRecords.manual_journal_entry_lines = await safeDelete('manual_journal_entry_lines', step++);
+      deletedRecords.manual_journal_entries = await safeDelete('manual_journal_entries', step++);
+
       deletedRecords.payment_allocations = await safeDelete('payment_allocations', step++);
       deletedRecords.payment_lines = await safeDelete('payment_lines', step++);
       deletedRecords.payment_transactions = await safeDelete('payment_transactions', step++);
@@ -201,6 +218,10 @@ export const adminRepository = {
       deletedRecords.delivery_orders = await safeDelete('delivery_orders', step++);
       deletedRecords.delivery_routes = await safeDelete('delivery_routes', step++);
 
+      // Delivery Notes (SAP-style wholesale delivery notes)
+      deletedRecords.delivery_note_lines = await safeDelete('delivery_note_lines', step++);
+      deletedRecords.delivery_notes = await safeDelete('delivery_notes', step++);
+
       deletedRecords.quotation_emails = await safeDelete('quotation_emails', step++);
       deletedRecords.quotation_attachments = await safeDelete('quotation_attachments', step++);
       deletedRecords.quotation_status_history = await safeDelete('quotation_status_history', step++);
@@ -221,6 +242,44 @@ export const adminRepository = {
       deletedRecords.cash_bank_transfers = await safeDelete('cash_bank_transfers', step++);
       deletedRecords.cash_book_entries = await safeDelete('cash_book_entries', step++);
 
+      // Banking module tables (transactional data - accounts are master data, preserved)
+      deletedRecords.bank_transaction_patterns = await safeDelete('bank_transaction_patterns', step++);
+      deletedRecords.bank_alerts = await safeDelete('bank_alerts', step++);
+      deletedRecords.bank_statement_lines = await safeDelete('bank_statement_lines', step++);
+      deletedRecords.bank_statements = await safeDelete('bank_statements', step++);
+
+      // Clear self-referential FKs on bank_transactions before deleting
+      try {
+        await client.query('SAVEPOINT sp_clear_bank_txn_fks');
+        await client.query(`
+          UPDATE bank_transactions 
+          SET transfer_pair_id = NULL, reversal_transaction_id = NULL
+          WHERE transfer_pair_id IS NOT NULL OR reversal_transaction_id IS NOT NULL
+        `);
+        await client.query('RELEASE SAVEPOINT sp_clear_bank_txn_fks');
+      } catch (error: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT sp_clear_bank_txn_fks');
+        logger.warn(`Clear bank_transactions self-refs skipped: ${(error instanceof Error ? error.message : String(error))}`);
+      }
+      deletedRecords.bank_transactions = await safeDelete('bank_transactions', step++);
+
+      // Reset bank account balances to opening balance
+      try {
+        await client.query('SAVEPOINT sp_reset_bank_balances');
+        const bankResetResult = await client.query(`
+          UPDATE bank_accounts 
+          SET current_balance = COALESCE(opening_balance, 0),
+              updated_at = NOW()
+          WHERE current_balance != COALESCE(opening_balance, 0)
+        `);
+        deletedRecords.bank_account_balances_reset = bankResetResult.rowCount || 0;
+        await client.query('RELEASE SAVEPOINT sp_reset_bank_balances');
+      } catch (error: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT sp_reset_bank_balances');
+        logger.warn(`Bank account balance reset skipped: ${(error instanceof Error ? error.message : String(error))}`);
+        deletedRecords.bank_account_balances_reset = 0;
+      }
+
       // =========================================================================
       // PHASE 7: LOGS & SESSIONS (not audit logs - those are kept for compliance)
       // =========================================================================
@@ -230,6 +289,11 @@ export const adminRepository = {
       deletedRecords.processed_events = await safeDelete('processed_events', step++);
       deletedRecords.failed_transactions = await safeDelete('failed_transactions', step++);
       deletedRecords.user_sessions = await safeDelete('user_sessions', step++);
+
+      // Demand forecast data (derived/computed data - stale after reset)
+      deletedRecords.product_demand_stats = await safeDelete('product_demand_stats', step++);
+      deletedRecords.product_seasonality = await safeDelete('product_seasonality', step++);
+      deletedRecords.demand_forecast_runs = await safeDelete('demand_forecast_runs', step++);
 
       // =========================================================================
       // PHASE 7B: CASH REGISTER DATA (sessions are transactional, registers preserved)

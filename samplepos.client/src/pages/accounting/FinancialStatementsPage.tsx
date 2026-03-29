@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FileText, Eye, BarChart3 } from 'lucide-react';
+import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { Button } from '../../components/ui/temp-ui-components';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/temp-ui-components';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/temp-ui-components';
@@ -397,11 +398,13 @@ const FinancialStatementsPage = () => {
       {/* Revenue */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-3">Revenue</h3>
-        <table className="w-full">
-          <tbody>
-            {incomeStatement?.revenue.map((item, index) => renderStatementItem(item, `revenue-${index}`))}
-          </tbody>
-        </table>
+        <ResponsiveTableWrapper>
+          <table className="w-full">
+            <tbody>
+              {incomeStatement?.revenue.map((item, index) => renderStatementItem(item, `revenue-${index}`))}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
       </div>
 
       {/* Gross Profit */}
@@ -417,11 +420,13 @@ const FinancialStatementsPage = () => {
       {/* Cost of Goods Sold */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-3">Cost of Goods Sold</h3>
-        <table className="w-full">
-          <tbody>
-            {incomeStatement?.costOfGoodsSold.map((item, index) => renderStatementItem(item, `cogs-${index}`))}
-          </tbody>
-        </table>
+        <ResponsiveTableWrapper>
+          <table className="w-full">
+            <tbody>
+              {incomeStatement?.costOfGoodsSold.map((item, index) => renderStatementItem(item, `cogs-${index}`))}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
       </div>
 
       {/* Gross Profit */}
@@ -442,11 +447,13 @@ const FinancialStatementsPage = () => {
       {/* Operating Expenses */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-3">Operating Expenses</h3>
-        <table className="w-full">
-          <tbody>
-            {incomeStatement?.operatingExpenses.map((item, index) => renderStatementItem(item, `opex-${index}`))}
-          </tbody>
-        </table>
+        <ResponsiveTableWrapper>
+          <table className="w-full">
+            <tbody>
+              {incomeStatement?.operatingExpenses.map((item, index) => renderStatementItem(item, `opex-${index}`))}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
       </div>
 
       {/* Operating Income */}
@@ -468,22 +475,26 @@ const FinancialStatementsPage = () => {
       {(incomeStatement?.otherIncome.length || 0) > 0 && (
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Other Income</h3>
-          <table className="w-full">
-            <tbody>
-              {incomeStatement?.otherIncome.map((item, index) => renderStatementItem(item, `other-income-${index}`))}
-            </tbody>
-          </table>
+          <ResponsiveTableWrapper>
+            <table className="w-full">
+              <tbody>
+                {incomeStatement?.otherIncome.map((item, index) => renderStatementItem(item, `other-income-${index}`))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
         </div>
       )}
 
       {(incomeStatement?.otherExpenses.length || 0) > 0 && (
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Other Expenses</h3>
-          <table className="w-full">
-            <tbody>
-              {incomeStatement?.otherExpenses.map((item, index) => renderStatementItem(item, `other-expense-${index}`))}
-            </tbody>
-          </table>
+          <ResponsiveTableWrapper>
+            <table className="w-full">
+              <tbody>
+                {incomeStatement?.otherExpenses.map((item, index) => renderStatementItem(item, `other-expense-${index}`))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
         </div>
       )}
 
@@ -515,32 +526,38 @@ const FinancialStatementsPage = () => {
         {/* Current Assets */}
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Current Assets</h3>
-          <table className="w-full">
-            <tbody>
-              {balanceSheet?.assets.currentAssets.map((item, index) => renderStatementItem(item, `current-assets-${index}`))}
-            </tbody>
-          </table>
+          <ResponsiveTableWrapper>
+            <table className="w-full">
+              <tbody>
+                {balanceSheet?.assets.currentAssets.map((item, index) => renderStatementItem(item, `current-assets-${index}`))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
         </div>
 
         {/* Fixed Assets */}
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Fixed Assets</h3>
-          <table className="w-full">
-            <tbody>
-              {balanceSheet?.assets.fixedAssets.map((item, index) => renderStatementItem(item, `fixed-assets-${index}`))}
-            </tbody>
-          </table>
+          <ResponsiveTableWrapper>
+            <table className="w-full">
+              <tbody>
+                {balanceSheet?.assets.fixedAssets.map((item, index) => renderStatementItem(item, `fixed-assets-${index}`))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
         </div>
 
         {/* Other Assets */}
         {(balanceSheet?.assets.otherAssets.length || 0) > 0 && (
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-3">Other Assets</h3>
-            <table className="w-full">
-              <tbody>
-                {balanceSheet?.assets.otherAssets.map((item, index) => renderStatementItem(item, `other-assets-${index}`))}
-              </tbody>
-            </table>
+            <ResponsiveTableWrapper>
+              <table className="w-full">
+                <tbody>
+                  {balanceSheet?.assets.otherAssets.map((item, index) => renderStatementItem(item, `other-assets-${index}`))}
+                </tbody>
+              </table>
+            </ResponsiveTableWrapper>
           </div>
         )}
 
@@ -562,22 +579,26 @@ const FinancialStatementsPage = () => {
         {/* Current Liabilities */}
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Current Liabilities</h3>
-          <table className="w-full">
-            <tbody>
-              {balanceSheet?.liabilities.currentLiabilities.map((item, index) => renderStatementItem(item, `current-liabilities-${index}`))}
-            </tbody>
-          </table>
+          <ResponsiveTableWrapper>
+            <table className="w-full">
+              <tbody>
+                {balanceSheet?.liabilities.currentLiabilities.map((item, index) => renderStatementItem(item, `current-liabilities-${index}`))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
         </div>
 
         {/* Long-term Liabilities */}
         {(balanceSheet?.liabilities.longTermLiabilities.length || 0) > 0 && (
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-3">Long-term Liabilities</h3>
-            <table className="w-full">
-              <tbody>
-                {balanceSheet?.liabilities.longTermLiabilities.map((item, index) => renderStatementItem(item, `longterm-liabilities-${index}`))}
-              </tbody>
-            </table>
+            <ResponsiveTableWrapper>
+              <table className="w-full">
+                <tbody>
+                  {balanceSheet?.liabilities.longTermLiabilities.map((item, index) => renderStatementItem(item, `longterm-liabilities-${index}`))}
+                </tbody>
+              </table>
+            </ResponsiveTableWrapper>
           </div>
         )}
 
@@ -594,11 +615,13 @@ const FinancialStatementsPage = () => {
         {/* Equity */}
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Equity</h3>
-          <table className="w-full">
-            <tbody>
-              {balanceSheet?.equity.map((item, index) => renderStatementItem(item, `equity-${index}`))}
-            </tbody>
-          </table>
+          <ResponsiveTableWrapper>
+            <table className="w-full">
+              <tbody>
+                {balanceSheet?.equity.map((item, index) => renderStatementItem(item, `equity-${index}`))}
+              </tbody>
+            </table>
+          </ResponsiveTableWrapper>
         </div>
 
         {/* Total Liabilities & Equity */}
@@ -626,11 +649,13 @@ const FinancialStatementsPage = () => {
       {/* Operating Activities */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-3">Cash Flow from Operating Activities</h3>
-        <table className="w-full">
-          <tbody>
-            {(cashFlow?.operatingActivities || []).map((item, index) => renderStatementItem(item, `operating-${index}`))}
-          </tbody>
-        </table>
+        <ResponsiveTableWrapper>
+          <table className="w-full">
+            <tbody>
+              {(cashFlow?.operatingActivities || []).map((item, index) => renderStatementItem(item, `operating-${index}`))}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
         <div className="bg-green-50 p-3 rounded mt-3">
           <div className="flex justify-between items-center">
             <span className="font-semibold text-green-900">Net Cash from Operating Activities</span>
@@ -644,11 +669,13 @@ const FinancialStatementsPage = () => {
       {/* Investing Activities */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-3">Cash Flow from Investing Activities</h3>
-        <table className="w-full">
-          <tbody>
-            {(cashFlow?.investingActivities || []).map((item, index) => renderStatementItem(item, `investing-${index}`))}
-          </tbody>
-        </table>
+        <ResponsiveTableWrapper>
+          <table className="w-full">
+            <tbody>
+              {(cashFlow?.investingActivities || []).map((item, index) => renderStatementItem(item, `investing-${index}`))}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
         <div className="bg-blue-50 p-3 rounded mt-3">
           <div className="flex justify-between items-center">
             <span className="font-semibold text-blue-900">Net Cash from Investing Activities</span>
@@ -662,11 +689,13 @@ const FinancialStatementsPage = () => {
       {/* Financing Activities */}
       <div>
         <h3 className="text-lg font-semibold text-gray-900 mb-3">Cash Flow from Financing Activities</h3>
-        <table className="w-full">
-          <tbody>
-            {(cashFlow?.financingActivities || []).map((item, index) => renderStatementItem(item, `financing-${index}`))}
-          </tbody>
-        </table>
+        <ResponsiveTableWrapper>
+          <table className="w-full">
+            <tbody>
+              {(cashFlow?.financingActivities || []).map((item, index) => renderStatementItem(item, `financing-${index}`))}
+            </tbody>
+          </table>
+        </ResponsiveTableWrapper>
         <div className="bg-purple-50 p-3 rounded mt-3">
           <div className="flex justify-between items-center">
             <span className="font-semibold text-purple-900">Net Cash from Financing Activities</span>

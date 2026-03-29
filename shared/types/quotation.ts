@@ -33,6 +33,7 @@ export function normalizeStatus(dbStatus: string): QuotationStatus {
 
 export type QuoteType = 'quick' | 'standard';
 export type QuoteItemType = 'product' | 'service' | 'custom';
+export type FulfillmentMode = 'RETAIL' | 'WHOLESALE';
 
 // ============================================================================
 // MAIN TYPES
@@ -62,6 +63,7 @@ export interface Quotation {
   convertedAt: Date | null;
   createdById: string | null;
   internalNotes: string | null;
+  fulfillmentMode: FulfillmentMode;
   createdAt: Date;
   updatedAt: Date;
 
@@ -120,6 +122,7 @@ export interface CreateQuotationInput {
   customerEmail?: string;
   validityDays?: number;
   notes?: string;
+  fulfillmentMode?: FulfillmentMode;
   items: QuotationItemInput[];
 }
 

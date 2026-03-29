@@ -793,6 +793,7 @@ export const systemManagementRepository = {
             step++
         );
         tablesCleared['customer_accounts'] = await safeDelete('customer_accounts', step++);
+        tablesCleared['customer_ledger'] = await safeDelete('customer_ledger', step++);
 
         // Invoices
         tablesCleared['invoice_payments'] = await safeDelete('invoice_payments', step++);
@@ -826,6 +827,7 @@ export const systemManagementRepository = {
             step++
         );
         tablesCleared['supplier_invoices'] = await safeTruncate('supplier_invoices', step++);
+        tablesCleared['supplier_ledger'] = await safeDelete('supplier_ledger', step++);
 
         // Goods receipts - Use TRUNCATE CASCADE
         tablesCleared['goods_receipt_items'] = await safeTruncate('goods_receipt_items', step++);
@@ -842,6 +844,7 @@ export const systemManagementRepository = {
 
         // Use TRUNCATE CASCADE to handle FK dependencies automatically
         tablesCleared['stock_movements'] = await safeTruncate('stock_movements', step++);
+        tablesCleared['stock_adjustments'] = await safeDelete('stock_adjustments', step++);
         tablesCleared['stock_count_lines'] = await safeTruncate('stock_count_lines', step++);
         tablesCleared['stock_counts'] = await safeTruncate('stock_counts', step++);
         tablesCleared['inventory_batches'] = await safeTruncate('inventory_batches', step++);
@@ -859,6 +862,10 @@ export const systemManagementRepository = {
         tablesCleared['route_deliveries'] = await safeDelete('route_deliveries', step++);
         tablesCleared['delivery_orders'] = await safeDelete('delivery_orders', step++);
         tablesCleared['delivery_routes'] = await safeDelete('delivery_routes', step++);
+
+        // Delivery Notes (SAP-style wholesale delivery notes)
+        tablesCleared['delivery_note_lines'] = await safeDelete('delivery_note_lines', step++);
+        tablesCleared['delivery_notes'] = await safeDelete('delivery_notes', step++);
 
         tablesCleared['quotation_emails'] = await safeDelete('quotation_emails', step++);
         tablesCleared['quotation_attachments'] = await safeDelete('quotation_attachments', step++);
@@ -951,6 +958,11 @@ export const systemManagementRepository = {
         tablesCleared['failed_transactions'] = await safeDelete('failed_transactions', step++);
         tablesCleared['user_sessions'] = await safeDelete('user_sessions', step++);
         // Note: audit_log, data_integrity_log, system_backups, system_reset_log are kept for compliance
+
+        // Demand forecast data (derived/computed data - stale after reset)
+        tablesCleared['product_demand_stats'] = await safeDelete('product_demand_stats', step++);
+        tablesCleared['product_seasonality'] = await safeDelete('product_seasonality', step++);
+        tablesCleared['demand_forecast_runs'] = await safeDelete('demand_forecast_runs', step++);
 
         // =========================================================================
         // PHASE 7B: CASH REGISTER DATA (sessions and movements are transactional)

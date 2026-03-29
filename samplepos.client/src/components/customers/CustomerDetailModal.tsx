@@ -6,7 +6,6 @@ import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
 import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
-import StoreCredits from './StoreCredits';
 import { AxiosError } from 'axios';
 
 interface CustomerData {
@@ -40,6 +39,9 @@ interface SummaryData {
     invoiceCount?: number | string;
     depositBalance?: number | string;
     totalOrders?: number | string;
+    totalSales?: number | string;
+    totalInvoices?: number | string;
+    totalSpent?: number | string;
     lifetimeValue?: number | string;
     averageOrderValue?: number | string;
     pendingInvoices?: number | string;
@@ -83,7 +85,7 @@ interface StatementEntry {
     balanceAfter?: number | string;
 }
 
-type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
+type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'edit';
 
 interface CustomerDetailModalProps {
     isOpen: boolean;
@@ -252,7 +254,7 @@ export default function CustomerDetailModal({
                     {/* Tabs */}
                     <div className="border-b border-gray-200 px-6 bg-white">
                         <nav className="-mb-px flex space-x-6">
-                            {(['overview', 'invoices', 'transactions', 'deposits', 'credits', 'edit'] as Tab[]).map((t) => (
+                            {(['overview', 'invoices', 'transactions', 'deposits', 'edit'] as Tab[]).map((t) => (
                                 <button
                                     key={t}
                                     onClick={() => setTab(t)}
@@ -283,10 +285,15 @@ export default function CustomerDetailModal({
                                         {/* Summary Cards */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                                <div className="text-sm text-gray-600">Balance (Owed)</div>
-                                                <div className={`text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                                    {formatCurrency(toNumber(c.balance))}
+                                                <div className="text-sm text-gray-600">
+                                                    {toNumber(c.balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}
                                                 </div>
+                                                <div className={`text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : toNumber(c.balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                                                    {formatCurrency(Math.abs(toNumber(c.balance)))}
+                                                </div>
+                                                {toNumber(c.balance) < 0 && (
+                                                    <div className="text-xs text-green-600 mt-1">Overpaid — credit on account</div>
+                                                )}
                                             </div>
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Credit Limit</div>
@@ -344,16 +351,22 @@ export default function CustomerDetailModal({
                                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Activity Summary</h3>
                                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                                     <div className="text-center p-3 bg-blue-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-blue-600">{sum.totalOrders || 0}</div>
-                                                        <div className="text-gray-600">Total Orders</div>
+                                                        <div className="text-2xl font-bold text-blue-600">{sum.totalOrders || sum.totalInvoices || sum.totalSales || 0}</div>
+                                                        <div className="text-gray-600">Total Invoices</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-green-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-green-600">{formatCurrency(Number(sum.lifetimeValue) || 0)}</div>
+                                                        <div className="text-2xl font-bold text-green-600">{formatCurrency(Number(sum.lifetimeValue || sum.totalSpent) || 0)}</div>
                                                         <div className="text-gray-600">Lifetime Value</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-purple-50 rounded-lg">
-                                                        <div className="text-2xl font-bold text-purple-600">{formatCurrency(Number(sum.averageOrderValue) || 0)}</div>
-                                                        <div className="text-gray-600">Avg Order</div>
+                                                        <div className="text-2xl font-bold text-purple-600">{formatCurrency(
+                                                            (() => {
+                                                                const total = Number(sum.lifetimeValue || sum.totalSpent) || 0;
+                                                                const count = Number(sum.totalOrders || sum.totalInvoices || sum.totalSales) || 1;
+                                                                return total / count;
+                                                            })()
+                                                        )}</div>
+                                                        <div className="text-gray-600">Avg Invoice</div>
                                                     </div>
                                                     <div className="text-center p-3 bg-yellow-50 rounded-lg">
                                                         <div className="text-2xl font-bold text-yellow-600">{Number(sum.pendingInvoices) || 0}</div>
@@ -645,11 +658,17 @@ export default function CustomerDetailModal({
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Opening Balance</div>
-                                                    <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).openingBalance || 0))}</div>
+                                                    <div className={`text-lg font-semibold ${Number((statement as StatementResponse).openingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).openingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                                                        {formatCurrency(Math.abs(Number((statement as StatementResponse).openingBalance || 0)))}
+                                                        {Number((statement as StatementResponse).openingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                                                    </div>
                                                 </div>
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Closing Balance</div>
-                                                    <div className="text-lg font-semibold">{formatCurrency(Number((statement as StatementResponse).closingBalance || 0))}</div>
+                                                    <div className={`text-lg font-semibold ${Number((statement as StatementResponse).closingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).closingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                                                        {formatCurrency(Math.abs(Number((statement as StatementResponse).closingBalance || 0)))}
+                                                        {Number((statement as StatementResponse).closingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                                                    </div>
                                                 </div>
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Period</div>
@@ -697,7 +716,10 @@ export default function CustomerDetailModal({
                                                             <td className="px-4 py-3 text-sm text-gray-600">{e.description || '-'}</td>
                                                             <td className="px-4 py-3 text-sm text-right text-red-600">{e.debit ? formatCurrency(Number(e.debit)) : '-'}</td>
                                                             <td className="px-4 py-3 text-sm text-right text-green-600">{e.credit ? formatCurrency(Number(e.credit)) : '-'}</td>
-                                                            <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(e.balanceAfter || 0))}</td>
+                                                            <td className={`px-4 py-3 text-sm text-right font-semibold ${Number(e.balanceAfter || 0) > 0 ? 'text-red-600' : Number(e.balanceAfter || 0) < 0 ? 'text-green-600' : ''}`}>
+                                                                {formatCurrency(Math.abs(Number(e.balanceAfter || 0)))}
+                                                                {Number(e.balanceAfter || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                                                            </td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -729,11 +751,6 @@ export default function CustomerDetailModal({
                                 {/* Deposits Tab */}
                                 {tab === 'deposits' && customerId && (
                                     <CustomerDeposits customerId={customerId} />
-                                )}
-
-                                {/* Credits Tab */}
-                                {tab === 'credits' && customerId && (
-                                    <StoreCredits customerId={customerId} />
                                 )}
 
                                 {/* Edit Tab */}

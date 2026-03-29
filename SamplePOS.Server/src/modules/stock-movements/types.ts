@@ -7,6 +7,7 @@
 export type MovementType =
   | 'GOODS_RECEIPT'
   | 'SALE'
+  | 'DELIVERY'
   | 'ADJUSTMENT_IN'
   | 'ADJUSTMENT_OUT'
   | 'TRANSFER_IN'
@@ -43,6 +44,7 @@ export const IN_MOVEMENT_TYPES: MovementType[] = [
  */
 export const OUT_MOVEMENT_TYPES: MovementType[] = [
   'SALE',
+  'DELIVERY',
   'ADJUSTMENT_OUT',
   'TRANSFER_OUT',
   'DAMAGE',

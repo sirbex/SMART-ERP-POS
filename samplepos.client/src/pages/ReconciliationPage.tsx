@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
+import { ResponsiveTableWrapper } from '../components/ui/ResponsiveTableWrapper';
 import {
     Dialog,
     DialogContent,
@@ -374,26 +375,28 @@ export default function ReconciliationPage() {
                                             <p className="text-sm font-medium text-gray-700 mb-3">
                                                 Entities with discrepancies:
                                             </p>
-                                            <table className="w-full text-sm">
-                                                <thead>
-                                                    <tr className="text-gray-500">
-                                                        <th className="text-left py-2">Name</th>
-                                                        <th className="text-right py-2">GL Balance</th>
-                                                        <th className="text-right py-2">Subledger</th>
-                                                        <th className="text-right py-2">Difference</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y">
-                                                    {discrepancies.map((d: { entityName: string; glBalance: number; subledgerBalance: number; difference: number }, dIdx: number) => (
-                                                        <tr key={dIdx}>
-                                                            <td className="py-2">{d.entityName}</td>
-                                                            <td className="py-2 text-right">{formatCurrency(d.glBalance)}</td>
-                                                            <td className="py-2 text-right">{formatCurrency(d.subledgerBalance)}</td>
-                                                            <td className="py-2 text-right text-red-600">{formatCurrency(d.difference)}</td>
+                                            <ResponsiveTableWrapper>
+                                                <table className="w-full text-sm">
+                                                    <thead>
+                                                        <tr className="text-gray-500">
+                                                            <th className="text-left py-2">Name</th>
+                                                            <th className="text-right py-2">GL Balance</th>
+                                                            <th className="text-right py-2">Subledger</th>
+                                                            <th className="text-right py-2">Difference</th>
                                                         </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                                    </thead>
+                                                    <tbody className="divide-y">
+                                                        {discrepancies.map((d: { entityName: string; glBalance: number; subledgerBalance: number; difference: number }, dIdx: number) => (
+                                                            <tr key={dIdx}>
+                                                                <td className="py-2">{d.entityName}</td>
+                                                                <td className="py-2 text-right">{formatCurrency(d.glBalance)}</td>
+                                                                <td className="py-2 text-right">{formatCurrency(d.subledgerBalance)}</td>
+                                                                <td className="py-2 text-right text-red-600">{formatCurrency(d.difference)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </ResponsiveTableWrapper>
                                         </div>
                                     )}
                                 </div>
@@ -446,39 +449,41 @@ export default function ReconciliationPage() {
                             <div>
                                 <h3 className="font-semibold mb-3">Reconciliation Items</h3>
                                 <div className="border rounded-lg overflow-hidden">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-gray-50">
-                                            <tr>
-                                                <th className="text-left px-4 py-3 font-medium">Source</th>
-                                                <th className="text-left px-4 py-3 font-medium">Description</th>
-                                                <th className="text-right px-4 py-3 font-medium">Amount</th>
-                                                <th className="text-right px-4 py-3 font-medium">Difference</th>
-                                                <th className="text-center px-4 py-3 font-medium">Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {accountDetail.items?.map((item: { source: string; description: string; amount: number; difference: number; status: string }, idx: number) => (
-                                                <tr key={idx} className="hover:bg-gray-50">
-                                                    <td className="px-4 py-3 font-mono text-xs">{item.source}</td>
-                                                    <td className="px-4 py-3">{item.description}</td>
-                                                    <td className="px-4 py-3 text-right">{formatCurrency(item.amount)}</td>
-                                                    <td className={`px-4 py-3 text-right ${Math.abs(item.difference) > 0.01 ? 'text-red-600 font-medium' : ''}`}>
-                                                        {formatCurrency(item.difference)}
-                                                    </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        <span className={`px-2 py-1 rounded text-xs font-medium ${item.status === 'MATCHED' ? 'bg-green-100 text-green-800' :
-                                                            item.status === 'BASE' ? 'bg-blue-100 text-blue-800' :
-                                                                item.status === 'DISCREPANCY' ? 'bg-red-100 text-red-800' :
-                                                                    item.status === 'ACTION_REQUIRED' ? 'bg-yellow-100 text-yellow-800' :
-                                                                        'bg-gray-100 text-gray-800'
-                                                            }`}>
-                                                            {item.status}
-                                                        </span>
-                                                    </td>
+                                    <ResponsiveTableWrapper>
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="text-left px-4 py-3 font-medium">Source</th>
+                                                    <th className="text-left px-4 py-3 font-medium">Description</th>
+                                                    <th className="text-right px-4 py-3 font-medium">Amount</th>
+                                                    <th className="text-right px-4 py-3 font-medium">Difference</th>
+                                                    <th className="text-center px-4 py-3 font-medium">Status</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody className="divide-y">
+                                                {accountDetail.items?.map((item: { source: string; description: string; amount: number; difference: number; status: string }, idx: number) => (
+                                                    <tr key={idx} className="hover:bg-gray-50">
+                                                        <td className="px-4 py-3 font-mono text-xs">{item.source}</td>
+                                                        <td className="px-4 py-3">{item.description}</td>
+                                                        <td className="px-4 py-3 text-right">{formatCurrency(item.amount)}</td>
+                                                        <td className={`px-4 py-3 text-right ${Math.abs(item.difference) > 0.01 ? 'text-red-600 font-medium' : ''}`}>
+                                                            {formatCurrency(item.difference)}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-center">
+                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${item.status === 'MATCHED' ? 'bg-green-100 text-green-800' :
+                                                                item.status === 'BASE' ? 'bg-blue-100 text-blue-800' :
+                                                                    item.status === 'DISCREPANCY' ? 'bg-red-100 text-red-800' :
+                                                                        item.status === 'ACTION_REQUIRED' ? 'bg-yellow-100 text-yellow-800' :
+                                                                            'bg-gray-100 text-gray-800'
+                                                                }`}>
+                                                                {item.status}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </ResponsiveTableWrapper>
                                 </div>
                             </div>
 
