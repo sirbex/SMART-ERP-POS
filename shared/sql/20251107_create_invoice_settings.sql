@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS invoice_settings (
   show_company_logo BOOLEAN DEFAULT false,
   show_tax_breakdown BOOLEAN DEFAULT true,
   show_payment_instructions BOOLEAN DEFAULT true,
+  show_prices_on_dn_pdf BOOLEAN DEFAULT true,
   
   -- Payment Accounts (bank, mobile money, etc.)
   payment_accounts JSONB NOT NULL DEFAULT '[]'::jsonb,
