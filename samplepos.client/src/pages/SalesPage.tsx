@@ -992,7 +992,41 @@ function SalesTable({
 
   return (
     <div className="space-y-4">
-      <div className="overflow-x-auto">
+      {/* Mobile Card View */}
+      <div className="block sm:hidden space-y-3 px-2">
+        {sales.map((sale: SaleRow) => (
+          <div
+            key={sale.id}
+            className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm active:bg-gray-50"
+            onClick={() => onSelectSale(sale)}
+          >
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <div className="text-sm font-semibold text-blue-600">{sale.saleNumber || sale.id.slice(0, 8)}</div>
+                <div className="text-xs text-gray-500">{formatDisplayDate(sale.saleDate)} {formatDisplayTime(sale.createdAt)}</div>
+              </div>
+              <div className="flex gap-1">
+                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH' ? 'bg-green-100 text-green-800' : sale.paymentMethod === 'CARD' ? 'bg-blue-100 text-blue-800' : sale.paymentMethod === 'CREDIT' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-800'}`}>
+                  {sale.paymentMethod}
+                </span>
+                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${sale.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : sale.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                  {sale.status}
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <div className="text-sm text-gray-700">{sale.customerName || 'Walk-in'}</div>
+              <div className="text-right">
+                <div className="text-base font-bold text-gray-900">{formatCurrency(sale.totalAmount)}</div>
+                <div className="text-xs text-green-600">Profit: {formatCurrency(sale.profit || 0)}</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop Table View */}
+      <div className="hidden sm:block overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -1571,7 +1605,7 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
           aria-modal="true"
           aria-labelledby="sale-modal-title"
           tabIndex={-1}
-          className="relative bg-white w-full max-w-4xl rounded-xl shadow-2xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col transform transition-all"
+          className="relative bg-white w-full max-w-[95vw] sm:max-w-4xl rounded-xl shadow-2xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col transform transition-all"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}

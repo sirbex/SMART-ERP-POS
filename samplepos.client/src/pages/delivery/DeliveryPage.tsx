@@ -795,7 +795,7 @@ function DeliveryDetailModal({ order: initialOrder, onClose }: { order: Delivery
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Delivery order details">
+      <div className="bg-white rounded-xl shadow-xl max-w-[95vw] sm:max-w-2xl w-full max-h-[80vh] overflow-y-auto p-4 sm:p-6" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Delivery order details">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-gray-900">{order.deliveryNumber}</h2>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg" aria-label="Close">✕</button>
@@ -1377,7 +1377,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col"
+        className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-2xl w-full max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

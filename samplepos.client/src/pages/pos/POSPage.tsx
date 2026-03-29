@@ -417,7 +417,9 @@ export default function POSPage() {
   // duplicate sync races between this useEffect and the auto-sync timer.
   useEffect(() => {
     if (isOnline) {
-      syncProductCatalog().catch(() => { });
+      syncProductCatalog().catch((err) => {
+        console.error('[POSPage] Failed to sync product catalog:', err);
+      });
     }
   }, [isOnline]);
 
@@ -924,7 +926,7 @@ export default function POSPage() {
         unitPrice: row.sellingPrice,
         costPrice: row.unitCost,
         marginPct:
-          row.unitCost > 0
+          row.unitCost > 0 && row.sellingPrice > 0
             ? new Decimal(row.sellingPrice)
               .minus(row.unitCost)
               .dividedBy(row.sellingPrice)
@@ -1086,10 +1088,12 @@ export default function POSPage() {
         ? new Decimal(originalAmount).times(discount.value).dividedBy(100).toNumber()
         : discount.value;
 
-    const discountPercentage = new Decimal(discountAmount)
-      .dividedBy(originalAmount)
-      .times(100)
-      .toNumber();
+    const discountPercentage = originalAmount > 0
+      ? new Decimal(discountAmount)
+        .dividedBy(originalAmount)
+        .times(100)
+        .toNumber()
+      : 0;
 
     // Check if requires manager approval
     if (discountPercentage > userLimit) {
@@ -3082,7 +3086,7 @@ export default function POSPage() {
           </button>
 
           {/* Quick Actions — 2×2 colored grid */}
-          <div className="grid grid-cols-4 sm:grid-cols-2 gap-1.5 sm:gap-2.5 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2.5 mb-3">
             {/* Discount */}
             <button
               onClick={() => handleOpenDiscountDialog('cart')}
@@ -3117,7 +3121,7 @@ export default function POSPage() {
               <span>{items.length > 0 ? 'Hold' : 'Retrieve'}</span>
               <span className="hidden sm:block text-[9px] font-normal text-orange-500">Ctrl+H</span>
               {heldOrdersCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-orange-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
+                <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 bg-orange-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
                   {heldOrdersCount}
                 </span>
               )}
@@ -3134,7 +3138,7 @@ export default function POSPage() {
               <span>{items.length > 0 ? 'Quote' : 'Load Quote'}</span>
               <span className="hidden sm:block text-[9px] font-normal text-sky-500">Ctrl+Q</span>
               {quotesCount > 0 && items.length === 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-sky-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
+                <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 bg-sky-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow">
                   {quotesCount}
                 </span>
               )}

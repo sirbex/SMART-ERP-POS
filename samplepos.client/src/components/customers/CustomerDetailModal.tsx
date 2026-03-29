@@ -227,7 +227,7 @@ export default function CustomerDetailModal({
                     role="dialog"
                     aria-modal="true"
                     aria-label={`Customer Details - ${c?.name || 'Loading'}`}
-                    className="relative bg-white w-full max-w-5xl rounded-lg shadow-xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col"
+                    className="relative bg-white w-full max-w-[95vw] sm:max-w-5xl rounded-lg shadow-xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col"
                 >
                     {/* Header */}
                     <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between bg-gray-50">

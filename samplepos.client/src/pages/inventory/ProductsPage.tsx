@@ -1006,7 +1006,63 @@ export default function ProductsPage() {
 
       {/* Products Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="block sm:hidden space-y-3 p-3">
+          {paginatedProducts.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
+                ? 'No products match your filters'
+                : 'No products yet. Click "Add Product" to create your first product.'}
+            </div>
+          ) : (
+            paginatedProducts.map((product: ProductListItem) => {
+              const margin = calculateMargin(product.costPrice, product.sellingPrice);
+              return (
+                <div key={product.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-gray-900 text-sm">{product.name}</span>
+                        {product.trackExpiry && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-purple-100 text-purple-800">Perishable</span>
+                        )}
+                      </div>
+                      {product.category && (
+                        <span className="inline-flex px-2 py-0.5 mt-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700">{product.category}</span>
+                      )}
+                    </div>
+                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${product.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                      {product.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                    <div>
+                      <div className="text-xs text-gray-500">Cost</div>
+                      <div className="text-sm text-gray-900">{formatCurrency(parseCurrency(product.costPrice))}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">Sell</div>
+                      <div className="text-sm font-medium text-gray-900">{formatCurrency(parseCurrency(product.sellingPrice))}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">Margin</div>
+                      <div className={`text-sm font-medium ${parseFloat(margin) >= 30 ? 'text-green-600' : parseFloat(margin) >= 15 ? 'text-yellow-600' : 'text-red-600'}`}>{margin}%</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-600 mb-2">Stock: {formatMultiUomQuantity(product)} | Reorder: {product.reorderLevel}</div>
+                  <div className="flex gap-3 border-t border-gray-100 pt-2">
+                    <button onClick={() => handleViewHistory(product.id!)} className="text-xs text-purple-600 hover:text-purple-800 font-medium">History</button>
+                    <button onClick={() => handleEdit(product)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                    <button onClick={() => handleDeleteClick(product.id!)} className="text-xs text-red-600 hover:text-red-800 font-medium">Delete</button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -1154,7 +1210,7 @@ export default function ProductsPage() {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b px-6 py-4">
               <h3 className="text-xl font-bold text-gray-900">
                 {modalMode === 'create' ? 'Add New Product' : 'Edit Product'}
@@ -1450,7 +1506,7 @@ export default function ProductsPage() {
       {/* Product History Modal */}
       {showHistoryModal && selectedProductForHistory && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => { setShowHistoryModal(false); setSelectedProductForHistory(null); setHistoryFilters({}); }}>
-          <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-5xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center rounded-t-lg">
               <div>
@@ -1777,7 +1833,7 @@ export default function ProductsPage() {
           onClick={handleCancelUom}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-2xl w-full max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"

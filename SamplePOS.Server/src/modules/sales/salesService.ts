@@ -740,7 +740,7 @@ export const salesService = {
             totalAmount: sale.totalAmount,
             costAmount: sale.totalCost || 0,
             paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
-            amountPaid: sale.amountPaid ?? sale.totalAmount,
+            amountPaid: sale.amountPaid ?? 0,
             taxAmount: sale.taxAmount || 0,
             customerId: sale.customerId || undefined,
             saleItems: itemsWithCosts.map((item) => ({

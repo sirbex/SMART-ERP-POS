@@ -522,7 +522,7 @@ export default function PeriodManagementPage() {
             {/* History Modal */}
             {showHistoryModal && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowHistoryModal(null)}>
-                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b flex items-center justify-between">
                             <h2 className="text-xl font-semibold">
                                 Period History: {months[showHistoryModal.month - 1]} {showHistoryModal.year}

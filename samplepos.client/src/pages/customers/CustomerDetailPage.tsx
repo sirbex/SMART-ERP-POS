@@ -1421,7 +1421,7 @@ export default function CustomerDetailPage() {
       {/* Create Invoice Modal */}
       {isCreateOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setCreateOpen(false)}>
-          <div ref={createRef} role="dialog" aria-modal="true" aria-label="Create Invoice" className="bg-white w-full max-w-2xl rounded-lg shadow-lg border border-gray-200 p-6" onClick={(e) => e.stopPropagation()}>
+          <div ref={createRef} role="dialog" aria-modal="true" aria-label="Create Invoice" className="bg-white w-full max-w-[95vw] sm:max-w-2xl rounded-lg shadow-lg border border-gray-200 p-4 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Create Invoice</h3>
               <button onClick={() => setCreateOpen(false)} className="p-2 rounded hover:bg-gray-100" aria-label="Close">✕</button>

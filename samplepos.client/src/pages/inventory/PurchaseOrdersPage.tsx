@@ -1079,7 +1079,53 @@ export default function PurchaseOrdersPage() {
 
       {/* Purchase Orders Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Card View */}
+        <div className="block sm:hidden space-y-3 p-3">
+          {purchaseOrders.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              {selectedStatus !== 'ALL' || selectedSupplier
+                ? 'No purchase orders match your filters'
+                : 'No purchase orders yet. Create your first PO to get started!'}
+            </div>
+          ) : (
+            purchaseOrders.map((po: PORow) => {
+              const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
+              const totalAmount = new Decimal(po.totalAmount || 0);
+              return (
+                <div key={po.id} className="border border-gray-200 rounded-lg p-4" onClick={() => handleViewDetails(po)}>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <div className="text-sm font-semibold text-blue-600">{po.poNumber}</div>
+                      <div className="text-xs text-gray-600">{po.supplierName}</div>
+                    </div>
+                    <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusConfig.color}`}>
+                      {statusConfig.icon} {statusConfig.label}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="text-xs text-gray-500">Ordered: {formatDate(po.orderDate)}</div>
+                    <div className="text-base font-bold text-gray-900">{formatCurrency(totalAmount.toNumber())}</div>
+                  </div>
+                  <div className="text-xs text-gray-500 mb-2">Delivery: {formatDate(po.expectedDelivery)}</div>
+                  <div className="flex gap-3 border-t border-gray-100 pt-2">
+                    {po.status === 'DRAFT' && (
+                      <>
+                        <button onClick={(e) => { e.stopPropagation(); handleSubmitPO(po.id); }} className="text-xs text-blue-600 font-medium">Submit</button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id); }} className="text-xs text-red-600 font-medium">Delete</button>
+                      </>
+                    )}
+                    {(po.status === 'PENDING' || po.status === 'APPROVED') && (
+                      <button onClick={(e) => { e.stopPropagation(); handleCancelPO(po.id); }} className="text-xs text-orange-600 font-medium">Cancel</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -1285,7 +1331,7 @@ export default function PurchaseOrdersPage() {
           onClick={() => setShowDetailsModal(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-4xl w-full max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

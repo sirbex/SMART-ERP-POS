@@ -146,7 +146,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
     // Calculate amounts for proper GL posting using Money utility (decimal-safe)
     // For credit sales with partial payment, only AR should reflect unpaid portion
     const totalAmount = Money.parseDb(sale.totalAmount);
-    const amountPaid = Money.parseDb(sale.amountPaid ?? sale.totalAmount); // Default to full payment if not specified
+    const amountPaid = Money.parseDb(sale.amountPaid ?? 0); // Default to zero if not specified (safest for AR calculation)
     const unpaidAmount = Money.subtract(totalAmount, amountPaid);
 
     // NEW: Calculate revenue and cost split by product type using Decimal-safe Money utility

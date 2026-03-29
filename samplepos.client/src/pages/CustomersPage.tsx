@@ -351,7 +351,53 @@ export default function CustomersPage() {
                 </div>
               ) : (
                 <>
-                  <div className="overflow-x-auto">
+                  {/* Mobile Card View */}
+                  <div className="block sm:hidden space-y-3 p-3">
+                    {filteredCustomers.map((customer: Customer) => (
+                      <div key={customer.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
+                              <span className="text-blue-600 font-semibold text-sm">{customer.name.charAt(0).toUpperCase()}</span>
+                            </div>
+                            <div>
+                              <div className="font-medium text-gray-900">{customer.name}</div>
+                              <div className="text-xs text-gray-500">{customer.phone || customer.email || 'No contact'}</div>
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${customer.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {customer.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                          <div>
+                            <div className="text-xs text-gray-500">Balance</div>
+                            <div className={`text-sm font-semibold ${toNumber(customer.balance) > 0 ? 'text-red-600' : toNumber(customer.balance) < 0 ? 'text-green-600' : 'text-gray-600'}`}>
+                              {formatCurrency(Math.abs(toNumber(customer.balance)))}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500">Deposits</div>
+                            <div className={`text-sm font-semibold ${toNumber(customer.depositBalance) > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                              {formatCurrency(toNumber(customer.depositBalance))}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500">Limit</div>
+                            <div className="text-sm text-gray-600">{formatCurrency(customer.creditLimit)}</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 border-t border-gray-100 pt-2">
+                          <button className="flex-1 text-xs text-blue-600 hover:text-blue-900 font-medium py-1" onClick={() => { setSelectedCustomerId(customer.id); setDetailModalTab('overview'); setDetailModalOpen(true); }}>View</button>
+                          <button className="flex-1 text-xs text-gray-600 hover:text-gray-900 font-medium py-1" onClick={() => { setSelectedCustomerId(customer.id); setDetailModalTab('edit'); setDetailModalOpen(true); }}>Edit</button>
+                          <button className="flex-1 text-xs text-gray-600 hover:text-gray-900 font-medium py-1" onClick={() => { setSelectedCustomerId(customer.id); setDetailModalTab('transactions'); setDetailModalOpen(true); }}>Statement</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden sm:block overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
@@ -504,7 +550,7 @@ export default function CustomersPage() {
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="absolute inset-0 bg-black/40" onClick={() => setStatementOpen(false)} />
           <div className="flex min-h-full items-center justify-center p-4">
-            <div ref={statementRef} role="dialog" aria-modal="true" aria-label="Customer Statement" className="relative bg-white w-full max-w-6xl rounded-lg shadow-xl border border-gray-200 p-6 max-h-[90vh] overflow-y-auto">
+            <div ref={statementRef} role="dialog" aria-modal="true" aria-label="Customer Statement" className="relative bg-white w-full max-w-[95vw] sm:max-w-6xl rounded-lg shadow-xl border border-gray-200 p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold">Customer Statement</h3>
                 <button onClick={() => setStatementOpen(false)} className="p-2 rounded hover:bg-gray-100" aria-label="Close">✕</button>

@@ -1065,7 +1065,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg p-6 max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-lg p-4 sm:p-6 max-w-[95vw] sm:max-w-5xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-6">
@@ -2066,7 +2066,7 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-lg p-4 sm:p-6 max-w-[95vw] sm:max-w-2xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
