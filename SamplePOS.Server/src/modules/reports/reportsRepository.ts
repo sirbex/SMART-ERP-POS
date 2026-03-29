@@ -118,7 +118,7 @@ export const reportsRepository = {
         `INSERT INTO report_runs (
           report_type, report_name, parameters, generated_by_id,
           start_date, end_date, record_count, file_path, file_format, execution_time_ms
-        ) VALUES ($1::report_type_enum, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1::report_type, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING 
           id,
           report_type as "reportType",
