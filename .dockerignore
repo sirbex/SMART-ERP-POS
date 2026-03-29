@@ -16,8 +16,6 @@ database
 *.lnk
 *.slnx
 *.txt
-# Allow frontend nginx config needed by Dockerfile.deploy
-!samplepos.client/nginx.conf
 
 # Node modules (each project installs its own)
 **/node_modules
@@ -33,6 +31,3 @@ database
 **/__tests__
 **/*.test.ts
 **/*.spec.ts
-
-# Frontend (not needed for backend build)
-samplepos.client
