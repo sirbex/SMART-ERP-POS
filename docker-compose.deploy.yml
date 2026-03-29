@@ -1,5 +1,14 @@
-# Deployment Docker Compose — single-server setup for DigitalOcean
-# Usage: docker compose -f docker-compose.deploy.yml up -d --build
+# 🚨 UPDATE DEPLOYMENT ONLY
+# This compose file must NEVER recreate volumes or databases.
+# Used only for updating running containers in production.
+# See DEPLOYMENT_CONTRACT.md for full rules.
+#
+# Safe usage:
+#   docker compose -f docker-compose.deploy.yml build backend frontend
+#   docker compose -f docker-compose.deploy.yml up -d --no-deps backend frontend
+#
+# FORBIDDEN:
+#   docker compose -f docker-compose.deploy.yml down -v   (DESTROYS ALL DATA)
 
 services:
   # PostgreSQL Database
