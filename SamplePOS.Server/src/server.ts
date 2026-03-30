@@ -47,6 +47,8 @@ import erpAccountingRoutes from './routes/erpAccountingRoutes.js';
 import bankingRoutes from './routes/bankingRoutes.js';
 import { createSupplierPaymentRoutes } from './modules/supplier-payments/supplierPaymentRoutes.js';
 import { cashRegisterRoutes } from './modules/cash-register/index.js';
+import { crmRoutes } from './modules/crm/crmRoutes.js';
+import { hrRoutes } from './modules/hr/hr.routes.js';
 import pool from './db/pool.js';
 import { auditContextMiddleware } from './middleware/auditContext.js';
 import { createRbacRoutes, initializeRbacMiddleware } from './rbac/index.js';
@@ -305,6 +307,9 @@ app.use('/api', quotationRoutes);
 app.use('/api/delivery', deliveryRoutes);
 app.use('/api/delivery-notes', deliveryNoteRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/crm', crmRoutes);
+app.use('/api/hr', hrRoutes);
+console.log('  HR & Payroll module loaded');
 // Accounting routes moved above for better priority
 
 // ============================================================
@@ -389,6 +394,7 @@ async function startServer() {
       console.log('   - Delivery (/api/delivery)');
       console.log('   - Import (/api/import)');
       console.log('   - Platform (/api/platform)');
+      console.log('   - CRM (/api/crm)');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
 

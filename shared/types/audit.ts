@@ -27,7 +27,16 @@ export type EntityType =
   | 'DISCOUNT'
   | 'SETTINGS'
   | 'REPORT'
-  | 'SYSTEM';
+  | 'SYSTEM'
+  | 'LEAD'
+  | 'OPPORTUNITY'
+  | 'ACTIVITY'
+  | 'OPPORTUNITY_DOCUMENT'
+  | 'DEPARTMENT'
+  | 'POSITION'
+  | 'EMPLOYEE'
+  | 'PAYROLL_PERIOD'
+  | 'PAYROLL_ENTRY';
 
 export type AuditAction =
   | 'CREATE'

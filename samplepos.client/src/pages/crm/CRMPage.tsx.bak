@@ -1,0 +1,1464 @@
+/**
+ * CRM Page — Main CRM module entry with tabs: Pipeline, Leads, Activities
+ */
+
+import { useState, useEffect, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { formatCurrency } from '../../utils/currency';
+import Layout from '../../components/Layout';
+import { apiClient, api } from '../../utils/api';
+import type { ApiResponse } from '../../utils/api';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface Lead {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  source: string | null;
+  notes: string | null;
+  status: string;
+  convertedCustomerId: string | null;
+  createdByName?: string;
+  createdAt: string;
+}
+
+interface Opportunity {
+  id: string;
+  customerId: string | null;
+  leadId: string | null;
+  title: string;
+  tenderRef: string | null;
+  procuringEntity: string | null;
+  deadline: string | null;
+  estimatedValue: number | null;
+  probability: number;
+  status: string;
+  assignedToName?: string;
+  customerName?: string;
+  leadName?: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+interface Activity {
+  id: string;
+  opportunityId: string | null;
+  leadId: string | null;
+  type: string;
+  title: string | null;
+  notes: string | null;
+  activityDate: string | null;
+  dueDate: string | null;
+  completed: boolean;
+  createdByName?: string;
+  createdAt: string;
+  opportunityTitle?: string;
+  leadName?: string;
+}
+
+interface PipelineSummary {
+  status: string;
+  count: number;
+  totalValue: number;
+}
+
+interface Customer {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+}
+
+// ============================================================================
+// API helpers
+// ============================================================================
+
+const crmApi = {
+  getLeads: (params: Record<string, unknown>) =>
+    apiClient.get<ApiResponse>('crm/leads', { params }),
+  createLead: (data: Record<string, unknown>) =>
+    apiClient.post<ApiResponse>('crm/leads', data),
+  updateLead: (id: string, data: Record<string, unknown>) =>
+    apiClient.put<ApiResponse>(`crm/leads/${id}`, data),
+  deleteLead: (id: string) =>
+    apiClient.delete<ApiResponse>(`crm/leads/${id}`),
+  convertLead: (id: string, customerId: string) =>
+    apiClient.post<ApiResponse>(`crm/leads/${id}/convert`, { customerId }),
+
+  getOpportunities: (params: Record<string, unknown>) =>
+    apiClient.get<ApiResponse>('crm/opportunities', { params }),
+  createOpportunity: (data: Record<string, unknown>) =>
+    apiClient.post<ApiResponse>('crm/opportunities', data),
+  updateOpportunityStatus: (id: string, status: string, lostReason?: string) =>
+    apiClient.put<ApiResponse>(`crm/opportunities/${id}/status`, { status, lostReason }),
+  deleteOpportunity: (id: string) =>
+    apiClient.delete<ApiResponse>(`crm/opportunities/${id}`),
+  getPipeline: () =>
+    apiClient.get<ApiResponse>('crm/opportunities/pipeline'),
+
+  getActivities: (params: Record<string, unknown>) =>
+    apiClient.get<ApiResponse>('crm/activities', { params }),
+  createActivity: (data: Record<string, unknown>) =>
+    apiClient.post<ApiResponse>('crm/activities', data),
+  updateActivity: (id: string, data: Record<string, unknown>) =>
+    apiClient.put<ApiResponse>(`crm/activities/${id}`, data),
+  deleteActivity: (id: string) =>
+    apiClient.delete<ApiResponse>(`crm/activities/${id}`),
+};
+
+// ============================================================================
+// CUSTOMER SEARCH SELECT (reusable dropdown)
+// ============================================================================
+
+function CustomerSearchSelect({
+  value,
+  onChange,
+  label = 'Customer',
+  required = false,
+}: {
+  value: string;
+  onChange: (id: string, name: string) => void;
+  label?: string;
+  required?: boolean;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const [selectedName, setSelectedName] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  const { data: customers } = useQuery({
+    queryKey: ['customers-search', search],
+    queryFn: () => api.customers.list({ page: 1, limit: 20, search: search || undefined } as Record<string, unknown>),
+    select: (res) => (res.data?.data || []) as Customer[],
+    enabled: open,
+  });
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label} {required && '*'}
+      </label>
+      <input
+        type="text"
+        value={open ? search : selectedName || ''}
+        onChange={(e) => { setSearch(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search customers..."
+        className="w-full border rounded-lg px-3 py-2 text-sm"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => { onChange('', ''); setSelectedName(''); setSearch(''); }}
+          className="absolute right-2 top-8 text-gray-400 hover:text-gray-600 text-sm"
+        >
+          ✕
+        </button>
+      )}
+      {open && customers && (
+        <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {customers.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">No customers found</div>
+          ) : (
+            customers.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  onChange(c.id, c.name);
+                  setSelectedName(c.name);
+                  setSearch('');
+                  setOpen(false);
+                }}
+                className={`block w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${
+                  c.id === value ? 'bg-blue-50 font-medium' : ''
+                }`}
+              >
+                <div className="font-medium">{c.name}</div>
+                {(c.phone || c.email) && (
+                  <div className="text-xs text-gray-400">{c.phone || c.email}</div>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// LEAD SEARCH SELECT (reusable dropdown for leads)
+// ============================================================================
+
+function LeadSearchSelect({
+  value,
+  onChange,
+  label = 'Lead',
+  required = false,
+  excludeConverted = false,
+}: {
+  value: string;
+  onChange: (id: string, name: string) => void;
+  label?: string;
+  required?: boolean;
+  excludeConverted?: boolean;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const [selectedName, setSelectedName] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  const { data: leads } = useQuery({
+    queryKey: ['leads-search', search, excludeConverted],
+    queryFn: () => crmApi.getLeads({ page: 1, limit: 20, search: search || undefined }),
+    select: (res) => {
+      const all = (res.data?.data || []) as Lead[];
+      return excludeConverted ? all.filter((l) => l.status !== 'CONVERTED') : all;
+    },
+    enabled: open,
+  });
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label} {required && '*'}
+      </label>
+      <input
+        type="text"
+        value={open ? search : selectedName || ''}
+        onChange={(e) => { setSearch(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search leads..."
+        className="w-full border rounded-lg px-3 py-2 text-sm"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => { onChange('', ''); setSelectedName(''); setSearch(''); }}
+          className="absolute right-2 top-8 text-gray-400 hover:text-gray-600 text-sm"
+        >
+          ✕
+        </button>
+      )}
+      {open && leads && (
+        <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {leads.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">No leads found</div>
+          ) : (
+            leads.map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => {
+                  onChange(l.id, l.name);
+                  setSelectedName(l.name);
+                  setSearch('');
+                  setOpen(false);
+                }}
+                className={`block w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${
+                  l.id === value ? 'bg-blue-50 font-medium' : ''
+                }`}
+              >
+                <div className="font-medium">{l.name}</div>
+                <div className="text-xs text-gray-400">
+                  {l.status} {l.source ? `· ${l.source}` : ''}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// OPPORTUNITY SEARCH SELECT (for activities)
+// ============================================================================
+
+function OpportunitySearchSelect({
+  value,
+  onChange,
+  label = 'Opportunity',
+  required = false,
+}: {
+  value: string;
+  onChange: (id: string, title: string) => void;
+  label?: string;
+  required?: boolean;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const [selectedTitle, setSelectedTitle] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  const { data: opps } = useQuery({
+    queryKey: ['opps-search', search],
+    queryFn: () => crmApi.getOpportunities({ page: 1, limit: 20, search: search || undefined }),
+    select: (res) => (res.data?.data || []) as Opportunity[],
+    enabled: open,
+  });
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label} {required && '*'}
+      </label>
+      <input
+        type="text"
+        value={open ? search : selectedTitle || ''}
+        onChange={(e) => { setSearch(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search opportunities..."
+        className="w-full border rounded-lg px-3 py-2 text-sm"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => { onChange('', ''); setSelectedTitle(''); setSearch(''); }}
+          className="absolute right-2 top-8 text-gray-400 hover:text-gray-600 text-sm"
+        >
+          ✕
+        </button>
+      )}
+      {open && opps && (
+        <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {opps.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">No opportunities found</div>
+          ) : (
+            opps.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => {
+                  onChange(o.id, o.title);
+                  setSelectedTitle(o.title);
+                  setSearch('');
+                  setOpen(false);
+                }}
+                className={`block w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${
+                  o.id === value ? 'bg-blue-50 font-medium' : ''
+                }`}
+              >
+                <div className="font-medium line-clamp-1">{o.title}</div>
+                <div className="text-xs text-gray-400">
+                  {o.status} {o.estimatedValue != null ? `· ${formatCurrency(o.estimatedValue)}` : ''}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// STATUS HELPERS
+// ============================================================================
+
+const LEAD_STATUSES = ['NEW', 'CONTACTED', 'QUALIFIED', 'CONVERTED', 'LOST'] as const;
+const OPP_STATUSES = ['OPEN', 'BIDDING', 'SUBMITTED', 'WON', 'LOST'] as const;
+const ACTIVITY_TYPES = ['CALL', 'EMAIL', 'MEETING', 'NOTE', 'TASK'] as const;
+
+function statusBadge(status: string) {
+  const map: Record<string, string> = {
+    NEW: 'bg-blue-100 text-blue-800',
+    CONTACTED: 'bg-yellow-100 text-yellow-800',
+    QUALIFIED: 'bg-purple-100 text-purple-800',
+    CONVERTED: 'bg-green-100 text-green-800',
+    OPEN: 'bg-blue-100 text-blue-800',
+    BIDDING: 'bg-yellow-100 text-yellow-800',
+    SUBMITTED: 'bg-indigo-100 text-indigo-800',
+    WON: 'bg-green-100 text-green-800',
+    LOST: 'bg-red-100 text-red-800',
+  };
+  return map[status] || 'bg-gray-100 text-gray-800';
+}
+
+function activityIcon(type: string) {
+  const map: Record<string, string> = {
+    CALL: '📞',
+    EMAIL: '📧',
+    MEETING: '🤝',
+    NOTE: '📝',
+    TASK: '✅',
+  };
+  return map[type] || '📋';
+}
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+type Tab = 'pipeline' | 'leads' | 'activities';
+
+export default function CRMPage() {
+  const [tab, setTab] = useState<Tab>('pipeline');
+
+  return (
+    <Layout>
+      <div className="p-4 lg:p-8 max-w-[1600px] mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">CRM</h1>
+          <p className="text-gray-500 mt-1">Manage leads, opportunities, and activities</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+          {(['pipeline', 'leads', 'activities'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                tab === t
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {t === 'pipeline' ? '🎯 Pipeline' : t === 'leads' ? '👤 Leads' : '📅 Activities'}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        {tab === 'pipeline' && <PipelineTab />}
+        {tab === 'leads' && <LeadsTab />}
+        {tab === 'activities' && <ActivitiesTab />}
+      </div>
+    </Layout>
+  );
+}
+
+// ============================================================================
+// PIPELINE TAB (Kanban)
+// ============================================================================
+
+function PipelineTab() {
+  const queryClient = useQueryClient();
+  const [showCreate, setShowCreate] = useState(false);
+
+  const { data: pipelineData } = useQuery({
+    queryKey: ['crm', 'pipeline'],
+    queryFn: () => crmApi.getPipeline(),
+    select: (res) => (res.data?.data || []) as PipelineSummary[],
+  });
+
+  const { data: oppData, isLoading } = useQuery({
+    queryKey: ['crm', 'opportunities'],
+    queryFn: () => crmApi.getOpportunities({ limit: 100 }),
+    select: (res) => (res.data?.data || []) as Opportunity[],
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status, lostReason }: { id: string; status: string; lostReason?: string }) =>
+      crmApi.updateOpportunityStatus(id, status, lostReason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['crm'] });
+    },
+  });
+
+  const columns = OPP_STATUSES.map((status) => ({
+    status,
+    opportunities: (oppData || []).filter((o) => o.status === status),
+    summary: (pipelineData || []).find((p) => p.status === status),
+  }));
+
+  const columnColors: Record<string, string> = {
+    OPEN: 'border-blue-300 bg-blue-50',
+    BIDDING: 'border-yellow-300 bg-yellow-50',
+    SUBMITTED: 'border-indigo-300 bg-indigo-50',
+    WON: 'border-green-300 bg-green-50',
+    LOST: 'border-red-300 bg-red-50',
+  };
+
+  return (
+    <div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        {columns.map((col) => (
+          <div key={col.status} className={`rounded-lg border-2 p-4 ${columnColors[col.status]}`}>
+            <div className="text-sm font-medium text-gray-700">{col.status}</div>
+            <div className="text-2xl font-bold">{col.summary?.count || 0}</div>
+            <div className="text-sm text-gray-500">
+              {formatCurrency(col.summary?.totalValue || 0)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-semibold">Opportunity Pipeline</h2>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+        >
+          + New Opportunity
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-12 text-gray-500">Loading pipeline...</div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 overflow-x-auto">
+          {columns.map((col) => (
+            <div key={col.status} className="min-w-[250px]">
+              <div className={`rounded-t-lg border-t-4 ${columnColors[col.status]} px-3 py-2`}>
+                <span className="font-semibold text-sm">{col.status}</span>
+                <span className="ml-2 text-xs text-gray-500">({col.opportunities.length})</span>
+              </div>
+              <div className="space-y-2 bg-gray-50 rounded-b-lg p-2 min-h-[200px]">
+                {col.opportunities.map((opp) => (
+                  <OpportunityCard
+                    key={opp.id}
+                    opportunity={opp}
+                    onStatusChange={(status, lostReason) =>
+                      statusMutation.mutate({ id: opp.id, status, lostReason })
+                    }
+                  />
+                ))}
+                {col.opportunities.length === 0 && (
+                  <div className="text-center text-gray-400 text-sm py-8">No opportunities</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showCreate && (
+        <CreateOpportunityModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            queryClient.invalidateQueries({ queryKey: ['crm'] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function OpportunityCard({
+  opportunity,
+  onStatusChange,
+}: {
+  opportunity: Opportunity;
+  onStatusChange: (status: string, lostReason?: string) => void;
+}) {
+  const [showActions, setShowActions] = useState(false);
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-3 hover:shadow-md transition-shadow">
+      <div className="flex justify-between items-start">
+        <h3 className="font-medium text-sm text-gray-900 line-clamp-2">{opportunity.title}</h3>
+        <div className="relative">
+          <button
+            onClick={() => setShowActions(!showActions)}
+            className="text-gray-400 hover:text-gray-600 p-1"
+          >
+            ⋮
+          </button>
+          {showActions && (
+            <div className="absolute right-0 top-6 bg-white border rounded-lg shadow-lg z-10 py-1 min-w-[140px]">
+              {OPP_STATUSES.filter((s) => s !== opportunity.status).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    if (s === 'LOST') {
+                      const reason = prompt('Reason for loss:');
+                      onStatusChange(s, reason || undefined);
+                    } else {
+                      onStatusChange(s);
+                    }
+                    setShowActions(false);
+                  }}
+                  className="block w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100"
+                >
+                  Move to {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {opportunity.customerName && (
+        <div className="text-xs text-gray-500 mt-1">🏢 {opportunity.customerName}</div>
+      )}
+      {opportunity.procuringEntity && (
+        <div className="text-xs text-gray-500">📋 {opportunity.procuringEntity}</div>
+      )}
+      {opportunity.estimatedValue != null && (
+        <div className="text-sm font-semibold text-gray-800 mt-2">
+          {formatCurrency(opportunity.estimatedValue)}
+        </div>
+      )}
+      <div className="flex items-center justify-between mt-2">
+        {opportunity.deadline && (
+          <span className="text-xs text-gray-400">⏰ {opportunity.deadline}</span>
+        )}
+        {opportunity.probability > 0 && (
+          <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{opportunity.probability}%</span>
+        )}
+      </div>
+      {opportunity.assignedToName && (
+        <div className="text-xs text-gray-400 mt-1">👤 {opportunity.assignedToName}</div>
+      )}
+    </div>
+  );
+}
+
+function CreateOpportunityModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [form, setForm] = useState({
+    title: '',
+    tenderRef: '',
+    procuringEntity: '',
+    deadline: '',
+    estimatedValue: '',
+    probability: '50',
+    notes: '',
+    customerId: '',
+    leadId: '',
+  });
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => crmApi.createOpportunity(data),
+    onSuccess: () => onCreated(),
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.customerId && !form.leadId) {
+      setError('An opportunity must be linked to a customer or a lead.');
+      return;
+    }
+    mutation.mutate({
+      title: form.title,
+      customerId: form.customerId || null,
+      leadId: form.leadId || null,
+      tenderRef: form.tenderRef || null,
+      procuringEntity: form.procuringEntity || null,
+      deadline: form.deadline || null,
+      estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : null,
+      probability: parseInt(form.probability),
+      notes: form.notes || null,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create Opportunity"
+      >
+        <h2 className="text-xl font-bold mb-4">New Opportunity</h2>
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {/* Owner: Customer or Lead (at least one required) */}
+          <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+            <p className="text-xs text-gray-500 font-medium uppercase">Link to Customer or Lead *</p>
+            <CustomerSearchSelect
+              value={form.customerId}
+              onChange={(id) => setForm({ ...form, customerId: id })}
+            />
+            <div className="text-center text-xs text-gray-400">— or —</div>
+            <LeadSearchSelect
+              value={form.leadId}
+              onChange={(id) => setForm({ ...form, leadId: id })}
+              excludeConverted
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              required
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tender Ref</label>
+              <input
+                value={form.tenderRef}
+                onChange={(e) => setForm({ ...form, tenderRef: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Procuring Entity</label>
+              <input
+                value={form.procuringEntity}
+                onChange={(e) => setForm({ ...form, procuringEntity: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+              <input
+                type="date"
+                value={form.deadline}
+                onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Value</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.estimatedValue}
+                onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Probability %</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={form.probability}
+                onChange={(e) => setForm({ ...form, probability: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              rows={2}
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50"
+            >
+              {mutation.isPending ? 'Creating...' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// LEADS TAB
+// ============================================================================
+
+function LeadsTab() {
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [search, setSearch] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['crm', 'leads', page, statusFilter, search],
+    queryFn: () =>
+      crmApi.getLeads({
+        page,
+        limit: 20,
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+        search: search || undefined,
+      }),
+    select: (res) => ({
+      leads: (res.data?.data || []) as Lead[],
+      pagination: res.data?.pagination as {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      } | undefined,
+    }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => crmApi.deleteLead(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['crm', 'leads'] }),
+  });
+
+  const leads = data?.leads || [];
+  const pagination = data?.pagination;
+
+  return (
+    <div>
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 mb-4">
+        <div className="flex gap-2 items-center flex-wrap">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search leads..."
+            className="border rounded-lg px-3 py-2 text-sm w-52"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="ALL">All Statuses</option>
+            {LEAD_STATUSES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+        >
+          + New Lead
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-12 text-gray-500">Loading leads...</div>
+      ) : leads.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <p className="text-4xl mb-2">👤</p>
+          <p>No leads found</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {leads.map((lead) => (
+                <tr key={lead.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{lead.name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {lead.phone && <div>📱 {lead.phone}</div>}
+                    {lead.email && <div>📧 {lead.email}</div>}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{lead.source || '—'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(lead.status)}`}>
+                      {lead.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {new Date(lead.createdAt).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3 text-right space-x-2">
+                    {lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (
+                      <button
+                        onClick={() => setConvertingLeadId(lead.id)}
+                        className="text-green-600 hover:text-green-800 text-sm font-medium"
+                      >
+                        Convert
+                      </button>
+                    )}
+                    {lead.status === 'CONVERTED' && (
+                      <span className="text-xs text-green-600">✓ Customer</span>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete lead "${lead.name}"?`)) {
+                          deleteMutation.mutate(lead.id);
+                        }
+                      }}
+                      className="text-red-600 hover:text-red-800 text-sm"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-4">
+          <button
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+            className="px-3 py-1 text-sm border rounded disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span className="px-3 py-1 text-sm text-gray-600">
+            Page {page} of {pagination.totalPages}
+          </span>
+          <button
+            disabled={page >= pagination.totalPages}
+            onClick={() => setPage(page + 1)}
+            className="px-3 py-1 text-sm border rounded disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {showCreate && (
+        <CreateLeadModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            queryClient.invalidateQueries({ queryKey: ['crm', 'leads'] });
+          }}
+        />
+      )}
+
+      {convertingLeadId && (
+        <ConvertLeadModal
+          leadId={convertingLeadId}
+          onClose={() => setConvertingLeadId(null)}
+          onConverted={() => {
+            setConvertingLeadId(null);
+            queryClient.invalidateQueries({ queryKey: ['crm', 'leads'] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// CONVERT LEAD MODAL
+// ============================================================================
+
+function ConvertLeadModal({
+  leadId,
+  onClose,
+  onConverted,
+}: {
+  leadId: string;
+  onClose: () => void;
+  onConverted: () => void;
+}) {
+  const [customerId, setCustomerId] = useState('');
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => crmApi.convertLead(leadId, customerId),
+    onSuccess: () => onConverted(),
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Convert Lead to Customer"
+      >
+        <h2 className="text-xl font-bold mb-2">Convert Lead</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Link this lead to an existing customer. The lead status will change to CONVERTED.
+        </p>
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+        <CustomerSearchSelect
+          value={customerId}
+          onChange={(id) => setCustomerId(id)}
+          label="Select Customer"
+          required
+        />
+        <div className="flex justify-end gap-3 pt-4">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (!customerId) {
+                setError('Please select a customer.');
+                return;
+              }
+              mutation.mutate();
+            }}
+            disabled={mutation.isPending || !customerId}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm disabled:opacity-50"
+          >
+            {mutation.isPending ? 'Converting...' : 'Convert'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateLeadModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [form, setForm] = useState({ name: '', phone: '', email: '', source: '', notes: '' });
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => crmApi.createLead(data),
+    onSuccess: () => onCreated(),
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutation.mutate({
+      name: form.name,
+      phone: form.phone || null,
+      email: form.email || null,
+      source: form.source || null,
+      notes: form.notes || null,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create Lead"
+      >
+        <h2 className="text-xl font-bold mb-4">New Lead</h2>
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              required
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <input
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
+            <select
+              value={form.source}
+              onChange={(e) => setForm({ ...form, source: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="">Select...</option>
+              <option value="Website">Website</option>
+              <option value="Referral">Referral</option>
+              <option value="Walk-in">Walk-in</option>
+              <option value="Phone">Phone</option>
+              <option value="Social Media">Social Media</option>
+              <option value="Tender Portal">Tender Portal</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              rows={2}
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50"
+            >
+              {mutation.isPending ? 'Creating...' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ACTIVITIES TAB
+// ============================================================================
+
+function ActivitiesTab() {
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [showCreate, setShowCreate] = useState(false);
+  const [showUpcoming, setShowUpcoming] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['crm', 'activities', page, typeFilter, showUpcoming],
+    queryFn: () =>
+      crmApi.getActivities({
+        page,
+        limit: 20,
+        type: typeFilter === 'ALL' ? undefined : typeFilter,
+        upcoming: showUpcoming ? 'true' : undefined,
+      }),
+    select: (res) => ({
+      activities: (res.data?.data || []) as Activity[],
+      pagination: res.data?.pagination as {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      } | undefined,
+    }),
+  });
+
+  const toggleComplete = useMutation({
+    mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
+      crmApi.updateActivity(id, { completed }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['crm', 'activities'] }),
+  });
+
+  const activities = data?.activities || [];
+  const pagination = data?.pagination;
+
+  return (
+    <div>
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 mb-4">
+        <div className="flex gap-2 items-center flex-wrap">
+          <select
+            value={typeFilter}
+            onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="ALL">All Types</option>
+            {ACTIVITY_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+          <label className="flex items-center gap-1.5 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={showUpcoming}
+              onChange={(e) => { setShowUpcoming(e.target.checked); setPage(1); }}
+              className="rounded"
+            />
+            Upcoming only
+          </label>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+        >
+          + New Activity
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-12 text-gray-500">Loading activities...</div>
+      ) : activities.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <p className="text-4xl mb-2">📅</p>
+          <p>No activities found</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {activities.map((activity) => (
+            <div
+              key={activity.id}
+              className={`bg-white rounded-lg shadow-sm border p-4 flex items-start gap-4 ${
+                activity.completed ? 'opacity-60' : ''
+              }`}
+            >
+              <button
+                onClick={() =>
+                  toggleComplete.mutate({
+                    id: activity.id,
+                    completed: !activity.completed,
+                  })
+                }
+                className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                  activity.completed
+                    ? 'bg-green-500 border-green-500 text-white'
+                    : 'border-gray-300 hover:border-blue-500'
+                }`}
+              >
+                {activity.completed && '✓'}
+              </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{activityIcon(activity.type)}</span>
+                  <span className={`font-medium text-sm ${activity.completed ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                    {activity.title || activity.type}
+                  </span>
+                  <span className="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600">
+                    {activity.type}
+                  </span>
+                </div>
+                {activity.notes && (
+                  <p className="text-sm text-gray-500 mt-1 line-clamp-2">{activity.notes}</p>
+                )}
+                <div className="flex gap-3 mt-2 text-xs text-gray-400">
+                  {activity.opportunityTitle && <span>🎯 {activity.opportunityTitle}</span>}
+                  {activity.leadName && <span>👤 {activity.leadName}</span>}
+                  {activity.dueDate && (
+                    <span className={
+                      !activity.completed && new Date(activity.dueDate) < new Date()
+                        ? 'text-red-500 font-medium'
+                        : ''
+                    }>
+                      ⏰ Due: {new Date(activity.dueDate).toLocaleDateString()}
+                    </span>
+                  )}
+                  {activity.createdByName && <span>by {activity.createdByName}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-4">
+          <button
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+            className="px-3 py-1 text-sm border rounded disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span className="px-3 py-1 text-sm text-gray-600">
+            Page {page} of {pagination.totalPages}
+          </span>
+          <button
+            disabled={page >= pagination.totalPages}
+            onClick={() => setPage(page + 1)}
+            className="px-3 py-1 text-sm border rounded disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {showCreate && (
+        <CreateActivityModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            queryClient.invalidateQueries({ queryKey: ['crm', 'activities'] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateActivityModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [form, setForm] = useState({
+    type: 'TASK' as string,
+    title: '',
+    notes: '',
+    dueDate: '',
+    activityDate: '',
+    opportunityId: '',
+    leadId: '',
+  });
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => crmApi.createActivity(data),
+    onSuccess: () => onCreated(),
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.opportunityId && !form.leadId) {
+      setError('An activity must be linked to an opportunity or a lead.');
+      return;
+    }
+    mutation.mutate({
+      type: form.type,
+      title: form.title || null,
+      notes: form.notes || null,
+      dueDate: form.dueDate || null,
+      activityDate: form.activityDate || null,
+      opportunityId: form.opportunityId || null,
+      leadId: form.leadId || null,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create Activity"
+      >
+        <h2 className="text-xl font-bold mb-4">New Activity</h2>
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {/* Parent: Opportunity or Lead (at least one required) */}
+          <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+            <p className="text-xs text-gray-500 font-medium uppercase">Link to Opportunity or Lead *</p>
+            <OpportunitySearchSelect
+              value={form.opportunityId}
+              onChange={(id) => setForm({ ...form, opportunityId: id })}
+            />
+            <div className="text-center text-xs text-gray-400">— or —</div>
+            <LeadSearchSelect
+              value={form.leadId}
+              onChange={(id) => setForm({ ...form, leadId: id })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
+            <select
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+            >
+              {ACTIVITY_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Activity Date</label>
+              <input
+                type="date"
+                value={form.activityDate}
+                onChange={(e) => setForm({ ...form, activityDate: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+              <input
+                type="date"
+                value={form.dueDate}
+                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              rows={3}
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50"
+            >
+              {mutation.isPending ? 'Creating...' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

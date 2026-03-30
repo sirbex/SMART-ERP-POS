@@ -56,6 +56,8 @@ import DeliveryPage from './pages/delivery/DeliveryPage';
 import DeliveryNotesPage from './pages/delivery-notes/DeliveryNotesPage';
 import ImportPage from './pages/ImportPage';
 import BarcodeLookupPage from './pages/inventory/BarcodeLookupPage';
+import CRMPage from './pages/crm/CRMPage';
+import HRPage from './pages/hr/HRPage';
 
 // Platform (Super Admin) imports
 import { PlatformAuthProvider, usePlatformAuth } from './contexts/PlatformAuthContext';
@@ -248,6 +250,26 @@ function App() {
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
                       <QuoteDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* CRM - ADMIN, MANAGER */}
+                <Route
+                  path="/crm"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <CRMPage />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* HR & Payroll - ADMIN, MANAGER */}
+                <Route
+                  path="/hr"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <HRPage />
                     </ProtectedRoute>
                   }
                 />

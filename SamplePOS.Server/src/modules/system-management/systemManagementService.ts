@@ -404,6 +404,7 @@ export const systemManagementService = {
     /**
      * Restore database from a backup
      * REQUIRES: Valid backup, maintenance mode
+     * Creates a pre-restore safety backup before overwriting
      */
     async restoreFromBackup(
         pool: Pool,
@@ -442,7 +443,27 @@ export const systemManagementService = {
         });
 
         // =========================================================================
-        // STEP 2: ENABLE MAINTENANCE MODE
+        // STEP 2: CREATE PRE-RESTORE SAFETY BACKUP
+        // =========================================================================
+        logger.info('Creating pre-restore safety backup...');
+        const safetyBackup = await this.createBackup(
+            pool,
+            userId,
+            userName,
+            `Pre-restore safety backup before restoring ${backup.backupNumber}`,
+            'FULL'
+        );
+
+        if (!safetyBackup || safetyBackup.status !== 'COMPLETED') {
+            throw new Error('Failed to create pre-restore safety backup. Restore aborted.');
+        }
+
+        logger.info('Pre-restore safety backup created', {
+            backupNumber: safetyBackup.backupNumber
+        });
+
+        // =========================================================================
+        // STEP 3: ENABLE MAINTENANCE MODE
         // =========================================================================
         await systemManagementRepository.enableMaintenanceMode(
             pool,
@@ -453,7 +474,7 @@ export const systemManagementService = {
 
         try {
             // =========================================================================
-            // STEP 3: EXECUTE RESTORE
+            // STEP 4: EXECUTE RESTORE
             // =========================================================================
             const dbUrl = process.env.DATABASE_URL || '';
             const dbName = dbUrl.split('/').pop()?.split('?')[0] || 'pos_system';
@@ -464,18 +485,40 @@ export const systemManagementService = {
 
             const env = { ...process.env, PGPASSWORD: dbPassword };
 
-            // pg_restore with clean option
-            const command = `pg_restore -c --if-exists -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} "${backup.filePath}"`;
+            // pg_restore with clean option + no-owner/no-privileges for portability
+            // --disable-triggers prevents FK constraint violations during restore
+            const command = `pg_restore -c --if-exists --no-owner --no-privileges --disable-triggers -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} "${backup.filePath}"`;
 
-            await execAsync(command, { env });
+            try {
+                await execAsync(command, { env, maxBuffer: 50 * 1024 * 1024 });
+            } catch (restoreError: unknown) {
+                // pg_restore exits with non-zero even on warnings (e.g., "table does not exist" 
+                // during DROP). Check stderr for actual fatal errors.
+                const errMsg = restoreError instanceof Error ? restoreError.message : String(restoreError);
+                const isFatal = errMsg.includes('FATAL') || errMsg.includes('could not connect');
+                if (isFatal) {
+                    throw new Error(`pg_restore fatal error: ${errMsg}`);
+                }
+                logger.warn('pg_restore completed with warnings (non-fatal)', {
+                    message: errMsg.substring(0, 500)
+                });
+            }
 
             // =========================================================================
-            // STEP 4: VALIDATE RESTORED DATA
+            // STEP 5: VALIDATE RESTORED DATA
             // =========================================================================
             const integrityResult = await systemManagementRepository.validateDatabaseIntegrity(pool);
 
+            // Post-restore: ANALYZE tables for accurate query plans
+            try {
+                await pool.query('ANALYZE');
+                logger.info('Post-restore ANALYZE completed');
+            } catch (analyzeErr) {
+                logger.warn('Post-restore ANALYZE failed', { error: analyzeErr });
+            }
+
             // =========================================================================
-            // STEP 5: INCREMENT RESTORE COUNT
+            // STEP 6: INCREMENT RESTORE COUNT
             // =========================================================================
             await systemManagementRepository.incrementRestoreCount(pool, backupId, userId);
 
@@ -483,6 +526,7 @@ export const systemManagementService = {
 
             logger.info('Database restore completed', {
                 backupNumber: backup.backupNumber,
+                safetyBackupNumber: safetyBackup.backupNumber,
                 duration: `${duration}ms`,
                 integrityValid: integrityResult.valid
             });

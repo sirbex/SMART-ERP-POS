@@ -406,6 +406,14 @@ export const systemManagementRepository = {
             'bank_recurring_rules',
             'bank_templates',
             'cash_registers',
+            'employees',
+            'departments',
+            'positions',
+            'discount_rules',
+            'discounts',
+            'pricing_tiers',
+            'invoice_settings',
+            'supplier_product_prices',
         ];
 
         // Transactional data tables (can be cleared)
@@ -473,6 +481,28 @@ export const systemManagementRepository = {
             'user_sessions',
             'cash_register_sessions',
             'cash_movements',
+            'cash_register_reconciliations',
+            'z_reports',
+            'customer_balance_audit',
+            'customer_ledger',
+            'supplier_ledger',
+            'product_valuation',
+            'product_inventory',
+            'import_jobs',
+            'import_job_errors',
+            'refresh_tokens',
+            'billing_events',
+            'sync_ledger',
+            'payroll_entries',
+            'payroll_periods',
+            'leads',
+            'opportunities',
+            'opportunity_items',
+            'opportunity_documents',
+            'activities',
+            'stock_adjustments',
+            'delivery_notes',
+            'delivery_note_lines',
         ];
 
         // Accounting data tables
@@ -794,6 +824,7 @@ export const systemManagementRepository = {
         );
         tablesCleared['customer_accounts'] = await safeDelete('customer_accounts', step++);
         tablesCleared['customer_ledger'] = await safeDelete('customer_ledger', step++);
+        tablesCleared['customer_balance_audit'] = await safeDelete('customer_balance_audit', step++);
 
         // Invoices
         tablesCleared['invoice_payments'] = await safeDelete('invoice_payments', step++);
@@ -850,6 +881,8 @@ export const systemManagementRepository = {
         tablesCleared['inventory_batches'] = await safeTruncate('inventory_batches', step++);
         tablesCleared['cost_layers'] = await safeTruncate('cost_layers', step++);
         tablesCleared['inventory_snapshots'] = await safeDelete('inventory_snapshots', step++);
+        tablesCleared['product_valuation'] = await safeDelete('product_valuation', step++);
+        tablesCleared['product_inventory'] = await safeDelete('product_inventory', step++);
 
         // =========================================================================
         // PHASE 5: DELIVERY & QUOTATIONS
@@ -964,6 +997,17 @@ export const systemManagementRepository = {
         tablesCleared['product_seasonality'] = await safeDelete('product_seasonality', step++);
         tablesCleared['demand_forecast_runs'] = await safeDelete('demand_forecast_runs', step++);
 
+        // Session tokens (stale after reset)
+        tablesCleared['refresh_tokens'] = await safeDelete('refresh_tokens', step++);
+
+        // Import data (job history - stale after reset)
+        tablesCleared['import_job_errors'] = await safeDelete('import_job_errors', step++);
+        tablesCleared['import_jobs'] = await safeDelete('import_jobs', step++);
+
+        // Multi-tenant/billing data
+        tablesCleared['billing_events'] = await safeDelete('billing_events', step++);
+        tablesCleared['sync_ledger'] = await safeDelete('sync_ledger', step++);
+
         // =========================================================================
         // PHASE 7B: CASH REGISTER DATA (sessions and movements are transactional)
         // =========================================================================
@@ -971,9 +1015,35 @@ export const systemManagementRepository = {
 
         // Cash movements must be deleted first (FK references sessions)
         tablesCleared['cash_movements'] = await safeDelete('cash_movements', step++);
+        // Cash register reconciliations (FK to sessions)
+        tablesCleared['cash_register_reconciliations'] = await safeDelete('cash_register_reconciliations', step++);
+        // Z-reports (FK to sessions)
+        tablesCleared['z_reports'] = await safeDelete('z_reports', step++);
         // Cash register sessions (transactional data)
         tablesCleared['cash_register_sessions'] = await safeDelete('cash_register_sessions', step++);
         // Note: cash_registers table is preserved (physical register configuration)
+
+        // =========================================================================
+        // PHASE 7C: HR & PAYROLL DATA (transactional payroll data, preserve master)
+        // =========================================================================
+        logger.info('Phase 7C: Clearing HR & Payroll transactional data...');
+
+        // Payroll entries reference payroll_periods and employees
+        tablesCleared['payroll_entries'] = await safeDelete('payroll_entries', step++);
+        tablesCleared['payroll_periods'] = await safeDelete('payroll_periods', step++);
+        // Note: employees, departments, positions are MASTER DATA - preserved
+
+        // =========================================================================
+        // PHASE 7D: CRM DATA (transactional CRM data, preserve contacts)
+        // =========================================================================
+        logger.info('Phase 7D: Clearing CRM transactional data...');
+
+        // CRM child tables first (FK ordering)
+        tablesCleared['opportunity_documents'] = await safeDelete('opportunity_documents', step++);
+        tablesCleared['opportunity_items'] = await safeDelete('opportunity_items', step++);
+        tablesCleared['activities'] = await safeDelete('activities', step++);
+        tablesCleared['opportunities'] = await safeDelete('opportunities', step++);
+        tablesCleared['leads'] = await safeDelete('leads', step++);
 
         // =========================================================================
         // PHASE 8: RECALCULATE ALL BALANCES (Using Database Functions)
@@ -1064,7 +1134,7 @@ export const systemManagementRepository = {
             try {
                 await client.query(`SAVEPOINT sp_reset_inventory_fallback`);
                 const fallbackResult = await client.query(`
-                    UPDATE product_inventory SET quantity_on_hand = 0, updated_at = NOW() 
+                    UPDATE products SET quantity_on_hand = 0, updated_at = NOW() 
                     WHERE quantity_on_hand != 0
                 `);
                 balancesReset['inventory'] = fallbackResult.rowCount || 0;
@@ -1179,7 +1249,7 @@ export const systemManagementRepository = {
         // Check for negative inventory
         try {
             const negInv = await pool.query(`
-        SELECT COUNT(*) as count FROM product_inventory WHERE quantity_on_hand < 0
+        SELECT COUNT(*) as count FROM products WHERE quantity_on_hand < 0
       `);
             if (parseInt(negInv.rows[0].count) > 0) {
                 issues.push(`Found ${negInv.rows[0].count} products with negative inventory`);

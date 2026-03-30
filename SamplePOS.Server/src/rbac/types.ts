@@ -11,7 +11,9 @@ export type PermissionModule =
   | 'system'
   | 'banking'
   | 'delivery'
-  | 'settings';
+  | 'settings'
+  | 'crm'
+  | 'hr';
 
 export type PermissionAction =
   | 'read'
@@ -24,7 +26,9 @@ export type PermissionAction =
   | 'export'
   | 'import'
   | 'reconcile'
-  | 'manage';
+  | 'manage'
+  | 'payroll_process'
+  | 'payroll_post';
 
 export interface Permission {
   key: string;

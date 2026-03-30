@@ -114,6 +114,21 @@ export const PERMISSIONS: Record<string, Permission> = {
   SETTINGS_READ: p('settings.read', 'settings', 'read', 'View application settings'),
   SETTINGS_UPDATE: p('settings.update', 'settings', 'update', 'Modify application settings'),
 
+  // CRM Module
+  CRM_READ: p('crm.read', 'crm', 'read', 'View CRM data (leads, opportunities, activities)'),
+  CRM_CREATE: p('crm.create', 'crm', 'create', 'Create leads and opportunities'),
+  CRM_UPDATE: p('crm.update', 'crm', 'update', 'Modify CRM records'),
+  CRM_DELETE: p('crm.delete', 'crm', 'delete', 'Delete CRM records'),
+  CRM_MANAGE: p('crm.manage', 'crm', 'manage', 'Manage opportunity pipeline'),
+
+  // HR & Payroll Module
+  HR_READ: p('hr.read', 'hr', 'read', 'View HR data (employees, departments, positions, payroll)'),
+  HR_CREATE: p('hr.create', 'hr', 'create', 'Create employees, departments, positions, payroll periods'),
+  HR_UPDATE: p('hr.update', 'hr', 'update', 'Modify HR records'),
+  HR_DELETE: p('hr.delete', 'hr', 'delete', 'Delete HR records'),
+  HR_PAYROLL_PROCESS: p('hr.payroll_process', 'hr', 'payroll_process', 'Process payroll (calculate entries)'),
+  HR_PAYROLL_POST: p('hr.payroll_post', 'hr', 'payroll_post', 'Post payroll to General Ledger'),
+
   // Inventory extended
   INVENTORY_STOCKCOUNT: p(
     'inventory.manage',

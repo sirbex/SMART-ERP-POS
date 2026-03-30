@@ -696,6 +696,9 @@ function ResetSection({
                             <li>Inventory batches and stock movements</li>
                             <li><strong>All accounting entries</strong> - GL entries, journal entries, ledger transactions</li>
                             <li><strong>Account balances reset to zero</strong></li>
+                            <li>HR payroll entries and payroll periods</li>
+                            <li>CRM leads, opportunities, and activities</li>
+                            <li>Delivery notes, quotations, and expenses</li>
                         </ul>
                         <p className="text-sm text-red-700 mt-2">
                             A backup will be created automatically before the reset.

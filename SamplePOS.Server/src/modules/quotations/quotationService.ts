@@ -827,4 +827,103 @@ export const quotationService = {
       await quotationRepository.deleteQuotation(client, id);
     });
   },
+
+  /**
+   * Create a quotation from a CRM opportunity.
+   * Called by CRM module when opportunity status transitions to WON.
+   * Reads opportunity_items and creates a standard quotation with those items.
+   *
+   * @param client - PoolClient (called within a transaction from CRM service)
+   * @param opportunityId - The opportunity UUID
+   * @param userId - The user performing the action
+   */
+  async createFromOpportunity(
+    client: import('pg').PoolClient,
+    opportunityId: string,
+    userId: string
+  ): Promise<QuotationDetail> {
+    // Read opportunity header
+    const oppResult = await client.query(
+      `SELECT o.*, c.name AS customer_name
+       FROM opportunities o
+       LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE o.id = $1`,
+      [opportunityId]
+    );
+    const opp = oppResult.rows[0];
+    if (!opp) throw new Error('Opportunity not found');
+
+    // Read opportunity items
+    const itemsResult = await client.query(
+      `SELECT * FROM opportunity_items WHERE opportunity_id = $1 ORDER BY sort_order, id`,
+      [opportunityId]
+    );
+
+    const items = itemsResult.rows.map((row: Record<string, unknown>, idx: number) => {
+      const qty = new Decimal(Number(row.quantity ?? 1));
+      const price = new Decimal(Number(row.estimated_price ?? 0));
+      const itemSubtotal = qty.times(price);
+      return {
+        lineNumber: idx + 1,
+        productId: null,
+        itemType: 'custom' as const,
+        sku: null,
+        description: String(row.description || `Item ${idx + 1}`),
+        notes: null,
+        quantity: qty.toNumber(),
+        unitPrice: price.toNumber(),
+        discountAmount: 0,
+        subtotal: itemSubtotal.toNumber(),
+        isTaxable: false,
+        taxRate: 0,
+        taxAmount: 0,
+        lineTotal: itemSubtotal.toNumber(),
+        uomId: null,
+        uomName: null,
+        unitCost: null,
+        costTotal: null,
+        productType: 'service',
+      };
+    });
+
+    // Calculate totals
+    let subtotal = new Decimal(0);
+    for (const item of items) {
+      subtotal = subtotal.plus(new Decimal(item.subtotal));
+    }
+
+    const validFrom = new Date().toLocaleDateString('en-CA');
+    const validUntilDate = new Date();
+    validUntilDate.setDate(validUntilDate.getDate() + 30);
+    const validUntil = validUntilDate.toLocaleDateString('en-CA');
+
+    // Create quotation header
+    const quotation = await quotationRepository.createQuotation(client, {
+      quoteType: 'standard',
+      customerId: opp.customer_id || null,
+      customerName: opp.customer_name || null,
+      customerPhone: null,
+      customerEmail: null,
+      description: `From opportunity: ${opp.title}${opp.tender_ref ? ` (Ref: ${opp.tender_ref})` : ''}`,
+      validFrom,
+      validUntil,
+      createdById: userId,
+      subtotal: subtotal.toNumber(),
+      discountAmount: 0,
+      taxAmount: 0,
+      totalAmount: subtotal.toNumber(),
+    });
+
+    // Create items
+    const createdItems = await quotationRepository.createQuotationItems(
+      client,
+      quotation.id,
+      items
+    );
+
+    return {
+      quotation: normalizeQuotation(quotation),
+      items: createdItems.map(normalizeQuotationItem),
+    };
+  },
 };

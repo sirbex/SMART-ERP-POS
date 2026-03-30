@@ -130,6 +130,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
       'banking',
       'delivery',
       'settings',
+      'hr',
     ].includes(module);
   },
   CASHIER: (key) => {

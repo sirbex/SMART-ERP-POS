@@ -30,6 +30,8 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600' },
     { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600' },
     { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500' },
+    { name: 'CRM', path: '/crm', icon: '🤝', color: 'text-violet-600' },
+    { name: 'HR & Payroll', path: '/hr', icon: '👥', color: 'text-pink-600' },
     { name: 'Delivery Notes', path: '/delivery-notes', icon: '📦', color: 'text-orange-600' },
     { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600' },
     { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600' },
