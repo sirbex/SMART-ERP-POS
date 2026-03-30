@@ -58,8 +58,7 @@ export const creditDebitNoteController = {
       const result = await creditDebitNoteService.createCreditNote(pool, data);
       res.status(201).json({
         success: true,
-        data: result.note,
-        lineItems: result.lineItems,
+        data: { note: result.note, lineItems: result.lineItems },
         message: `Credit note ${result.note.invoiceNumber} created as Draft`,
       });
     } catch (error: unknown) {
@@ -79,8 +78,7 @@ export const creditDebitNoteController = {
       const result = await creditDebitNoteService.createDebitNote(pool, data);
       res.status(201).json({
         success: true,
-        data: result.note,
-        lineItems: result.lineItems,
+        data: { note: result.note, lineItems: result.lineItems },
         message: `Debit note ${result.note.invoiceNumber} created as Draft`,
       });
     } catch (error: unknown) {
@@ -139,7 +137,7 @@ export const creditDebitNoteController = {
     const { id } = UuidParamSchema.parse(req.params);
     const result = await creditDebitNoteService.getNoteById(pool, id);
     if (!result) throw new NotFoundError('Credit/Debit note');
-    res.json({ success: true, data: result.note, lineItems: result.lineItems });
+    res.json({ success: true, data: { note: result.note, lineItems: result.lineItems } });
   }),
 
   getNotesForInvoice: asyncHandler(async (req: Request, res: Response) => {
@@ -164,8 +162,7 @@ export const supplierCreditDebitNoteController = {
       const result = await supplierCreditDebitNoteService.createCreditNote(pool, data);
       res.status(201).json({
         success: true,
-        data: result.note,
-        lineItems: result.lineItems,
+        data: { note: result.note, lineItems: result.lineItems },
         message: `Supplier credit note ${result.note.invoiceNumber} created as Draft`,
       });
     } catch (error: unknown) {
@@ -185,8 +182,7 @@ export const supplierCreditDebitNoteController = {
       const result = await supplierCreditDebitNoteService.createDebitNote(pool, data);
       res.status(201).json({
         success: true,
-        data: result.note,
-        lineItems: result.lineItems,
+        data: { note: result.note, lineItems: result.lineItems },
         message: `Supplier debit note ${result.note.invoiceNumber} created as Draft`,
       });
     } catch (error: unknown) {
@@ -245,6 +241,6 @@ export const supplierCreditDebitNoteController = {
     const { id } = UuidParamSchema.parse(req.params);
     const result = await supplierCreditDebitNoteService.getNoteById(pool, id);
     if (!result) throw new NotFoundError('Supplier credit/debit note');
-    res.json({ success: true, data: result.note, lineItems: result.lineItems });
+    res.json({ success: true, data: { note: result.note, lineItems: result.lineItems } });
   }),
 };

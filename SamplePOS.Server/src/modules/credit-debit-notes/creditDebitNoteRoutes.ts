@@ -22,18 +22,18 @@ creditDebitNoteRoutes.get(
   creditDebitNoteController.listNotes,
 );
 
+// Get all notes linked to a specific invoice (must come before /:id)
+creditDebitNoteRoutes.get(
+  '/customer/invoice/:id',
+  authenticate,
+  creditDebitNoteController.getNotesForInvoice,
+);
+
 // Get single customer note
 creditDebitNoteRoutes.get(
   '/customer/:id',
   authenticate,
   creditDebitNoteController.getNoteById,
-);
-
-// Get all notes linked to a specific invoice
-creditDebitNoteRoutes.get(
-  '/customer/invoice/:id',
-  authenticate,
-  creditDebitNoteController.getNotesForInvoice,
 );
 
 // Create customer credit note

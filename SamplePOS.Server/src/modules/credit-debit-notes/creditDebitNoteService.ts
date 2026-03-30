@@ -71,10 +71,11 @@ export const creditDebitNoteService = {
       // 3. Validate cumulative credit notes don't exceed invoice total
       if (input.noteType !== 'FULL') {
         const existingNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'CREDIT_NOTE');
-        const existingTotal = existingNotes.reduce((sum, n) => sum + n.totalAmount, 0);
-        if (existingTotal + total > invoice.totalAmount) {
+        const existingTotalDec = existingNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+        const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+        if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
           throw new Error(
-            `Credit note total (${total}) plus existing notes (${existingTotal}) would exceed invoice total (${invoice.totalAmount})`,
+            `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
           );
         }
       }
@@ -299,10 +300,11 @@ export const supplierCreditDebitNoteService = {
         const existing = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(
           client, input.invoiceId, 'SUPPLIER_CREDIT_NOTE',
         );
-        const existingTotal = existing.reduce((sum, n) => sum + n.totalAmount, 0);
-        if (existingTotal + total > invoice.totalAmount) {
+        const existingTotalDec = existing.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+        const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+        if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
           throw new Error(
-            `Credit note total (${total}) plus existing notes (${existingTotal}) would exceed invoice total (${invoice.totalAmount})`,
+            `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
           );
         }
       }
