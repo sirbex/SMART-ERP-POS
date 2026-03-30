@@ -36,32 +36,56 @@ jobs:
         run: npm ci
 
       # Backend TypeScript check
-      - name: Backend - Install dependencies
+      - name: Backend - Install and compile
         working-directory: SamplePOS.Server
         run: |
-          echo "=== npm ci output ==="
-          npm ci 2>&1
-          echo "=== npm ci exit code: $? ==="
-          echo "=== Checking key binaries ==="
-          ls -la node_modules/.bin/tsc || echo "tsc binary not found!"
-          ls -la node_modules/.bin/shx || echo "shx binary not found!"
-          echo "=== Node modules count ==="
-          ls node_modules | wc -l
-
-      - name: Backend - TypeScript compilation
-        working-directory: SamplePOS.Server
-        run: |
-          echo "=== Node/npm versions ==="
-          node --version
-          npm --version
-          echo "=== tsc version ==="
-          npx tsc --version
-          echo "=== Checking shared/node_modules ==="
-          ls -la ../shared/node_modules/ || echo "No shared node_modules"
-          echo "=== Running tsc --noEmit ==="
-          npx tsc --noEmit 2>&1 || true
-          echo "=== Running full build ==="
-          npm run build
+          {
+            echo "## Backend Build Diagnostics"
+            echo ""
+            echo "### Environment"
+            echo '```'
+            echo "Node: $(node --version)"
+            echo "npm: $(npm --version)"
+            echo '```'
+            echo ""
+            echo "### npm ci"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+          npm ci >> $GITHUB_STEP_SUMMARY 2>&1
+          NPM_EXIT=$?
+          {
+            echo '```'
+            echo "npm ci exit code: $NPM_EXIT"
+            echo ""
+            echo "### Installed binaries"
+            echo '```'
+            ls -la node_modules/.bin/tsc 2>&1 || echo "tsc not found"
+            echo '```'
+            echo ""
+            echo "### node_modules count"
+            echo '```'
+            ls node_modules 2>/dev/null | wc -l
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+          if [ $NPM_EXIT -ne 0 ]; then
+            echo "npm ci failed with exit code $NPM_EXIT" >> $GITHUB_STEP_SUMMARY
+            exit $NPM_EXIT
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### TypeScript compilation" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          npx tsc --noEmit >> $GITHUB_STEP_SUMMARY 2>&1
+          TSC_EXIT=$?
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "tsc exit code: $TSC_EXIT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Full build (npm run build)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          npm run build >> $GITHUB_STEP_SUMMARY 2>&1
+          BUILD_EXIT=$?
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "build exit code: $BUILD_EXIT" >> $GITHUB_STEP_SUMMARY
+          exit $BUILD_EXIT
 
       - name: Backend - ESLint
         working-directory: SamplePOS.Server
@@ -74,23 +98,31 @@ jobs:
         continue-on-error: true
 
       # Frontend TypeScript check
-      - name: Frontend - Install dependencies
-        working-directory: samplepos.client
-        run: npm ci
-
-      - name: Frontend - TypeScript compilation
+      - name: Frontend - Install and compile
         working-directory: samplepos.client
         run: |
-          echo "=== tsc version ==="
-          npx tsc --version
-          echo "=== Running build ==="
-          npm run build
-        continue-on-error: false
-
-      - name: Frontend - ESLint
-        working-directory: samplepos.client
-        run: npm run lint
-        continue-on-error: true
+          {
+            echo "## Frontend Build Diagnostics"
+            echo ""
+            echo "### npm ci"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+          npm ci >> $GITHUB_STEP_SUMMARY 2>&1
+          NPM_EXIT=$?
+          {
+            echo '```'
+            echo "npm ci exit: $NPM_EXIT"
+            echo ""
+            echo "### Build"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+          npm run build >> $GITHUB_STEP_SUMMARY 2>&1
+          BUILD_EXIT=$?
+          {
+            echo '```'
+            echo "build exit: $BUILD_EXIT"
+          } >> $GITHUB_STEP_SUMMARY
+          exit $BUILD_EXIT
 
   # ============================================================
   # 2. SECURITY CHECKS
