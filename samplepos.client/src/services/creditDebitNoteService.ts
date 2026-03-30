@@ -184,6 +184,11 @@ export const creditDebitNoteService = {
     return response.data;
   },
 
+  async getNotesForSupplierInvoice(invoiceId: string) {
+    const response = await api.get(`/credit-debit-notes/supplier/invoice/${invoiceId}`);
+    return response.data;
+  },
+
   async createSupplierCreditNote(data: CreateSupplierCreditNoteRequest) {
     const response = await api.post('/credit-debit-notes/supplier/credit-note', data);
     return response.data;

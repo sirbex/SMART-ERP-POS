@@ -269,6 +269,13 @@ export const supplierCreditDebitNoteController = {
     res.json({ success: true, data: { note: result.note, lineItems: result.lineItems } });
   }),
 
+  getNotesForInvoice: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await supplierCreditDebitNoteService.getNotesForInvoice(pool, id);
+    res.json({ success: true, data: result });
+  }),
+
   cancelNote: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const { id } = UuidParamSchema.parse(req.params);

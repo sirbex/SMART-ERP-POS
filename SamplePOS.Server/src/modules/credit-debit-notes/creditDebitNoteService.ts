@@ -146,6 +146,17 @@ export const creditDebitNoteService = {
         taxTotal = Money.add(taxTotal, lineTax);
       }
       const totalAmount = Money.add(subtotal, taxTotal);
+      const total = Money.toNumber(totalAmount);
+
+      // Validate cumulative debit notes don't exceed invoice total (SAP/Odoo compliance)
+      const existingDebitNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'DEBIT_NOTE');
+      const existingTotalDec = existingDebitNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+      const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+      if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
+        throw new Error(
+          `Debit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
+        );
+      }
 
       const noteNumber = await creditDebitNoteRepository.generateDebitNoteNumber(client);
 
@@ -458,6 +469,19 @@ export const supplierCreditDebitNoteService = {
         taxTotal = Money.add(taxTotal, lineTax);
       }
       const totalAmount = Money.add(subtotal, taxTotal);
+      const total = Money.toNumber(totalAmount);
+
+      // Validate cumulative debit notes don't exceed invoice total (SAP/Odoo compliance)
+      const existingDebitNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(
+        client, input.invoiceId, 'SUPPLIER_DEBIT_NOTE',
+      );
+      const existingTotalDec = existingDebitNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+      const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+      if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
+        throw new Error(
+          `Debit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
+        );
+      }
 
       const noteNumber = await supplierCreditDebitNoteRepository.generateSupplierDebitNoteNumber(client);
 
@@ -644,5 +668,17 @@ export const supplierCreditDebitNoteService = {
     if (!note) return null;
     const lineItems = await supplierCreditDebitNoteRepository.getSupplierInvoiceLineItems(pool, noteId);
     return { note, lineItems };
+  },
+
+  /**
+   * Get all notes linked to a specific supplier invoice.
+   */
+  async getNotesForInvoice(
+    pool: Pool,
+    invoiceId: string,
+  ) {
+    const creditNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(pool, invoiceId, 'SUPPLIER_CREDIT_NOTE');
+    const debitNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(pool, invoiceId, 'SUPPLIER_DEBIT_NOTE');
+    return { creditNotes, debitNotes };
   },
 };

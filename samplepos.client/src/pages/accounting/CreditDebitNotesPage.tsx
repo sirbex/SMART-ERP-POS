@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus } from 'lucide-react';
+import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus, XCircle } from 'lucide-react';
 import {
   Button,
   Input,
@@ -128,6 +128,18 @@ function CustomerNotesTab() {
     }
   };
 
+  const handleCancel = async (noteId: string) => {
+    const reason = window.prompt('Enter cancellation reason:');
+    if (!reason) return;
+    try {
+      await creditDebitNoteService.cancelCustomerNote(noteId, reason);
+      toast.success('Note cancelled with GL reversal');
+      fetchNotes();
+    } catch {
+      toast.error('Failed to cancel note');
+    }
+  };
+
   const filteredNotes = notes.filter(n =>
     !search || n.invoiceNumber.toLowerCase().includes(search.toLowerCase()) ||
     n.customerName.toLowerCase().includes(search.toLowerCase()) ||
@@ -239,6 +251,17 @@ function CustomerNotesTab() {
                         Post
                       </Button>
                     )}
+                    {note.status === 'Posted' && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleCancel(note.id)}
+                        className="flex items-center gap-1"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Cancel
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -325,6 +348,18 @@ function SupplierNotesTab() {
       fetchNotes();
     } catch {
       toast.error('Failed to post supplier note');
+    }
+  };
+
+  const handleCancel = async (noteId: string) => {
+    const reason = window.prompt('Enter cancellation reason:');
+    if (!reason) return;
+    try {
+      await creditDebitNoteService.cancelSupplierNote(noteId, reason);
+      toast.success('Supplier note cancelled with GL reversal');
+      fetchNotes();
+    } catch {
+      toast.error('Failed to cancel supplier note');
     }
   };
 
@@ -437,6 +472,17 @@ function SupplierNotesTab() {
                       >
                         <Check className="h-4 w-4" />
                         Post
+                      </Button>
+                    )}
+                    {note.status === 'POSTED' && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleCancel(note.id)}
+                        className="flex items-center gap-1"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Cancel
                       </Button>
                     )}
                   </div>

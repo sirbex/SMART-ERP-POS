@@ -79,6 +79,13 @@ creditDebitNoteRoutes.get(
   supplierCreditDebitNoteController.listNotes,
 );
 
+// Get all notes linked to a specific supplier invoice (must come before /:id)
+creditDebitNoteRoutes.get(
+  '/supplier/invoice/:id',
+  authenticate,
+  supplierCreditDebitNoteController.getNotesForInvoice,
+);
+
 // Get single supplier note
 creditDebitNoteRoutes.get(
   '/supplier/:id',
