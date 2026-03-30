@@ -632,7 +632,8 @@ export default function GoodsReceiptsPage() {
         lines,
       });
 
-      const rgrnId = (createResp as { data?: { data?: { id: string } } })?.data?.data?.id;
+      const respData = (createResp as { data?: { success?: boolean; data?: { returnGrn?: { id: string } } } })?.data;
+      const rgrnId = respData?.data?.returnGrn?.id;
       if (!rgrnId) throw new Error('Failed to create Return GRN');
 
       // Post it immediately (stock reduction)
