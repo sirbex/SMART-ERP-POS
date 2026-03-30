@@ -607,9 +607,9 @@ export default function GoodsReceiptsPage() {
         return {
           productId: item.productId,
           batchId: item.batchId || undefined,
-          uomId: item.uomId,
+          uomId: item.uomId || undefined,
           quantity: returnQuantities[key],
-          unitCost: item.unitCost,
+          unitCost: Number(item.unitCost) || 0,
         };
       });
 

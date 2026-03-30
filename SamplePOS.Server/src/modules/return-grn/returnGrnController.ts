@@ -28,11 +28,10 @@ const CreateReturnGrnSchema = z.object({
   reason: z.string().min(1, 'Reason is required').max(500),
   lines: z.array(z.object({
     productId: z.string().uuid(),
-    batchId: z.string().uuid().nullable(),
-    uomId: z.string().uuid().nullable(),
-    quantity: z.number().positive('Quantity must be positive'),
-    baseQuantity: z.number().positive('Base quantity must be positive'),
-    unitCost: z.number().nonnegative('Unit cost must be non-negative'),
+    batchId: z.string().uuid().nullish(),
+    uomId: z.string().uuid().nullish(),
+    quantity: z.coerce.number().positive('Quantity must be positive'),
+    unitCost: z.coerce.number().nonnegative('Unit cost must be non-negative'),
   })).min(1, 'At least one line item is required'),
 }).strict();
 

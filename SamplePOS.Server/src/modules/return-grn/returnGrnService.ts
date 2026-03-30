@@ -29,10 +29,9 @@ export interface CreateReturnGrnInput {
   createdBy: string;
   lines: Array<{
     productId: string;
-    batchId: string | null;
-    uomId: string | null;
+    batchId?: string | null;
+    uomId?: string | null;
     quantity: number;
-    baseQuantity: number;
     unitCost: number;
   }>;
 }
@@ -81,19 +80,34 @@ export const returnGrnService = {
       // 4. Create line items with validation
       const lines: ReturnGrnLine[] = [];
       for (const line of input.lines) {
-        if (line.baseQuantity <= 0) throw new Error('Return quantity must be positive');
+        if (line.quantity <= 0) throw new Error('Return quantity must be positive');
+
+        // Look up conversion factor for UoM (default 1 = base unit)
+        let conversionFactor = 1;
+        if (line.uomId) {
+          const cfResult = await client.query(
+            `SELECT conversion_factor FROM product_uoms WHERE product_id = $1 AND uom_id = $2`,
+            [line.productId, line.uomId]
+          );
+          if (cfResult.rows.length > 0) {
+            conversionFactor = Number(cfResult.rows[0].conversion_factor) || 1;
+          }
+        }
+        const baseQuantity = Money.toNumber(
+          Money.multiply(Money.parseDb(line.quantity), Money.parseDb(conversionFactor))
+        );
 
         const lineTotal = Money.toNumber(
-          Money.multiply(Money.parseDb(line.baseQuantity), Money.parseDb(line.unitCost))
+          Money.multiply(Money.parseDb(baseQuantity), Money.parseDb(line.unitCost))
         );
 
         const created = await returnGrnRepository.createLine(client, {
           rgrnId: returnGrn.id,
           productId: line.productId,
-          batchId: line.batchId,
-          uomId: line.uomId,
+          batchId: line.batchId || null,
+          uomId: line.uomId || null,
           quantity: line.quantity,
-          baseQuantity: line.baseQuantity,
+          baseQuantity,
           unitCost: line.unitCost,
           lineTotal,
         });
@@ -251,7 +265,15 @@ export const returnGrnService = {
    * Get returnable items for a GRN (for UI).
    */
   async getReturnableItems(pool: Pool, grnId: string) {
-    return returnGrnRepository.getReturnableItems(pool, grnId);
+    const items = await returnGrnRepository.getReturnableItems(pool, grnId);
+    return items.map(item => ({
+      ...item,
+      conversionFactor: Number(item.conversionFactor) || 1,
+      receivedQuantity: Number(item.receivedQuantity) || 0,
+      unitCost: Number(item.unitCost) || 0,
+      returnedQuantity: Number(item.returnedQuantity) || 0,
+      returnableQuantity: Number(item.returnableQuantity) || 0,
+    }));
   },
 
   /**
