@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3, Calculator, TrendingUp, BookOpen, CreditCard, DollarSign,
   Building, Truck, FileText, Calendar, Scale, ClipboardCheck,
-  ChevronDown, ChevronRight, Home, ArrowLeft, Menu, X, Building2
+  ChevronDown, ChevronRight, Home, ArrowLeft, Menu, X, Building2, FileMinus
 } from 'lucide-react';
 
 interface AccountingLayoutProps {
@@ -82,6 +82,12 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           path: '/accounting/supplier-payments',
           icon: <Truck className="h-4 w-4" />,
           description: 'Bills and payments'
+        },
+        {
+          name: 'Credit/Debit Notes',
+          path: '/accounting/credit-debit-notes',
+          icon: <FileMinus className="h-4 w-4" />,
+          description: 'Customer & supplier notes'
         }
       ]
     },

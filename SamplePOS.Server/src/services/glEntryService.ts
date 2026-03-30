@@ -83,6 +83,10 @@ export const AccountCodes = {
   SHRINKAGE: '5110',
   DAMAGE: '5120',
   EXPIRY: '5130',
+
+  // Returns & Allowances
+  SALES_RETURNS: '4010',
+  PURCHASE_RETURNS: '5010',
 };
 
 // =============================================================================
@@ -1595,6 +1599,279 @@ export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool
   }
 }
 
+// =============================================================================
+// CREDIT NOTE / DEBIT NOTE JOURNAL ENTRIES
+// =============================================================================
+
+export interface CreditNoteGLData {
+  noteId: string;
+  noteNumber: string;
+  noteDate: string;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  customerId?: string;
+  customerName?: string;
+  supplierId?: string;
+  supplierName?: string;
+}
+
+/**
+ * Customer Credit Note GL posting.
+ * Reverses the original invoice impact on AR and revenue.
+ *
+ * DR  Sales Returns & Allowances (4010) — subtotal
+ * DR  Tax Payable / Output VAT (2300) — tax
+ * CR  Accounts Receivable (1200) — total
+ */
+export async function recordCustomerCreditNoteToGL(
+  data: CreditNoteGLData,
+  pool: pg.Pool = globalPool,
+): Promise<void> {
+  try {
+    const lines: JournalLine[] = [];
+
+    if (data.subtotal > 0) {
+      lines.push({
+        accountCode: AccountCodes.SALES_RETURNS,
+        description: `Credit note ${data.noteNumber} - sales return`,
+        debitAmount: data.subtotal,
+        creditAmount: 0,
+      });
+    }
+
+    if (data.taxAmount > 0) {
+      lines.push({
+        accountCode: AccountCodes.TAX_PAYABLE,
+        description: `Credit note ${data.noteNumber} - output VAT reversal`,
+        debitAmount: data.taxAmount,
+        creditAmount: 0,
+      });
+    }
+
+    lines.push({
+      accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+      description: `Credit note ${data.noteNumber} - reduce AR`,
+      debitAmount: 0,
+      creditAmount: data.totalAmount,
+      entityType: 'customer',
+      entityId: data.customerId,
+    });
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.noteDate,
+      description: `Customer credit note ${data.noteNumber}${data.customerName ? ` for ${data.customerName}` : ''}`,
+      referenceType: 'CREDIT_NOTE',
+      referenceId: data.noteId,
+      referenceNumber: data.noteNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `CREDIT_NOTE-${data.noteId}`,
+    }, pool);
+
+    logger.info('Recorded customer credit note to GL', {
+      noteId: data.noteId,
+      noteNumber: data.noteNumber,
+      totalAmount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record customer credit note to GL', { error, data });
+    throw new Error(`GL posting failed for credit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Customer Debit Note GL posting.
+ * Adds additional charges to a customer's AR balance.
+ *
+ * DR  Accounts Receivable (1200) — total
+ * CR  Sales Revenue (4000) — subtotal
+ * CR  Tax Payable / Output VAT (2300) — tax
+ */
+export async function recordCustomerDebitNoteToGL(
+  data: CreditNoteGLData,
+  pool: pg.Pool = globalPool,
+): Promise<void> {
+  try {
+    const lines: JournalLine[] = [];
+
+    lines.push({
+      accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+      description: `Debit note ${data.noteNumber} - increase AR`,
+      debitAmount: data.totalAmount,
+      creditAmount: 0,
+      entityType: 'customer',
+      entityId: data.customerId,
+    });
+
+    if (data.subtotal > 0) {
+      lines.push({
+        accountCode: AccountCodes.SALES_REVENUE,
+        description: `Debit note ${data.noteNumber} - additional revenue`,
+        debitAmount: 0,
+        creditAmount: data.subtotal,
+      });
+    }
+
+    if (data.taxAmount > 0) {
+      lines.push({
+        accountCode: AccountCodes.TAX_PAYABLE,
+        description: `Debit note ${data.noteNumber} - output VAT`,
+        debitAmount: 0,
+        creditAmount: data.taxAmount,
+      });
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.noteDate,
+      description: `Customer debit note ${data.noteNumber}${data.customerName ? ` for ${data.customerName}` : ''}`,
+      referenceType: 'DEBIT_NOTE',
+      referenceId: data.noteId,
+      referenceNumber: data.noteNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DEBIT_NOTE-${data.noteId}`,
+    }, pool);
+
+    logger.info('Recorded customer debit note to GL', {
+      noteId: data.noteId,
+      noteNumber: data.noteNumber,
+      totalAmount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record customer debit note to GL', { error, data });
+    throw new Error(`GL posting failed for debit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Supplier Credit Note GL posting.
+ * Supplier has issued a credit — reduces our AP liability.
+ *
+ * DR  Accounts Payable (2100) — total (we owe less)
+ * CR  Purchase Returns & Allowances (5010) — subtotal
+ * CR  Tax Payable / Input VAT (2300) — tax
+ */
+export async function recordSupplierCreditNoteToGL(
+  data: CreditNoteGLData,
+  pool: pg.Pool = globalPool,
+): Promise<void> {
+  try {
+    const lines: JournalLine[] = [];
+
+    lines.push({
+      accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+      description: `Supplier credit note ${data.noteNumber} - reduce AP`,
+      debitAmount: data.totalAmount,
+      creditAmount: 0,
+      entityType: 'supplier',
+      entityId: data.supplierId,
+    });
+
+    if (data.subtotal > 0) {
+      lines.push({
+        accountCode: AccountCodes.PURCHASE_RETURNS,
+        description: `Supplier credit note ${data.noteNumber} - purchase return`,
+        debitAmount: 0,
+        creditAmount: data.subtotal,
+      });
+    }
+
+    if (data.taxAmount > 0) {
+      lines.push({
+        accountCode: AccountCodes.TAX_PAYABLE,
+        description: `Supplier credit note ${data.noteNumber} - input VAT reversal`,
+        debitAmount: 0,
+        creditAmount: data.taxAmount,
+      });
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.noteDate,
+      description: `Supplier credit note ${data.noteNumber}${data.supplierName ? ` from ${data.supplierName}` : ''}`,
+      referenceType: 'SUPPLIER_CREDIT_NOTE',
+      referenceId: data.noteId,
+      referenceNumber: data.noteNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `SUPPLIER_CREDIT_NOTE-${data.noteId}`,
+    }, pool);
+
+    logger.info('Recorded supplier credit note to GL', {
+      noteId: data.noteId,
+      noteNumber: data.noteNumber,
+      totalAmount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record supplier credit note to GL', { error, data });
+    throw new Error(`GL posting failed for supplier credit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Supplier Debit Note GL posting.
+ * We charge the supplier more — increases our AP obligation or asset.
+ *
+ * DR  Inventory (1300) — subtotal (additional cost)
+ * DR  Tax Payable / Input VAT (2300) — tax
+ * CR  Accounts Payable (2100) — total
+ */
+export async function recordSupplierDebitNoteToGL(
+  data: CreditNoteGLData,
+  pool: pg.Pool = globalPool,
+): Promise<void> {
+  try {
+    const lines: JournalLine[] = [];
+
+    if (data.subtotal > 0) {
+      lines.push({
+        accountCode: AccountCodes.INVENTORY,
+        description: `Supplier debit note ${data.noteNumber} - additional cost`,
+        debitAmount: data.subtotal,
+        creditAmount: 0,
+      });
+    }
+
+    if (data.taxAmount > 0) {
+      lines.push({
+        accountCode: AccountCodes.TAX_PAYABLE,
+        description: `Supplier debit note ${data.noteNumber} - input VAT`,
+        debitAmount: data.taxAmount,
+        creditAmount: 0,
+      });
+    }
+
+    lines.push({
+      accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+      description: `Supplier debit note ${data.noteNumber} - increase AP`,
+      debitAmount: 0,
+      creditAmount: data.totalAmount,
+      entityType: 'supplier',
+      entityId: data.supplierId,
+    });
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.noteDate,
+      description: `Supplier debit note ${data.noteNumber}${data.supplierName ? ` from ${data.supplierName}` : ''}`,
+      referenceType: 'SUPPLIER_DEBIT_NOTE',
+      referenceId: data.noteId,
+      referenceNumber: data.noteNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `SUPPLIER_DEBIT_NOTE-${data.noteId}`,
+    }, pool);
+
+    logger.info('Recorded supplier debit note to GL', {
+      noteId: data.noteId,
+      noteNumber: data.noteNumber,
+      totalAmount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record supplier debit note to GL', { error, data });
+    throw new Error(`GL posting failed for supplier debit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export default {
   AccountCodes,
   recordSaleToGL,
@@ -1612,4 +1889,8 @@ export default {
   recordStockMovementToGL,
   recordExpenseApprovalToGL,
   recordExpensePaymentToGL,
+  recordCustomerCreditNoteToGL,
+  recordCustomerDebitNoteToGL,
+  recordSupplierCreditNoteToGL,
+  recordSupplierDebitNoteToGL,
 };

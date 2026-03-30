@@ -47,6 +47,7 @@ import ExpenseCategoriesPage from './pages/accounting/ExpenseCategoriesPage';
 import ComprehensiveInvoicesPage from './pages/accounting/ComprehensiveInvoicesPage';
 import CustomerPaymentsPage from './pages/accounting/CustomerPaymentsPage';
 import SupplierPaymentsPage from './pages/accounting/SupplierPaymentsPage';
+import CreditDebitNotesPage from './pages/accounting/CreditDebitNotesPage';
 import ProfitLossPage from './pages/ProfitLossPage';
 import ReconciliationPage from './pages/ReconciliationPage';
 import JournalEntriesPage from './pages/JournalEntriesPage';
@@ -401,6 +402,16 @@ function App() {
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
                       <AccountingLayout>
                         <SupplierPaymentsPage />
+                      </AccountingLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/accounting/credit-debit-notes"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <AccountingLayout>
+                        <CreditDebitNotesPage />
                       </AccountingLayout>
                     </ProtectedRoute>
                   }

@@ -49,6 +49,7 @@ import { createSupplierPaymentRoutes } from './modules/supplier-payments/supplie
 import { cashRegisterRoutes } from './modules/cash-register/index.js';
 import { crmRoutes } from './modules/crm/crmRoutes.js';
 import { hrRoutes } from './modules/hr/hr.routes.js';
+import { creditDebitNoteRoutes } from './modules/credit-debit-notes/creditDebitNoteRoutes.js';
 import pool from './db/pool.js';
 import { auditContextMiddleware } from './middleware/auditContext.js';
 import { createRbacRoutes, initializeRbacMiddleware } from './rbac/index.js';
@@ -288,6 +289,7 @@ app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/goods-receipts', goodsReceiptRoutes);
 app.use('/api/stock-movements', stockMovementRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/credit-debit-notes', creditDebitNoteRoutes);
 app.use('/api/settings/invoice', invoiceSettingsRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/reports', createReportsRouter(pool));

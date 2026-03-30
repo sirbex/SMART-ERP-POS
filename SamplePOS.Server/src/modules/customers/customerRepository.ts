@@ -424,7 +424,10 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
   // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
     `WITH debits AS (
-       SELECT COALESCE(SUM(i."TotalAmount"),0) AS amt
+       SELECT COALESCE(SUM(
+         CASE WHEN i.document_type IS NULL OR i.document_type = 'INVOICE' OR i.document_type = 'DEBIT_NOTE'
+              THEN i."TotalAmount" ELSE 0 END
+       ),0) AS amt
        FROM invoices i
        WHERE i."CustomerId" = $1
          AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
@@ -435,9 +438,17 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
        FROM invoice_payments ip
        INNER JOIN invoices i ON i."Id" = ip.invoice_id
        WHERE i."CustomerId" = $1 AND ip.payment_date::date < $2
+     ),
+     credit_notes AS (
+       SELECT COALESCE(SUM(i."TotalAmount"),0) AS amt
+       FROM invoices i
+       WHERE i."CustomerId" = $1
+         AND i.document_type = 'CREDIT_NOTE'
+         AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
+         AND i."InvoiceDate" < $2
      )
-     SELECT (d.amt - c.amt) AS opening
-     FROM debits d, credits c`,
+     SELECT (d.amt - c.amt - cn.amt) AS opening
+     FROM debits d, credits c, credit_notes cn`,
     [customerId, start]
   );
   return parseFloat(res.rows[0]?.opening ?? 0);
@@ -463,6 +474,37 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
         0::numeric as credit
       FROM invoices i
       WHERE i."CustomerId" = $1
+        AND (i.document_type IS NULL OR i.document_type = 'INVOICE')
+        AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
+        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
+    )
+    UNION ALL
+    (
+      SELECT 
+        i."InvoiceDate" as date,
+        'CREDIT_NOTE' as type,
+        i."InvoiceNumber" as reference,
+        CONCAT('Credit Note ', i."InvoiceNumber", ' - ', COALESCE(i.reason, '')) as description,
+        0::numeric as debit,
+        i."TotalAmount" as credit
+      FROM invoices i
+      WHERE i."CustomerId" = $1
+        AND i.document_type = 'CREDIT_NOTE'
+        AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
+        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
+    )
+    UNION ALL
+    (
+      SELECT 
+        i."InvoiceDate" as date,
+        'DEBIT_NOTE' as type,
+        i."InvoiceNumber" as reference,
+        CONCAT('Debit Note ', i."InvoiceNumber", ' - ', COALESCE(i.reason, '')) as description,
+        i."TotalAmount" as debit,
+        0::numeric as credit
+      FROM invoices i
+      WHERE i."CustomerId" = $1
+        AND i.document_type = 'DEBIT_NOTE'
         AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
         AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
     )
