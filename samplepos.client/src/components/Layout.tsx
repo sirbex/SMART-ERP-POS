@@ -31,8 +31,8 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600' },
     { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500' },
     { name: 'CRM', path: '/crm', icon: '🤝', color: 'text-violet-600' },
-    { name: 'HR & Payroll', path: '/hr', icon: '👥', color: 'text-pink-600' },
-    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📦', color: 'text-orange-600' },
+    { name: 'HR & Payroll', path: '/hr', icon: '📇', color: 'text-pink-600' },
+    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📋', color: 'text-orange-600' },
     { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600' },
     { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600' },
     { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600' },
@@ -103,8 +103,8 @@ export default function Layout({ children }: LayoutProps) {
                 <Link
                   to={item.path}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${isActive(item.path)
-                    ? 'bg-blue-50 text-blue-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-blue-50 text-blue-700 font-bold'
+                    : 'text-gray-700 hover:bg-gray-100 font-semibold'
                     }`}
                   title={!sidebarOpen && isDesktop ? item.name : undefined}
                   onClick={() => {
@@ -113,7 +113,7 @@ export default function Layout({ children }: LayoutProps) {
                     }
                   }}
                 >
-                  <span className={`text-2xl ${item.color}`}>{item.icon}</span>
+                  <span className={`text-xl ${item.color}`}>{item.icon}</span>
                   {(sidebarOpen || !isDesktop) && (
                     <span className="text-sm whitespace-nowrap">{item.name}</span>
                   )}
