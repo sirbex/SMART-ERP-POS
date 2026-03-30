@@ -399,22 +399,19 @@ jobs:
         run: |
           echo "🚀 Checking deployment readiness..."
           
-          # Check for critical files
-          REQUIRED_FILES="
-            SamplePOS.Server/dist/server.js
-            samplepos.client/dist/index.html
-          "
+          # Check for critical files (tsc outputs under nested path due to composite project)
+          if [ -f "SamplePOS.Server/dist/server.js" ] || [ -f "SamplePOS.Server/dist/SamplePOS.Server/src/server.js" ] || [ -f "SamplePOS.Server/dist/src/server.js" ]; then
+            echo "✅ Backend build artifact found"
+          else
+            echo "❌ Missing backend build artifact"
+            find SamplePOS.Server/dist -name "server.js" 2>/dev/null || echo "No server.js found in dist"
+            exit 1
+          fi
           
-          MISSING_FILES=0
-          for file in $REQUIRED_FILES; do
-            if [ ! -f "$file" ]; then
-              echo "❌ Missing required file: $file"
-              MISSING_FILES=1
-            fi
-          done
-          
-          if [ $MISSING_FILES -eq 1 ]; then
-            echo "❌ DEPLOYMENT BLOCKED: Required files missing!"
+          if [ -f "samplepos.client/dist/index.html" ]; then
+            echo "✅ Frontend build artifact found"
+          else
+            echo "❌ Missing frontend build artifact"
             exit 1
           fi
           
