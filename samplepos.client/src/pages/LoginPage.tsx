@@ -5,6 +5,7 @@ import { api } from '../utils/api';
 import { TwoFactorVerifyModal } from '../components/auth/TwoFactorVerifyModal';
 import type { UserRole } from '../types';
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff } from 'lucide-react';
+import { useTenant } from '../contexts/TenantContext';
 
 /** Shape returned by POST /auth/login inside `data.data` */
 interface LoginResponseData {
@@ -178,6 +179,8 @@ export default function LoginPage() {
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const { login, isAuthenticated } = useAuth();
+  const { config } = useTenant();
+  const brandName = config.branding.companyName || config.name || 'SMART ERP';
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -361,7 +364,7 @@ export default function LoginPage() {
             <Store className="w-9 h-9 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
-            SMART ERP
+            {brandName}
           </h1>
           <p className="mt-1 text-sm text-gray-500">
             Point of Sale &amp; Inventory Management
@@ -477,7 +480,7 @@ export default function LoginPage() {
 
         {/* Copyright */}
         <p className="mt-6 text-center text-xs text-gray-400">
-          &copy; {new Date().getFullYear()} SMART ERP. All rights reserved.
+          &copy; {new Date().getFullYear()} {brandName}. All rights reserved.
         </p>
       </div>
     </div>

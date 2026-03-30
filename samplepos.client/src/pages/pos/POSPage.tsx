@@ -2529,7 +2529,7 @@ export default function POSPage() {
           />
           <aside className="fixed inset-y-0 left-0 w-64 bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-left duration-200">
             <div className="h-14 flex items-center justify-between px-4 border-b">
-              <span className="text-lg font-bold text-gray-900">SMART ERP</span>
+              <span className="text-lg font-bold text-gray-900">{invoiceSettings?.companyName || 'SMART ERP'}</span>
               <button
                 onClick={() => setShowNavDrawer(false)}
                 className="p-1.5 rounded-lg hover:bg-gray-100"

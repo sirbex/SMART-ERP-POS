@@ -179,11 +179,16 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
             font-size: 12px;
             max-width: 80mm;
             margin: 0 auto;
+            color: #000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           h1 {
             text-align: center;
-            font-size: 16px;
+            font-size: 18px;
+            font-weight: bold;
             margin: 10px 0;
+            letter-spacing: 1px;
           }
           .header {
             text-align: center;
@@ -207,6 +212,7 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
           th, td {
             padding: 5px;
             text-align: left;
+            font-weight: bold;
           }
           th {
             border-bottom: 1px solid #000;
@@ -235,12 +241,12 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
       <body>
         <div class="header">
           <h1>${data.companyName || 'RECEIPT'}</h1>
-          ${data.companyAddress ? `<div style="font-size: 10px; color: #666;">${data.companyAddress}</div>` : ''}
-          ${data.companyPhone ? `<div style="font-size: 10px; color: #666;">${data.companyPhone}</div>` : ''}
-          <div style="margin-top: 8px;">Sale #: ${data.saleNumber}</div>
-          <div>Date: ${data.saleDate}</div>
-          ${data.customerName ? `<div>Customer: ${data.customerName}</div>` : ''}
-          ${data.cashierName ? `<div>Served by: ${data.cashierName}</div>` : ''}
+          ${data.companyAddress ? `<div style="font-size: 11px; font-weight: bold;">${data.companyAddress}</div>` : ''}
+          ${data.companyPhone ? `<div style="font-size: 11px; font-weight: bold;">${data.companyPhone}</div>` : ''}
+          <div style="margin-top: 8px; font-weight: bold;">Sale #: ${data.saleNumber}</div>
+          <div style="font-weight: bold;">Date: ${data.saleDate}</div>
+          ${data.customerName ? `<div style="font-weight: bold;">Customer: ${data.customerName}</div>` : ''}
+          ${data.cashierName ? `<div style="font-weight: bold;">Served by: ${data.cashierName}</div>` : ''}
         </div>
 
         ${data.items && data.items.length > 0 ? `
@@ -404,6 +410,10 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
             max-width: 58mm;
             margin: 0 auto;
             line-height: 1.3;
+            color: #000;
+            font-weight: bold;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           .header {
             text-align: center;
@@ -412,9 +422,10 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
             margin-bottom: 8px;
           }
           .header h1 {
-            font-size: 14px;
+            font-size: 16px;
             margin: 5px 0;
             font-weight: bold;
+            letter-spacing: 1px;
           }
           .info-line {
             display: flex;
@@ -442,19 +453,19 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
           }
           small {
             font-size: 9px;
-            color: #666;
+            color: #333;
           }
         </style>
       </head>
       <body>
         <div class="header">
           <h1>${data.companyName || 'RECEIPT'}</h1>
-          ${data.companyAddress ? `<div style="font-size: 9px; color: #666;">${data.companyAddress}</div>` : ''}
-          ${data.companyPhone ? `<div style="font-size: 9px; color: #666;">${data.companyPhone}</div>` : ''}
-          <div style="margin-top: 4px;">#${data.saleNumber}</div>
-          <div style="font-size: 9px;">${data.saleDate}</div>
-          ${data.customerName ? `<div style="font-size: 9px;">${data.customerName}</div>` : ''}
-          ${data.cashierName ? `<div style="font-size: 9px;">Served by: ${data.cashierName}</div>` : ''}
+          ${data.companyAddress ? `<div style="font-size: 10px; font-weight: bold;">${data.companyAddress}</div>` : ''}
+          ${data.companyPhone ? `<div style="font-size: 10px; font-weight: bold;">${data.companyPhone}</div>` : ''}
+          <div style="margin-top: 4px; font-weight: bold;">#${data.saleNumber}</div>
+          <div style="font-size: 10px; font-weight: bold;">${data.saleDate}</div>
+          ${data.customerName ? `<div style="font-size: 10px; font-weight: bold;">${data.customerName}</div>` : ''}
+          ${data.cashierName ? `<div style="font-size: 10px; font-weight: bold;">Served by: ${data.cashierName}</div>` : ''}
         </div>
 
         ${data.items && data.items.length > 0 ? itemsHTML : ''}
