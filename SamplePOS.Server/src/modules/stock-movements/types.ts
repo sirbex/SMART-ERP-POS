@@ -13,6 +13,7 @@ export type MovementType =
   | 'TRANSFER_IN'
   | 'TRANSFER_OUT'
   | 'RETURN'
+  | 'SUPPLIER_RETURN'
   | 'DAMAGE'
   | 'EXPIRY'
   | 'OPENING_BALANCE';
@@ -47,6 +48,7 @@ export const OUT_MOVEMENT_TYPES: MovementType[] = [
   'DELIVERY',
   'ADJUSTMENT_OUT',
   'TRANSFER_OUT',
+  'SUPPLIER_RETURN',
   'DAMAGE',
   'EXPIRY',
 ];

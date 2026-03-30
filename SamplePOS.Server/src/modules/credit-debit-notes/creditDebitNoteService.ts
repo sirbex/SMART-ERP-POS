@@ -416,6 +416,21 @@ export const supplierCreditDebitNoteService = {
         );
       }
 
+      // Returned Goods validation: if reason indicates goods return, require POSTED Return GRN
+      const reasonLower = input.reason.toLowerCase();
+      if (reasonLower.includes('returned goods') || reasonLower.includes('goods return') || reasonLower.includes('return to supplier')) {
+        if (!input.returnGrnId) {
+          throw new Error('Supplier credit note for returned goods requires a posted Return GRN reference');
+        }
+        // Validate the Return GRN exists and is POSTED
+        const rgrnCheck = await client.query(
+          `SELECT id, status FROM return_grn WHERE id = $1`,
+          [input.returnGrnId]
+        );
+        if (rgrnCheck.rows.length === 0) throw new Error('Referenced Return GRN not found');
+        if (rgrnCheck.rows[0].status !== 'POSTED') throw new Error('Referenced Return GRN must be POSTED');
+      }
+
       const noteNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
 
       const note = await supplierCreditDebitNoteRepository.createSupplierNote(client, {
@@ -429,6 +444,7 @@ export const supplierCreditDebitNoteService = {
         totalAmount: total,
         reason: input.reason,
         notes: input.notes || null,
+        returnGrnId: input.returnGrnId || null,
       });
 
       const lineItems = await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(

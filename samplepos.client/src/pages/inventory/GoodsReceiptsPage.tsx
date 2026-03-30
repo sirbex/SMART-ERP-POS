@@ -10,6 +10,13 @@ import {
   useUpdateGRItem,
   useCreateGoodsReceipt,
 } from '../../hooks/useGoodsReceipts';
+import {
+  useReturnableItems,
+  useReturnGrnsByGrn,
+  useCreateReturnGrn,
+  usePostReturnGrn,
+} from '../../hooks/useReturnGrn';
+import type { ReturnableItem } from '../../hooks/useReturnGrn';
 import { useAuth } from '../../hooks/useAuth';
 import { useTenant } from '../../contexts/TenantContext';
 import { formatCurrency } from '../../utils/currency';
@@ -199,6 +206,10 @@ export default function GoodsReceiptsPage() {
   const [editItems, setEditItems] = useState<Record<string, EditItemState>>({});
   const [batchWarnings, setBatchWarnings] = useState<Record<string, string>>({});
   const validationTimeout = useRef<Record<string, NodeJS.Timeout>>({});
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
 
   const limit = 20;
 
@@ -257,6 +268,26 @@ export default function GoodsReceiptsPage() {
   });
 
   const finalizeMutation = useFinalizeGoodsReceipt();
+  const createReturnGrnMutation = useCreateReturnGrn();
+  const postReturnGrnMutation = usePostReturnGrn();
+
+  // Return GRN data for selected GRN
+  const selectedGRId = selectedGR?.id || '';
+  const isFinalized = selectedGR?.status === 'COMPLETED' || selectedGR?.status === 'FINALIZED';
+  const { data: returnableData, isLoading: returnableLoading } = useReturnableItems(
+    showReturnModal ? selectedGRId : ''
+  );
+  const { data: returnGrnData } = useReturnGrnsByGrn(isFinalized ? selectedGRId : '');
+
+  const returnableItems: ReturnableItem[] = useMemo(() => {
+    const raw = (returnableData as { data?: { data?: ReturnableItem[] } })?.data?.data;
+    return Array.isArray(raw) ? raw.filter((i) => i.returnableQuantity > 0) : [];
+  }, [returnableData]);
+
+  const existingReturns = useMemo(() => {
+    const raw = (returnGrnData as { data?: { data?: Array<{ id: string; returnGrnNumber: string; return_grn_number?: string; status: string; totalAmount?: number; total_amount?: number }> } })?.data?.data;
+    return Array.isArray(raw) ? raw : [];
+  }, [returnGrnData]);
 
   // PDF Export for Goods Receipt
   const handleExportGRPDF = (gr: GRRow, grItems: GRItemRow[]) => {
@@ -556,6 +587,65 @@ export default function GoodsReceiptsPage() {
   const handleViewDetails = (gr: GRRow) => {
     setSelectedGR(gr);
     setShowDetailsModal(true);
+  };
+
+  const handleOpenReturnModal = () => {
+    setReturnReason('');
+    setReturnQuantities({});
+    setShowReturnModal(true);
+  };
+
+  const handleSubmitReturn = async () => {
+    if (!selectedGR) return;
+    const lines = returnableItems
+      .filter((item) => {
+        const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+        return (returnQuantities[key] || 0) > 0;
+      })
+      .map((item) => {
+        const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+        return {
+          productId: item.productId,
+          batchId: item.batchId || undefined,
+          uomId: item.uomId,
+          quantity: returnQuantities[key],
+          unitCost: item.unitCost,
+        };
+      });
+
+    if (lines.length === 0) {
+      alert('Please enter quantities for at least one item to return.');
+      return;
+    }
+
+    if (!returnReason.trim()) {
+      alert('Please provide a reason for the return.');
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      // Create the return GRN (DRAFT)
+      const createResp = await createReturnGrnMutation.mutateAsync({
+        grnId: selectedGR.id,
+        reason: returnReason.trim(),
+        lines,
+      });
+
+      const rgrnId = (createResp as { data?: { data?: { id: string } } })?.data?.data?.id;
+      if (!rgrnId) throw new Error('Failed to create Return GRN');
+
+      // Post it immediately (stock reduction)
+      await postReturnGrnMutation.mutateAsync(rgrnId);
+
+      alert('Return GRN created and posted successfully. Stock has been reduced.');
+      setShowReturnModal(false);
+      setShowDetailsModal(false);
+    } catch (err: unknown) {
+      handleApiError(err, { fallback: 'Failed to process return to supplier' });
+    } finally {
+      setReturnSubmitting(false);
+    }
   };
 
   const handleItemFieldChange = (
@@ -1094,7 +1184,195 @@ export default function GoodsReceiptsPage() {
                     </button>
                   </div>
                 )}
+                {(selectedGR.status === 'COMPLETED' || selectedGR.status === 'FINALIZED') && (
+                  <div className="flex items-center gap-3">
+                    {existingReturns.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {existingReturns.map((r) => (
+                          <span
+                            key={r.id}
+                            className={`text-xs px-2 py-1 rounded-full ${
+                              r.status === 'POSTED'
+                                ? 'bg-orange-100 text-orange-800'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {r.returnGrnNumber || r.return_grn_number} ({r.status})
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      onClick={handleOpenReturnModal}
+                      className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                      </svg>
+                      Return to Supplier
+                    </button>
+                  </div>
+                )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return to Supplier Modal */}
+      {showReturnModal && selectedGR && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => !returnSubmitting && setShowReturnModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Return to Supplier</h3>
+                  <p className="text-gray-600 mt-1">
+                    GR: {selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.grNumber || selectedGR.gr_number}
+                    {' — '}
+                    {selectedGR.supplierName || selectedGR.supplier_name}
+                  </p>
+                </div>
+                <button
+                  onClick={() => !returnSubmitting && setShowReturnModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                  aria-label="Close return modal"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {/* Reason */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Return Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  rows={2}
+                  placeholder="e.g., Damaged goods, Wrong items received, Quality issues..."
+                  disabled={returnSubmitting}
+                />
+              </div>
+
+              {/* Returnable Items Table */}
+              {returnableLoading ? (
+                <div className="text-center py-8 text-gray-500">Loading returnable items...</div>
+              ) : returnableItems.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No returnable items. All received quantities have already been returned.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left px-3 py-2">Product</th>
+                        <th className="text-left px-3 py-2">Batch</th>
+                        <th className="text-right px-3 py-2">Received</th>
+                        <th className="text-right px-3 py-2">Already Returned</th>
+                        <th className="text-right px-3 py-2">Max Returnable</th>
+                        <th className="text-right px-3 py-2">Unit Cost</th>
+                        <th className="text-center px-3 py-2">Return Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {returnableItems.map((item) => {
+                        const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+                        const qty = returnQuantities[key] || 0;
+                        return (
+                          <tr key={key} className="border-b hover:bg-gray-50">
+                            <td className="px-3 py-2">{item.productName}</td>
+                            <td className="px-3 py-2 text-xs text-gray-500">
+                              {item.batchNumber || '-'}
+                              {item.expiryDate && (
+                                <span className="ml-1 text-orange-600">
+                                  (exp: {formatDisplayDate(item.expiryDate)})
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">{item.receivedQuantity}</td>
+                            <td className="px-3 py-2 text-right text-gray-500">{item.returnedQuantity}</td>
+                            <td className="px-3 py-2 text-right font-medium">{item.returnableQuantity}</td>
+                            <td className="px-3 py-2 text-right">{formatCurrency(item.unitCost)}</td>
+                            <td className="px-3 py-2 text-center">
+                              <input
+                                type="number"
+                                min={0}
+                                max={item.returnableQuantity}
+                                step={1}
+                                value={qty || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                  setReturnQuantities((prev) => ({
+                                    ...prev,
+                                    [key]: Math.min(Math.max(0, val), item.returnableQuantity),
+                                  }));
+                                }}
+                                className="w-20 border rounded px-2 py-1 text-right"
+                                disabled={returnSubmitting}
+                                aria-label={`Return quantity for ${item.productName}`}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-50 font-medium">
+                        <td colSpan={6} className="px-3 py-2 text-right">
+                          Total Return Value:
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {formatCurrency(
+                            returnableItems.reduce((sum, item) => {
+                              const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+                              return sum + (returnQuantities[key] || 0) * item.unitCost;
+                            }, 0)
+                          )}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowReturnModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                disabled={returnSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitReturn}
+                disabled={returnSubmitting || returnableItems.length === 0}
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {returnSubmitting ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  'Create & Post Return'
+                )}
+              </button>
             </div>
           </div>
         </div>

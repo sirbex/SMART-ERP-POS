@@ -630,6 +630,7 @@ export const supplierCreditDebitNoteRepository = {
       totalAmount: number;
       reason: string;
       notes: string | null;
+      returnGrnId?: string | null;
     }
   ): Promise<SupplierCreditDebitNoteRecord> {
     const uuidResult = await client.query('SELECT gen_random_uuid() as id');
@@ -642,13 +643,13 @@ export const supplierCreditDebitNoteRepository = {
         "InvoiceDate", "DueDate", "Subtotal", "TaxAmount", "TotalAmount",
         "AmountPaid", "OutstandingBalance", "Status", "CurrencyCode",
         "Notes", "CreatedAt", "UpdatedAt",
-        document_type, reference_invoice_id, reason
+        document_type, reference_invoice_id, reason, return_grn_id
       ) VALUES (
         $1, $2, $2, $3,
         $4, $4, $5, $6, $7,
         0, $7, 'DRAFT', 'UGX',
         $8, $9, $9,
-        $10, $11, $12
+        $10, $11, $12, $13
       ) RETURNING *`,
       [
         noteId, data.invoiceNumber, data.supplierId,
@@ -656,6 +657,7 @@ export const supplierCreditDebitNoteRepository = {
         data.subtotal, data.taxAmount, data.totalAmount,
         data.notes || null, now,
         data.documentType, data.referenceInvoiceId, data.reason,
+        data.returnGrnId || null,
       ]
     );
 
