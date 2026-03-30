@@ -739,14 +739,16 @@ export async function bulkInsertProducts(
   // ── Create inventory batches for rows that have batch data ──
   // Auto-generate a batch number for rows with stock but no explicit batch,
   // so FEFO inventory tracking has a batch to draw from during sales.
-  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  // IMPORTANT: Batch number must be STABLE (not date-dependent) so that
+  // re-imports on different days correctly hit ON CONFLICT (product_id, batch_number)
+  // instead of creating duplicate batches.
   const batchRows = rows
-    .map((r, i) => ({
+    .map((r) => ({
       ...r,
       batchNumber:
         r.batchNumber ||
         ((r.quantityOnHand ?? 0) > 0
-          ? `IMP-${datePart}-${String(i + 1).padStart(4, '0')}`
+          ? `IMP-INIT-${r.sku.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 40)}`
           : undefined),
     }))
     .filter((r) => r.batchNumber);
