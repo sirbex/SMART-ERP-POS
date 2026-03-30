@@ -26,6 +26,10 @@ import {
 
 const UuidParamSchema = z.object({ id: z.string().uuid() });
 
+const CancelNoteBodySchema = z.object({
+  reason: z.string().min(1, 'Cancellation reason is required').max(500),
+}).strict();
+
 const ListNotesQuerySchema = z.object({
   page: z.string().optional().transform(v => (v ? parseInt(v) : 1)),
   limit: z.string().optional().transform(v => (v ? parseInt(v) : 50)),
@@ -146,6 +150,27 @@ export const creditDebitNoteController = {
     const result = await creditDebitNoteService.getNotesForInvoice(pool, id);
     res.json({ success: true, data: result });
   }),
+
+  cancelNote: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const { reason } = CancelNoteBodySchema.parse(req.body);
+
+    try {
+      const note = await creditDebitNoteService.cancelNote(pool, id, reason);
+      res.json({
+        success: true,
+        data: note,
+        message: `${note.documentType === 'CREDIT_NOTE' ? 'Credit' : 'Debit'} note ${note.invoiceNumber} cancelled with GL reversal`,
+      });
+    } catch (error: unknown) {
+      if (error instanceof AppError) throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('not found')) throw new NotFoundError(msg);
+      if (msg.includes('Only posted')) throw new ConflictError(msg);
+      throw new ValidationError(msg);
+    }
+  }),
 };
 
 // ============================================================
@@ -242,5 +267,26 @@ export const supplierCreditDebitNoteController = {
     const result = await supplierCreditDebitNoteService.getNoteById(pool, id);
     if (!result) throw new NotFoundError('Supplier credit/debit note');
     res.json({ success: true, data: { note: result.note, lineItems: result.lineItems } });
+  }),
+
+  cancelNote: asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const { reason } = CancelNoteBodySchema.parse(req.body);
+
+    try {
+      const note = await supplierCreditDebitNoteService.cancelNote(pool, id, reason);
+      res.json({
+        success: true,
+        data: note,
+        message: `Supplier ${note.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'credit' : 'debit'} note ${note.invoiceNumber} cancelled with GL reversal`,
+      });
+    } catch (error: unknown) {
+      if (error instanceof AppError) throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('not found')) throw new NotFoundError(msg);
+      if (msg.includes('Only posted')) throw new ConflictError(msg);
+      throw new ValidationError(msg);
+    }
   }),
 };

@@ -60,6 +60,14 @@ creditDebitNoteRoutes.post(
   creditDebitNoteController.postNote,
 );
 
+// Cancel customer note (POSTED → CANCELLED with GL reversal)
+creditDebitNoteRoutes.post(
+  '/customer/:id/cancel',
+  authenticate,
+  requirePermission('accounting.create'),
+  creditDebitNoteController.cancelNote,
+);
+
 // ============================================================
 // SUPPLIER CREDIT/DEBIT NOTES (/api/credit-debit-notes/supplier/...)
 // ============================================================
@@ -100,4 +108,12 @@ creditDebitNoteRoutes.post(
   authenticate,
   requirePermission('accounting.create'),
   supplierCreditDebitNoteController.postNote,
+);
+
+// Cancel supplier note (POSTED → CANCELLED with GL reversal)
+creditDebitNoteRoutes.post(
+  '/supplier/:id/cancel',
+  authenticate,
+  requirePermission('accounting.create'),
+  supplierCreditDebitNoteController.cancelNote,
 );

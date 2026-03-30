@@ -24,8 +24,10 @@ import {
   recordSupplierCreditNoteToGL,
   recordSupplierDebitNoteToGL,
 } from '../../services/glEntryService.js';
+import { AccountingCore, AccountingError } from '../../services/accountingCore.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
+import { SYSTEM_USER_ID } from '../../utils/constants.js';
 import type {
   CreateCustomerCreditNote,
   CreateCustomerDebitNote,
@@ -54,7 +56,7 @@ export const creditDebitNoteService = {
       const invoice = await creditDebitNoteRepository.getInvoiceById(client, input.invoiceId);
       if (!invoice) throw new Error('Original invoice not found');
       if (invoice.documentType !== 'INVOICE') throw new Error('Cannot create a note against another note');
-      if (invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
+      if (invoice.status === 'Cancelled' || invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
 
       // 2. Calculate note totals from lines
       let subtotal = Money.zero();
@@ -68,16 +70,21 @@ export const creditDebitNoteService = {
       const totalAmount = Money.add(subtotal, taxTotal);
       const total = Money.toNumber(totalAmount);
 
-      // 3. Validate cumulative credit notes don't exceed invoice total
-      if (input.noteType !== 'FULL') {
-        const existingNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'CREDIT_NOTE');
-        const existingTotalDec = existingNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
-        const cumulativeDec = Money.add(existingTotalDec, totalAmount);
-        if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
-          throw new Error(
-            `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
-          );
-        }
+      // 3. Enforce noteType business rules (SAP/Odoo compliance)
+      if (input.noteType === 'FULL' && total !== invoice.totalAmount) {
+        throw new Error(
+          `FULL credit note must equal invoice total (${invoice.totalAmount}), got ${total}`,
+        );
+      }
+
+      // 4. Validate cumulative credit notes don't exceed invoice total
+      const existingNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'CREDIT_NOTE');
+      const existingTotalDec = existingNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+      const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+      if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
+        throw new Error(
+          `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
+        );
       }
 
       // 4. Generate number and create note
@@ -128,7 +135,7 @@ export const creditDebitNoteService = {
       const invoice = await creditDebitNoteRepository.getInvoiceById(client, input.invoiceId);
       if (!invoice) throw new Error('Original invoice not found');
       if (invoice.documentType !== 'INVOICE') throw new Error('Cannot create a note against another note');
-      if (invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
+      if (invoice.status === 'Cancelled' || invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
 
       let subtotal = Money.zero();
       let taxTotal = Money.zero();
@@ -213,11 +220,95 @@ export const creditDebitNoteService = {
         );
       } else {
         await recordCustomerDebitNoteToGL(glData, pool);
-        // Debit notes create a new AR charge — no adjustment on original
+        // Debit note increases the AR on the customer — also adjust original invoice
+        await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
+          client,
+          note.referenceInvoiceId,
+          note.totalAmount,
+          'DEBIT',
+        );
       }
 
       logger.info('Note posted', { noteId: note.id, noteNumber: note.invoiceNumber, type: note.documentType });
       return note;
+    });
+  },
+
+  /**
+   * Cancel a posted customer note (POSTED → CANCELLED).
+   * Reverses the GL journal entry and restores original invoice balance.
+   * SAP/Odoo compliance: posted documents are cancelled via reversal, never deleted.
+   */
+  async cancelNote(
+    pool: Pool,
+    noteId: string,
+    reason: string,
+  ): Promise<CreditDebitNoteRecord> {
+
+    return UnitOfWork.run(pool, async (client) => {
+      // 1. Get the note to validate it
+      const noteData = await creditDebitNoteRepository.getNoteById(client, noteId);
+      if (!noteData) throw new Error('Note not found');
+      if (noteData.status !== 'Posted') throw new Error('Only posted notes can be cancelled');
+
+      // 2. Cancel the note record
+      const cancelled = await creditDebitNoteRepository.cancelNote(client, noteId);
+      if (!cancelled) throw new Error('Failed to cancel note');
+
+      // 3. Reverse the GL journal entry
+      const refType = noteData.documentType === 'CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE';
+      const glTxn = await pool.query(
+        `SELECT "Id" FROM ledger_transactions
+         WHERE "ReferenceType" = $1 AND "ReferenceId" = $2
+           AND "IsReversed" = FALSE
+         LIMIT 1`,
+        [refType, noteId]
+      );
+
+      if (glTxn.rows.length > 0) {
+        try {
+          await AccountingCore.reverseTransaction({
+            originalTransactionId: glTxn.rows[0].Id,
+            reversalDate: new Date().toISOString().split('T')[0],
+            reason: `CANCEL: ${noteData.invoiceNumber} — ${reason}`,
+            userId: SYSTEM_USER_ID,
+            idempotencyKey: `${refType}_CANCEL-${noteId}`,
+          }, pool);
+        } catch (error: unknown) {
+          if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+            logger.info('Note GL already reversed (idempotent)', { noteId });
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      // 4. Reverse the balance adjustment on the original invoice
+      if (noteData.documentType === 'CREDIT_NOTE') {
+        // Credit note was credited → reverse by debiting back
+        await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
+          client,
+          noteData.referenceInvoiceId,
+          noteData.totalAmount,
+          'DEBIT',
+        );
+      } else {
+        // Debit note was debited → reverse by crediting back
+        await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
+          client,
+          noteData.referenceInvoiceId,
+          noteData.totalAmount,
+          'CREDIT',
+        );
+      }
+
+      logger.info('Note cancelled with GL reversal', {
+        noteId: cancelled.id,
+        noteNumber: cancelled.invoiceNumber,
+        type: cancelled.documentType,
+        reason,
+      });
+      return cancelled;
     });
   },
 
@@ -282,7 +373,7 @@ export const supplierCreditDebitNoteService = {
       const invoice = await supplierCreditDebitNoteRepository.getSupplierInvoiceById(client, input.invoiceId);
       if (!invoice) throw new Error('Supplier invoice not found');
       if (invoice.documentType !== 'SUPPLIER_INVOICE') throw new Error('Cannot create a note against another note');
-      if (invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
+      if (invoice.status === 'CANCELLED' || invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
 
       let subtotal = Money.zero();
       let taxTotal = Money.zero();
@@ -295,18 +386,23 @@ export const supplierCreditDebitNoteService = {
       const totalAmount = Money.add(subtotal, taxTotal);
       const total = Money.toNumber(totalAmount);
 
-      // Validate cumulative
-      if (input.noteType !== 'FULL') {
-        const existing = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(
-          client, input.invoiceId, 'SUPPLIER_CREDIT_NOTE',
+      // Enforce FULL noteType (SAP/Odoo compliance)
+      if (input.noteType === 'FULL' && total !== invoice.totalAmount) {
+        throw new Error(
+          `FULL credit note must equal invoice total (${invoice.totalAmount}), got ${total}`,
         );
-        const existingTotalDec = existing.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
-        const cumulativeDec = Money.add(existingTotalDec, totalAmount);
-        if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
-          throw new Error(
-            `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
-          );
-        }
+      }
+
+      // Validate cumulative
+      const existing = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(
+        client, input.invoiceId, 'SUPPLIER_CREDIT_NOTE',
+      );
+      const existingTotalDec = existing.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+      const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+      if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
+        throw new Error(
+          `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
+        );
       }
 
       const noteNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
@@ -351,7 +447,7 @@ export const supplierCreditDebitNoteService = {
       const invoice = await supplierCreditDebitNoteRepository.getSupplierInvoiceById(client, input.invoiceId);
       if (!invoice) throw new Error('Supplier invoice not found');
       if (invoice.documentType !== 'SUPPLIER_INVOICE') throw new Error('Cannot create a note against another note');
-      if (invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
+      if (invoice.status === 'CANCELLED' || invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
 
       let subtotal = Money.zero();
       let taxTotal = Money.zero();
@@ -420,14 +516,106 @@ export const supplierCreditDebitNoteService = {
 
       if (note.documentType === 'SUPPLIER_CREDIT_NOTE') {
         await recordSupplierCreditNoteToGL(glData, pool);
+        // Reduce AP on original invoice (SAP/Odoo compliance)
+        await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+          client,
+          note.referenceInvoiceId,
+          note.totalAmount,
+          'CREDIT',
+        );
       } else {
         await recordSupplierDebitNoteToGL(glData, pool);
+        // Increase AP on original invoice
+        await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+          client,
+          note.referenceInvoiceId,
+          note.totalAmount,
+          'DEBIT',
+        );
       }
 
       logger.info('Supplier note posted', {
         noteId: note.id, noteNumber: note.invoiceNumber, type: note.documentType,
       });
       return note;
+    });
+  },
+
+  /**
+   * Cancel a posted supplier note (POSTED → CANCELLED).
+   * Reverses the GL journal entry and restores original invoice balance.
+   * SAP/Odoo compliance: posted documents are cancelled via reversal, never deleted.
+   */
+  async cancelNote(
+    pool: Pool,
+    noteId: string,
+    reason: string,
+  ): Promise<SupplierCreditDebitNoteRecord> {
+
+    return UnitOfWork.run(pool, async (client) => {
+      // 1. Get the note to validate it
+      const noteData = await supplierCreditDebitNoteRepository.getSupplierNoteById(client, noteId);
+      if (!noteData) throw new Error('Supplier note not found');
+      if (noteData.status !== 'POSTED') throw new Error('Only posted notes can be cancelled');
+
+      // 2. Cancel the note record
+      const cancelled = await supplierCreditDebitNoteRepository.cancelSupplierNote(client, noteId);
+      if (!cancelled) throw new Error('Failed to cancel supplier note');
+
+      // 3. Reverse the GL journal entry
+      const refType = noteData.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'SUPPLIER_CREDIT_NOTE' : 'SUPPLIER_DEBIT_NOTE';
+      const glTxn = await pool.query(
+        `SELECT "Id" FROM ledger_transactions
+         WHERE "ReferenceType" = $1 AND "ReferenceId" = $2
+           AND "IsReversed" = FALSE
+         LIMIT 1`,
+        [refType, noteId]
+      );
+
+      if (glTxn.rows.length > 0) {
+        try {
+          await AccountingCore.reverseTransaction({
+            originalTransactionId: glTxn.rows[0].Id,
+            reversalDate: new Date().toISOString().split('T')[0],
+            reason: `CANCEL: ${noteData.invoiceNumber} — ${reason}`,
+            userId: SYSTEM_USER_ID,
+            idempotencyKey: `${refType}_CANCEL-${noteId}`,
+          }, pool);
+        } catch (error: unknown) {
+          if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+            logger.info('Supplier note GL already reversed (idempotent)', { noteId });
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      // 4. Reverse the balance adjustment on the original supplier invoice
+      if (noteData.documentType === 'SUPPLIER_CREDIT_NOTE') {
+        // Credit note reduced AP → reverse by increasing AP (debit direction)
+        await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+          client,
+          noteData.referenceInvoiceId,
+          noteData.totalAmount,
+          'DEBIT',
+        );
+      } else {
+        // Debit note increased AP → reverse by reducing AP (credit direction)
+        await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+          client,
+          noteData.referenceInvoiceId,
+          noteData.totalAmount,
+          'CREDIT',
+        );
+      }
+
+      logger.info('Supplier note cancelled with GL reversal', {
+        noteId: cancelled.id,
+        noteNumber: cancelled.invoiceNumber,
+        type: cancelled.documentType,
+        reason,
+      });
+      return cancelled;
     });
   },
 

@@ -361,8 +361,22 @@ export const creditDebitNoteRepository = {
          WHERE "Id" = $1`,
         [originalInvoiceId, adjustmentAmount]
       );
+    } else {
+      // Debit note reversal: restore previously credited amount on original invoice
+      await client.query(
+        `UPDATE invoices
+         SET "AmountPaid" = GREATEST("AmountPaid" - $2, 0),
+             "OutstandingBalance" = "TotalAmount" - GREATEST("AmountPaid" - $2, 0),
+             "Status" = CASE
+               WHEN "TotalAmount" - GREATEST("AmountPaid" - $2, 0) <= 0 THEN 'Paid'
+               WHEN GREATEST("AmountPaid" - $2, 0) > 0 THEN 'PartiallyPaid'
+               ELSE 'Sent'
+             END,
+             "UpdatedAt" = NOW()
+         WHERE "Id" = $1`,
+        [originalInvoiceId, adjustmentAmount]
+      );
     }
-    // Debit notes don't adjust the original invoice balance - they create a new AR entry
   },
 
   // ----------------------------------------------------------
@@ -467,6 +481,33 @@ export const creditDebitNoteRepository = {
 
   async getNoteLineItems(client: Pool | PoolClient, noteId: string): Promise<NoteLineItemRecord[]> {
     return this.getInvoiceLineItems(client, noteId);
+  },
+
+  // ----------------------------------------------------------
+  // Cancel a posted note (POSTED → CANCELLED)
+  // ----------------------------------------------------------
+
+  async cancelNote(client: Pool | PoolClient, noteId: string): Promise<CreditDebitNoteRecord | null> {
+    const result = await client.query(
+      `UPDATE invoices
+       SET "Status" = 'Cancelled', "UpdatedAt" = NOW()
+       WHERE "Id" = $1 AND "Status" = 'Posted' AND document_type IN ('CREDIT_NOTE', 'DEBIT_NOTE')
+       RETURNING *`,
+      [noteId]
+    );
+    if (!result.rows[0]) return null;
+    const r = result.rows[0];
+    return {
+      id: r.Id, invoiceNumber: r.InvoiceNumber, documentType: r.document_type,
+      referenceInvoiceId: r.reference_invoice_id,
+      customerId: r.CustomerId, customerName: r.CustomerName,
+      issueDate: r.InvoiceDate,
+      subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
+      taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
+      totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+      status: r.Status, reason: r.reason, notes: r.Notes,
+      createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
+    };
   },
 };
 
@@ -776,6 +817,77 @@ export const supplierCreditDebitNoteRepository = {
         createdAt: r.CreatedAt as string,
         updatedAt: r.UpdatedAt as string,
       })),
+    };
+  },
+
+  // ----------------------------------------------------------
+  // Update AP on original supplier invoice after credit/debit note posted
+  // Mirrors customer-side adjustOriginalInvoiceBalance
+  // ----------------------------------------------------------
+
+  async adjustSupplierInvoiceBalance(
+    client: Pool | PoolClient,
+    originalInvoiceId: string,
+    adjustmentAmount: number,
+    direction: 'CREDIT' | 'DEBIT'
+  ): Promise<void> {
+    if (direction === 'CREDIT') {
+      // Supplier credit note: reduce what we owe (reduces AP)
+      await client.query(
+        `UPDATE supplier_invoices
+         SET "AmountPaid" = "AmountPaid" + $2,
+             "OutstandingBalance" = GREATEST("TotalAmount" - ("AmountPaid" + $2), 0),
+             "Status" = CASE
+               WHEN GREATEST("TotalAmount" - ("AmountPaid" + $2), 0) = 0 THEN 'PAID'
+               WHEN ("AmountPaid" + $2) > 0 THEN 'PARTIALLY_PAID'
+               ELSE "Status"
+             END,
+             "UpdatedAt" = NOW()
+         WHERE "Id" = $1`,
+        [originalInvoiceId, adjustmentAmount]
+      );
+    } else {
+      // Supplier debit note reversal: restore previously credited amount
+      await client.query(
+        `UPDATE supplier_invoices
+         SET "AmountPaid" = GREATEST("AmountPaid" - $2, 0),
+             "OutstandingBalance" = "TotalAmount" - GREATEST("AmountPaid" - $2, 0),
+             "Status" = CASE
+               WHEN "TotalAmount" - GREATEST("AmountPaid" - $2, 0) <= 0 THEN 'PAID'
+               WHEN GREATEST("AmountPaid" - $2, 0) > 0 THEN 'PARTIALLY_PAID'
+               ELSE 'RECEIVED'
+             END,
+             "UpdatedAt" = NOW()
+         WHERE "Id" = $1`,
+        [originalInvoiceId, adjustmentAmount]
+      );
+    }
+  },
+
+  // ----------------------------------------------------------
+  // Cancel a posted supplier note (POSTED → CANCELLED)
+  // ----------------------------------------------------------
+
+  async cancelSupplierNote(client: Pool | PoolClient, noteId: string): Promise<SupplierCreditDebitNoteRecord | null> {
+    const result = await client.query(
+      `UPDATE supplier_invoices
+       SET "Status" = 'CANCELLED', "UpdatedAt" = NOW()
+       WHERE "Id" = $1 AND "Status" = 'POSTED' AND document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
+       RETURNING *`,
+      [noteId]
+    );
+    if (!result.rows[0]) return null;
+    const r = result.rows[0];
+    return {
+      id: r.Id, invoiceNumber: r.SupplierInvoiceNumber, documentType: r.document_type,
+      referenceInvoiceId: r.reference_invoice_id,
+      supplierId: r.SupplierId,
+      issueDate: r.InvoiceDate,
+      subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
+      taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
+      totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+      status: r.Status, reason: r.reason, notes: r.Notes,
+      createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
     };
   },
 

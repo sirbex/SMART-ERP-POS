@@ -158,6 +158,11 @@ export const creditDebitNoteService = {
     return response.data;
   },
 
+  async cancelCustomerNote(id: string, reason: string) {
+    const response = await api.post(`/credit-debit-notes/customer/${id}/cancel`, { reason });
+    return response.data;
+  },
+
   // ============================================================
   // Supplier Credit/Debit Notes
   // ============================================================
@@ -191,6 +196,11 @@ export const creditDebitNoteService = {
 
   async postSupplierNote(id: string) {
     const response = await api.post(`/credit-debit-notes/supplier/${id}/post`);
+    return response.data;
+  },
+
+  async cancelSupplierNote(id: string, reason: string) {
+    const response = await api.post(`/credit-debit-notes/supplier/${id}/cancel`, { reason });
     return response.data;
   },
 };
