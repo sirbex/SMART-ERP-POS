@@ -38,25 +38,7 @@ jobs:
       # Backend TypeScript check
       - name: Backend - Install dependencies
         working-directory: SamplePOS.Server
-        run: |
-          set +e
-          echo "::group::Environment"
-          echo "Node: $(node --version)"
-          echo "npm: $(npm --version)"
-          echo "Working dir: $(pwd)"
-          echo "package.json exists: $(test -f package.json && echo YES || echo NO)"
-          echo "package-lock.json exists: $(test -f package-lock.json && echo YES || echo NO)"
-          echo "::endgroup::"
-          echo "::group::npm ci"
-          npm ci 2>&1
-          NPM_EXIT=$?
-          echo "::endgroup::"
-          echo "npm ci exit code: $NPM_EXIT"
-          if [ $NPM_EXIT -ne 0 ]; then
-            echo "::error::npm ci failed with exit code $NPM_EXIT"
-            exit $NPM_EXIT
-          fi
-          echo "node_modules count: $(ls node_modules 2>/dev/null | wc -l)"
+        run: npm ci
 
       - name: Backend - TypeScript compilation
         working-directory: SamplePOS.Server
@@ -357,19 +339,11 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: samplepos.client
-        run: |
-          echo "=== npm ci output ==="
-          npm ci 2>&1
-          echo "=== npm ci exit: $? ==="
-          echo "=== Checking vitest ==="
-          npx vitest --version || echo "vitest not found!"
+        run: npm ci
 
       - name: Run frontend tests
         working-directory: samplepos.client
-        run: |
-          echo "=== Running vitest ==="
-          npx vitest run 2>&1 || true
-          echo "=== vitest exit: $? ==="
+        run: npx vitest run
         continue-on-error: true
 
       - name: Generate frontend coverage
