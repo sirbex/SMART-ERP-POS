@@ -1192,11 +1192,10 @@ export default function GoodsReceiptsPage() {
                         {existingReturns.map((r) => (
                           <span
                             key={r.id}
-                            className={`text-xs px-2 py-1 rounded-full ${
-                              r.status === 'POSTED'
+                            className={`text-xs px-2 py-1 rounded-full ${r.status === 'POSTED'
                                 ? 'bg-orange-100 text-orange-800'
                                 : 'bg-gray-100 text-gray-600'
-                            }`}
+                              }`}
                           >
                             {r.returnGrnNumber || r.return_grn_number} ({r.status})
                           </span>

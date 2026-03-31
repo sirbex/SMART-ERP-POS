@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import { Pool } from 'pg';
 import { reportsController } from './reportsController.js';
+import { cnDnReportsController } from './cnDnReportController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -310,6 +311,53 @@ export function createReportsRouter(pool: Pool) {
       const runs = await demandForecastRepository.getRecentRuns(p(req), limit);
       res.json({ success: true, data: runs });
     })
+  );
+
+  // ── Credit/Debit Note Reports ────────────────────────────────────
+  router.get(
+    '/sales-returns',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getSalesReturns(req, res, p(req)))
+  );
+  router.get(
+    '/purchase-returns',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getPurchaseReturns(req, res, p(req)))
+  );
+  router.get(
+    '/ar-ledger',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getArLedger(req, res, p(req)))
+  );
+  router.get(
+    '/ap-ledger',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getApLedger(req, res, p(req)))
+  );
+  router.get(
+    '/note-register',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getNoteRegister(req, res, p(req)))
+  );
+  router.get(
+    '/tax-reversal',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getTaxReversal(req, res, p(req)))
+  );
+  router.get(
+    '/invoice-adjustments/:invoiceId',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getInvoiceAdjustments(req, res, p(req)))
+  );
+  router.get(
+    '/supplier-statement/:supplierId',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getSupplierStatement(req, res, p(req)))
+  );
+  router.get(
+    '/supplier-aging',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => cnDnReportsController.getSupplierAging(req, res, p(req)))
   );
 
   return router;

@@ -18,6 +18,7 @@ import {
   formatDatePDF,
   PDFColors,
 } from '../../utils/pdfGenerator.js';
+import { cnDnReportsController } from './cnDnReportController.js';
 
 // Helper to get company name from system settings for PDF generation
 async function getCompanyName(pool: Pool): Promise<string> {
@@ -4029,6 +4030,72 @@ export const reportsController = {
           format: params.format,
         };
         return await reportsController.getBankTransactionReport(modifiedReq, res, pool);
+
+      // ── Credit / Debit Note Reports ──────────────────────────────
+      case 'SALES_RETURNS_ALLOWANCES':
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+        };
+        return await cnDnReportsController.getSalesReturns(modifiedReq, res, pool);
+
+      case 'PURCHASE_RETURNS_ALLOWANCES':
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+        };
+        return await cnDnReportsController.getPurchaseReturns(modifiedReq, res, pool);
+
+      case 'AR_LEDGER':
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+          customerId: params.customerId,
+        };
+        return await cnDnReportsController.getArLedger(modifiedReq, res, pool);
+
+      case 'AP_LEDGER':
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+          supplierId: params.supplierId,
+        };
+        return await cnDnReportsController.getApLedger(modifiedReq, res, pool);
+
+      case 'NOTE_REGISTER':
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+          side: params.side,
+          documentType: params.documentType,
+          status: params.status,
+        };
+        return await cnDnReportsController.getNoteRegister(modifiedReq, res, pool);
+
+      case 'TAX_REVERSAL':
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+        };
+        return await cnDnReportsController.getTaxReversal(modifiedReq, res, pool);
+
+      case 'SUPPLIER_STATEMENT':
+        requestParams.supplierId = params.supplierId;
+        queryParams = {
+          startDate: params.startDate,
+          endDate: params.endDate,
+        };
+        return await cnDnReportsController.getSupplierStatement(modifiedReq, res, pool);
+
+      case 'SUPPLIER_AGING':
+        return await cnDnReportsController.getSupplierAging(modifiedReq, res, pool);
+
+      case 'INVOICE_ADJUSTMENTS':
+        requestParams.invoiceId = params.invoiceId;
+        queryParams = {
+          side: params.side,
+        };
+        return await cnDnReportsController.getInvoiceAdjustments(modifiedReq, res, pool);
 
       default:
         return res.status(400).json({

@@ -335,7 +335,15 @@ type ReportType =
   | 'CUSTOMER_AGING_REPORT'
   | 'CASH_REGISTER_SESSION'
   | 'CASH_REGISTER_MOVEMENT_BREAKDOWN'
-  | 'CASH_REGISTER_SESSION_HISTORY';
+  | 'CASH_REGISTER_SESSION_HISTORY'
+  | 'SALES_RETURNS_ALLOWANCES'
+  | 'PURCHASE_RETURNS_ALLOWANCES'
+  | 'AR_LEDGER'
+  | 'AP_LEDGER'
+  | 'NOTE_REGISTER'
+  | 'TAX_REVERSAL'
+  | 'SUPPLIER_STATEMENT'
+  | 'SUPPLIER_AGING';
 
 interface ReportOption {
   value: ReportType;
@@ -654,6 +662,79 @@ const REPORT_OPTIONS: ReportOption[] = [
     category: 'Financial',
     icon: '📜',
   },
+  // ── Credit / Debit Note Reports ──────────────────────────
+  {
+    value: 'SALES_RETURNS_ALLOWANCES',
+    label: 'Sales Returns & Allowances',
+    description: 'P&L impact of customer credit notes — returns, discounts, and allowances',
+    requiresDateRange: true,
+    supportsFilters: [],
+    category: 'Financial',
+    icon: '↩️',
+  },
+  {
+    value: 'PURCHASE_RETURNS_ALLOWANCES',
+    label: 'Purchase Returns & Allowances',
+    description: 'P&L impact of supplier credit notes — purchase returns and deductions',
+    requiresDateRange: true,
+    supportsFilters: [],
+    category: 'Financial',
+    icon: '🔄',
+  },
+  {
+    value: 'AR_LEDGER',
+    label: 'Accounts Receivable Ledger',
+    description: 'GL-sourced AR ledger with invoices, credit notes, debit notes, and running balance',
+    requiresDateRange: true,
+    supportsFilters: ['customer'],
+    category: 'Customer',
+    icon: '📒',
+  },
+  {
+    value: 'AP_LEDGER',
+    label: 'Accounts Payable Ledger',
+    description: 'GL-sourced AP ledger with supplier invoices, credit notes, and running balance',
+    requiresDateRange: true,
+    supportsFilters: ['supplier'],
+    category: 'Supplier',
+    icon: '📕',
+  },
+  {
+    value: 'NOTE_REGISTER',
+    label: 'Credit / Debit Note Register',
+    description: 'Complete register of all credit and debit notes with status and GL references',
+    requiresDateRange: true,
+    supportsFilters: ['noteSide', 'noteDocumentType', 'status'],
+    category: 'Financial',
+    icon: '📑',
+  },
+  {
+    value: 'TAX_REVERSAL',
+    label: 'Tax Reversal Report',
+    description: 'Tax impact of credit and debit notes for VAT/GST reconciliation',
+    requiresDateRange: true,
+    supportsFilters: [],
+    category: 'Financial',
+    icon: '🏛️',
+  },
+  {
+    value: 'SUPPLIER_STATEMENT',
+    label: 'Supplier Statement',
+    description: 'Account statement for a specific supplier with invoices, payments, CN/DN, and balance',
+    requiresDateRange: true,
+    supportsFilters: ['supplier'],
+    category: 'Supplier',
+    icon: '📄',
+  },
+  {
+    value: 'SUPPLIER_AGING',
+    label: 'Supplier Aging (Aged Payables)',
+    description: 'Aged payables analysis by supplier with current, 30, 60, 90+ day buckets',
+    requiresDateRange: false,
+    supportsFilters: [],
+    category: 'Supplier',
+    icon: '⏳',
+  },
 ];
 
 // Dynamic report data interface - covers all report types
@@ -726,6 +807,13 @@ export default function ReportsPage() {
   // Cash Register Session specific state
   const [sessionId, setSessionId] = useState<string>('');
 
+  // Supplier Statement specific state
+  const [supplierId, setSupplierId] = useState<string>('');
+
+  // Note Register filters
+  const [noteSide, setNoteSide] = useState<string>('');
+  const [noteDocumentType, setNoteDocumentType] = useState<string>('');
+
   const selectedReportOption = REPORT_OPTIONS.find((r) => r.value === selectedReport);
 
   const handleGenerateReport = async () => {
@@ -796,6 +884,21 @@ export default function ReportsPage() {
       } else if (selectedReport === 'CASH_REGISTER_SESSION') {
         // Cash Register Session requires session ID
         params.sessionId = sessionId;
+      } else if (selectedReport === 'AR_LEDGER') {
+        if (customerId) params.customerId = customerId;
+      } else if (selectedReport === 'AP_LEDGER') {
+        if (supplierId) params.supplierId = supplierId;
+      } else if (selectedReport === 'NOTE_REGISTER') {
+        if (noteSide) params.side = noteSide;
+        if (noteDocumentType) params.documentType = noteDocumentType;
+        if (status) params.status = status;
+      } else if (selectedReport === 'SUPPLIER_STATEMENT') {
+        if (!supplierId.trim()) {
+          setError('Supplier ID is required for Supplier Statement');
+          setIsLoading(false);
+          return;
+        }
+        params.supplierId = supplierId;
       }
 
       const { data: result } = await api.post('/reports/generate', params);
@@ -858,6 +961,14 @@ export default function ReportsPage() {
         'CUSTOMER_AGING_REPORT': 'customer-aging',
         'CASH_REGISTER_MOVEMENT_BREAKDOWN': 'cash-register/movement-breakdown',
         'CASH_REGISTER_SESSION_HISTORY': 'cash-register/session-history',
+        'SALES_RETURNS_ALLOWANCES': 'sales-returns',
+        'PURCHASE_RETURNS_ALLOWANCES': 'purchase-returns',
+        'AR_LEDGER': 'ar-ledger',
+        'AP_LEDGER': 'ap-ledger',
+        'NOTE_REGISTER': 'note-register',
+        'TAX_REVERSAL': 'tax-reversal',
+        'SUPPLIER_STATEMENT': 'supplier-statement',
+        'SUPPLIER_AGING': 'supplier-aging',
       };
 
       const endpoint = reportEndpointMap[selectedReport];
@@ -1314,6 +1425,87 @@ export default function ReportsPage() {
               aria-label="Session Number"
             />
             <p className="text-xs text-gray-500 mt-1">Enter session number (e.g., REG-2026-0001)</p>
+          </div>
+        )}
+
+        {/* Supplier Statement / AP Ledger - Supplier ID */}
+        {(selectedReport === 'SUPPLIER_STATEMENT' || selectedReport === 'AP_LEDGER') && (
+          <div>
+            <label htmlFor="supplierId" className="block text-sm font-semibold text-gray-700 mb-2">
+              Supplier ID
+            </label>
+            <input
+              id="supplierId"
+              type="text"
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+              placeholder="Enter supplier UUID"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              aria-label="Supplier ID"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {selectedReport === 'SUPPLIER_STATEMENT' ? 'Required: Supplier UUID' : 'Optional: Filter by supplier'}
+            </p>
+          </div>
+        )}
+
+        {/* AR Ledger - Customer filter */}
+        {selectedReport === 'AR_LEDGER' && (
+          <div>
+            <label htmlFor="arCustomerId" className="block text-sm font-semibold text-gray-700 mb-2">
+              Customer ID (Optional)
+            </label>
+            <input
+              id="arCustomerId"
+              type="text"
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              placeholder="Filter by customer UUID"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              aria-label="Customer ID for AR Ledger"
+            />
+          </div>
+        )}
+
+        {/* Note Register - Side filter */}
+        {selectedReportOption?.supportsFilters.includes('noteSide') && (
+          <div>
+            <label htmlFor="noteSide" className="block text-sm font-semibold text-gray-700 mb-2">
+              Side
+            </label>
+            <select
+              id="noteSide"
+              value={noteSide}
+              onChange={(e) => setNoteSide(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Note side"
+            >
+              <option value="">All (Customer & Supplier)</option>
+              <option value="CUSTOMER">Customer</option>
+              <option value="SUPPLIER">Supplier</option>
+            </select>
+          </div>
+        )}
+
+        {/* Note Register - Document Type filter */}
+        {selectedReportOption?.supportsFilters.includes('noteDocumentType') && (
+          <div>
+            <label htmlFor="noteDocumentType" className="block text-sm font-semibold text-gray-700 mb-2">
+              Document Type
+            </label>
+            <select
+              id="noteDocumentType"
+              value={noteDocumentType}
+              onChange={(e) => setNoteDocumentType(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Document type"
+            >
+              <option value="">All Types</option>
+              <option value="CREDIT_NOTE">Credit Note</option>
+              <option value="DEBIT_NOTE">Debit Note</option>
+              <option value="SUPPLIER_CREDIT_NOTE">Supplier Credit Note</option>
+              <option value="SUPPLIER_DEBIT_NOTE">Supplier Debit Note</option>
+            </select>
           </div>
         )}
       </div>

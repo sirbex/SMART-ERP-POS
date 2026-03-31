@@ -416,7 +416,7 @@ export const api = {
     list: (params?: { page?: number; limit?: number; grnId?: string; supplierId?: string; status?: string }) =>
       apiClient.get<ApiResponse>('return-grn', { params }),
     getById: (id: string) => apiClient.get<ApiResponse>(`return-grn/${id}`),
-    create: (data: { grnId: string; returnDate?: string; reason: string; lines: Array<{ productId: string; batchId?: string; uomId: string; quantity: number; unitCost: number }> }) =>
+    create: (data: { grnId: string; returnDate?: string; reason: string; lines: Array<{ productId: string; batchId?: string; uomId?: string; quantity: number; unitCost: number }> }) =>
       apiClient.post<ApiResponse>('return-grn', data),
     post: (id: string) => apiClient.post<ApiResponse>(`return-grn/${id}/post`),
     getReturnableItems: (grnId: string) =>
