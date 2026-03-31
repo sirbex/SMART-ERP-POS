@@ -24,7 +24,7 @@ import {
 import type { QuotationStatus } from '@shared/types/quotation';
 import { AxiosError } from 'axios';
 import deliveryNotesApi from '../../api/deliveryNotes';
-import type { DeliveryNoteWithLines } from '../../api/deliveryNotes';
+import type { DeliveryNoteListItem } from '../../api/deliveryNotes';
 import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
@@ -135,7 +135,7 @@ export default function QuoteDetailPage() {
   const canConvert = isQuoteConvertible(quotation.status, quotation.validUntil, quotation.convertedToSaleId);
 
   // ── Wholesale derived data ──
-  const existingDns: DeliveryNoteWithLines[] = dnListData?.data || [];
+  const existingDns: DeliveryNoteListItem[] = dnListData?.data || [];
   const fulfillment = fulfillmentData;
   const fulfillmentItems = fulfillment?.items ||
     (items || []).filter(i => i.productType !== 'service').map(i => ({
@@ -478,9 +478,9 @@ export default function QuoteDetailPage() {
                               }`}>
                               {dn.status}
                             </span>
-                            {(dn as DeliveryNoteWithLines).invoiceNumber && (
+                            {dn.invoiceNumber && (
                               <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700">
-                                {(dn as DeliveryNoteWithLines).invoiceNumber}
+                                {dn.invoiceNumber}
                               </span>
                             )}
                           </div>

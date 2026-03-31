@@ -91,8 +91,14 @@ export interface FulfillmentStatus {
   overallStatus: 'NOT_STARTED' | 'PARTIAL' | 'FULFILLED';
 }
 
+export interface DeliveryNoteListItem extends DeliveryNote {
+  quotationNumber?: string | null;
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
+}
+
 export interface DeliveryNoteListResponse {
-  data: DeliveryNoteWithLines[];
+  data: DeliveryNoteListItem[];
   pagination: {
     page: number;
     limit: number;

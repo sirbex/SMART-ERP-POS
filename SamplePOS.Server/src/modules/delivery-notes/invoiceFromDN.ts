@@ -94,19 +94,8 @@ export async function invoiceFromDeliveryNote(
       [deliveryNoteId, inv.id]
     );
 
-    // BR-INV-003: Update customer balance
-    // Draft/Cancelled invoices must NOT affect AR balance
-    await client.query(
-      `UPDATE customers
-       SET balance = (
-         SELECT COALESCE(SUM("OutstandingBalance"), 0)
-         FROM invoices
-         WHERE "CustomerId" = $1
-           AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
-       )
-       WHERE id = $1`,
-      [dn.customerId]
-    );
+    // BR-INV-003: Customer balance is handled by trigger
+    // trg_sync_customer_balance_on_invoice fires on INSERT/UPDATE
 
     // GL posting: DR Accounts Receivable, CR Revenue
     // Use savepoint so GL failure doesn't block invoice creation

@@ -4,7 +4,7 @@
  * Tabs: List | Create from Quotation | Detail View
  */
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
@@ -14,8 +14,8 @@ import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
 import type {
   DeliveryNoteWithLines,
+  DeliveryNoteListItem,
   DeliveryNoteStatus,
-  FulfillmentStatus,
   CreateDeliveryNoteLine,
 } from '../../api/deliveryNotes';
 import type { Quotation, QuotationItem } from '@shared/types/quotation';
@@ -33,11 +33,11 @@ type ViewMode = 'list' | 'create' | 'detail';
 
 export default function DeliveryNotesPage() {
   const [view, setView] = useState<ViewMode>('list');
-  const [selectedDn, setSelectedDn] = useState<DeliveryNoteWithLines | null>(null);
+  const [selectedDnId, setSelectedDnId] = useState<string | null>(null);
   const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(null);
 
-  const openDetail = (dn: DeliveryNoteWithLines) => {
-    setSelectedDn(dn);
+  const openDetail = (dn: { id: string }) => {
+    setSelectedDnId(dn.id);
     setView('detail');
   };
 
@@ -48,7 +48,7 @@ export default function DeliveryNotesPage() {
 
   const backToList = () => {
     setView('list');
-    setSelectedDn(null);
+    setSelectedDnId(null);
     setSelectedQuotationId(null);
   };
 
@@ -70,14 +70,14 @@ export default function DeliveryNotesPage() {
             preselectedQuotationId={selectedQuotationId}
             onBack={backToList}
             onCreated={(dn) => {
-              setSelectedDn(dn);
+              setSelectedDnId(dn.id);
               setView('detail');
             }}
           />
         )}
-        {view === 'detail' && selectedDn && (
+        {view === 'detail' && selectedDnId && (
           <DeliveryNoteDetail
-            deliveryNoteId={selectedDn.id}
+            deliveryNoteId={selectedDnId}
             onBack={backToList}
           />
         )}
@@ -94,7 +94,7 @@ function DeliveryNotesList({
   onViewDetail,
   onCreateNew,
 }: {
-  onViewDetail: (dn: DeliveryNoteWithLines) => void;
+  onViewDetail: (dn: DeliveryNoteListItem) => void;
   onCreateNew: (quotationId?: string) => void;
 }) {
   const [page, setPage] = useState(1);
@@ -263,7 +263,7 @@ function CreateDeliveryNote({
   const [warehouseNotes, setWarehouseNotes] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [lineQuantities, setLineQuantities] = useState<Record<string, number>>({});
-  const [fulfillment, setFulfillment] = useState<FulfillmentStatus | null>(null);
+  const fulfillmentAppliedForRef = useRef<string | null>(null);
 
   // Search wholesale quotations
   const { data: quotationsData } = useQuery({
@@ -314,19 +314,17 @@ function CreateDeliveryNote({
   });
 
   useEffect(() => {
-    if (fulfillmentData && fulfillment !== fulfillmentData) {
-      setFulfillment(fulfillmentData);
+    if (fulfillmentData && selectedQuotation && fulfillmentAppliedForRef.current !== selectedQuotation.quotation.id) {
+      fulfillmentAppliedForRef.current = selectedQuotation.quotation.id;
       // Adjust initial quantities to remaining
-      if (selectedQuotation) {
-        const updated: Record<string, number> = {};
-        selectedQuotation.items.forEach((item) => {
-          if (item.productType === 'service') return;
-          const fi = fulfillmentData.items.find((f) => f.quotationItemId === item.id);
-          const remaining = fi ? fi.remaining : item.quantity;
-          updated[item.id] = Math.max(0, remaining);
-        });
-        setLineQuantities(updated);
-      }
+      const updated: Record<string, number> = {};
+      selectedQuotation.items.forEach((item) => {
+        if (item.productType === 'service') return;
+        const fi = fulfillmentData.items.find((f) => f.quotationItemId === item.id);
+        const remaining = fi ? fi.remaining : item.quantity;
+        updated[item.id] = Math.max(0, remaining);
+      });
+      setLineQuantities(updated);
     }
   }, [fulfillmentData, selectedQuotation]);
 
@@ -457,7 +455,7 @@ function CreateDeliveryNote({
                 <span className="ml-3 font-semibold">{formatCurrency(selectedQuotation.quotation.totalAmount)}</span>
               </div>
               <button
-                onClick={() => { setSelectedQuotation(null); setFulfillment(null); }}
+                onClick={() => { setSelectedQuotation(null); fulfillmentAppliedForRef.current = null; }}
                 className="text-sm text-blue-600 hover:text-blue-800"
               >
                 Change Quotation
@@ -465,13 +463,13 @@ function CreateDeliveryNote({
             </div>
 
             {/* Fulfillment Progress */}
-            {fulfillment && fulfillment.overallStatus !== 'NOT_STARTED' && (
+            {fulfillmentData && fulfillmentData.overallStatus !== 'NOT_STARTED' && (
               <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
                 <p className="font-semibold text-green-800 mb-2">
-                  Fulfillment: {fulfillment.overallStatus === 'FULFILLED' ? 'Fully Delivered' : 'Partially Delivered'}
+                  Fulfillment: {fulfillmentData.overallStatus === 'FULFILLED' ? 'Fully Delivered' : 'Partially Delivered'}
                 </p>
                 <div className="space-y-1">
-                  {fulfillment.items.map((fi) => (
+                  {fulfillmentData.items.map((fi) => (
                     <div key={fi.quotationItemId} className="flex justify-between text-sm">
                       <span className="text-gray-700">{fi.description}</span>
                       <span className={fi.remaining === 0 ? 'text-green-600 font-medium' : 'text-orange-600'}>
@@ -556,7 +554,7 @@ function CreateDeliveryNote({
                   {selectedQuotation.items
                     .filter((item) => item.productType !== 'service')
                     .map((item) => {
-                      const fi = fulfillment?.items.find((f) => f.quotationItemId === item.id);
+                      const fi = fulfillmentData?.items.find((f) => f.quotationItemId === item.id);
                       const delivered = fi?.delivered || 0;
                       const remaining = fi ? fi.remaining : item.quantity;
                       const qty = lineQuantities[item.id] || 0;
