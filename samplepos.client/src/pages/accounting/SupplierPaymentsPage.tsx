@@ -18,6 +18,7 @@ import { AxiosError } from 'axios';
 import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
     Button,
     Input,
@@ -1986,6 +1987,9 @@ const SupplierPaymentsPage: React.FC = () => {
                         <Button variant="outline" onClick={() => setIsReceiptModalOpen(false)}>
                             Close
                         </Button>
+                        {selectedPayment && (
+                            <DocumentFlowButton entityType="SUPPLIER_PAYMENT" entityId={selectedPayment.id} size="sm" />
+                        )}
                         <Button
                             variant="outline"
                             onClick={handleExportPDF}

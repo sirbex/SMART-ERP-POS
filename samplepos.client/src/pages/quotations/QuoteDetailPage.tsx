@@ -14,6 +14,7 @@ import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
   getQuoteStatusBadge,
   calculateQuoteAge,
@@ -244,11 +245,11 @@ export default function QuoteDetailPage() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold text-gray-900">{quotation.quoteNumber}</h1>
                 <span className={`px-3 py-1 rounded-full text-sm font-semibold ${badge.color === 'gray' ? 'bg-gray-100 text-gray-800' :
-                    badge.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-                      badge.color === 'green' ? 'bg-green-100 text-green-800' :
-                        badge.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                          badge.color === 'red' ? 'bg-red-100 text-red-800' :
-                            'bg-purple-100 text-purple-800'
+                  badge.color === 'blue' ? 'bg-blue-100 text-blue-800' :
+                    badge.color === 'green' ? 'bg-green-100 text-green-800' :
+                      badge.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                        badge.color === 'red' ? 'bg-red-100 text-red-800' :
+                          'bg-purple-100 text-purple-800'
                   }`}>
                   {badge.label}
                 </span>
@@ -298,6 +299,9 @@ export default function QuoteDetailPage() {
           >
             🖨️ Print
           </button>
+          {quotation.id && (
+            <DocumentFlowButton entityType="QUOTATION" entityId={quotation.id} size="sm" />
+          )}
           {canEdit && (
             <button
               onClick={() => setShowCancelModal(true)}
@@ -433,8 +437,8 @@ export default function QuoteDetailPage() {
               </div>
               <div className="flex items-center gap-4 mb-2">
                 <span className={`px-3 py-1 rounded-full text-xs font-semibold ${fulfillment?.overallStatus === 'FULFILLED' ? 'bg-green-100 text-green-800' :
-                    fulfillment?.overallStatus === 'PARTIAL' ? 'bg-orange-100 text-orange-800' :
-                      'bg-gray-100 text-gray-800'
+                  fulfillment?.overallStatus === 'PARTIAL' ? 'bg-orange-100 text-orange-800' :
+                    'bg-gray-100 text-gray-800'
                   }`}>
                   {fulfillment?.overallStatus === 'FULFILLED' ? 'Fully Delivered' :
                     fulfillment?.overallStatus === 'PARTIAL' ? 'Partially Delivered' :

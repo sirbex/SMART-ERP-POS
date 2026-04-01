@@ -8,6 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { AxiosError } from 'axios';
 import { Plus, Search, Eye, FileText, DollarSign, AlertTriangle } from 'lucide-react';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
     Button,
     Input,
@@ -939,6 +940,9 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                     )}
 
                     <DialogFooter>
+                        {selectedInvoice && (
+                            <DocumentFlowButton entityType="INVOICE" entityId={selectedInvoice.id} size="sm" />
+                        )}
                         <Button onClick={() => setIsViewModalOpen(false)}>Close</Button>
                     </DialogFooter>
                 </DialogContent>

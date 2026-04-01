@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus, XCircle } from 'lucide-react';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
     Button,
     Input,
@@ -303,6 +304,11 @@ function CustomerNotesTab() {
                             {selectedNote.notes && (
                                 <div><span className="text-gray-500">Notes:</span> {selectedNote.notes}</div>
                             )}
+                            <DocumentFlowButton
+                                entityType={selectedNote.documentType === 'CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE'}
+                                entityId={selectedNote.id}
+                                size="sm"
+                            />
                         </div>
                     )}
                 </DialogContent>
@@ -526,6 +532,11 @@ function SupplierNotesTab() {
                             {selectedNote.notes && (
                                 <div><span className="text-gray-500">Notes:</span> {selectedNote.notes}</div>
                             )}
+                            <DocumentFlowButton
+                                entityType={selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE'}
+                                entityId={selectedNote.id}
+                                size="sm"
+                            />
                         </div>
                     )}
                 </DialogContent>

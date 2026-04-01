@@ -12,6 +12,7 @@ import deliveryNotesApi from '../../api/deliveryNotes';
 import quotationApi from '../../api/quotations';
 import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import type {
   DeliveryNoteWithLines,
   DeliveryNoteListItem,
@@ -123,8 +124,8 @@ function DeliveryNotesList({
               key={s}
               onClick={() => { setStatusFilter(s); setPage(1); }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${statusFilter === s
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
             >
               {s === 'ALL' ? 'All' : s}
@@ -813,6 +814,7 @@ function DeliveryNoteDetail({
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             Export PDF
           </button>
+          <DocumentFlowButton entityType="DELIVERY_NOTE" entityId={deliveryNoteId} size="sm" />
           {dn.status === 'DRAFT' && (
             <>
               <button

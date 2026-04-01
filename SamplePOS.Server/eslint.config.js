@@ -1,7 +1,6 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
-import prettier from 'eslint-plugin-prettier';
 import prettierConfig from 'eslint-config-prettier';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
@@ -15,9 +14,6 @@ export default defineConfig([
       tseslint.configs.recommended,
       prettierConfig,
     ],
-    plugins: {
-      prettier,
-    },
     languageOptions: {
       ecmaVersion: 2020,
       globals: {
@@ -28,7 +24,6 @@ export default defineConfig([
       },
     },
     rules: {
-      'prettier/prettier': 'error',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': [
         'warn',

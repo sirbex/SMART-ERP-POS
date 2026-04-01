@@ -17,6 +17,13 @@ lerna-debug.log*
 
 # Backup directories that may contain secrets
 *.backup_*
+*.dump
+
+# Test coverage output
+coverage/
+
+# npm global cache
+npm-global/
 
 node_modules
 dist

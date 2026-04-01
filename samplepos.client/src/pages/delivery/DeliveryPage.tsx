@@ -11,6 +11,7 @@ import Layout from '../../components/Layout';
 import deliveryApi from '../../api/delivery';
 import type { DeliveryAnalytics, DeliverableSale } from '../../api/delivery';
 import { formatCurrency } from '../../utils/currency';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import apiClient from '../../utils/api';
 import type {
   DeliveryOrder,
@@ -901,13 +902,16 @@ function DeliveryDetailModal({ order: initialOrder, onClose }: { order: Delivery
         )}
 
         <div className="mt-6 flex justify-between">
-          <button
-            onClick={handlePrintPdf}
-            disabled={downloading}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium flex items-center gap-2"
-          >
-            {downloading ? '⏳ Generating...' : '🖨️ Print Delivery Note'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handlePrintPdf}
+              disabled={downloading}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium flex items-center gap-2"
+            >
+              {downloading ? '⏳ Generating...' : '🖨️ Print Delivery Note'}
+            </button>
+            <DocumentFlowButton entityType="DELIVERY_ORDER" entityId={order.id} size="sm" />
+          </div>
           <button onClick={onClose} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium">Close</button>
         </div>
       </div>

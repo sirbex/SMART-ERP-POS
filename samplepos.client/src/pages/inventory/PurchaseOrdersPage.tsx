@@ -13,6 +13,7 @@ import { formatCurrency } from '../../utils/currency';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import Decimal from 'decimal.js';
 import { UomSelector } from '../../components/inventory/UomSelector';
 import { computeUnitCost, convertQtyToBase, convertCostToBase } from '../../utils/uom';
@@ -1481,26 +1482,31 @@ export default function PurchaseOrdersPage() {
 
             {/* Footer */}
             <div className="sticky bottom-0 bg-gray-50 px-6 py-4 flex justify-between gap-3 border-t">
-              <button
-                onClick={() => handleExportPDF(selectedPO)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleExportPDF(selectedPO)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                  />
-                </svg>
-                Export PDF
-              </button>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                  </svg>
+                  Export PDF
+                </button>
+                {selectedPO && (
+                  <DocumentFlowButton entityType="PURCHASE_ORDER" entityId={selectedPO.id} size="sm" />
+                )}
+              </div>
               <button
                 onClick={() => setShowDetailsModal(false)}
                 className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"

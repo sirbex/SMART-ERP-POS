@@ -22,6 +22,7 @@ import { useTenant } from '../../contexts/TenantContext';
 import { formatCurrency } from '../../utils/currency';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
+import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { useProductWithUoms, findUom, getDefaultUom } from '../../hooks/useProductWithUoms';
@@ -1149,26 +1150,29 @@ export default function GoodsReceiptsPage() {
               </div>
 
               <div className="flex justify-between items-center">
-                <button
-                  onClick={() => handleExportGRPDF(selectedGR, items)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleExportGRPDF(selectedGR, items)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  Export PDF
-                </button>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    Export PDF
+                  </button>
+                  <DocumentFlowButton entityType="GOODS_RECEIPT" entityId={selectedGR.id} size="sm" />
+                </div>
                 {selectedGR.status === 'DRAFT' && (
                   <div className="flex gap-3">
                     <button
@@ -1193,8 +1197,8 @@ export default function GoodsReceiptsPage() {
                           <span
                             key={r.id}
                             className={`text-xs px-2 py-1 rounded-full ${r.status === 'POSTED'
-                                ? 'bg-orange-100 text-orange-800'
-                                : 'bg-gray-100 text-gray-600'
+                              ? 'bg-orange-100 text-orange-800'
+                              : 'bg-gray-100 text-gray-600'
                               }`}
                           >
                             {r.returnGrnNumber || r.return_grn_number} ({r.status})

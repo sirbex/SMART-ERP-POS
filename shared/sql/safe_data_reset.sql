@@ -112,6 +112,11 @@ DELETE FROM inventory_batches WHERE TRUE;
 DELETE FROM cost_layers WHERE TRUE;
 DELETE FROM inventory_snapshots WHERE TRUE;
 
+-- Vertical partition tables (migration 410) — must be cleared
+-- so stale prices/quantities don't interfere with import
+DELETE FROM product_valuation WHERE TRUE;
+DELETE FROM product_inventory WHERE TRUE;
+
 -- =============================================================================
 -- PHASE 10: EXPENSE DATA
 -- =============================================================================
@@ -193,6 +198,28 @@ DO $$ BEGIN RAISE NOTICE 'PHASE 16: Resetting all balances...'; END $$;
 -- Reset product quantities
 UPDATE products SET quantity_on_hand = 0, updated_at = NOW();
 
+-- Recreate child table rows that Phase 9 deleted.
+-- trg_product_create_children only fires on INSERT, not UPDATE,
+-- so existing products need explicit child row creation here.
+INSERT INTO product_inventory (product_id, quantity_on_hand, reorder_level)
+SELECT p.id, 0, COALESCE(p.reorder_level, 0)
+FROM products p
+WHERE NOT EXISTS (SELECT 1 FROM product_inventory pi WHERE pi.product_id = p.id)
+ON CONFLICT (product_id) DO NOTHING;
+
+INSERT INTO product_valuation (
+  product_id, cost_price, selling_price, average_cost, last_cost,
+  costing_method, pricing_formula, auto_update_price
+)
+SELECT p.id,
+  COALESCE(p.cost_price, 0), COALESCE(p.selling_price, 0),
+  COALESCE(p.cost_price, 0), COALESCE(p.cost_price, 0),
+  COALESCE(p.costing_method, 'FIFO'), p.pricing_formula,
+  COALESCE(p.auto_update_price, false)
+FROM products p
+WHERE NOT EXISTS (SELECT 1 FROM product_valuation pv WHERE pv.product_id = p.id)
+ON CONFLICT (product_id) DO NOTHING;
+
 -- Reset customer balances
 UPDATE customers SET balance = 0, updated_at = NOW();
 
@@ -211,14 +238,24 @@ UPDATE bank_accounts SET current_balance = 0, updated_at = NOW();
 DO $$ BEGIN RAISE NOTICE 'PHASE 17: Resetting sequences...'; END $$;
 
 -- Reset any sequences that exist for document numbering
+-- EXCLUDES master-data sequences (product_number_seq, customer_number_seq, etc.)
+-- because master data rows are preserved and their numbers must not collide.
 DO $$
 DECLARE
     seq_record RECORD;
+    -- Sequences tied to preserved master data — must NOT be reset
+    master_data_seqs TEXT[] := ARRAY[
+        'product_number_seq',
+        'customer_number_seq',
+        'supplier_number_seq',
+        'account_number_seq'
+    ];
 BEGIN
     FOR seq_record IN 
         SELECT sequence_name 
         FROM information_schema.sequences 
         WHERE sequence_schema = 'public'
+          AND sequence_name != ALL(master_data_seqs)
     LOOP
         EXECUTE format('ALTER SEQUENCE %I RESTART WITH 1', seq_record.sequence_name);
     END LOOP;

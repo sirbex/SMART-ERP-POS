@@ -526,14 +526,21 @@ BEGIN
     WHERE a."AccountCode" = '1300'
       AND lt."TransactionDate"::DATE <= p_as_of_date;
     
-    -- Get inventory value from products (quantity_on_hand * cost_price)
-    SELECT COALESCE(SUM(quantity_on_hand * COALESCE(cost_price, 0)), 0)
+    -- Get inventory value from product_inventory × product_valuation
+    -- (authoritative after migration 410 split products → child tables)
+    -- ROUND per-line to match GL posting precision (Money.lineTotal rounds each line
+    -- to currency decimal places — 0 for UGX). SAP/Odoo principle: subledger
+    -- line-level rounding must mirror GL line-level rounding.
+    SELECT COALESCE(SUM(ROUND(pi.quantity_on_hand * COALESCE(pv.cost_price, 0), 0)), 0)
     INTO v_inventory_value
-    FROM products
-    WHERE quantity_on_hand > 0;
+    FROM products p
+    JOIN product_inventory pi ON pi.product_id = p.id
+    JOIN product_valuation pv ON pv.product_id = p.id
+    WHERE pi.quantity_on_hand > 0;
     
     -- Get inventory value from batches (more accurate if using FEFO)
-    SELECT COALESCE(SUM(remaining_quantity * cost_price), 0)
+    -- Same per-line rounding to match GL precision
+    SELECT COALESCE(SUM(ROUND(remaining_quantity * cost_price, 0)), 0)
     INTO v_batch_value
     FROM inventory_batches
     WHERE remaining_quantity > 0;
@@ -730,7 +737,8 @@ BEGIN
     WHERE a."AccountCode" = '1300'
       AND lt."TransactionDate"::DATE <= p_as_of_date;
     
-    SELECT COALESCE(SUM(remaining_quantity * cost_price), 0)
+    -- Inventory: per-line rounding to match GL posting precision (0 dp for UGX)
+    SELECT COALESCE(SUM(ROUND(remaining_quantity * cost_price, 0)), 0)
     INTO v_inv_sub
     FROM inventory_batches
     WHERE remaining_quantity > 0;
@@ -783,6 +791,69 @@ GRANT EXECUTE ON FUNCTION fn_reconcile_inventory(DATE) TO PUBLIC;
 GRANT EXECUTE ON FUNCTION fn_reconcile_accounts_payable(DATE) TO PUBLIC;
 GRANT EXECUTE ON FUNCTION fn_full_reconciliation_report(DATE) TO PUBLIC;
 
+-- =============================================================================
+-- FUNCTION: Recompute Account Running Balances
+-- =============================================================================
+-- SAP equivalent: FAGL_BALANCE_CORRECT
+-- Recomputes accounts.CurrentBalance from authoritative ledger_entries.
+-- Needed after manual data corrections, migration failures, or testing resets.
+-- Returns the accounts that were corrected.
+
+CREATE OR REPLACE FUNCTION fn_correct_account_balances()
+RETURNS TABLE (
+    account_code TEXT,
+    account_name TEXT,
+    old_balance NUMERIC(18,6),
+    new_balance NUMERIC(18,6),
+    drift NUMERIC(18,6)
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Return drifted accounts before updating
+    RETURN QUERY
+    SELECT 
+        a."AccountCode"::TEXT,
+        a."AccountName"::TEXT,
+        a."CurrentBalance"::NUMERIC(18,6) AS old_balance,
+        sub.computed::NUMERIC(18,6) AS new_balance,
+        (a."CurrentBalance" - sub.computed)::NUMERIC(18,6) AS drift
+    FROM accounts a
+    JOIN (
+        SELECT a2."Id",
+            CASE a2."NormalBalance"
+                WHEN 'DEBIT' THEN COALESCE(SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0)
+                ELSE COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0)
+            END AS computed
+        FROM accounts a2
+        LEFT JOIN ledger_entries le ON le."AccountId" = a2."Id"
+        LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id" AND lt."Status" = 'POSTED'
+        GROUP BY a2."Id", a2."NormalBalance"
+    ) sub ON a."Id" = sub."Id"
+    WHERE ABS(a."CurrentBalance" - sub.computed) > 0.001;
+
+    -- Apply correction
+    UPDATE accounts a
+    SET "CurrentBalance" = COALESCE(sub.computed, 0),
+        "UpdatedAt" = NOW()
+    FROM (
+        SELECT a2."Id",
+            CASE a2."NormalBalance"
+                WHEN 'DEBIT' THEN COALESCE(SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0)
+                ELSE COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0)
+            END AS computed
+        FROM accounts a2
+        LEFT JOIN ledger_entries le ON le."AccountId" = a2."Id"
+        LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id" AND lt."Status" = 'POSTED'
+        GROUP BY a2."Id", a2."NormalBalance"
+    ) sub
+    WHERE a."Id" = sub."Id"
+      AND ABS(a."CurrentBalance" - sub.computed) > 0.001;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION fn_correct_account_balances() TO PUBLIC;
+
 -- Success message
 DO $$
 BEGIN
@@ -796,4 +867,5 @@ BEGIN
     RAISE NOTICE '   - fn_reconcile_inventory(as_of_date)';
     RAISE NOTICE '   - fn_reconcile_accounts_payable(as_of_date)';
     RAISE NOTICE '   - fn_full_reconciliation_report(as_of_date)';
+    RAISE NOTICE '   - fn_correct_account_balances() [SAP: FAGL_BALANCE_CORRECT]';
 END $$;

@@ -8,6 +8,7 @@ import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
 import { printReceipt } from '../lib/print';
 import type { ReceiptData } from '../lib/print';
+import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 
 // ── Local type definitions ──────────────────────────────────────────────
 
@@ -2024,6 +2025,7 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
 
           {/* Footer */}
           <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex flex-col-reverse sm:flex-row justify-end gap-3 flex-shrink-0">
+            <DocumentFlowButton entityType="SALE" entityId={sale.id} size="sm" />
             <button
               onClick={onClose}
               className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700 font-medium"
