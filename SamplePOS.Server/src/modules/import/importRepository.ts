@@ -474,6 +474,7 @@ export async function bulkInsertProducts(
     productId: string;
     quantity: number;
     unitCost: number;
+    movementValue: number;
   }>;
 }> {
   if (rows.length === 0) return { inserted: 0, skipped: 0, stockMovements: [] };
@@ -485,19 +486,34 @@ export async function bulkInsertProducts(
     productId: string;
     quantity: number;
     unitCost: number;
+    movementValue: number;
   }> = [];
+
+  // ── Pre-generate product numbers for ALL rows (app-layer, no trigger) ──
+  // For true INSERTs the number is used; for ON CONFLICT DO UPDATE the
+  // product_number column is excluded from the SET clause so it stays unchanged.
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext('product_number_seq'))`);
+  const seqResult = await client.query(
+    `SELECT nextval('product_number_seq') AS seq FROM generate_series(1, $1)`,
+    [rows.length]
+  );
+  const productNumbers = seqResult.rows.map(
+    (r: { seq: string }) => `PROD-${String(r.seq).padStart(6, '0')}`
+  );
 
   const values: unknown[] = [];
   const placeholders: string[] = [];
   let idx = 1;
 
-  for (const r of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
     placeholders.push(
-      `($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5},
-        $${idx + 6}, $${idx + 7}, $${idx + 8}, $${idx + 9}, $${idx + 10}, $${idx + 11},
-        $${idx + 12}, $${idx + 13}, $${idx + 14}, $${idx + 15}, $${idx + 16}, $${idx + 17}, $${idx + 18})`
+      `($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5}, $${idx + 6},
+        $${idx + 7}, $${idx + 8}, $${idx + 9}, $${idx + 10}, $${idx + 11}, $${idx + 12},
+        $${idx + 13}, $${idx + 14}, $${idx + 15}, $${idx + 16}, $${idx + 17}, $${idx + 18}, $${idx + 19})`
     );
     values.push(
+      productNumbers[i],
       r.sku,
       r.barcode || null,
       r.name,
@@ -518,7 +534,7 @@ export async function bulkInsertProducts(
       r.minDaysBeforeExpirySale ?? 0,
       r.isActive ?? true
     );
-    idx += 19;
+    idx += 20;
   }
 
   let conflictClause: string;
@@ -550,7 +566,7 @@ export async function bulkInsertProducts(
 
   const sql = `
     INSERT INTO products (
-      sku, barcode, name, description, category, generic_name,
+      product_number, sku, barcode, name, description, category, generic_name,
       conversion_factor, cost_price, selling_price,
       is_taxable, tax_rate, costing_method,
       pricing_formula, auto_update_price,
@@ -758,9 +774,10 @@ export async function bulkInsertProducts(
     // manually so they post to the GL via recordOpeningStockToGL (equity, not revenue).
     await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
-    // For UPDATE strategy, capture existing batch quantities BEFORE upsert
-    // so we can compute the delta for accurate stock movements.
-    const existingBatchQty = new Map<string, number>();
+    // For UPDATE strategy, capture existing batch state (qty + cost) BEFORE upsert
+    // so we can compute the VALUE delta for accurate GL entries.
+    // Tracks both quantity AND cost changes (SAP revaluation pattern).
+    const existingBatchState = new Map<string, { qty: number; cost: number }>();
     if (duplicateStrategy === 'UPDATE') {
       const batchKeys = batchRows
         .map((r) => {
@@ -770,11 +787,10 @@ export async function bulkInsertProducts(
         .filter((k): k is { productId: string; batchNumber: string } => k !== null);
 
       if (batchKeys.length > 0) {
-        // Build a lookup of existing batch quantities
         const pids = batchKeys.map((k) => k.productId);
         const bns = batchKeys.map((k) => k.batchNumber);
         const existingResult = await client.query(
-          `SELECT product_id, batch_number, remaining_quantity
+          `SELECT product_id, batch_number, remaining_quantity, cost_price
            FROM inventory_batches
            WHERE (product_id, batch_number) IN (
              SELECT UNNEST($1::uuid[]), UNNEST($2::text[])
@@ -783,7 +799,10 @@ export async function bulkInsertProducts(
         );
         for (const row of existingResult.rows) {
           const key = `${row.product_id}|${row.batch_number}`;
-          existingBatchQty.set(key, Money.parseDb(row.remaining_quantity).toNumber());
+          existingBatchState.set(key, {
+            qty: Money.parseDb(row.remaining_quantity).toNumber(),
+            cost: Money.parseDb(row.cost_price).toNumber(),
+          });
         }
       }
     }
@@ -844,17 +863,29 @@ export async function bulkInsertProducts(
         const smPlaceholders: string[] = [];
         let smIdx = 1;
 
+        // Track value deltas in parallel with smPlaceholders for RETURNING zip
+        const pendingValueDeltas: number[] = [];
+
         for (const batch of batchResult.rows) {
           const batchQty = Money.parseDb(batch.remaining_quantity).toNumber();
           const batchCost = Money.parseDb(batch.cost_price).toNumber();
 
-          // For UPDATE re-imports, only record the delta (new - old)
+          // For UPDATE re-imports, compute full VALUE delta (handles qty + cost changes).
+          // Per SAP revaluation pattern: GL must reflect the economic change, not just
+          // quantity movement. A cost-price change on existing stock is a revaluation.
           const existingKey = `${batch.product_id}|${batch.batch_number}`;
-          const oldQty = existingBatchQty.get(existingKey) ?? 0;
-          const delta = batchQty - oldQty;
+          const oldState = existingBatchState.get(existingKey);
+          const oldQty = oldState?.qty ?? 0;
+          const oldCost = oldState?.cost ?? 0;
 
-          // Skip if no change or negative (we don't create ADJUSTMENT_OUT for re-imports)
-          if (delta <= 0) continue;
+          const oldValue = Money.lineTotal(oldQty, oldCost);
+          const newValue = Money.lineTotal(batchQty, batchCost);
+          const valueDelta = Money.toNumber(newValue.minus(oldValue));
+
+          // Skip if no economic change (identical re-import)
+          if (valueDelta === 0) continue;
+
+          const qtyDelta = batchQty - oldQty;
 
           smPlaceholders.push(
             `(gen_random_uuid(), generate_movement_number(), $${smIdx}::uuid, $${smIdx + 1}::uuid,
@@ -864,10 +895,13 @@ export async function bulkInsertProducts(
           smValues.push(
             batch.product_id,
             batch.id,
-            delta,
+            Math.abs(qtyDelta),
             batchCost,
-            `Opening balance stock import`
+            valueDelta > 0
+              ? `Opening balance increase (qty ${oldQty}→${batchQty}, cost ${oldCost}→${batchCost})`
+              : `Opening balance decrease (qty ${oldQty}→${batchQty}, cost ${oldCost}→${batchCost})`
           );
+          pendingValueDeltas.push(valueDelta);
           smIdx += 5;
         }
 
@@ -882,14 +916,17 @@ export async function bulkInsertProducts(
             smValues
           );
 
-          // Collect movement data for GL posting by the caller
-          for (const sm of smResult.rows) {
+          // Collect movement data for GL posting by the caller.
+          // RETURNING order matches VALUES order, so zip with pendingValueDeltas.
+          for (let i = 0; i < smResult.rows.length; i++) {
+            const sm = smResult.rows[i];
             stockMovements.push({
               movementId: sm.id as string,
               movementNumber: sm.movement_number as string,
               productId: sm.product_id as string,
               quantity: Money.parseDb(sm.quantity).toNumber(),
               unitCost: Money.parseDb(sm.unit_cost).toNumber(),
+              movementValue: pendingValueDeltas[i],
             });
           }
         }
@@ -917,14 +954,30 @@ export async function bulkInsertCustomers(
 ): Promise<{ inserted: number; skipped: number }> {
   if (rows.length === 0) return { inserted: 0, skipped: 0 };
 
+  // Skip trg_sync_customer_to_ar during bulk insert — it does SUM(balance)
+  // over ALL customers on every row change, causing N² performance.
+  // We recalculate AR once at the end of this function.
+  await client.query("SET LOCAL app.skip_customer_ar_trigger = 'true'");
+
+  // Pre-generate customer numbers (app-layer, trigger removed)
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext('customer_number_seq'))`);
+  const seqResult = await client.query(
+    `SELECT nextval('customer_number_seq') AS seq FROM generate_series(1, $1)`,
+    [rows.length]
+  );
+  const customerNumbers = seqResult.rows.map(
+    (r: { seq: string }) => `CUST-${String(r.seq).padStart(6, '0')}`
+  );
+
   const values: unknown[] = [];
   const placeholders: string[] = [];
   let idx = 1;
 
-  for (const r of rows) {
-    placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4})`);
-    values.push(r.name, r.email || null, r.phone || null, r.address || null, r.creditLimit ?? 0);
-    idx += 5;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    placeholders.push(`($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5})`);
+    values.push(customerNumbers[i], r.name, r.email || null, r.phone || null, r.address || null, r.creditLimit ?? 0);
+    idx += 6;
   }
 
   // Customers don't have a strong unique constraint beyond name,
@@ -944,7 +997,7 @@ export async function bulkInsertCustomers(
   }
 
   const sql = `
-    INSERT INTO customers (name, email, phone, address, credit_limit)
+    INSERT INTO customers (customer_number, name, email, phone, address, credit_limit)
     VALUES ${placeholders.join(', ')}
     ${conflictClause}
     RETURNING id`;
@@ -952,18 +1005,27 @@ export async function bulkInsertCustomers(
   try {
     const result = await client.query(sql, values);
     const inserted = result.rowCount ?? 0;
+
+    // Single AR recalculation after bulk insert (replaces N per-row trigger calls)
+    await client.query(`
+      UPDATE accounts
+      SET "CurrentBalance" = COALESCE((
+        SELECT SUM(balance) FROM customers WHERE is_active = true
+      ), 0),
+      "UpdatedAt" = NOW()
+      WHERE "AccountCode" = '1200'
+    `);
+
     return { inserted, skipped: rows.length - inserted };
   } catch (error: unknown) {
-    // If the unique index doesn't exist, fall back to simple insert
+    // If the unique index doesn't exist, fail loudly — silent fallback creates duplicates.
+    // The admin must create the dedup index before importing customers.
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes('ON CONFLICT') || msg.includes('there is no unique')) {
-      logger.warn('Customer dedup index missing, inserting without ON CONFLICT');
-      const fallbackSql = `
-        INSERT INTO customers (name, email, phone, address, credit_limit)
-        VALUES ${placeholders.join(', ')}
-        RETURNING id`;
-      const result = await client.query(fallbackSql, values);
-      return { inserted: result.rowCount ?? 0, skipped: 0 };
+      throw new Error(
+        'Customer dedup index missing. Run: CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_name_email ' +
+        "ON customers (LOWER(name), LOWER(COALESCE(email, '')));"
+      );
     }
     throw error;
   }

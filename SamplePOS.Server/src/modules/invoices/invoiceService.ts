@@ -8,6 +8,7 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
 interface PaymentLineRow {
@@ -286,6 +287,11 @@ export const invoiceService = {
         notes: input.notes || null,
         createdById: input.createdById || null,
       });
+
+      // Document Flow: Sale → Invoice
+      if (input.saleId) {
+        await documentFlowService.linkDocuments(client, 'SALE', input.saleId, 'INVOICE', invoice.id, 'CREATED_FROM');
+      }
 
       // Record initial payments: either from explicit amount OR from sale's non-credit payment lines
       if (input.initialPaymentAmount && input.initialPaymentAmount > 0) {
@@ -619,6 +625,9 @@ export const invoiceService = {
         notes: input.notes || null,
         processedById: input.processedById || null,
       });
+
+      // Document Flow: Invoice → Payment
+      await documentFlowService.linkDocuments(client, 'INVOICE', invoiceId, 'PAYMENT', payment.id, 'PAYS');
 
       // Recalculate invoice aggregates & status
       const fresh = await invoiceRepository.recalcInvoice(client, invoiceId);

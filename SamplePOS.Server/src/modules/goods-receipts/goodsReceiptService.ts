@@ -20,6 +20,7 @@ import * as supplierProductPriceRepository from '../suppliers/supplierProductPri
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { batchFetchProducts, type ProductBatchRow } from '../../db/batchFetch.js';
 import logger from '../../utils/logger.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
   InventoryBusinessRules,
   PurchaseOrderBusinessRules,
@@ -288,6 +289,11 @@ export const goodsReceiptService = {
       }
 
       const items = await goodsReceiptRepository.addGRItems(client, itemsToInsert);
+
+      // Document Flow: PO → Goods Receipt
+      if (purchaseOrderId) {
+        await documentFlowService.linkDocuments(client, 'PURCHASE_ORDER', purchaseOrderId, 'GOODS_RECEIPT', gr.id, 'FULFILLS');
+      }
 
       return {
         grId: gr.id,

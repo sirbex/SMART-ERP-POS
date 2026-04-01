@@ -36,6 +36,7 @@ import type {
   DeliveryRouteQuery
 } from '../../../../shared/types/delivery.js';
 import * as deliveryRepo from './deliveryRepository.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 
 // ====================================================
 // SHARED HELPERS
@@ -123,6 +124,15 @@ export async function createDeliveryOrder(
         deliveryOrderRow.id,
         data.items
       );
+
+      // Document Flow: Sale → Delivery Order (if linked to a sale)
+      if (data.saleId) {
+        await documentFlowService.linkDocuments(client, 'SALE', data.saleId, 'DELIVERY_ORDER', deliveryOrderRow.id, 'FULFILLS');
+      }
+      // Document Flow: Invoice → Delivery Order (if linked to an invoice)
+      if (data.invoiceId) {
+        await documentFlowService.linkDocuments(client, 'INVOICE', data.invoiceId, 'DELIVERY_ORDER', deliveryOrderRow.id, 'FULFILLS');
+      }
 
       // Create audit entry
       // TODO: Implement proper audit logging for delivery orders
@@ -314,12 +324,17 @@ export async function updateDeliveryStatus(
 
     // GL POSTING: Record delivery completion costs (fail-fast)
     if (data.status === 'DELIVERED') {
-      await glEntryService.recordDeliveryCompletedToGL({
-        deliveryId: deliveryOrder.id,
-        deliveryNumber: deliveryOrder.deliveryNumber,
-        completedAt: new Date().toISOString(),
-        totalCost: deliveryOrder.totalCost || deliveryOrder.deliveryFee
-      }, dbPool);
+      // Only post actual delivery costs (driver wages, fuel, etc.) — NOT the customer-facing fee.
+      // deliveryFee is revenue (already posted at creation); totalCost is the expense.
+      // If totalCost is 0/undefined, skip — prevents double-counting the fee as expense.
+      if (deliveryOrder.totalCost && deliveryOrder.totalCost > 0) {
+        await glEntryService.recordDeliveryCompletedToGL({
+          deliveryId: deliveryOrder.id,
+          deliveryNumber: deliveryOrder.deliveryNumber,
+          completedAt: new Date().toISOString(),
+          totalCost: deliveryOrder.totalCost
+        }, dbPool);
+      }
     }
 
     logger.info('Delivery status updated successfully', {

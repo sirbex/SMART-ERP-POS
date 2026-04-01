@@ -11,6 +11,7 @@ import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppl
 import * as glEntryService from '../../services/glEntryService.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -176,6 +177,9 @@ export async function createSupplierPayment(
                 supplierInvoiceId: invoice.id,
                 amount: allocationAmount.toNumber(),
             });
+
+            // Document Flow: Supplier Invoice → Supplier Payment
+            await documentFlowService.linkDocuments(client, 'SUPPLIER_INVOICE', invoice.id, 'SUPPLIER_PAYMENT', payment.id, 'PAYS');
 
             // Fetch invoice line items
             const lineItemsResult = await client.query(

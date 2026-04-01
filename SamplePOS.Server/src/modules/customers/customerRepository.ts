@@ -75,12 +75,24 @@ export async function findCustomerByEmail(email: string, dbPool?: pg.Pool | pg.P
   return result.rows[0] || null;
 }
 
+/**
+ * Generate next customer number (CUST-NNNNNN format).
+ * Uses advisory lock + sequence — safe for concurrent calls.
+ */
+export async function generateCustomerNumber(conn: pg.Pool | pg.PoolClient): Promise<string> {
+  await conn.query(`SELECT pg_advisory_xact_lock(hashtext('customer_number_seq'))`);
+  const result = await conn.query(`SELECT nextval('customer_number_seq') AS seq`);
+  const seq = parseInt(result.rows[0].seq, 10);
+  return `CUST-${seq.toString().padStart(6, '0')}`;
+}
+
 export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer> {
   const pool = dbPool || globalPool;
+  const customerNumber = await generateCustomerNumber(pool);
   const result = await pool.query(
     `INSERT INTO customers (
-      name, email, phone, address, customer_group_id, credit_limit
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+      customer_number, name, email, phone, address, customer_group_id, credit_limit
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
@@ -90,6 +102,7 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
       updated_at as "updatedAt",
       version`,
     [
+      customerNumber,
       data.name,
       data.email || null,
       data.phone || null,

@@ -17,6 +17,7 @@ import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quota
 import { salesService } from '../sales/salesService.js';
 import { invoiceService } from '../invoices/invoiceService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -739,6 +740,9 @@ export const quotationService = {
         // Continue - GL posting failure shouldn't block the sale
       }
 
+      // Document Flow: Quotation → Sale
+      await documentFlowService.linkDocuments(client, 'QUOTATION', quotation.id, 'SALE', saleRecord.id, 'CREATED_FROM');
+
       // BR-QUOTE-003: Mark quotation as CONVERTED (proper business logic)
       // CONVERTED status indicates the quotation has been fulfilled
       // This prevents duplicate conversions and provides clear audit trail
@@ -767,6 +771,13 @@ export const quotationService = {
       dueDate: dueDate,
     });
     invoice = invoiceResult.invoice;
+
+    // Document Flow: Sale → Invoice (and Quotation → Invoice)
+    if (invoice) {
+      const invoiceId = (invoice as Record<string, string>).id;
+      await documentFlowService.linkDocuments(pool, 'SALE', saleRecord.id, 'INVOICE', invoiceId, 'CREATED_FROM');
+      await documentFlowService.linkDocuments(pool, 'QUOTATION', quotation.id, 'INVOICE', invoiceId, 'CREATED_FROM');
+    }
 
     // Handle payment recording based on payment option
     if (data.paymentOption === 'full' && invoice) {

@@ -14,6 +14,7 @@ import {
 import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -427,6 +428,11 @@ export const purchaseOrderService = {
       );
 
       logger.info('Supplier invoice created', { invoiceId: result.rows[0].id });
+
+      // Document Flow: PO → Supplier Invoice
+      await documentFlowService.linkDocuments(client, 'PURCHASE_ORDER', data.purchaseOrderId, 'SUPPLIER_INVOICE', result.rows[0].id as string, 'CREATED_FROM');
+      // Document Flow: GR → Supplier Invoice
+      await documentFlowService.linkDocuments(client, 'GOODS_RECEIPT', data.goodsReceiptId, 'SUPPLIER_INVOICE', result.rows[0].id as string, 'CREATED_FROM');
 
       return result.rows[0] as Record<string, unknown>;
     });

@@ -28,6 +28,7 @@ import { AccountingCore, AccountingError } from '../../services/accountingCore.j
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import { SYSTEM_USER_ID } from '../../utils/constants.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 import type {
     CreateCustomerCreditNote,
     CreateCustomerDebitNote,
@@ -118,6 +119,9 @@ export const creditDebitNoteService = {
                 })),
             );
 
+            // Document Flow: Invoice → Credit Note
+            await documentFlowService.linkDocuments(client, 'INVOICE', input.invoiceId, 'CREDIT_NOTE', note.id, 'ADJUSTS');
+
             logger.info('Credit note draft created', { noteId: note.id, noteNumber: note.invoiceNumber });
             return { note, lineItems };
         });
@@ -148,15 +152,9 @@ export const creditDebitNoteService = {
             const totalAmount = Money.add(subtotal, taxTotal);
             const total = Money.toNumber(totalAmount);
 
-            // Validate cumulative debit notes don't exceed invoice total (SAP/Odoo compliance)
-            const existingDebitNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'DEBIT_NOTE');
-            const existingTotalDec = existingDebitNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
-            const cumulativeDec = Money.add(existingTotalDec, totalAmount);
-            if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
-                throw new Error(
-                    `Debit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
-                );
-            }
+            // Debit notes ADD charges to a customer (undercharge correction, late fees, etc.)
+            // Unlike credit notes, they are NOT capped at the original invoice total.
+            // SAP/Odoo: credit notes ≤ invoice total, debit notes are uncapped.
 
             const noteNumber = await creditDebitNoteRepository.generateDebitNoteNumber(client);
 
@@ -186,6 +184,9 @@ export const creditDebitNoteService = {
                     taxRate: l.taxRate ?? 0,
                 })),
             );
+
+            // Document Flow: Invoice → Debit Note
+            await documentFlowService.linkDocuments(client, 'INVOICE', input.invoiceId, 'DEBIT_NOTE', note.id, 'ADJUSTS');
 
             logger.info('Debit note draft created', { noteId: note.id, noteNumber: note.invoiceNumber });
             return { note, lineItems };
@@ -260,7 +261,8 @@ export const creditDebitNoteService = {
             // 1. Get the note to validate it
             const noteData = await creditDebitNoteRepository.getNoteById(client, noteId);
             if (!noteData) throw new Error('Note not found');
-            if (noteData.status !== 'Posted') throw new Error('Only posted notes can be cancelled');
+            // Customer invoices table uses mixed-case statuses (Draft/Posted/Cancelled)
+            if (noteData.status.toUpperCase() !== 'POSTED') throw new Error('Only posted notes can be cancelled');
 
             // 2. Cancel the note record
             const cancelled = await creditDebitNoteRepository.cancelNote(client, noteId);
@@ -487,17 +489,9 @@ export const supplierCreditDebitNoteService = {
             const totalAmount = Money.add(subtotal, taxTotal);
             const total = Money.toNumber(totalAmount);
 
-            // Validate cumulative debit notes don't exceed invoice total (SAP/Odoo compliance)
-            const existingDebitNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(
-                client, input.invoiceId, 'SUPPLIER_DEBIT_NOTE',
-            );
-            const existingTotalDec = existingDebitNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
-            const cumulativeDec = Money.add(existingTotalDec, totalAmount);
-            if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
-                throw new Error(
-                    `Debit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
-                );
-            }
+            // Supplier debit notes ADD charges to the supplier (damaged goods, shortages, etc.)
+            // Unlike credit notes, they are NOT capped at the original invoice total.
+            // SAP/Odoo: credit notes ≤ invoice total, debit notes are uncapped.
 
             const noteNumber = await supplierCreditDebitNoteRepository.generateSupplierDebitNoteNumber(client);
 

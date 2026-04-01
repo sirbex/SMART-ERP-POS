@@ -918,7 +918,7 @@ export interface DeliveryCompletedData {
  * 
  * When a delivery order is created with a fee, we recognise income:
  *   DR Accounts Receivable (1200) deliveryFee
- *   CR Delivery Revenue    (4400) deliveryFee
+ *   CR Delivery Revenue    (4500) deliveryFee
  */
 export async function recordDeliveryChargeToGL(data: DeliveryChargeData, pool?: pg.Pool): Promise<void> {
   try {
@@ -968,7 +968,7 @@ export async function recordDeliveryChargeToGL(data: DeliveryChargeData, pool?: 
  * Record delivery completion costs in the general ledger
  * 
  * When a delivery is completed, we recognise the costs incurred:
- *   DR Delivery Expense (6850) totalCost
+ *   DR Delivery Expense (6750) totalCost
  *   CR Cash             (1010) totalCost
  */
 export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData, pool?: pg.Pool): Promise<void> {
@@ -1426,29 +1426,51 @@ export interface OpeningStockData {
  */
 export async function recordOpeningStockToGL(data: OpeningStockData, pool?: pg.Pool): Promise<void> {
   try {
-    if (data.movementValue <= 0) {
+    if (data.movementValue === 0) {
       logger.debug('Skipping opening stock GL posting (zero value)', {
         movementNumber: data.movementNumber,
       });
       return;
     }
 
-    const description = `Opening stock import: ${data.productName ?? 'Unknown'} — ${data.movementNumber}`;
+    const absValue = Math.abs(data.movementValue);
+    const isReversal = data.movementValue < 0;
 
-    const lines: JournalLine[] = [
-      {
-        accountCode: AccountCodes.INVENTORY,
-        description: `Inventory increase (import): ${data.movementNumber}`,
-        debitAmount: data.movementValue,
-        creditAmount: 0,
-      },
-      {
-        accountCode: AccountCodes.OPENING_BALANCE_EQUITY,
-        description: `Opening balance equity: ${data.movementNumber}`,
-        debitAmount: 0,
-        creditAmount: data.movementValue,
-      },
-    ];
+    const description = isReversal
+      ? `Opening stock reversal: ${data.productName ?? 'Unknown'} — ${data.movementNumber}`
+      : `Opening stock import: ${data.productName ?? 'Unknown'} — ${data.movementNumber}`;
+
+    // Positive value: DR Inventory / CR Opening Balance Equity (stock increase)
+    // Negative value: DR Opening Balance Equity / CR Inventory (stock decrease/revaluation)
+    const lines: JournalLine[] = isReversal
+      ? [
+        {
+          accountCode: AccountCodes.OPENING_BALANCE_EQUITY,
+          description: `Opening balance equity reversal: ${data.movementNumber}`,
+          debitAmount: absValue,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory decrease (import correction): ${data.movementNumber}`,
+          debitAmount: 0,
+          creditAmount: absValue,
+        },
+      ]
+      : [
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory increase (import): ${data.movementNumber}`,
+          debitAmount: absValue,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.OPENING_BALANCE_EQUITY,
+          description: `Opening balance equity: ${data.movementNumber}`,
+          debitAmount: 0,
+          creditAmount: absValue,
+        },
+      ];
 
     await AccountingCore.createJournalEntry({
       entryDate: data.movementDate,

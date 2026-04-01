@@ -82,6 +82,7 @@ interface ChunkResult {
   inserted: number;
   skipped: number;
   failed: number;
+  glWarnings: number;
 }
 
 // ── Entry Point ───────────────────────────────────────────
@@ -149,6 +150,9 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
   // In-file duplicate detection (e.g., two rows with same SKU)
   const seenKeys = new Set<string>();
+
+  // GL posting warning accumulator (stock imported but GL entry failed)
+  let totalGlWarnings = 0;
 
   let currentRow = 0;
 
@@ -286,6 +290,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
           progress.rowsImported += result.inserted;
           progress.rowsSkipped += result.skipped;
           progress.rowsFailed += result.failed;
+          totalGlWarnings += result.glWarnings;
 
           // Flush pending errors
           if (pendingErrors.length > 0) {
@@ -359,6 +364,7 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
       progress.rowsImported += result.inserted;
       progress.rowsSkipped += result.skipped;
       progress.rowsFailed += result.failed;
+      totalGlWarnings += result.glWarnings;
     }
 
     // Flush remaining errors
@@ -368,11 +374,63 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
 
     // Final progress update
     await importRepo.updateImportProgress(jobId, progress, dbPool);
-    await importRepo.completeImportJob(jobId, 'COMPLETED', undefined, dbPool);
+
+    // ── Post-import inventory consistency check ──────────────
+    // Detect product↔batch quantity mismatches early (before reconciliation report)
+    if (entityType === 'PRODUCT' && progress.rowsImported > 0) {
+      try {
+        const driftCheck = await dbPool.query(`
+          SELECT p.id, p.sku, p.name,
+                 p.quantity_on_hand AS product_qty,
+                 COALESCE(b.batch_qty, 0) AS batch_qty,
+                 p.quantity_on_hand - COALESCE(b.batch_qty, 0) AS drift
+          FROM products p
+          LEFT JOIN (
+            SELECT product_id, SUM(remaining_quantity) AS batch_qty
+            FROM inventory_batches
+            WHERE remaining_quantity > 0
+            GROUP BY product_id
+          ) b ON b.product_id = p.id
+          WHERE p.quantity_on_hand > 0
+            AND ABS(p.quantity_on_hand - COALESCE(b.batch_qty, 0)) > 0.001
+          LIMIT 20
+        `);
+        if (driftCheck.rows.length > 0) {
+          log.warn('Post-import: product↔batch quantity drift detected', {
+            driftCount: driftCheck.rows.length,
+            examples: driftCheck.rows.slice(0, 5).map((r) => ({
+              sku: r.sku,
+              productQty: Number(r.product_qty),
+              batchQty: Number(r.batch_qty),
+              drift: Number(r.drift),
+            })),
+          });
+        } else {
+          log.info('Post-import: product↔batch quantities are consistent');
+        }
+      } catch {
+        // Non-fatal — don't fail the import over a verification query
+      }
+    }
+
+    // Build error summary for the job (surfaces GL warnings to the user)
+    const summaryParts: string[] = [];
+    if (progress.rowsFailed > 0) {
+      summaryParts.push(`${progress.rowsFailed} rows failed`);
+    }
+    if (totalGlWarnings > 0) {
+      summaryParts.push(
+        `${totalGlWarnings} GL entries failed to post (stock imported but accounting incomplete)`
+      );
+    }
+    const errorSummary = summaryParts.length > 0 ? summaryParts.join('; ') : undefined;
+
+    await importRepo.completeImportJob(jobId, 'COMPLETED', errorSummary, dbPool);
 
     log.info('Import job completed', {
       rowsTotal: totalRows,
       ...progress,
+      totalGlWarnings,
     });
 
     // Clean up uploaded file after successful completion
@@ -451,7 +509,7 @@ async function flushChunk(
         }
 
         if (nonDupRows.length === 0) {
-          return { inserted: 0, skipped: 0, failed: failedCount };
+          return { inserted: 0, skipped: 0, failed: failedCount, glWarnings: 0 };
         }
         rows = nonDupRows;
         rowNumbers = nonDupRowNums;
@@ -486,6 +544,7 @@ async function flushChunk(
     });
 
     // Post GL entries for imported stock movements (after transaction commits)
+    const glFailures: Array<{ movementId: string; error: string }> = [];
     const stockMovements =
       entityType === 'PRODUCT' && 'stockMovements' in result
         ? (
@@ -496,6 +555,7 @@ async function flushChunk(
               productId: string;
               quantity: number;
               unitCost: number;
+              movementValue: number;
             }>;
           }
         ).stockMovements
@@ -514,14 +574,16 @@ async function flushChunk(
       }
 
       const importDate = new Date().toLocaleDateString('en-CA');
-      const glFailures: Array<{ movementId: string; error: string }> = [];
       for (const sm of stockMovements) {
         try {
-          const movementValue = sm.quantity * sm.unitCost;
-          if (movementValue <= 0) continue;
+          // Use pre-computed movementValue from repository (handles qty + cost changes).
+          // Positive = inventory increase, negative = inventory decrease (reversal).
+          const movementValue = sm.movementValue;
+          if (movementValue === 0) continue;
 
           // Per ERP best practices (SAP/Odoo/Tally/QuickBooks), opening stock
           // credits Opening Balance Equity (3050), NOT revenue (4110).
+          // Negative values create reversed entries (DR OBE / CR Inventory).
           await glEntryService.recordOpeningStockToGL(
             {
               movementId: sm.movementId,
@@ -544,14 +606,22 @@ async function flushChunk(
       if (glFailures.length > 0) {
         logger.warn(
           `Import GL incomplete: ${glFailures.length}/${stockMovements.length} movements failed GL posting`,
-          {
-            failedMovements: glFailures,
-          }
+          { failedMovements: glFailures }
         );
+        // Surface GL failures as import job errors so the user can see them in the UI
+        for (const gl of glFailures) {
+          pendingErrors.push({
+            importJobId: jobId,
+            rowNumber: 0, // GL errors are not row-specific
+            rawData: null,
+            errorMessage: `GL posting failed for movement ${gl.movementId}: ${gl.error}`,
+            errorType: 'DATABASE',
+          });
+        }
       }
     }
 
-    return { ...result, failed: failedCount };
+    return { ...result, failed: failedCount, glWarnings: glFailures.length };
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.error('Chunk insert failed', { entityType, chunkSize: rows.length, error: msg });
@@ -566,7 +636,7 @@ async function flushChunk(
         errorType: 'DATABASE',
       });
     }
-    return { inserted: 0, skipped: 0, failed: rows.length + failedCount };
+    return { inserted: 0, skipped: 0, failed: rows.length + failedCount, glWarnings: 0 };
   }
 }
 

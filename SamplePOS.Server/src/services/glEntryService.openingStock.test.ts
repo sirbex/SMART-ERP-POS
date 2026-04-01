@@ -89,10 +89,21 @@ describe('recordOpeningStockToGL', () => {
         expect(mockCreateJournalEntry).not.toHaveBeenCalled();
     });
 
-    it('should skip GL posting when movementValue is negative', async () => {
+    it('should create reversal GL entry when movementValue is negative', async () => {
+        mockCreateJournalEntry.mockResolvedValue(undefined);
+
         await recordOpeningStockToGL({ ...validData, movementValue: -10 });
 
-        expect(mockCreateJournalEntry).not.toHaveBeenCalled();
+        expect(mockCreateJournalEntry).toHaveBeenCalledTimes(1);
+        const callArgs = mockCreateJournalEntry.mock.calls[0]![0] as Record<string, unknown>;
+        const lines = callArgs.lines as Array<{ accountCode: string; debitAmount: number; creditAmount: number }>;
+        // Reversal: DR Opening Balance Equity (3050), CR Inventory (1300)
+        expect(lines[0].accountCode).toBe('3050');
+        expect(lines[0].debitAmount).toBe(10);
+        expect(lines[0].creditAmount).toBe(0);
+        expect(lines[1].accountCode).toBe('1300');
+        expect(lines[1].debitAmount).toBe(0);
+        expect(lines[1].creditAmount).toBe(10);
     });
 
     it('should rethrow if AccountingCore fails', async () => {

@@ -179,7 +179,7 @@ export const creditDebitNoteRepository = {
        FROM invoices 
        WHERE reference_invoice_id = $1 
          AND document_type = $2
-         AND "Status" != 'CANCELLED'`,
+         AND UPPER("Status") != 'CANCELLED'`,
             [invoiceId, documentType]
         );
         return result.rows.map((r: Record<string, unknown>) => ({

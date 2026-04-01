@@ -21,6 +21,7 @@ import {
 import * as stockMovementRepository from '../stock-movements/stockMovementRepository.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -113,6 +114,9 @@ export const returnGrnService = {
                 });
                 lines.push(created);
             }
+
+            // Document Flow: GR → Return GRN
+            await documentFlowService.linkDocuments(client, 'GOODS_RECEIPT', input.grnId, 'RETURN_GRN', returnGrn.id, 'RETURNS');
 
             logger.info('Return GRN draft created', {
                 rgrnId: returnGrn.id,

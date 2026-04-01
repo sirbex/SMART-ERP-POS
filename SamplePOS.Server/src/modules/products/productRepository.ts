@@ -189,9 +189,26 @@ export async function findProductBySku(sku: string, dbPool?: pg.Pool): Promise<P
   return result.rows[0] || null;
 }
 
+/**
+ * Generate next product number (PROD-NNNNNN format).
+ * Uses advisory lock + sequence — safe for concurrent calls.
+ * Accepts Pool or PoolClient so it can participate in a transaction.
+ */
+export async function generateProductNumber(conn: pg.Pool | pg.PoolClient): Promise<string> {
+  await conn.query(`SELECT pg_advisory_xact_lock(hashtext('product_number_seq'))`);
+  const result = await conn.query(`SELECT nextval('product_number_seq') AS seq`);
+  const seq = parseInt(result.rows[0].seq, 10);
+  return `PROD-${seq.toString().padStart(6, '0')}`;
+}
+
 export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Promise<Product> {
   const pool = dbPool || globalPool;
+
+  // Generate product number in app layer (trigger removed — SAP/Odoo pattern)
+  const productNumber = await generateProductNumber(pool);
+
   const params = [
+    productNumber,
     data.sku,
     data.barcode || null,
     data.name,
@@ -213,35 +230,15 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   ];
 
   const sql = `INSERT INTO products (
-      sku, barcode, name, description, category, generic_name,
+      product_number, sku, barcode, name, description, category, generic_name,
       conversion_factor,
       cost_price, selling_price, is_taxable, tax_rate, costing_method,
       pricing_formula, auto_update_price, reorder_level, track_expiry, min_days_before_expiry_sale, is_active
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
     RETURNING ${PRODUCT_RETURNING_COLUMNS}`;
 
-  // Retry up to 3 times if product_number sequence is desynced (duplicate key on product_number)
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const result = await pool.query(sql, params);
-      return result.rows[0];
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('products_product_number_key') && attempt < 3) {
-        // Sequence is behind — advance it past the current max and retry
-        await pool.query(`
-          SELECT setval('product_number_seq',
-            (SELECT COALESCE(MAX(CAST(SUBSTRING(product_number FROM 6) AS INTEGER)), 0)
-             FROM products WHERE product_number LIKE 'PROD-%'))
-        `);
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  // Unreachable, but satisfies TypeScript
-  throw new Error('Failed to create product after retries');
+  const result = await pool.query(sql, params);
+  return result.rows[0];
 }
 
 export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product | null> {

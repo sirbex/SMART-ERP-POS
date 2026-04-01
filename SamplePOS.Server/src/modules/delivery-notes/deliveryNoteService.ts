@@ -10,6 +10,7 @@ import { deliveryNoteRepository } from './deliveryNoteRepository.js';
 import { recordMovement } from '../stock-movements/stockMovementRepository.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
   DeliveryNoteWithLines,
   CreateDeliveryNoteData,
@@ -109,7 +110,8 @@ export const deliveryNoteService = {
         vehicleNumber: data.vehicleNumber,
         createdById: data.createdById,
       });
-
+      // Document Flow: Quotation → Delivery Note
+      await documentFlowService.linkDocuments(client, 'QUOTATION', data.quotationId, 'DELIVERY_NOTE', dn.id, 'FULFILLS');
       // ── Create lines ─────────────────────────────────────────
       for (const line of data.lines) {
         const qi = qiMap.get(line.quotationItemId)!;
