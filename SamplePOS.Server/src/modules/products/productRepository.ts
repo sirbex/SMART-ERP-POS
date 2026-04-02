@@ -5,6 +5,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 import type { Product, CreateProduct, UpdateProduct } from '../../../../shared/zod/product.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 
 // ── Shared SQL fragments (DRY) ──────────────────────────────────────────────
 // Single source of truth for product column SELECT & GROUP BY lists.
@@ -398,5 +399,296 @@ export async function countProducts(dbPool?: pg.Pool): Promise<number> {
   const pool = dbPool || globalPool;
   const result = await pool.query('SELECT COUNT(*) as count FROM products WHERE is_active = true');
 
-  return parseInt(result.rows[0].count, 10);
+  return parseInt(result.rows[0].count, 10);}
+
+// ── Bulk Upsert for Opening Inventory Import ──────────────────────────────
+
+export interface BulkImportProductRow {
+  sku: string;
+  barcode?: string;
+  name: string;
+  description?: string;
+  category?: string;
+  genericName?: string;
+  conversionFactor?: number;
+  costPrice?: number;
+  sellingPrice?: number;
+  isTaxable?: boolean;
+  taxRate?: number;
+  costingMethod?: string;
+  pricingFormula?: string;
+  autoUpdatePrice?: boolean;
+  reorderLevel?: number;
+  trackExpiry?: boolean;
+  minDaysBeforeExpirySale?: number;
+  isActive?: boolean;
+  unitOfMeasure?: string;
+}
+
+export interface BulkUpsertResult {
+  inserted: number;
+  skipped: number;
+  skuToProductId: Map<string, string>;
+}
+
+/**
+ * Bulk upsert product master data for opening inventory import.
+ * Handles: products, product_valuation, product_inventory (qty=0), product_uoms.
+ * Does NOT create batches, stock movements, or cost layers — those flow through
+ * goodsReceiptService.createOpeningBalanceGRN() per ERP best practices.
+ *
+ * @param client - Transaction client (caller manages tx boundary)
+ * @param rows - Validated product rows from CSV
+ * @param duplicateStrategy - SKIP | UPDATE | FAIL
+ */
+export async function bulkUpsertForImport(
+  client: pg.PoolClient,
+  rows: BulkImportProductRow[],
+  duplicateStrategy: DuplicateStrategy
+): Promise<BulkUpsertResult> {
+  if (rows.length === 0) return { inserted: 0, skipped: 0, skuToProductId: new Map() };
+
+  // Pre-generate product numbers (app-layer, advisory lock for concurrency)
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext('product_number_seq'))`);
+  const seqResult = await client.query(
+    `SELECT nextval('product_number_seq') AS seq FROM generate_series(1, $1)`,
+    [rows.length]
+  );
+  const productNumbers = seqResult.rows.map(
+    (r: { seq: string }) => `PROD-${String(r.seq).padStart(6, '0')}`
+  );
+
+  // Build bulk INSERT
+  const values: unknown[] = [];
+  const placeholders: string[] = [];
+  let idx = 1;
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    placeholders.push(
+      `($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5}, $${idx + 6},
+        $${idx + 7}, $${idx + 8}, $${idx + 9}, $${idx + 10}, $${idx + 11}, $${idx + 12},
+        $${idx + 13}, $${idx + 14}, $${idx + 15}, $${idx + 16}, $${idx + 17}, $${idx + 18})`
+    );
+    values.push(
+      productNumbers[i],
+      r.sku,
+      r.barcode || null,
+      r.name,
+      r.description || null,
+      r.category || null,
+      r.genericName || null,
+      r.conversionFactor ?? 1,
+      r.costPrice ?? 0,
+      r.sellingPrice ?? 0,
+      r.isTaxable ?? false,
+      r.taxRate ?? 0,
+      r.costingMethod || 'FIFO',
+      r.pricingFormula || null,
+      r.autoUpdatePrice ?? false,
+      r.reorderLevel ?? 0,
+      r.trackExpiry ?? false,
+      r.minDaysBeforeExpirySale ?? 0,
+      r.isActive ?? true
+    );
+    idx += 19;
+  }
+
+  let conflictClause: string;
+  if (duplicateStrategy === 'UPDATE') {
+    conflictClause = `ON CONFLICT (sku) DO UPDATE SET
+      name = EXCLUDED.name,
+      barcode = EXCLUDED.barcode,
+      description = EXCLUDED.description,
+      category = EXCLUDED.category,
+      generic_name = EXCLUDED.generic_name,
+      conversion_factor = EXCLUDED.conversion_factor,
+      cost_price = EXCLUDED.cost_price,
+      selling_price = EXCLUDED.selling_price,
+      is_taxable = EXCLUDED.is_taxable,
+      tax_rate = EXCLUDED.tax_rate,
+      costing_method = EXCLUDED.costing_method,
+      pricing_formula = EXCLUDED.pricing_formula,
+      auto_update_price = EXCLUDED.auto_update_price,
+      reorder_level = EXCLUDED.reorder_level,
+      track_expiry = EXCLUDED.track_expiry,
+      min_days_before_expiry_sale = EXCLUDED.min_days_before_expiry_sale,
+      is_active = EXCLUDED.is_active`;
+  } else {
+    conflictClause = `ON CONFLICT (sku) DO NOTHING`;
+  }
+
+  const sql = `
+    INSERT INTO products (
+      product_number, sku, barcode, name, description, category, generic_name,
+      conversion_factor, cost_price, selling_price,
+      is_taxable, tax_rate, costing_method,
+      pricing_formula, auto_update_price,
+      reorder_level, track_expiry, min_days_before_expiry_sale, is_active
+    ) VALUES ${placeholders.join(', ')}
+    ${conflictClause}
+    RETURNING id, sku`;
+
+  const result = await client.query(sql, values);
+  const inserted = result.rowCount ?? 0;
+  const skipped = rows.length - inserted;
+
+  // Build SKU → product ID map (RETURNING + fallback for existing)
+  const skuToProductId = new Map<string, string>();
+  for (const row of result.rows) {
+    skuToProductId.set(String(row.sku).toLowerCase(), row.id);
+  }
+  const missingSKUs = rows
+    .filter((r) => !skuToProductId.has(r.sku.toLowerCase()))
+    .map((r) => r.sku);
+  if (missingSKUs.length > 0) {
+    const lookupResult = await client.query(
+      `SELECT id, LOWER(sku) AS sku FROM products WHERE LOWER(sku) = ANY($1::text[])`,
+      [missingSKUs.map((s) => s.toLowerCase())]
+    );
+    for (const row of lookupResult.rows) {
+      skuToProductId.set(row.sku, row.id);
+    }
+  }
+
+  // ── Sync child tables ──
+  const newlyInsertedIds = new Set<string>(result.rows.map((r: { id: string }) => r.id));
+  const idsToSync =
+    duplicateStrategy === 'UPDATE' ? new Set<string>(skuToProductId.values()) : newlyInsertedIds;
+
+  if (idsToSync.size > 0) {
+    const syncRows = rows.filter((r) => {
+      const pid = skuToProductId.get(r.sku.toLowerCase());
+      return pid && idsToSync.has(pid);
+    });
+
+    // ── product_valuation: prices, costing, formula ──
+    const pvValues: unknown[] = [];
+    const pvPlaceholders: string[] = [];
+    let pvIdx = 1;
+    for (const r of syncRows) {
+      const productId = skuToProductId.get(r.sku.toLowerCase())!;
+      pvPlaceholders.push(
+        `($${pvIdx}::uuid, $${pvIdx + 1}::numeric, $${pvIdx + 2}::numeric, $${pvIdx + 3}::numeric, $${pvIdx + 4}::numeric, $${pvIdx + 5}, $${pvIdx + 6}, $${pvIdx + 7}::boolean)`
+      );
+      pvValues.push(
+        productId,
+        r.costPrice ?? 0,
+        r.sellingPrice ?? 0,
+        r.costPrice ?? 0,
+        r.costPrice ?? 0,
+        r.costingMethod || 'FIFO',
+        r.pricingFormula || null,
+        r.autoUpdatePrice ?? false
+      );
+      pvIdx += 8;
+    }
+    if (pvPlaceholders.length > 0) {
+      await client.query(
+        `INSERT INTO product_valuation (product_id, cost_price, selling_price, average_cost, last_cost, costing_method, pricing_formula, auto_update_price)
+         VALUES ${pvPlaceholders.join(', ')}
+         ON CONFLICT (product_id) DO UPDATE SET
+           cost_price = EXCLUDED.cost_price,
+           selling_price = EXCLUDED.selling_price,
+           average_cost = EXCLUDED.average_cost,
+           last_cost = EXCLUDED.last_cost,
+           costing_method = EXCLUDED.costing_method,
+           pricing_formula = EXCLUDED.pricing_formula,
+           auto_update_price = EXCLUDED.auto_update_price,
+           updated_at = NOW()`,
+        pvValues
+      );
+    }
+
+    // ── product_inventory: init with qty=0 (inventory flows through GRN) ──
+    const piValues: unknown[] = [];
+    const piPlaceholders: string[] = [];
+    let piIdx = 1;
+    for (const r of syncRows) {
+      const productId = skuToProductId.get(r.sku.toLowerCase())!;
+      piPlaceholders.push(`($${piIdx}::uuid, $${piIdx + 1}::numeric)`);
+      piValues.push(productId, r.reorderLevel ?? 0);
+      piIdx += 2;
+    }
+    if (piPlaceholders.length > 0) {
+      await client.query(
+        `INSERT INTO product_inventory (product_id, quantity_on_hand, reorder_level)
+         VALUES ${piPlaceholders.join(', ')}
+         ON CONFLICT (product_id) DO UPDATE SET
+           reorder_level = EXCLUDED.reorder_level,
+           updated_at = NOW()`,
+        piValues
+      );
+    }
+
+    // ── product_uoms: assign UOM to imported products ──
+    {
+      const allUoms = await client.query(
+        `SELECT id, UPPER(name) AS name, UPPER(symbol) AS symbol FROM uoms`
+      );
+      const uomNameMap = new Map<string, string>();
+      for (const u of allUoms.rows) {
+        uomNameMap.set(u.name, u.id);
+        if (u.symbol) uomNameMap.set(u.symbol, u.id);
+      }
+      const eachUomId = uomNameMap.get('EACH') || uomNameMap.get('EA');
+
+      // Auto-create missing UoMs
+      const missingUoms = new Set<string>();
+      for (const r of syncRows) {
+        if (r.unitOfMeasure) {
+          const upper = r.unitOfMeasure.toUpperCase();
+          if (!uomNameMap.has(upper)) missingUoms.add(r.unitOfMeasure);
+        }
+      }
+      for (const uomName of missingUoms) {
+        const res = await client.query(
+          `INSERT INTO uoms (name, symbol, type) VALUES ($1, $2, 'QUANTITY') RETURNING id, UPPER(name) AS name`,
+          [uomName, uomName.toLowerCase()]
+        );
+        if (res.rows[0]) {
+          uomNameMap.set(res.rows[0].name, res.rows[0].id);
+        }
+      }
+
+      const puValues: unknown[] = [];
+      const puPlaceholders: string[] = [];
+      let puIdx = 1;
+      for (const r of syncRows) {
+        const productId = skuToProductId.get(r.sku.toLowerCase())!;
+        let uomId: string | undefined;
+        if (r.unitOfMeasure) {
+          uomId = uomNameMap.get(r.unitOfMeasure.toUpperCase());
+        }
+        if (!uomId) uomId = eachUomId;
+        if (!uomId) continue;
+        puPlaceholders.push(`($${puIdx}::uuid, $${puIdx + 1}::uuid, 1.0, true)`);
+        puValues.push(productId, uomId);
+        puIdx += 2;
+      }
+      if (puPlaceholders.length > 0) {
+        const productIdsToSync = syncRows
+          .map((r) => skuToProductId.get(r.sku.toLowerCase()))
+          .filter((pid): pid is string => !!pid);
+        if (productIdsToSync.length > 0) {
+          await client.query(
+            `UPDATE product_uoms SET is_default = false
+             WHERE product_id = ANY($1::uuid[]) AND is_default = true`,
+            [productIdsToSync]
+          );
+        }
+
+        await client.query(
+          `INSERT INTO product_uoms (product_id, uom_id, conversion_factor, is_default)
+           VALUES ${puPlaceholders.join(', ')}
+           ON CONFLICT (product_id, uom_id) DO UPDATE SET
+             is_default = true,
+             updated_at = NOW()`,
+          puValues
+        );
+      }
+    }
+  }
+
+  return { inserted, skipped, skuToProductId };
 }

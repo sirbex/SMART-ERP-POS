@@ -283,7 +283,7 @@ export async function retryImportJob(
 /** Sample data rows for each entity type so users see the expected format. */
 const PRODUCT_SAMPLE_ROW = [
   'SKU-001', 'Paracetamol 500mg', '6001234567890', 'Pain relief tablets', 'Pharmacy',
-  'Paracetamol', 'PACK', '3500', '5000', '100', '', '2027-06-30',
+  'Paracetamol', 'PACK', '3500', '5000', '100', 'BATCH-001', '2027-06-30',
   'true', '18', 'FIFO', '', 'false', '10', 'true', '30', '1', 'true',
 ];
 const CUSTOMER_SAMPLE_ROW = [
@@ -296,10 +296,11 @@ const SUPPLIER_SAMPLE_ROW = [
 
 const PRODUCT_INSTRUCTIONS_ROW = [
   '(Required)', '(Required)', '(Optional)', '(Optional)', '(Optional)',
-  '(Optional)', '(EACH/PIECE/BOX/KG/LITER etc)', '(Number)', '(Number)', '(Number - auto-creates batch)',
-  '(Optional - auto-generated if blank)', '(YYYY-MM-DD)', '(true/false)', '(Number e.g. 18)',
-  '(FIFO/AVCO)', '(Optional)', '(true/false)', '(Number)', '(true/false)',
-  '(Number - min days)', '(Number)', '(true/false)',
+  '(Optional)', '(EACH/PIECE/BOX/KG/LITER etc)', '(Required for inventory — creates cost layer & GL entry)',
+  '(Number — auto-filled at 60% markup if blank)', '(Opening qty — creates GRN batch & stock movement)',
+  '(Optional — auto-generated from SKU if blank)', '(YYYY-MM-DD — batch expiry)',
+  '(true/false)', '(Number e.g. 18)', '(FIFO/AVCO)', '(Optional)', '(true/false)',
+  '(Number)', '(true/false)', '(Number - min days)', '(Number)', '(true/false)',
 ];
 const CUSTOMER_INSTRUCTIONS_ROW = [
   '(Required)', '(Optional)', '(Optional)', '(Optional)', '(Number)',
@@ -338,7 +339,9 @@ export function generateCsvTemplate(entityType: ImportEntityType): {
   const headers = [...getTemplateHeaders(entityType)];
   const instructionsRow = getInstructionsRow(entityType);
   const sampleRow = getSampleRow(entityType);
-  const filename = `${entityType.toLowerCase()}-template.csv`;
+  const filename = entityType === 'PRODUCT'
+    ? 'opening-inventory-template.csv'
+    : `${entityType.toLowerCase()}-template.csv`;
   return { headers, instructionsRow, sampleRow, filename };
 }
 

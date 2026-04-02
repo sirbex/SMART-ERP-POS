@@ -47,7 +47,7 @@ export interface CreateGRData {
   receiptDate: string;
   notes: string | null;
   receivedBy: string;
-  source?: 'PURCHASE_ORDER' | 'MANUAL';
+  source?: 'PURCHASE_ORDER' | 'MANUAL' | 'OPENING_BALANCE';
 }
 
 export interface CreateGRItemData {

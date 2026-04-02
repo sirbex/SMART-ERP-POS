@@ -25,6 +25,7 @@ import {
   InventoryBusinessRules,
   PurchaseOrderBusinessRules,
 } from '../../middleware/businessRules.js';
+import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -953,5 +954,312 @@ export const goodsReceiptService = {
     const refreshed = await goodsReceiptRepository.getGRById(pool, grId);
     if (!refreshed) throw new Error(`Goods receipt ${grId} not found after hydration`);
     return refreshed;
+  },
+
+  // ════════════════════════════════════════════════════════════
+  // OPENING BALANCE GRN — ERP Opening Inventory (SAP MB1C / Odoo Adjustment)
+  // ════════════════════════════════════════════════════════════
+
+  /**
+   * Create an Opening Balance Goods Receipt for imported inventory.
+   *
+   * Per SAP/Odoo/Tally/QuickBooks best practices, opening stock enters the
+   * system through a formal Goods Receipt document with a complete audit trail:
+   *   - Inventory batch (FEFO-compatible, source_type = OPENING_BALANCE)
+   *   - Stock movement (OPENING_BALANCE type)
+   *   - Cost layer (FIFO/AVCO)
+   *   - GL journal entry: DR Inventory (1300) / CR Opening Balance Equity (3050)
+   *
+   * For UPDATE re-imports, computes the VALUE delta (handles qty + cost changes)
+   * per SAP revaluation pattern — GL reflects economic change, not absolute qty.
+   *
+   * @param pool - Database connection pool
+   * @param items - Products with inventory data (qty > 0)
+   * @param userId - User performing the import
+   * @param duplicateStrategy - Controls batch upsert behavior (UPDATE = idempotent)
+   */
+  async createOpeningBalanceGRN(
+    pool: Pool,
+    items: Array<{
+      productId: string;
+      productName: string;
+      sku: string;
+      quantity: number;
+      costPrice: number;
+      batchNumber?: string;
+      expiryDate?: string | null;
+    }>,
+    userId: string,
+    duplicateStrategy: DuplicateStrategy = 'UPDATE'
+  ): Promise<{
+    grId: string;
+    grNumber: string;
+    stockMovements: Array<{
+      movementId: string;
+      movementNumber: string;
+      productId: string;
+      quantity: number;
+      unitCost: number;
+      movementValue: number;
+    }>;
+    warnings: string[];
+  }> {
+    if (items.length === 0) {
+      return { grId: '', grNumber: '', stockMovements: [], warnings: [] };
+    }
+
+    const warnings: string[] = [];
+    const stockMovements: Array<{
+      movementId: string;
+      movementNumber: string;
+      productId: string;
+      quantity: number;
+      unitCost: number;
+      movementValue: number;
+    }> = [];
+    const costLayerData: Array<{
+      productId: string;
+      quantity: number;
+      unitCost: number;
+      goodsReceiptId: string;
+      batchNumber: string;
+    }> = [];
+
+    const { grId, grNumber } = await UnitOfWork.run(pool, async (client) => {
+      // Tell app.skip_stock_movement_trigger — we create movements explicitly
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
+
+      // Create GR header (COMPLETED — no draft→finalize cycle for imports)
+      const gr = await goodsReceiptRepository.createGR(client, {
+        purchaseOrderId: null,
+        receiptDate: new Date().toLocaleDateString('en-CA'),
+        notes: 'Opening Inventory Import',
+        receivedBy: userId,
+        source: 'OPENING_BALANCE',
+      });
+
+      // Immediately finalize
+      await goodsReceiptRepository.finalizeGR(client, gr.id);
+
+      // For UPDATE re-imports, capture existing batch state for delta calculation
+      const existingBatchState = new Map<string, { qty: number; cost: number }>();
+      if (duplicateStrategy === 'UPDATE') {
+        const batchKeys = items.map((it) => ({
+          productId: it.productId,
+          batchNumber:
+            it.batchNumber ||
+            `IMP-INIT-${it.sku.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 40)}`,
+        }));
+        const pids = batchKeys.map((k) => k.productId);
+        const bns = batchKeys.map((k) => k.batchNumber);
+        const existingResult = await client.query(
+          `SELECT product_id, batch_number, remaining_quantity, cost_price
+           FROM inventory_batches
+           WHERE (product_id, batch_number) IN (
+             SELECT UNNEST($1::uuid[]), UNNEST($2::text[])
+           )`,
+          [pids, bns]
+        );
+        for (const row of existingResult.rows) {
+          const key = `${row.product_id}|${row.batch_number}`;
+          existingBatchState.set(key, {
+            qty: Money.parseDb(row.remaining_quantity).toNumber(),
+            cost: Money.parseDb(row.cost_price).toNumber(),
+          });
+        }
+      }
+
+      // Process each item: batch → movement → qty update → cost layer data
+      for (const item of items) {
+        const batchNumber =
+          item.batchNumber ||
+          `IMP-INIT-${item.sku.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 40)}`;
+
+        // Upsert batch
+        const batchConflict =
+          duplicateStrategy === 'UPDATE'
+            ? `ON CONFLICT (product_id, batch_number) DO UPDATE SET
+                quantity = EXCLUDED.quantity,
+                remaining_quantity = EXCLUDED.remaining_quantity,
+                cost_price = EXCLUDED.cost_price,
+                expiry_date = COALESCE(EXCLUDED.expiry_date, inventory_batches.expiry_date)`
+            : `ON CONFLICT (product_id, batch_number) DO NOTHING`;
+
+        const batchResult = await client.query(
+          `INSERT INTO inventory_batches (
+            product_id, batch_number, quantity, remaining_quantity,
+            cost_price, expiry_date, source_type, goods_receipt_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, 'OPENING_BALANCE', $7)
+          ${batchConflict}
+          RETURNING id, remaining_quantity, cost_price`,
+          [
+            item.productId,
+            batchNumber,
+            item.quantity,
+            item.quantity,
+            item.costPrice,
+            item.expiryDate || null,
+            gr.id,
+          ]
+        );
+
+        if (batchResult.rows.length === 0) continue; // Skipped by DO NOTHING
+
+        const batch = batchResult.rows[0];
+        const batchQty = Money.parseDb(batch.remaining_quantity).toNumber();
+        const batchCost = Money.parseDb(batch.cost_price).toNumber();
+
+        // Compute value delta for GL posting
+        const existingKey = `${item.productId}|${batchNumber}`;
+        const oldState = existingBatchState.get(existingKey);
+        const oldQty = oldState?.qty ?? 0;
+        const oldCost = oldState?.cost ?? 0;
+
+        const oldValue = Money.lineTotal(oldQty, oldCost);
+        const newValue = Money.lineTotal(batchQty, batchCost);
+        const valueDelta = Money.toNumber(newValue.minus(oldValue));
+
+        if (valueDelta === 0) continue; // No economic change (identical re-import)
+
+        const qtyDelta = batchQty - oldQty;
+
+        // Generate movement number (app-layer, advisory lock)
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
+        const movNumResult = await client.query(
+          `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+           LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0') 
+           AS movement_number
+           FROM stock_movements 
+           WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
+        );
+        const movementNumber =
+          movNumResult.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+
+        // Create stock movement
+        const smResult = await client.query(
+          `INSERT INTO stock_movements (
+            movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
+            reference_type, reference_id, notes, created_by_id
+          ) VALUES ($1, $2, $3, 'OPENING_BALANCE'::movement_type, $4, $5,
+                    'GOODS_RECEIPT', $6, $7, $8)
+          RETURNING id, movement_number`,
+          [
+            movementNumber,
+            item.productId,
+            batch.id,
+            Math.abs(qtyDelta),
+            batchCost,
+            gr.id,
+            valueDelta > 0
+              ? `Opening balance increase (qty ${oldQty}→${batchQty}, cost ${oldCost}→${batchCost})`
+              : `Opening balance decrease (qty ${oldQty}→${batchQty}, cost ${oldCost}→${batchCost})`,
+            userId,
+          ]
+        );
+
+        const sm = smResult.rows[0];
+        stockMovements.push({
+          movementId: sm.id as string,
+          movementNumber: sm.movement_number as string,
+          productId: item.productId,
+          quantity: Math.abs(qtyDelta),
+          unitCost: batchCost,
+          movementValue: valueDelta,
+        });
+
+        // Update product_inventory.quantity_on_hand from batch totals
+        await client.query(
+          `WITH new_qty AS (
+             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
+             FROM inventory_batches
+             WHERE product_id = $1 AND status = 'ACTIVE'
+           ), upd_pi AS (
+             UPDATE product_inventory
+             SET quantity_on_hand = (SELECT qty FROM new_qty),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE product_id = $1
+           )
+           UPDATE products
+           SET quantity_on_hand = (SELECT qty FROM new_qty),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [item.productId]
+        );
+
+        // Collect cost layer data (processed inside transaction for atomicity)
+        costLayerData.push({
+          productId: item.productId,
+          quantity: Math.abs(qtyDelta),
+          unitCost: batchCost,
+          goodsReceiptId: gr.id,
+          batchNumber,
+        });
+      }
+
+      // Create cost layers inside transaction
+      for (const costData of costLayerData) {
+        try {
+          await costLayerService.createCostLayer(
+            { ...costData, skipGlPosting: true },
+            undefined,
+            client
+          );
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.error('Cost layer creation failed for opening balance GRN item', {
+            grId: gr.id,
+            productId: costData.productId,
+            error: errMsg,
+          });
+          warnings.push(
+            `Cost layer failed for product ${costData.productId}: ${errMsg}`
+          );
+        }
+      }
+
+      return { grId: gr.id, grNumber: gr.grNumber || '' };
+    });
+
+    // ── GL posting: DR Inventory (1300) / CR Opening Balance Equity (3050) ──
+    // Per SAP/Odoo/Tally best practices, runs AFTER transaction commits
+    if (stockMovements.length > 0) {
+      const productIds = [...new Set(stockMovements.map((sm) => sm.productId))];
+      const nameRes = await pool.query(
+        `SELECT id, name FROM products WHERE id = ANY($1::uuid[])`,
+        [productIds]
+      );
+      const nameMap = new Map<string, string>();
+      for (const r of nameRes.rows) {
+        nameMap.set(r.id as string, r.name as string);
+      }
+
+      const importDate = new Date().toLocaleDateString('en-CA');
+      for (const sm of stockMovements) {
+        if (sm.movementValue === 0) continue;
+        try {
+          await glEntryService.recordOpeningStockToGL(
+            {
+              movementId: sm.movementId,
+              movementNumber: sm.movementNumber,
+              movementDate: importDate,
+              movementValue: sm.movementValue,
+              productName: nameMap.get(sm.productId) || 'Imported product',
+            },
+            pool
+          );
+        } catch (glErr) {
+          const errMsg = glErr instanceof Error ? glErr.message : String(glErr);
+          logger.error('GL posting failed for opening balance movement', {
+            movementId: sm.movementId,
+            error: errMsg,
+          });
+          warnings.push(
+            `GL posting failed for movement ${sm.movementNumber}: ${errMsg}`
+          );
+        }
+      }
+    }
+
+    return { grId, grNumber, stockMovements, warnings };
   },
 };

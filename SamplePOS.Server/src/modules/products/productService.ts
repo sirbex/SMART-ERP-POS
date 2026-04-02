@@ -3,8 +3,8 @@
 
 import Decimal from 'decimal.js';
 import { Pool } from 'pg';
-import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
+import { pool as globalPool } from '../../db/pool.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as productRepository from './productRepository.js';
 import * as uomRepository from './uomRepository.js';
@@ -12,6 +12,8 @@ import { ProductWithUom } from './ProductWithUom.js';
 import type { Product, CreateProduct, UpdateProduct } from '../../../../shared/zod/product.js';
 import { PricingBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
+import type { BulkImportProductRow, BulkUpsertResult } from './productRepository.js';
+import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 
 // Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
 // 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
@@ -312,4 +314,39 @@ export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<void>
   if (!success) {
     throw new Error(`Failed to delete product with ID ${id}`);
   }
+}
+
+// ── Bulk Import (Opening Inventory) ─────────────────────────────────────
+
+/**
+ * Bulk create/update product master data for opening inventory import.
+ * Handles product + product_valuation + product_inventory + product_uoms.
+ * Does NOT create inventory (batches, movements, cost layers, GL) — those
+ * flow through goodsReceiptService.createOpeningBalanceGRN() per ERP pattern.
+ *
+ * @param client - Transaction client (caller manages tx boundary)
+ * @param rows - Validated product rows from CSV
+ * @param duplicateStrategy - SKIP | UPDATE | FAIL
+ */
+export async function bulkImportProducts(
+  client: pg.PoolClient,
+  rows: BulkImportProductRow[],
+  duplicateStrategy: DuplicateStrategy
+): Promise<BulkUpsertResult> {
+  if (rows.length === 0) return { inserted: 0, skipped: 0, skuToProductId: new Map() };
+
+  logger.info('Bulk importing products (master data only)', {
+    count: rows.length,
+    duplicateStrategy,
+  });
+
+  const result = await productRepository.bulkUpsertForImport(client, rows, duplicateStrategy);
+
+  logger.info('Product master data import complete', {
+    inserted: result.inserted,
+    skipped: result.skipped,
+    totalMapped: result.skuToProductId.size,
+  });
+
+  return result;
 }

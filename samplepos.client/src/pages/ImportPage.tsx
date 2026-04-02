@@ -38,7 +38,7 @@ import {
 // ── Helpers ───────────────────────────────────────────────
 
 const ENTITY_LABELS: Record<ImportEntityType, string> = {
-  PRODUCT: 'Products',
+  PRODUCT: 'Opening Inventory',
   CUSTOMER: 'Customers',
   SUPPLIER: 'Suppliers',
 };
@@ -130,7 +130,7 @@ function UploadSection({ onUploadSuccess }: UploadSectionProps) {
       <CardHeader>
         <CardTitle>Upload CSV</CardTitle>
         <CardDescription>
-          Import products, customers, or suppliers from a CSV file
+          Import opening inventory, customers, or suppliers from a CSV file
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -147,7 +147,7 @@ function UploadSection({ onUploadSuccess }: UploadSectionProps) {
             >
               <SelectTrigger><SelectValue placeholder="Entity" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="PRODUCT">Products</SelectItem>
+                <SelectItem value="PRODUCT">Opening Inventory</SelectItem>
                 <SelectItem value="CUSTOMER">Customers</SelectItem>
                 <SelectItem value="SUPPLIER">Suppliers</SelectItem>
               </SelectContent>
@@ -186,7 +186,9 @@ function UploadSection({ onUploadSuccess }: UploadSectionProps) {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${et.toLowerCase()}-template.csv`;
+                    a.download = et === 'PRODUCT'
+                      ? 'opening-inventory-template.csv'
+                      : `${et.toLowerCase()}-template.csv`;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
@@ -661,9 +663,9 @@ export default function ImportPage() {
       <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
         {/* Page header */}
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">CSV Import</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Data Import</h1>
           <p className="text-gray-600 mt-1">
-            Bulk import products, customers, and suppliers from CSV files
+            Import opening inventory, customers, and suppliers from CSV files
           </p>
         </div>
 

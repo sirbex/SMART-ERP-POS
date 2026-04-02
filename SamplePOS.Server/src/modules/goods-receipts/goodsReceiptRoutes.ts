@@ -33,7 +33,7 @@ const CreateGRSchema = z
     receiptDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
     notes: z.string().optional().nullable(),
     receivedBy: z.string().uuid('Received By (user ID) must be a valid UUID'),
-    source: z.enum(['PURCHASE_ORDER', 'MANUAL']).optional(),
+    source: z.enum(['PURCHASE_ORDER', 'MANUAL', 'OPENING_BALANCE']).optional(),
     items: z.array(GRItemSchema).min(1, 'Goods receipt must have at least one item'),
   })
   .refine(

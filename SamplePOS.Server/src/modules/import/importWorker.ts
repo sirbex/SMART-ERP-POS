@@ -29,7 +29,6 @@ import { ProductImportSchema } from '../../../../shared/zod/product.js';
 import { CreateCustomerSchema } from '../../../../shared/zod/customer.js';
 import { CreateSupplierSchema } from '../../../../shared/zod/supplier.js';
 import { Money } from '../../utils/money.js';
-import * as glEntryService from '../../services/glEntryService.js';
 import {
   getFieldMapForEntity,
   type ImportEntityType,
@@ -37,6 +36,8 @@ import {
   type ImportErrorType,
 } from '../../../../shared/zod/importSchemas.js';
 import type { ZodSchema } from 'zod';
+import * as productService from '../products/productService.js';
+import { goodsReceiptService } from '../goods-receipts/goodsReceiptService.js';
 
 // ── Tuning Constants ──────────────────────────────────────
 // Entity-aware chunk sizes balance throughput vs PostgreSQL's 65,535 parameter limit.
@@ -517,18 +518,76 @@ async function flushChunk(
       }
     }
 
-    // Execute bulk insert inside a transaction
+    // ── PRODUCT: Service orchestrator pattern (ERP Opening Inventory) ──
+    // Step 1: Create/update product master data via productService
+    // Step 2: Create Opening Balance GRN via goodsReceiptService (batches, movements, cost layers, GL)
+    if (entityType === 'PRODUCT') {
+      // Step 1: Product master data (inside transaction)
+      const productResult = await UnitOfWork.run(dbPool, async (client) => {
+        await client.query("SET LOCAL statement_timeout = '60000'");
+        return productService.bulkImportProducts(
+          client,
+          rows as unknown as Parameters<typeof productService.bulkImportProducts>[1],
+          duplicateStrategy
+        );
+      });
+
+      // Step 2: Opening Balance GRN for products with quantity > 0
+      const inventoryItems = rows
+        .filter((r) => {
+          const qty = typeof r.quantityOnHand === 'number' ? r.quantityOnHand : 0;
+          return qty > 0;
+        })
+        .map((r) => {
+          const sku = String(r.sku);
+          const productId = productResult.skuToProductId.get(sku.toLowerCase());
+          if (!productId) return null;
+          return {
+            productId,
+            productName: String(r.name),
+            sku,
+            quantity: r.quantityOnHand as number,
+            costPrice: (r.costPrice as number) ?? 0,
+            batchNumber: r.batchNumber as string | undefined,
+            expiryDate: (r.expiryDate as string) || null,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
+
+      let glWarnings = 0;
+      if (inventoryItems.length > 0) {
+        const grnResult = await goodsReceiptService.createOpeningBalanceGRN(
+          dbPool,
+          inventoryItems,
+          jobId, // userId placeholder — import job is system-level
+          duplicateStrategy
+        );
+        glWarnings = grnResult.warnings.length;
+        // Surface GRN warnings as import errors
+        for (const warn of grnResult.warnings) {
+          pendingErrors.push({
+            importJobId: jobId,
+            rowNumber: 0,
+            rawData: null,
+            errorMessage: warn,
+            errorType: 'DATABASE',
+          });
+        }
+      }
+
+      return {
+        inserted: productResult.inserted,
+        skipped: productResult.skipped,
+        failed: failedCount,
+        glWarnings,
+      };
+    }
+
+    // ── CUSTOMER / SUPPLIER: Direct repository pattern (no inventory involved) ──
     const result = await UnitOfWork.run(dbPool, async (client) => {
-      // Safety: cancel any single statement that takes > 60s (prevents indefinite hangs)
       await client.query("SET LOCAL statement_timeout = '60000'");
 
       switch (entityType) {
-        case 'PRODUCT':
-          return importRepo.bulkInsertProducts(
-            client,
-            rows as Parameters<typeof importRepo.bulkInsertProducts>[1],
-            duplicateStrategy
-          );
         case 'CUSTOMER':
           return importRepo.bulkInsertCustomers(
             client,
@@ -541,88 +600,12 @@ async function flushChunk(
             rows as Parameters<typeof importRepo.bulkInsertSuppliers>[1],
             duplicateStrategy
           );
+        default:
+          throw new Error(`Unknown entity type: ${entityType}`);
       }
     });
 
-    // Post GL entries for imported stock movements (after transaction commits)
-    const glFailures: Array<{ movementId: string; error: string }> = [];
-    const stockMovements =
-      entityType === 'PRODUCT' && 'stockMovements' in result
-        ? (
-          result as {
-            stockMovements: Array<{
-              movementId: string;
-              movementNumber: string;
-              productId: string;
-              quantity: number;
-              unitCost: number;
-              movementValue: number;
-            }>;
-          }
-        ).stockMovements
-        : [];
-
-    if (stockMovements.length > 0) {
-      // Fetch product names in one query for GL descriptions
-      const productIds = [...new Set(stockMovements.map((sm) => sm.productId))];
-      const nameRes = await dbPool.query(
-        `SELECT id, name FROM products WHERE id = ANY($1::uuid[])`,
-        [productIds]
-      );
-      const nameMap = new Map<string, string>();
-      for (const r of nameRes.rows) {
-        nameMap.set(r.id as string, r.name as string);
-      }
-
-      const importDate = new Date().toLocaleDateString('en-CA');
-      for (const sm of stockMovements) {
-        try {
-          // Use pre-computed movementValue from repository (handles qty + cost changes).
-          // Positive = inventory increase, negative = inventory decrease (reversal).
-          const movementValue = sm.movementValue;
-          if (movementValue === 0) continue;
-
-          // Per ERP best practices (SAP/Odoo/Tally/QuickBooks), opening stock
-          // credits Opening Balance Equity (3050), NOT revenue (4110).
-          // Negative values create reversed entries (DR OBE / CR Inventory).
-          await glEntryService.recordOpeningStockToGL(
-            {
-              movementId: sm.movementId,
-              movementNumber: sm.movementNumber,
-              movementDate: importDate,
-              movementValue,
-              productName: nameMap.get(sm.productId) || 'Imported product',
-            },
-            dbPool
-          );
-        } catch (glErr) {
-          const errMsg = glErr instanceof Error ? glErr.message : String(glErr);
-          logger.error('Import GL posting failed for movement', {
-            movementId: sm.movementId,
-            error: errMsg,
-          });
-          glFailures.push({ movementId: sm.movementId, error: errMsg });
-        }
-      }
-      if (glFailures.length > 0) {
-        logger.warn(
-          `Import GL incomplete: ${glFailures.length}/${stockMovements.length} movements failed GL posting`,
-          { failedMovements: glFailures }
-        );
-        // Surface GL failures as import job errors so the user can see them in the UI
-        for (const gl of glFailures) {
-          pendingErrors.push({
-            importJobId: jobId,
-            rowNumber: 0, // GL errors are not row-specific
-            rawData: null,
-            errorMessage: `GL posting failed for movement ${gl.movementId}: ${gl.error}`,
-            errorType: 'DATABASE',
-          });
-        }
-      }
-    }
-
-    return { ...result, failed: failedCount, glWarnings: glFailures.length };
+    return { ...result, failed: failedCount, glWarnings: 0 };
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.error('Chunk insert failed', { entityType, chunkSize: rows.length, error: msg });
