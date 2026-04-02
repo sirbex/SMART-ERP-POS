@@ -18,6 +18,7 @@ import { salesService } from '../sales/salesService.js';
 import { invoiceService } from '../invoices/invoiceService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -508,6 +509,9 @@ export const quotationService = {
   }> {
     // Phase 1: Transactional work - create sale, sale items, GL posting, mark converted
     const { saleRecord, quotation, customerId, totalAmount } = await UnitOfWork.run(pool, async (client) => {
+      // Maintenance mode guard (replaces trg_maintenance_check_sales)
+      await checkMaintenanceMode(client);
+
       // Get quotation with items
       const quoteData = await quotationRepository.getQuotationById(pool, quotationId);
       if (!quoteData) {
@@ -724,21 +728,9 @@ export const quotationService = {
         );
       }
 
-      // ============================================================
-      // GL POSTING FIX: Manually trigger GL posting for quotation conversions
-      // The automatic trigger (trg_post_sale_to_ledger) fires on INSERT but skips
-      // because sale_items don't exist yet. We must manually invoke it after items are added.
-      // Use SAVEPOINT so a GL failure doesn't abort the entire transaction.
-      // ============================================================
-      try {
-        await client.query('SAVEPOINT gl_posting');
-        await client.query('SELECT fn_post_sale_to_ledger() FROM sales WHERE id = $1', [saleRecord.id]);
-        await client.query('RELEASE SAVEPOINT gl_posting');
-      } catch (glError: unknown) {
-        console.error('GL posting failed for quotation conversion:', glError);
-        await client.query('ROLLBACK TO SAVEPOINT gl_posting');
-        // Continue - GL posting failure shouldn't block the sale
-      }
+      // TODO: GL posting for quotation→sale conversions should use
+      // glEntryService.recordSaleToGL() — same as salesService.createSale().
+      // Currently quotation-converted sales have no GL entries.
 
       // Document Flow: Quotation → Sale
       await documentFlowService.linkDocuments(client, 'QUOTATION', quotation.id, 'SALE', saleRecord.id, 'CREATED_FROM');

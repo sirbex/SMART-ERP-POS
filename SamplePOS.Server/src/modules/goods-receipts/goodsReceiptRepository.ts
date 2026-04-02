@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 
 export interface GoodsReceipt {
   id: string;
@@ -102,6 +103,9 @@ export const goodsReceiptRepository = {
    */
   async createGR(pool: Pool | PoolClient, data: CreateGRData): Promise<GoodsReceipt> {
     const grNumber = await this.generateGRNumber(pool);
+
+    // Period enforcement (replaces trg_enforce_period_goods_receipts)
+    await checkAccountingPeriodOpen(pool, data.receiptDate);
 
     const result = await pool.query(
       `INSERT INTO goods_receipts (

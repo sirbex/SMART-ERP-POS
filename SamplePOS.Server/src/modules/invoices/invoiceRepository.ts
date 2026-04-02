@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
+import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 
 // Helper to normalize Pascal case database columns to camelCase
 function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
@@ -258,6 +259,12 @@ export const invoiceRepository = {
     }
   ): Promise<InvoicePaymentRecord> {
     const receiptNumber = await this.generateReceiptNumber(pool);
+
+    // Period enforcement (replaces trg_enforce_period_invoice_payments)
+    const periodDate = typeof data.paymentDate === 'string'
+      ? data.paymentDate
+      : (data.paymentDate ?? new Date()).toISOString().slice(0, 10);
+    await checkAccountingPeriodOpen(pool, periodDate);
 
     // invoice_payments table has lowercase columns with uuid_generate_v4() default for id
     const res = await pool.query(

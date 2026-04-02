@@ -48,6 +48,16 @@ export interface CreateHoldOrderItemData {
 
 export const holdRepository = {
     /**
+     * Generate next hold number (HOLD-YYYY-####)
+     */
+    async generateHoldNumber(client: PoolClient): Promise<string> {
+        const year = new Date().getFullYear();
+        const seq = await client.query("SELECT nextval('hold_number_seq')");
+        const num = seq.rows[0].nextval;
+        return `HOLD-${year}-${String(num).padStart(4, '0')}`;
+    },
+
+    /**
      * Create a held order with items (transactional)
      */
     async createHoldOrder(
@@ -56,15 +66,18 @@ export const holdRepository = {
         items: CreateHoldOrderItemData[]
     ): Promise<Record<string, unknown>> {
         return UnitOfWork.run(pool, async (client: PoolClient) => {
+            const holdNumber = await this.generateHoldNumber(client);
+
             // Insert hold order
             const holdResult = await client.query(
                 `INSERT INTO pos_held_orders (
-          terminal_id, user_id, customer_id, customer_name,
+          hold_number, terminal_id, user_id, customer_id, customer_name,
           subtotal, tax_amount, discount_amount, total_amount,
           hold_reason, notes, metadata, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *`,
                 [
+                    holdNumber,
                     holdData.terminalId,
                     holdData.userId,
                     holdData.customerId,

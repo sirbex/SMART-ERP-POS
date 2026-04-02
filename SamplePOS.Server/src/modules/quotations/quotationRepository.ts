@@ -438,6 +438,10 @@ export const quotationRepository = {
     status: string,
     notes?: string
   ): Promise<QuotationDbRow> {
+    // Capture old status for history logging
+    const oldRow = await client.query('SELECT status FROM quotations WHERE id = $1', [id]);
+    const oldStatus = oldRow.rows[0]?.status || null;
+
     const result = await client.query<QuotationDbRow>(
       `UPDATE quotations 
        SET status = $1::quotation_status,
@@ -447,6 +451,16 @@ export const quotationRepository = {
        RETURNING *`,
       [status, id]
     );
+
+    // Log status change to quotation_status_history (replaces trg_log_quote_status_change)
+    if (oldStatus !== status) {
+      await client.query(
+        `INSERT INTO quotation_status_history (
+           quotation_id, from_status, to_status, notes, changed_by_id
+         ) VALUES ($1, $2, $3, $4, NULL)`,
+        [id, oldStatus, status, notes || ('Status changed from ' + oldStatus + ' to ' + status)]
+      );
+    }
 
     return result.rows[0];
   },
@@ -460,6 +474,7 @@ export const quotationRepository = {
     saleId: string,
     invoiceId: string | null
   ): Promise<QuotationDbRow> {
+    // Atomic convert-once guard (replaces tr_protect_converted_quotation)
     const result = await client.query<QuotationDbRow>(
       `UPDATE quotations 
        SET status = 'CONVERTED',
@@ -469,9 +484,15 @@ export const quotationRepository = {
            converted_at = NOW(),
            updated_at = NOW()
        WHERE id = $3
+         AND status != 'CONVERTED'
+         AND converted_to_sale_id IS NULL
        RETURNING *`,
       [saleId, invoiceId, quotationId]
     );
+
+    if (result.rows.length === 0) {
+      throw new Error('Quotation has already been converted or does not exist');
+    }
 
     return result.rows[0];
   },

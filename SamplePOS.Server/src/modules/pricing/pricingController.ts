@@ -75,6 +75,23 @@ export const getBulkPrices = asyncHandler(async (req: Request, res: Response) =>
 });
 
 // ============================================================================
+// CUSTOMER GROUPS (read-only for dropdowns)
+// ============================================================================
+
+/**
+ * GET /api/pricing/customer-groups?isActive=true
+ */
+export const listCustomerGroups = asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const isActive = req.query.isActive === 'true' ? true
+        : req.query.isActive === 'false' ? false
+            : undefined;
+
+    const data = await pricingEngine.listCustomerGroups(pool, isActive);
+    res.json({ success: true, data });
+});
+
+// ============================================================================
 // PRODUCT CATEGORIES
 // ============================================================================
 

@@ -502,7 +502,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
     try {
       // Fetch sale items for proper revenue/cost classification
       const itemsResult = await pool.query(`
-        SELECT product_type, is_service, total_price, unit_cost, quantity
+        SELECT product_type, (product_type = 'service') AS is_service, total_price, unit_cost, quantity
         FROM sale_items WHERE sale_id = $1
       `, [sale.id]);
 

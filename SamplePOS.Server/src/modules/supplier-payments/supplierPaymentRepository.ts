@@ -241,6 +241,13 @@ export async function updatePayment(
         notes: string;
     }>
 ): Promise<SupplierPayment | null> {
+    // Protection: block modification of completed payments (replaces trg_protect_completed_supplier_payment)
+    const statusCheck = await client.query('SELECT "Status" FROM supplier_payments WHERE "Id" = $1', [id]);
+    if (!statusCheck.rows[0]) return null;
+    if (statusCheck.rows[0].Status === 'COMPLETED') {
+        throw new Error('Cannot modify a completed supplier payment');
+    }
+
     const updates: string[] = [];
     const params: (string | number)[] = [];
     let paramIndex = 1;
@@ -296,6 +303,12 @@ export async function updatePayment(
  * NOTE: This does NOT permanently remove the record - use for data safety
  */
 export async function deletePayment(client: PoolClient, id: string): Promise<boolean> {
+    // Protection: block deletion of completed payments (replaces trg_protect_completed_supplier_payment)
+    const statusCheck = await client.query('SELECT "Status" FROM supplier_payments WHERE "Id" = $1', [id]);
+    if (statusCheck.rows[0]?.Status === 'COMPLETED') {
+        throw new Error('Cannot delete a completed supplier payment');
+    }
+
     // Check if payment has allocations - prevent deletion if allocated
     const allocCheck = await client.query(
         'SELECT COUNT(*) as count FROM supplier_payment_allocations WHERE "PaymentId" = $1 AND deleted_at IS NULL',
@@ -746,6 +759,12 @@ export async function updateInvoicePaidAmount(
  * NOTE: This does NOT permanently remove the record - use for data safety
  */
 export async function deleteInvoice(client: PoolClient, id: string): Promise<boolean> {
+    // Protection: block deletion of cancelled invoices (replaces trg_protect_paid_supplier_invoice)
+    const statusCheck = await client.query('SELECT "Status" FROM supplier_invoices WHERE "Id" = $1', [id]);
+    if (statusCheck.rows[0]?.Status === 'Cancelled') {
+        throw new Error('Cannot modify a cancelled supplier invoice');
+    }
+
     // Check if invoice has payments allocated - prevent deletion if paid
     const allocCheck = await client.query(
         'SELECT COUNT(*) as count FROM supplier_payment_allocations WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL',

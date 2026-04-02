@@ -554,6 +554,44 @@ export async function getProductFormula(
 // Entity existence checks (used by service-layer validation)
 // ============================================================================
 
+export interface CustomerGroupDbRow {
+    id: string;
+    name: string;
+    description: string | null;
+    discount_percentage: string;
+    is_active: boolean;
+}
+
+export async function listCustomerGroups(
+    client: Pool | PoolClient,
+    isActive?: boolean,
+): Promise<CustomerGroupDbRow[]> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (isActive !== undefined) {
+        params.push(isActive);
+        conditions.push(`is_active = $${params.length}`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const res = await client.query(
+        `SELECT id, name, description, discount_percentage, is_active
+         FROM customer_groups ${where}
+         ORDER BY name`,
+        params,
+    );
+    return res.rows;
+}
+
+export function normaliseCustomerGroup(r: CustomerGroupDbRow) {
+    return {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        discountPercentage: Money.toNumber(Money.parseDb(r.discount_percentage)),
+        isActive: r.is_active,
+    };
+}
+
 export async function customerGroupExists(
     client: Pool | PoolClient,
     id: string,

@@ -129,8 +129,9 @@ export async function updateDiscount(
     return findDiscountById(pool, id);
   }
 
-  // Always bump version
+  // Always bump version and updated_at
   fields.push(`version = version + 1`);
+  fields.push(`updated_at = NOW()`);
 
   values.push(id);
   const result = await pool.query(
@@ -145,7 +146,7 @@ export async function updateDiscount(
  */
 export async function deleteDiscount(pool: Pool, id: string): Promise<boolean> {
   const result = await pool.query(
-    'UPDATE discounts SET is_active = false WHERE id = $1',
+    'UPDATE discounts SET is_active = false, updated_at = NOW() WHERE id = $1',
     [id]
   );
   return (result.rowCount ?? 0) > 0;

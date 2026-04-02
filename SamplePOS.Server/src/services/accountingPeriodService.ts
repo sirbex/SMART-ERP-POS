@@ -125,16 +125,19 @@ export class AccountingPeriodService {
 
     /**
      * Check if a date falls within an open period
+     * (No period row = implicitly open)
      */
     async isDateInOpenPeriod(date: string): Promise<boolean> {
         const result = await this.pool.query(
-            `
-            SELECT fn_is_period_open($1::DATE) as is_open
-        `,
+            `SELECT status FROM accounting_periods
+             WHERE period_year = EXTRACT(YEAR FROM $1::date)::int
+               AND period_month = EXTRACT(MONTH FROM $1::date)::int`,
             [date]
         );
 
-        return result.rows[0]?.is_open === true;
+        // No period row → implicitly open
+        if (result.rows.length === 0) return true;
+        return result.rows[0].status === 'OPEN';
     }
 
     /**
@@ -151,6 +154,7 @@ export class AccountingPeriodService {
         closedBy?: string,
         notes?: string
     ): Promise<PeriodActionResult> {
+        const client = await this.pool.connect();
         try {
             // Pre-close validation
             const validation = await this.validateBeforeClose(year, month);
@@ -162,35 +166,97 @@ export class AccountingPeriodService {
                 };
             }
 
-            const result = await this.pool.query(
-                `
-                SELECT * FROM fn_close_accounting_period($1, $2, $3, $4)
-            `,
-                [year, month, closedBy || null, notes || null]
+            await client.query('BEGIN');
+
+            // Calculate period boundaries
+            const periodStart = `${year}-${month.toString().padStart(2, '0')}-01`;
+
+            // Lock the period row
+            const existing = await client.query(
+                `SELECT id, status FROM accounting_periods
+                 WHERE period_year = $1 AND period_month = $2
+                 FOR UPDATE`,
+                [year, month]
             );
 
-            const row = result.rows[0];
+            let periodId: string;
+            let currentStatus: string;
 
-            if (row.success) {
-                logger.info(`Accounting period closed: ${year}-${month.toString().padStart(2, '0')}`, {
-                    periodId: row.period_id,
-                    closedBy,
-                    notes,
-                });
+            if (existing.rows.length === 0) {
+                // Create the period first
+                const periodEnd = await client.query(
+                    `SELECT ($1::date + INTERVAL '1 month' - INTERVAL '1 day')::date AS period_end`,
+                    [periodStart]
+                );
+                const created = await client.query(
+                    `INSERT INTO accounting_periods (period_year, period_month, period_start, period_end, status)
+                     VALUES ($1, $2, $3, $4, 'OPEN')
+                     RETURNING id`,
+                    [year, month, periodStart, periodEnd.rows[0].period_end]
+                );
+                periodId = created.rows[0].id;
+                currentStatus = 'OPEN';
+
+                await client.query(
+                    `INSERT INTO accounting_period_history
+                     (period_id, action, period_year, period_month, previous_status, new_status, notes)
+                     VALUES ($1, 'CREATED', $2, $3, NULL, 'OPEN', 'Period created for closing')`,
+                    [periodId, year, month]
+                );
+            } else {
+                periodId = existing.rows[0].id;
+                currentStatus = existing.rows[0].status;
             }
 
+            // Check if already closed or locked
+            if (currentStatus === 'CLOSED' || currentStatus === 'LOCKED') {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    message: `Period ${year}-${month.toString().padStart(2, '0')} is already ${currentStatus}`,
+                    periodId,
+                };
+            }
+
+            // Close the period
+            await client.query(
+                `UPDATE accounting_periods
+                 SET status = 'CLOSED', closed_at = NOW(), closed_by = $2, close_notes = $3, updated_at = NOW()
+                 WHERE id = $1`,
+                [periodId, closedBy || null, notes || null]
+            );
+
+            // Record in history
+            await client.query(
+                `INSERT INTO accounting_period_history
+                 (period_id, action, performed_by, period_year, period_month, previous_status, new_status, notes)
+                 VALUES ($1, 'CLOSED', $2, $3, $4, 'OPEN', 'CLOSED', $5)`,
+                [periodId, closedBy || null, year, month, notes || null]
+            );
+
+            await client.query('COMMIT');
+
+            logger.info(`Accounting period closed: ${year}-${month.toString().padStart(2, '0')}`, {
+                periodId,
+                closedBy,
+                notes,
+            });
+
             return {
-                success: row.success,
-                message: row.message,
-                periodId: row.period_id,
+                success: true,
+                message: `Period ${year}-${month.toString().padStart(2, '0')} closed successfully`,
+                periodId,
             };
         } catch (error: unknown) {
+            await client.query('ROLLBACK');
             logger.error('Failed to close accounting period', { year, month, error });
             return {
                 success: false,
                 message: error instanceof Error ? error.message : String(error),
                 periodId: null,
             };
+        } finally {
+            client.release();
         }
     }
 
@@ -206,6 +272,7 @@ export class AccountingPeriodService {
         reopenedBy?: string,
         reason?: string
     ): Promise<PeriodActionResult> {
+        const client = await this.pool.connect();
         try {
             if (!reason || reason.trim().length < 10) {
                 return {
@@ -215,35 +282,85 @@ export class AccountingPeriodService {
                 };
             }
 
-            const result = await this.pool.query(
-                `
-                SELECT * FROM fn_reopen_accounting_period($1, $2, $3, $4)
-            `,
-                [year, month, reopenedBy || null, reason]
+            await client.query('BEGIN');
+
+            // Lock the period row
+            const existing = await client.query(
+                `SELECT id, status FROM accounting_periods
+                 WHERE period_year = $1 AND period_month = $2
+                 FOR UPDATE`,
+                [year, month]
             );
 
-            const row = result.rows[0];
-
-            if (row.success) {
-                logger.warn(`Accounting period reopened: ${year}-${month.toString().padStart(2, '0')}`, {
-                    periodId: row.period_id,
-                    reopenedBy,
-                    reason,
-                });
+            if (existing.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    message: `Period ${year}-${month.toString().padStart(2, '0')} does not exist`,
+                    periodId: null,
+                };
             }
 
+            const periodId = existing.rows[0].id;
+            const currentStatus = existing.rows[0].status;
+
+            if (currentStatus === 'LOCKED') {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    message: `Period ${year}-${month.toString().padStart(2, '0')} is LOCKED and cannot be reopened`,
+                    periodId,
+                };
+            }
+
+            if (currentStatus === 'OPEN') {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    message: `Period ${year}-${month.toString().padStart(2, '0')} is already open`,
+                    periodId,
+                };
+            }
+
+            // Reopen the period
+            await client.query(
+                `UPDATE accounting_periods
+                 SET status = 'OPEN', reopened_at = NOW(), reopened_by = $2, reopen_reason = $3, updated_at = NOW()
+                 WHERE id = $1`,
+                [periodId, reopenedBy || null, reason]
+            );
+
+            // Record in history
+            await client.query(
+                `INSERT INTO accounting_period_history
+                 (period_id, action, performed_by, period_year, period_month, previous_status, new_status, notes)
+                 VALUES ($1, 'REOPENED', $2, $3, $4, 'CLOSED', 'OPEN', $5)`,
+                [periodId, reopenedBy || null, year, month, reason]
+            );
+
+            await client.query('COMMIT');
+
+            logger.warn(`Accounting period reopened: ${year}-${month.toString().padStart(2, '0')}`, {
+                periodId,
+                reopenedBy,
+                reason,
+            });
+
             return {
-                success: row.success,
-                message: row.message,
-                periodId: row.period_id,
+                success: true,
+                message: `Period ${year}-${month.toString().padStart(2, '0')} reopened successfully`,
+                periodId,
             };
         } catch (error: unknown) {
+            await client.query('ROLLBACK');
             logger.error('Failed to reopen accounting period', { year, month, error });
             return {
                 success: false,
                 message: error instanceof Error ? error.message : String(error),
                 periodId: null,
             };
+        } finally {
+            client.release();
         }
     }
 

@@ -298,8 +298,8 @@ export const inventoryRepository = {
       `INSERT INTO inventory_batches (
         product_id, batch_number, quantity, remaining_quantity,
         expiry_date, cost_price, goods_receipt_id, goods_receipt_item_id,
-        purchase_order_id, purchase_order_item_id, is_bonus
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        purchase_order_id, purchase_order_item_id, is_bonus, source_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
         data.productId,
@@ -313,6 +313,11 @@ export const inventoryRepository = {
         data.purchaseOrderId || null,
         data.purchaseOrderItemId || null,
         data.isBonus ?? false,
+        // Auto-populate source_type (replaces trg_prevent_ghost_batches)
+        data.goodsReceiptId ? 'GOODS_RECEIPT'
+          : data.adjustmentId ? 'STOCK_ADJUSTMENT'
+          : data.isOpeningBalance ? 'OPENING_BALANCE'
+          : 'DIRECT_ENTRY',
       ]
     );
     return result.rows[0];

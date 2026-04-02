@@ -36,7 +36,7 @@ const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   sales: new Set(['id', 'sale_number', 'customer_id', 'cashier_id', 'sale_date', 'subtotal', 'tax_amount', 'discount_amount', 'total_amount', 'total_cost', 'profit', 'payment_method', 'amount_paid', 'change_amount', 'status', 'notes', 'created_at']),
   sale_items: new Set(['id', 'sale_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'cost_price', 'discount_amount', 'tax_amount', 'total_amount', 'uom_id', 'uom_conversion_factor', 'created_at']),
   customers: new Set(['id', 'name', 'email', 'phone', 'address', 'customer_group', 'credit_limit', 'balance', 'is_active', 'created_at', 'updated_at']),
-  products: new Set(['id', 'product_number', 'name', 'description', 'sku', 'barcode', 'category', 'price', 'cost_price', 'stock_quantity', 'reorder_level', 'base_uom', 'track_expiry', 'is_taxable', 'tax_rate', 'is_service', 'is_active', 'created_at', 'updated_at']),
+  products: new Set(['id', 'product_number', 'name', 'description', 'sku', 'barcode', 'category', 'price', 'cost_price', 'stock_quantity', 'reorder_level', 'base_uom', 'track_expiry', 'is_taxable', 'tax_rate', 'product_type', 'is_active', 'created_at', 'updated_at']),
   inventory_batches: new Set(['id', 'product_id', 'batch_number', 'expiry_date', 'quantity', 'remaining_quantity', 'cost_price', 'created_at']),
   invoices: new Set(['id', 'invoice_number', 'sale_id', 'customer_id', 'invoice_date', 'due_date', 'subtotal', 'tax_amount', 'total_amount', 'amount_paid', 'status', 'notes', 'created_at', 'updated_at']),
   sale_payments: new Set(['id', 'sale_id', 'payment_method_id', 'amount', 'reference_number', 'notes', 'created_at']),
@@ -113,7 +113,7 @@ export const syncService = {
 
     // Update tenant sync status
     await masterPool.query(
-      `UPDATE tenants SET last_sync_at = NOW(), sync_status = 'IDLE' WHERE id = $1`,
+      `UPDATE tenants SET last_sync_at = NOW(), sync_status = 'IDLE', updated_at = NOW() WHERE id = $1`,
       [tenantId]
     );
 

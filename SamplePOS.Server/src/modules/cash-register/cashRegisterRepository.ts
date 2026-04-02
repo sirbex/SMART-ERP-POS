@@ -966,7 +966,7 @@ export const cashRegisterRepository = {
         expected_amount AS "expectedAmount",
         counted_amount AS "countedAmount",
         variance,
-        variance_percent AS "variancePercent",
+        CASE WHEN expected_amount = 0 THEN 0 ELSE (variance / expected_amount * 100) END AS "variancePercent",
         approved,
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
@@ -1006,7 +1006,7 @@ export const cashRegisterRepository = {
         expected_amount AS "expectedAmount",
         counted_amount AS "countedAmount",
         variance,
-        variance_percent AS "variancePercent",
+        CASE WHEN expected_amount = 0 THEN 0 ELSE (variance / expected_amount * 100) END AS "variancePercent",
         approved,
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
@@ -1034,7 +1034,7 @@ export const cashRegisterRepository = {
         r.expected_amount AS "expectedAmount",
         r.counted_amount AS "countedAmount",
         r.variance,
-        r.variance_percent AS "variancePercent",
+        CASE WHEN r.expected_amount = 0 THEN 0 ELSE (r.variance / r.expected_amount * 100) END AS "variancePercent",
         r.approved,
         r.approved_by AS "approvedBy",
         a.full_name AS "approvedByName",
@@ -1063,6 +1063,16 @@ export const cashRegisterRepository = {
     pool: Pool | PoolClient,
     data: Omit<ZReportRecord, 'id' | 'reportNumber' | 'generatedAt'>
   ): Promise<ZReportRecord> {
+    // Generate Z-report number in service layer (replaces fn_next_z_report_number())
+    const year = new Date().getFullYear();
+    const prefix = `ZRPT-${year}-`;
+    const seqResult = await pool.query(
+      `SELECT COALESCE(MAX(CAST(SPLIT_PART(report_number, '-', 3) AS INTEGER)), 0) + 1 AS next_num
+       FROM z_reports WHERE report_number LIKE $1`,
+      [`${prefix}%`]
+    );
+    const reportNumber = `${prefix}${String(seqResult.rows[0].next_num).padStart(4, '0')}`;
+
     const result = await pool.query(`
       INSERT INTO z_reports (
         session_id, report_number, register_name, cashier_name, cashier_id,
@@ -1072,11 +1082,11 @@ export const cashRegisterRepository = {
         payment_summary, denomination_breakdown, movement_breakdown, generated_by
       )
       VALUES (
-        $1, fn_next_z_report_number(), $2, $3, $4,
-        $5, $6, $7, $8, $9,
-        $10, $11, $12, $13,
-        $14, $15, $16, $17,
-        $18, $19, $20, $21
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10,
+        $11, $12, $13, $14,
+        $15, $16, $17, $18,
+        $19, $20, $21, $22
       )
       RETURNING
         id,
@@ -1104,7 +1114,7 @@ export const cashRegisterRepository = {
         generated_by AS "generatedBy",
         generated_at AS "generatedAt"
     `, [
-      data.sessionId, data.registerName, data.cashierName, data.cashierId,
+      data.sessionId, reportNumber, data.registerName, data.cashierName, data.cashierId,
       data.openedAt, data.closedAt, data.openingFloat, data.expectedClosing, data.actualClosing,
       data.variance, data.varianceReason, data.totalSales, data.totalRefunds,
       data.totalCashIn, data.totalCashOut, data.netCashFlow, data.transactionCount,

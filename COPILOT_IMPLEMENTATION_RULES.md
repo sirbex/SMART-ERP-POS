@@ -137,6 +137,61 @@ Controller → Service → Repository → Database
 - No business logic whatsoever
 - Uses parameterized queries exclusively
 
+### Database is PASSIVE STORAGE ONLY (Zero Tolerance)
+
+**ABSOLUTE PROHIBITION — applies to ALL changes, NO EXCEPTIONS:**
+
+❌ **NO database triggers** — no ON INSERT/UPDATE/DELETE side effects  
+❌ **NO generated columns** — no DB-computed business values  
+❌ **NO DB-side functions that mutate data** — all writes originate from services  
+❌ **NO trigger-based number generation** — service generates all business IDs  
+❌ **NO trigger-based GL posting** — `glEntryService` handles all ledger writes  
+❌ **NO trigger-based balance/stock sync** — service layer writes explicitly  
+❌ **NO automatic cascading writes** from INSERT/UPDATE  
+
+**Database is allowed ONLY:**
+- Primary keys, Foreign keys, Unique constraints
+- NOT NULL, CHECK constraints (simple invariants only)
+- Indexes
+
+**ALL business logic MUST exist in the Service layer**, including:
+- Generating business numbers (SALE-YYYY-####, PO-YYYY-####, etc.)
+- Updating stock quantities (both `product_inventory` and `products`)
+- Creating GL entries (`glEntryService.recordSaleToGL()`, etc.)
+- Computing balances (customer, supplier, account)
+- Deriving totals (sale totals, invoice totals)
+- Enforcing workflows (period open, immutability, status transitions)
+- Audit logging and session tracking
+- Validations beyond basic FK/NOT NULL/UNIQUE
+
+**Patterns to follow:**
+```typescript
+// ✅ CORRECT: Service layer generates sale number
+const saleNumber = await saleService.generateSaleNumber(client);
+
+// ✅ CORRECT: Service layer posts GL entries
+await glEntryService.recordSaleToGL(client, saleData);
+
+// ✅ CORRECT: Service layer syncs stock
+await client.query(
+  `WITH new_qty AS (
+     SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
+     FROM inventory_batches WHERE product_id = $1 AND status = 'ACTIVE'
+   ), upd_pi AS (
+     UPDATE product_inventory SET quantity_on_hand = (SELECT qty FROM new_qty) WHERE product_id = $1
+   )
+   UPDATE products SET quantity_on_hand = (SELECT qty FROM new_qty) WHERE id = $1`,
+  [productId]
+);
+
+// ❌ WRONG: Trigger-based side effects
+CREATE TRIGGER trg_post_sale_to_ledger AFTER INSERT ON sales ...
+CREATE TRIGGER trg_sync_stock AFTER UPDATE ON inventory_batches ...
+CREATE TRIGGER trg_generate_sale_number BEFORE INSERT ON sales ...
+```
+
+**If you think a trigger is needed, YOU ARE WRONG. Implement it in the Service layer.**
+
 ### Async/Await Only
 - ✅ Always use `async/await` pattern
 - ❌ Never use `.then()` chains

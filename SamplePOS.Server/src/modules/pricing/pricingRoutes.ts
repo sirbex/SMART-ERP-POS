@@ -10,6 +10,7 @@ import { requirePermission } from '../../rbac/middleware.js';
 import {
     getPrice,
     getBulkPrices,
+    listCustomerGroups,
     listCategories,
     getCategoryById,
     createCategory,
@@ -26,6 +27,9 @@ const router = Router();
 // ── Price Calculation (authenticated users) ──
 router.get('/price', authenticate, getPrice);
 router.post('/price/bulk', authenticate, getBulkPrices);
+
+// ── Customer Groups (read-only for dropdowns) ──
+router.get('/customer-groups', authenticate, listCustomerGroups);
 
 // ── Product Categories ──
 router.get('/categories', authenticate, listCategories);

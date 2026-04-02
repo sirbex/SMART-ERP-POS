@@ -78,6 +78,22 @@ Controller → Service → Repository → Database
 - **Repository**: SQL queries only (parameterized)
 - Never skip layers or access database directly from controller
 
+### Database is PASSIVE STORAGE ONLY (Zero Tolerance)
+
+**ABSOLUTE PROHIBITION — NO EXCEPTIONS:**
+- ❌ **NO database triggers** — no ON INSERT/UPDATE/DELETE side effects
+- ❌ **NO generated columns** — no DB-computed values
+- ❌ **NO DB-side functions that mutate data** — no automatic writes
+- ❌ **NO trigger-based number generation** — service generates all business IDs
+- ❌ **NO trigger-based GL posting** — glEntryService handles all ledger writes
+- ❌ **NO trigger-based balance/stock sync** — service layer writes explicitly
+
+**Database is allowed ONLY:** Primary keys, Foreign keys, Unique constraints, NOT NULL, CHECK constraints (simple invariants), Indexes.
+
+**ALL** business logic lives in the Service layer: number generation, stock updates, GL entries, balance computation, workflow enforcement, audit logging, validations.
+
+**If you think a trigger is needed, YOU ARE WRONG. Implement it in the Service layer.**
+
 ---
 
 ## Frontend Module – Copilot Instructions
@@ -248,22 +264,22 @@ Whenever a new field is added or modified in the Product entity/model (for examp
   - Product details popup/side panel
   - Product selectors (search dropdowns, GR/PO screens, stock adjustments, etc.)
 
-2) Centralize validation and computed logic
+1) Centralize validation and computed logic
 - Any validation or computed logic related to this field (e.g., expiry checks, stock warnings) must be:
   - Implemented once in a shared utility or Zod schema in `shared/zod`
   - Imported and reused everywhere the field appears (frontend and backend)
 - Do not duplicate page-specific validation. Prefer a shared hook like `useProductValidation()` or shared helpers that wrap Zod schemas.
 
-3) Auto-update missing components
+1) Auto-update missing components
 - If any Product popup, modal, or component does not yet include this field, update it to include it (with correct labels, help text, and accessibility attributes).
 
-4) Avoid page-specific expiry logic
+1) Avoid page-specific expiry logic
 - Never create separate expiry-check logic for a single page (e.g., GR only). Move expiry validation into shared schemas/utilities so all UIs share identical rules.
 
-5) Keep types and DTOs in sync
+1) Keep types and DTOs in sync
 - Ensure type definitions (`Product`, `ProductDTO`, etc.) are updated in `shared/types`, and all API DTOs are synchronized with backend schemas and database fields.
 
-6) Verify end-to-end wiring
+1) Verify end-to-end wiring
 - After adding a field, ensure:
   - Frontend Zod schema includes it
   - Backend validation and DB migration support it (add a SQL migration in `shared/sql` when needed)

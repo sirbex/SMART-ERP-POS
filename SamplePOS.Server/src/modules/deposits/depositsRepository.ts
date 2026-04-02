@@ -64,18 +64,33 @@ export interface ApplyDepositInput {
 }
 
 /**
+ * Generate next deposit number (DEP-YYYY-####)
+ */
+export async function generateDepositNumber(
+    pool: Pool
+): Promise<string> {
+    const year = new Date().getFullYear();
+    const seq = await pool.query("SELECT nextval('deposit_number_seq')");
+    const num = seq.rows[0].nextval;
+    return `DEP-${year}-${String(num).padStart(4, '0')}`;
+}
+
+/**
  * Create a new customer deposit
  */
 export async function createDeposit(
     pool: Pool,
     input: CreateDepositInput
 ): Promise<DepositDbRow> {
+    const depositNumber = await generateDepositNumber(pool);
+
     const result = await pool.query<DepositDbRow>(
         `INSERT INTO pos_customer_deposits 
-     (customer_id, amount, amount_available, payment_method, reference, notes, created_by)
-     VALUES ($1, $2, $2, $3, $4, $5, $6)
+     (deposit_number, customer_id, amount, amount_available, payment_method, reference, notes, created_by)
+     VALUES ($1, $2, $3, $3, $4, $5, $6, $7)
      RETURNING *`,
         [
+            depositNumber,
             input.customerId,
             input.amount,
             input.paymentMethod,

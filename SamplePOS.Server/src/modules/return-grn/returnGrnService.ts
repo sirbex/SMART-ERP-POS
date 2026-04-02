@@ -213,16 +213,22 @@ export const returnGrnService = {
                     createdBy: rgrn.createdBy,
                 });
 
-                // 3d. Recalculate product_inventory.quantity_on_hand
+                // 3d. App-layer sync: update BOTH product_inventory and products.quantity_on_hand
                 await client.query(
-                    `UPDATE product_inventory
-           SET quantity_on_hand = (
-             SELECT COALESCE(SUM(remaining_quantity), 0)
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ),
-           updated_at = CURRENT_TIMESTAMP
-           WHERE product_id = $1`,
+                    `WITH new_qty AS (
+                       SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
+                       FROM inventory_batches
+                       WHERE product_id = $1 AND status = 'ACTIVE'
+                     ), upd_pi AS (
+                       UPDATE product_inventory
+                       SET quantity_on_hand = (SELECT qty FROM new_qty),
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE product_id = $1
+                     )
+                     UPDATE products
+                     SET quantity_on_hand = (SELECT qty FROM new_qty),
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
                     [line.productId]
                 );
             }

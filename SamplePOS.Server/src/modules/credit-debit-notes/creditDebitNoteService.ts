@@ -241,6 +241,39 @@ export const creditDebitNoteService = {
                 );
             }
 
+            // Recalculate customer balance from invoices (replaces trg_sync_customer_balance_on_invoice)
+            if (note.customerId) {
+                const balanceUpdate = await client.query(
+                    `WITH old AS (SELECT balance, name FROM customers WHERE id = $1)
+                     UPDATE customers SET balance = (
+                      SELECT COALESCE(SUM("OutstandingBalance"), 0)
+                      FROM invoices
+                      WHERE "CustomerId" = $1
+                      AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
+                    ) WHERE id = $1
+                    RETURNING balance, (SELECT balance FROM old) AS old_balance, (SELECT name FROM old) AS customer_name`,
+                    [note.customerId]
+                );
+                // Audit customer balance change (replaces trg_audit_customer_balance)
+                if (balanceUpdate.rows[0] && balanceUpdate.rows[0].old_balance !== balanceUpdate.rows[0].balance) {
+                    const r = balanceUpdate.rows[0];
+                    await client.query(
+                        `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
+                         VALUES ($1, $2, $3, $4, $5, $6)`,
+                        [note.customerId, r.customer_name, r.old_balance ?? 0, r.balance ?? 0,
+                         (r.balance ?? 0) - (r.old_balance ?? 0), 'CREDIT_DEBIT_NOTE']
+                    );
+                }
+
+                // Sync AR account balance (replaces trg_sync_customer_to_ar)
+                await client.query(`
+                  UPDATE accounts SET "CurrentBalance" = COALESCE(
+                    (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+                  ), "UpdatedAt" = NOW()
+                  WHERE "AccountCode" = '1200'
+                `);
+            }
+
             logger.info('Note posted', { noteId: note.id, noteNumber: note.invoiceNumber, type: note.documentType });
             return note;
         });
@@ -313,6 +346,39 @@ export const creditDebitNoteService = {
                     noteData.totalAmount,
                     'CREDIT',
                 );
+            }
+
+            // Recalculate customer balance from invoices (replaces trg_sync_customer_balance_on_invoice)
+            if (noteData.customerId) {
+                const balanceUpdate2 = await client.query(
+                    `WITH old AS (SELECT balance, name FROM customers WHERE id = $1)
+                     UPDATE customers SET balance = (
+                      SELECT COALESCE(SUM("OutstandingBalance"), 0)
+                      FROM invoices
+                      WHERE "CustomerId" = $1
+                      AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
+                    ) WHERE id = $1
+                    RETURNING balance, (SELECT balance FROM old) AS old_balance, (SELECT name FROM old) AS customer_name`,
+                    [noteData.customerId]
+                );
+                // Audit customer balance change (replaces trg_audit_customer_balance)
+                if (balanceUpdate2.rows[0] && balanceUpdate2.rows[0].old_balance !== balanceUpdate2.rows[0].balance) {
+                    const r = balanceUpdate2.rows[0];
+                    await client.query(
+                        `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
+                         VALUES ($1, $2, $3, $4, $5, $6)`,
+                        [noteData.customerId, r.customer_name, r.old_balance ?? 0, r.balance ?? 0,
+                         (r.balance ?? 0) - (r.old_balance ?? 0), 'NOTE_CANCELLATION']
+                    );
+                }
+
+                // Sync AR account balance (replaces trg_sync_customer_to_ar)
+                await client.query(`
+                  UPDATE accounts SET "CurrentBalance" = COALESCE(
+                    (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+                  ), "UpdatedAt" = NOW()
+                  WHERE "AccountCode" = '1200'
+                `);
             }
 
             logger.info('Note cancelled with GL reversal', {

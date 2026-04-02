@@ -59,6 +59,9 @@ import ImportPage from './pages/ImportPage';
 import BarcodeLookupPage from './pages/inventory/BarcodeLookupPage';
 import CRMPage from './pages/crm/CRMPage';
 import HRPage from './pages/hr/HRPage';
+import PriceRulesPage from './pages/pricing/PriceRulesPage';
+import CategoriesPage from './pages/pricing/CategoriesPage';
+import PricePreviewPage from './pages/pricing/PricePreviewPage';
 
 // Platform (Super Admin) imports
 import { PlatformAuthProvider, usePlatformAuth } from './contexts/PlatformAuthContext';
@@ -271,6 +274,36 @@ function App() {
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
                       <HRPage />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* Pricing - ADMIN, MANAGER */}
+                <Route
+                  path="/pricing"
+                  element={<Navigate to="/pricing/rules" replace />}
+                />
+                <Route
+                  path="/pricing/rules"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <PriceRulesPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/pricing/categories"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <CategoriesPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/pricing/preview"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <PricePreviewPage />
                     </ProtectedRoute>
                   }
                 />

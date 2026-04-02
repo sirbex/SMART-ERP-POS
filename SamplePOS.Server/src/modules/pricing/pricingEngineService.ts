@@ -115,7 +115,7 @@ export async function getFinalPrice(
     }
 
     const basePrice = Money.parseDb(product.sellingPrice);
-    const costPrice = Money.parseDb(product.costPrice);
+    const _costPrice = Money.parseDb(product.costPrice);
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
     // --- 1. Pricing Tier (direct query — bypasses old calculatePrice) ---
@@ -471,6 +471,18 @@ function applyRule(
         default:
             return basePrice;
     }
+}
+
+// ============================================================================
+// CUSTOMER GROUPS (read-only for pricing UI dropdowns)
+// ============================================================================
+
+export async function listCustomerGroups(
+    pool: Pool | PoolClient,
+    isActive?: boolean,
+) {
+    const rows = await repo.listCustomerGroups(pool, isActive);
+    return rows.map(repo.normaliseCustomerGroup);
 }
 
 // ============================================================================

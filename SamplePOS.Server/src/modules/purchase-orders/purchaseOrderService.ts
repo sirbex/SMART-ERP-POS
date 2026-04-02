@@ -15,6 +15,7 @@ import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -65,6 +66,9 @@ export const purchaseOrderService = {
    */
   async createPO(pool: Pool, input: CreatePOInput): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
     return UnitOfWork.run(pool, async (client) => {
+      // Maintenance mode guard (replaces trg_maintenance_check_po)
+      await checkMaintenanceMode(client);
+
       // BR-PO-001: Validate supplier exists and is active
       await PurchaseOrderBusinessRules.validateSupplierExists(client, input.supplierId);
       logger.info('BR-PO-001: Supplier validation passed', { supplierId: input.supplierId });
@@ -212,6 +216,9 @@ export const purchaseOrderService = {
    * Update PO status with validation
    */
   async updatePOStatus(pool: Pool, id: string, newStatus: string): Promise<PurchaseOrder> {
+    // Maintenance mode guard (replaces trg_maintenance_check_po)
+    await checkMaintenanceMode(pool);
+
     // Validate status transition
     const validStatuses = ['DRAFT', 'PENDING', 'COMPLETED', 'CANCELLED'];
 
@@ -281,6 +288,9 @@ export const purchaseOrderService = {
    */
   async sendPOToSupplier(pool: Pool, id: string, userId: string): Promise<{ po: PurchaseOrder & { sent_date: Date }; goodsReceipt: { id: string; receiptNumber: string; status: string; message: string } }> {
     return UnitOfWork.run(pool, async (client) => {
+      // Maintenance mode guard (replaces trg_maintenance_check_po)
+      await checkMaintenanceMode(client);
+
       // Get PO with items
       const poResult = await purchaseOrderRepository.getPOById(client, id);
 

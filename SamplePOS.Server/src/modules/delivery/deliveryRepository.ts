@@ -40,6 +40,18 @@ export async function generateDeliveryNumber(pool: Pool): Promise<string> {
 }
 
 /**
+ * Generate a time-based tracking number (TRK-YYYY-DDD-SSSSS)
+ */
+export function generateTrackingNumber(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const start = new Date(year, 0, 1);
+  const doy = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  const secondsInDay = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  return `TRK-${year}-${String(doy).padStart(3, '0')}-${String(secondsInDay).padStart(5, '0')}`;
+}
+
+/**
  * Create new delivery order with items
  */
 export async function createDeliveryOrder(
@@ -48,9 +60,12 @@ export async function createDeliveryOrder(
   data: CreateDeliveryOrderRequest,
   userId?: string
 ): Promise<DeliveryOrderDbRow> {
+  const trackingNumber = generateTrackingNumber();
+
   const result = await client.query(`
     INSERT INTO delivery_orders (
       delivery_number,
+      tracking_number,
       sale_id,
       invoice_id,
       customer_id,
@@ -64,10 +79,11 @@ export async function createDeliveryOrder(
       created_by_id,
       updated_by_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
     RETURNING *
   `, [
     deliveryNumber,
+    trackingNumber,
     data.saleId || null,
     data.invoiceId || null,
     data.customerId || null,
@@ -324,6 +340,12 @@ export async function updateDeliveryOrderStatus(
     values.push(data.actualDeliveryTime);
   }
 
+  // Capture old status before update (for audit history)
+  const oldRow = await client.query(
+    `SELECT status FROM delivery_orders WHERE id = $1`, [id]
+  );
+  const oldStatus = oldRow.rows[0]?.status || null;
+
   const result = await client.query(`
     UPDATE delivery_orders 
     SET ${fields.join(', ')}
@@ -331,7 +353,29 @@ export async function updateDeliveryOrderStatus(
     RETURNING *
   `, values);
 
-  return result.rows[0] || null;
+  const row = result.rows[0];
+  if (!row) return null;
+
+  // Log status change to delivery_status_history (replaces trg_track_delivery_status_change)
+  if (data.status && oldStatus !== data.status) {
+    await client.query(
+      `INSERT INTO delivery_status_history (
+         delivery_order_id, old_status, new_status, changed_by_id, notes
+       ) VALUES ($1, $2, $3, $4, $5)`,
+      [id, oldStatus, data.status, userId || null,
+       'Status changed from ' + (oldStatus || 'NULL') + ' to ' + data.status]
+    );
+
+    // Set completion timestamp when delivered
+    if (data.status === 'DELIVERED') {
+      await client.query(
+        `UPDATE delivery_orders SET completed_at = CURRENT_TIMESTAMP WHERE id = $1 AND completed_at IS NULL`,
+        [id]
+      );
+    }
+  }
+
+  return row;
 }
 
 /**

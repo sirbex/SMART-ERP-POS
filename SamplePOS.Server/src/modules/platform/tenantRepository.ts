@@ -143,6 +143,8 @@ export const tenantRepository = {
 
     if (setClauses.length === 0) return this.findById(pool, id);
 
+    setClauses.push(`updated_at = NOW()`);
+
     const result = await pool.query<TenantDbRow>(
       `UPDATE tenants SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
       params

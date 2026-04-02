@@ -4,7 +4,7 @@ import type {
   ComputeUomPricesResult,
   UomPriceRow,
   RoundingMode,
-} from '../types/muom';
+} from '../types/muom.js';
 
 // Map friendly rounding names to Decimal.js rounding constants
 // Note: use numeric constants directly to avoid relying on Decimal namespace typing

@@ -20,36 +20,36 @@ const router = Router();
 // ============================================================
 
 router.post('/upload', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
-    const parsed = SyncBatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ success: false, error: parsed.error.errors[0].message });
-      return;
-    }
+  const parsed = SyncBatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+    return;
+  }
 
-    const tenantId = req.tenantId;
-    if (!tenantId) {
-      res.status(400).json({ success: false, error: 'Tenant context required for sync' });
-      return;
-    }
+  const tenantId = req.tenantId;
+  if (!tenantId) {
+    res.status(400).json({ success: false, error: 'Tenant context required for sync' });
+    return;
+  }
 
-    // Verify the batch tenant matches the authenticated tenant
-    if (parsed.data.tenantId !== tenantId) {
-      res.status(403).json({ success: false, error: 'Tenant ID mismatch' });
-      return;
-    }
+  // Verify the batch tenant matches the authenticated tenant
+  if (parsed.data.tenantId !== tenantId) {
+    res.status(403).json({ success: false, error: 'Tenant ID mismatch' });
+    return;
+  }
 
-    const masterPool = connectionManager.getMasterPool();
-    const tenantPool = getTenantPool(req);
+  const masterPool = connectionManager.getMasterPool();
+  const tenantPool = getTenantPool(req);
 
-    // Mark tenant as syncing
-    await masterPool.query(
-      `UPDATE tenants SET sync_status = 'SYNCING' WHERE id = $1`,
-      [tenantId]
-    );
+  // Mark tenant as syncing
+  await masterPool.query(
+    `UPDATE tenants SET sync_status = 'SYNCING', updated_at = NOW() WHERE id = $1`,
+    [tenantId]
+  );
 
-    const result = await syncService.processSyncBatch(masterPool, tenantPool, tenantId, parsed.data);
+  const result = await syncService.processSyncBatch(masterPool, tenantPool, tenantId, parsed.data);
 
-    res.json({ success: true, data: result });
+  res.json({ success: true, data: result });
 
 }));
 
@@ -58,22 +58,22 @@ router.post('/upload', authenticate, verifyTenantAccess, asyncHandler(async (req
 // ============================================================
 
 router.get('/download', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
-    const tenantId = req.tenantId;
-    if (!tenantId) {
-      res.status(400).json({ success: false, error: 'Tenant context required for sync' });
-      return;
-    }
+  const tenantId = req.tenantId;
+  if (!tenantId) {
+    res.status(400).json({ success: false, error: 'Tenant context required for sync' });
+    return;
+  }
 
-    const since = (req.query.since as string) || '1970-01-01T00:00:00Z';
-    const entityTypes = req.query.types
-      ? (req.query.types as string).split(',')
-      : undefined;
-    const limit = Math.min(parseInt(req.query.limit as string || '500', 10), 1000);
+  const since = (req.query.since as string) || '1970-01-01T00:00:00Z';
+  const entityTypes = req.query.types
+    ? (req.query.types as string).split(',')
+    : undefined;
+  const limit = Math.min(parseInt(req.query.limit as string || '500', 10), 1000);
 
-    const tenantPool = getTenantPool(req);
-    const result = await syncService.getChangesSince(tenantPool, since, entityTypes, limit);
+  const tenantPool = getTenantPool(req);
+  const result = await syncService.getChangesSince(tenantPool, since, entityTypes, limit);
 
-    res.json({ success: true, data: result });
+  res.json({ success: true, data: result });
 
 }));
 
@@ -82,16 +82,16 @@ router.get('/download', authenticate, verifyTenantAccess, asyncHandler(async (re
 // ============================================================
 
 router.get('/status', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
-    const tenantId = req.tenantId;
-    if (!tenantId) {
-      res.status(400).json({ success: false, error: 'Tenant context required' });
-      return;
-    }
+  const tenantId = req.tenantId;
+  if (!tenantId) {
+    res.status(400).json({ success: false, error: 'Tenant context required' });
+    return;
+  }
 
-    const masterPool = connectionManager.getMasterPool();
-    const status = await syncService.getSyncStatus(masterPool, tenantId);
+  const masterPool = connectionManager.getMasterPool();
+  const status = await syncService.getSyncStatus(masterPool, tenantId);
 
-    res.json({ success: true, data: status });
+  res.json({ success: true, data: status });
 
 }));
 
@@ -100,39 +100,39 @@ router.get('/status', authenticate, verifyTenantAccess, asyncHandler(async (req,
 // ============================================================
 
 router.get('/conflicts', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
-    const tenantId = req.tenantId;
-    if (!tenantId) {
-      res.status(400).json({ success: false, error: 'Tenant context required' });
-      return;
-    }
+  const tenantId = req.tenantId;
+  if (!tenantId) {
+    res.status(400).json({ success: false, error: 'Tenant context required' });
+    return;
+  }
 
-    const masterPool = connectionManager.getMasterPool();
-    const limit = Math.min(parseInt(req.query.limit as string || '50', 10), 200);
-    const conflicts = await syncService.getConflicts(masterPool, tenantId, limit);
+  const masterPool = connectionManager.getMasterPool();
+  const limit = Math.min(parseInt(req.query.limit as string || '50', 10), 200);
+  const conflicts = await syncService.getConflicts(masterPool, tenantId, limit);
 
-    res.json({ success: true, data: conflicts });
+  res.json({ success: true, data: conflicts });
 
 }));
 
 router.post('/conflicts/resolve', authenticate, verifyTenantAccess, asyncHandler(async (req, res) => {
-    const tenantId = req.tenantId;
-    if (!tenantId) {
-      res.status(400).json({ success: false, error: 'Tenant context required' });
-      return;
-    }
+  const tenantId = req.tenantId;
+  if (!tenantId) {
+    res.status(400).json({ success: false, error: 'Tenant context required' });
+    return;
+  }
 
-    const { entityType, entityId, resolution } = req.body;
-    if (!entityType || !entityId || !['LOCAL_WINS', 'SERVER_WINS'].includes(resolution)) {
-      res.status(400).json({ success: false, error: 'entityType, entityId, and resolution (LOCAL_WINS/SERVER_WINS) required' });
-      return;
-    }
+  const { entityType, entityId, resolution } = req.body;
+  if (!entityType || !entityId || !['LOCAL_WINS', 'SERVER_WINS'].includes(resolution)) {
+    res.status(400).json({ success: false, error: 'entityType, entityId, and resolution (LOCAL_WINS/SERVER_WINS) required' });
+    return;
+  }
 
-    const masterPool = connectionManager.getMasterPool();
-    const tenantPool = getTenantPool(req);
+  const masterPool = connectionManager.getMasterPool();
+  const tenantPool = getTenantPool(req);
 
-    await syncService.resolveConflict(masterPool, tenantPool, tenantId, entityType, entityId, resolution);
+  await syncService.resolveConflict(masterPool, tenantPool, tenantId, entityType, entityId, resolution);
 
-    res.json({ success: true, message: 'Conflict resolved' });
+  res.json({ success: true, message: 'Conflict resolved' });
 
 }));
 

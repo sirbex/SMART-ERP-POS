@@ -42,7 +42,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
 
 const { purchaseOrderService } = await import('./purchaseOrderService.js');
 
-const mockPool = { query: jest.fn<MockFn>(), connect: jest.fn<MockFn>() } as unknown as Pool;
+const mockPool = { query: jest.fn<MockFn>().mockResolvedValue({ rows: [] }), connect: jest.fn<MockFn>() } as unknown as Pool;
 
 describe('purchaseOrderService', () => {
     beforeEach(() => jest.clearAllMocks());

@@ -161,7 +161,21 @@ export async function createAuditEntry(
   ];
 
   const result = await pool.query<AuditLogDbRow>(query, values);
-  return normalizeAuditLog(result.rows[0]);
+  const entry = normalizeAuditLog(result.rows[0]);
+
+  // Update session activity counters (replaces trigger_update_session_activity)
+  if (data.sessionId) {
+    await pool.query(
+      `UPDATE user_sessions
+       SET last_activity_at = NOW(),
+           actions_count = actions_count + 1,
+           updated_at = NOW()
+       WHERE id = $1 AND is_active = true`,
+      [data.sessionId]
+    );
+  }
+
+  return entry;
 }
 
 /**
@@ -366,6 +380,7 @@ export async function endUserSession(
       logout_at = NOW(),
       is_active = false,
       logout_reason = $2,
+      session_duration_seconds = EXTRACT(EPOCH FROM (NOW() - login_at))::INT,
       updated_at = NOW()
     WHERE id = $1 AND is_active = true
     RETURNING *
@@ -436,6 +451,7 @@ export async function forceLogoutIdleSessions(
       logout_at = NOW(),
       is_active = false,
       logout_reason = 'TIMEOUT',
+      session_duration_seconds = EXTRACT(EPOCH FROM (NOW() - login_at))::INT,
       updated_at = NOW()
     WHERE is_active = true
       AND last_activity_at < NOW() - INTERVAL '${idleMinutes} minutes'

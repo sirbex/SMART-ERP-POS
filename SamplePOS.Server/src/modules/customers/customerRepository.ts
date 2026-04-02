@@ -228,6 +228,14 @@ export async function updateCustomerBalance(id: string, amount: number, dbPool?:
     [amount, id]
   );
 
+  // Sync AR account balance (replaces trg_sync_customer_to_ar)
+  await pool.query(`
+    UPDATE accounts SET "CurrentBalance" = COALESCE(
+      (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+    ), "UpdatedAt" = NOW()
+    WHERE "AccountCode" = '1200'
+  `);
+
   return result.rows[0] || null;
 }
 

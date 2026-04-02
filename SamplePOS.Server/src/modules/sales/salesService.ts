@@ -18,6 +18,7 @@ import { Money } from '../../utils/money.js';
 import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import type { SaleData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -157,6 +158,9 @@ export const salesService = {
 
     try {
       await client.query('BEGIN');
+
+      // Maintenance mode guard (replaces trg_maintenance_check_sales)
+      await checkMaintenanceMode(client);
 
       // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
       // Sales code already creates proper MOV- movements for each batch deduction
@@ -972,16 +976,22 @@ export const salesService = {
           );
         }
 
-        // Update product_inventory quantity_on_hand (app-layer single source of truth)
+        // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
         await client.query(
-          `UPDATE product_inventory
-           SET quantity_on_hand = (
-             SELECT COALESCE(SUM(remaining_quantity), 0)
+          `WITH new_qty AS (
+             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
              FROM inventory_batches
              WHERE product_id = $1 AND status = 'ACTIVE'
-           ),
-           updated_at = CURRENT_TIMESTAMP
-           WHERE product_id = $1`,
+           ), upd_pi AS (
+             UPDATE product_inventory
+             SET quantity_on_hand = (SELECT qty FROM new_qty),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE product_id = $1
+           )
+           UPDATE products
+           SET quantity_on_hand = (SELECT qty FROM new_qty),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
           [item.productId]
         );
       }
@@ -1226,6 +1236,14 @@ export const salesService = {
                  WHERE id = $1`,
                 [input.customerId]
               );
+
+              // Sync AR account balance (replaces trg_sync_customer_to_ar)
+              await client.query(`
+                UPDATE accounts SET "CurrentBalance" = COALESCE(
+                  (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+                ), "UpdatedAt" = NOW()
+                WHERE "AccountCode" = '1200'
+              `);
             }
           }
 
@@ -1808,6 +1826,9 @@ export const salesService = {
     try {
       await client.query('BEGIN');
 
+      // Maintenance mode guard (replaces trg_maintenance_check_sales)
+      await checkMaintenanceMode(client);
+
       // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
       // Void code already creates proper MOV- movements for inventory restoration
       await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
@@ -1976,16 +1997,22 @@ export const salesService = {
           }
         }
 
-        // Update product_inventory quantity_on_hand after batch restoration
+        // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
         await client.query(
-          `UPDATE product_inventory
-           SET quantity_on_hand = (
-             SELECT COALESCE(SUM(remaining_quantity), 0)
+          `WITH new_qty AS (
+             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
              FROM inventory_batches
              WHERE product_id = $1 AND status = 'ACTIVE'
-           ),
-           updated_at = CURRENT_TIMESTAMP
-           WHERE product_id = $1`,
+           ), upd_pi AS (
+             UPDATE product_inventory
+             SET quantity_on_hand = (SELECT qty FROM new_qty),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE product_id = $1
+           )
+           UPDATE products
+           SET quantity_on_hand = (SELECT qty FROM new_qty),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
           [productId]
         );
 
@@ -2062,10 +2089,28 @@ export const salesService = {
 
         if (creditAmount > 0) {
           // Reduce customer balance (they no longer owe us this money)
+          // Capture old balance for audit (replaces trg_audit_customer_balance)
+          const oldBal = await client.query('SELECT balance, name FROM customers WHERE id = $1', [sale.customer_id]);
           await client.query('UPDATE customers SET balance = balance - $1 WHERE id = $2', [
             creditAmount,
             sale.customer_id,
           ]);
+          if (oldBal.rows[0]) {
+            const ob = parseFloat(oldBal.rows[0].balance ?? 0);
+            await client.query(
+              `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [sale.customer_id, oldBal.rows[0].name, ob, ob - creditAmount, -creditAmount, 'SALE_VOID']
+            );
+          }
+
+          // Sync AR account balance (replaces trg_sync_customer_to_ar)
+          await client.query(`
+            UPDATE accounts SET "CurrentBalance" = COALESCE(
+              (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+            ), "UpdatedAt" = NOW()
+            WHERE "AccountCode" = '1200'
+          `);
 
           logger.info('Customer balance adjusted for voided credit sale (no invoice)', {
             customerId: sale.customer_id,

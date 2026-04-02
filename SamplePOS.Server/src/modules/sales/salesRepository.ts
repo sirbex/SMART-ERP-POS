@@ -2,6 +2,7 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { BusinessError } from '../../middleware/errorHandler.js';
+import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 
 export interface SaleRecord {
   id: string;
@@ -149,6 +150,9 @@ export const salesRepository = {
 
     let result;
     try {
+      // Period enforcement (replaces trg_enforce_period_sales)
+      await checkAccountingPeriodOpen(pool, data.saleDate ?? new Date().toISOString().slice(0, 10));
+
       result = await pool.query(
         `INSERT INTO sales (
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
@@ -479,7 +483,7 @@ export const salesRepository = {
     layerId: string,
     newQuantity: number
   ): Promise<void> {
-    await poolOrClient.query('UPDATE cost_layers SET remaining_quantity = $1 WHERE id = $2', [
+    await poolOrClient.query('UPDATE cost_layers SET remaining_quantity = $1, updated_at = NOW() WHERE id = $2', [
       newQuantity,
       layerId,
     ]);

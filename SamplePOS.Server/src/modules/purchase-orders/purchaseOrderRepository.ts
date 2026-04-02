@@ -306,7 +306,8 @@ export const purchaseOrderRepository = {
          SELECT COALESCE(SUM(total_price), 0) 
          FROM purchase_order_items 
          WHERE purchase_order_id = $1
-       )
+       ),
+       updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [id]
     );

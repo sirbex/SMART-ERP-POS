@@ -381,18 +381,19 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
       try {
         const driftCheck = await dbPool.query(`
           SELECT p.id, p.sku, p.name,
-                 p.quantity_on_hand AS product_qty,
+                 COALESCE(pi.quantity_on_hand, 0) AS product_qty,
                  COALESCE(b.batch_qty, 0) AS batch_qty,
-                 p.quantity_on_hand - COALESCE(b.batch_qty, 0) AS drift
+                 COALESCE(pi.quantity_on_hand, 0) - COALESCE(b.batch_qty, 0) AS drift
           FROM products p
+          LEFT JOIN product_inventory pi ON pi.product_id = p.id
           LEFT JOIN (
             SELECT product_id, SUM(remaining_quantity) AS batch_qty
             FROM inventory_batches
             WHERE remaining_quantity > 0
             GROUP BY product_id
           ) b ON b.product_id = p.id
-          WHERE p.quantity_on_hand > 0
-            AND ABS(p.quantity_on_hand - COALESCE(b.batch_qty, 0)) > 0.001
+          WHERE COALESCE(pi.quantity_on_hand, 0) > 0
+            AND ABS(COALESCE(pi.quantity_on_hand, 0) - COALESCE(b.batch_qty, 0)) > 0.001
           LIMIT 20
         `);
         if (driftCheck.rows.length > 0) {

@@ -1,0 +1,21 @@
+// Project-level markdownlint configuration
+// Disables rules that conflict with technical documentation style
+{
+    // Allow compact table separators: |---|---|
+    "MD060": false,
+    // Allow emphasis as heading (e.g., **BOLD TEXT** as visual heading)
+    "MD036": false,
+    // Allow trailing punctuation in headings (e.g., ### Rules:)
+    "MD026": false,
+    // Allow ordered lists to use meaningful numbers (5. 6. instead of 1. 2.)
+    "MD029": {
+        "style": "ordered"
+    },
+    // Relax blank-line requirements around elements — our docs use tight formatting
+    "MD022": false, // blanks-around-headings
+    "MD031": false, // blanks-around-fences
+    "MD032": false, // blanks-around-lists
+    "MD058": false, // blanks-around-tables
+    // Allow fenced code blocks without a language specifier
+    "MD040": false
+}

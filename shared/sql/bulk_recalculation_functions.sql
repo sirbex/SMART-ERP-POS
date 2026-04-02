@@ -123,8 +123,10 @@ DECLARE
     v_old_quantity NUMERIC;
     v_new_quantity NUMERIC;
 BEGIN
-    FOR v_product IN SELECT id, quantity_on_hand FROM products LOOP
-        v_old_quantity := COALESCE(v_product.quantity_on_hand, 0);
+    FOR v_product IN SELECT p.id, COALESCE(pi.quantity_on_hand, 0) AS quantity_on_hand
+                     FROM products p
+                     LEFT JOIN product_inventory pi ON pi.product_id = p.id LOOP
+        v_old_quantity := v_product.quantity_on_hand;
         
         -- Calculate expected quantity from batches
         SELECT COALESCE(SUM(remaining_quantity), 0)
@@ -133,10 +135,15 @@ BEGIN
         WHERE product_id = v_product.id
           AND status = 'ACTIVE';
         
-        -- Update product stock
-        UPDATE products
+        -- Update product_inventory stock (single source of truth)
+        UPDATE product_inventory
         SET quantity_on_hand = v_new_quantity,
             updated_at = CURRENT_TIMESTAMP
+        WHERE product_id = v_product.id;
+
+        -- Mirror to products table (app-layer sync)
+        UPDATE products
+        SET quantity_on_hand = v_new_quantity
         WHERE id = v_product.id;
         
         product_id := v_product.id;

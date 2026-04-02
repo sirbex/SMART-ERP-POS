@@ -172,7 +172,8 @@ export const stockCountRepository = {
       `UPDATE stock_count_lines 
        SET counted_qty_base = COALESCE($1, counted_qty_base),
            uom_recorded = COALESCE($2, uom_recorded),
-           notes = COALESCE($3, notes)
+           notes = COALESCE($3, notes),
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = $4
        RETURNING *`,
       [data.countedQtyBase ?? null, data.uomRecorded || null, data.notes || null, lineId]

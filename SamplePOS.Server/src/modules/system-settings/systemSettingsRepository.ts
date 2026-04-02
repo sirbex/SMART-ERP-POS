@@ -167,6 +167,8 @@ export const systemSettingsRepository = {
             throw new Error('No fields to update');
         }
 
+        setClauses.push(`updated_at = NOW()`);
+
         const query = `
       UPDATE system_settings 
       SET ${setClauses.join(', ')}

@@ -180,7 +180,7 @@ export async function addPasswordToHistory(
     history = history.slice(0, PASSWORD_CONFIG.historyCount);
 
     await dbPool.query(
-        'UPDATE users SET password_history = $1 WHERE id = $2',
+        'UPDATE users SET password_history = $1, updated_at = NOW() WHERE id = $2',
         [history, userId]
     );
 }
@@ -240,7 +240,8 @@ export async function recordFailedLoginAttempt(
            WHEN COALESCE(failed_login_attempts, 0) + 1 >= $1 
            THEN CURRENT_TIMESTAMP + INTERVAL '${PASSWORD_CONFIG.lockoutMinutes} minutes'
            ELSE lockout_until
-         END
+         END,
+         updated_at = NOW()
      WHERE id = $2
      RETURNING failed_login_attempts, lockout_until`,
         [PASSWORD_CONFIG.maxFailedAttempts, userId]
@@ -344,7 +345,7 @@ export async function checkAccountLockout(
  */
 export async function resetFailedLoginAttempts(userId: string, dbPool: Pool = globalPool): Promise<void> {
     await dbPool.query(
-        'UPDATE users SET failed_login_attempts = 0, lockout_until = NULL WHERE id = $1',
+        'UPDATE users SET failed_login_attempts = 0, lockout_until = NULL, updated_at = NOW() WHERE id = $1',
         [userId]
     );
 }

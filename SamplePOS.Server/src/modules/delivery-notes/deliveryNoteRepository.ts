@@ -59,6 +59,16 @@ function normalizeLineRow(row: Record<string, unknown>): DeliveryNoteLine {
 
 export const deliveryNoteRepository = {
   /**
+   * Generate next delivery note number (DN-YYYY-####)
+   */
+  async generateDeliveryNoteNumber(client: PoolClient): Promise<string> {
+    const year = new Date().getFullYear();
+    const seq = await client.query("SELECT nextval('delivery_notes_seq')");
+    const num = seq.rows[0].nextval;
+    return `DN-${year}-${String(num).padStart(4, '0')}`;
+  },
+
+  /**
    * Create a delivery note header (without lines).
    */
   async create(
@@ -75,14 +85,17 @@ export const deliveryNoteRepository = {
       createdById?: string;
     }
   ): Promise<DeliveryNote> {
+    const deliveryNoteNumber = await this.generateDeliveryNoteNumber(client);
+
     const result = await client.query(
       `INSERT INTO delivery_notes (
-        quotation_id, customer_id, customer_name,
+        delivery_note_number, quotation_id, customer_id, customer_name,
         delivery_date, warehouse_notes, delivery_address,
         driver_name, vehicle_number, created_by_id
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING *`,
       [
+        deliveryNoteNumber,
         data.quotationId,
         data.customerId,
         data.customerName || null,

@@ -389,9 +389,14 @@ BEGIN
     WHERE product_id = p_product_id
       AND status = 'ACTIVE';
     
-    UPDATE products
+    UPDATE product_inventory
     SET quantity_on_hand = v_total_quantity,
         updated_at = CURRENT_TIMESTAMP
+    WHERE product_id = p_product_id;
+
+    -- Mirror to products table (app-layer sync)
+    UPDATE products
+    SET quantity_on_hand = v_total_quantity
     WHERE id = p_product_id;
     
     RAISE NOTICE 'Updated product % stock to %', p_product_id, v_total_quantity;

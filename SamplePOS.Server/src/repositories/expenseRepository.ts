@@ -2,6 +2,7 @@ import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
 import { ExpenseFilters, Expense, ExpenseDbRow, CreateExpenseData, UpdateExpenseData } from '../types/expense.js';
 import logger from '../utils/logger.js';
+import { ConflictError } from '../middleware/errorHandler.js';
 
 /**
  * Get expenses with filtering and pagination
@@ -277,6 +278,20 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
 export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?: pg.Pool | pg.PoolClient): Promise<Expense | null> => {
   const pool = dbPool || globalPool;
   try {
+    // Protection: block modification of finalized expenses (replaces trg_protect_paid_expense)
+    const current = await pool.query('SELECT status FROM expenses WHERE id = $1', [id]);
+    if (!current.rows[0]) return null;
+    const currentStatus = current.rows[0].status;
+    if (currentStatus === 'PAID') {
+      throw new ConflictError('Cannot modify a paid expense');
+    }
+    if (currentStatus === 'APPROVED') {
+      const newStatus = (data as Record<string, unknown>).status as string | undefined;
+      if (newStatus && !['PAID', 'CANCELLED'].includes(newStatus)) {
+        throw new ConflictError('Approved expense can only transition to PAID or CANCELLED');
+      }
+    }
+
     // Whitelist of allowed column names to prevent SQL injection
     const ALLOWED_UPDATE_FIELDS = new Set([
       'title', 'description', 'amount', 'expense_date', 'category_id',
@@ -303,6 +318,8 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?
       throw new Error('No fields to update');
     }
 
+    fields.push(`updated_at = NOW()`);
+
     const query = `
       UPDATE expenses 
       SET ${fields.join(', ')}
@@ -326,9 +343,20 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?
 export const deleteExpense = async (id: string, dbPool?: pg.Pool | pg.PoolClient): Promise<boolean> => {
   const pool = dbPool || globalPool;
   try {
+    // Protection: block deletion of finalized expenses (replaces trg_protect_paid_expense)
+    const current = await pool.query('SELECT status FROM expenses WHERE id = $1', [id]);
+    if (!current.rows[0]) return false;
+    const currentStatus = current.rows[0].status;
+    if (currentStatus === 'PAID') {
+      throw new ConflictError('Cannot delete a paid expense');
+    }
+    if (currentStatus === 'APPROVED') {
+      throw new ConflictError('Cannot delete an approved expense');
+    }
+
     const query = `
       UPDATE expenses 
-      SET status = 'CANCELLED'
+      SET status = 'CANCELLED', updated_at = NOW()
       WHERE id = $1
     `;
 
@@ -341,13 +369,24 @@ export const deleteExpense = async (id: string, dbPool?: pg.Pool | pg.PoolClient
 };
 
 /**
- * Generate expense number using database function
+ * Generate expense number in service layer (replaces generate_expense_number() DB function)
+ * Pattern: EXP-YYYYMM-0001
  */
 export const generateExpenseNumber = async (dbPool?: pg.Pool | pg.PoolClient): Promise<string> => {
   const pool = dbPool || globalPool;
   try {
-    const result = await pool.query('SELECT generate_expense_number() as expense_number');
-    return result.rows[0].expense_number;
+    const now = new Date();
+    const yearPart = now.getFullYear().toString();
+    const monthPart = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `EXP-${yearPart}${monthPart}-`;
+
+    const result = await pool.query(
+      `SELECT COALESCE(MAX(CAST(SUBSTRING(expense_number FROM 10) AS INTEGER)), 0) + 1 AS next_num
+       FROM expenses WHERE expense_number LIKE $1`,
+      [`${prefix}%`]
+    );
+    const seq = result.rows[0].next_num;
+    return `${prefix}${String(seq).padStart(4, '0')}`;
   } catch (error) {
     logger.error('Error in expenseRepository generateExpenseNumber', { error });
     throw error;

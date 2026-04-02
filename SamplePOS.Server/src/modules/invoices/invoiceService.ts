@@ -353,6 +353,14 @@ export const invoiceService = {
         [input.customerId]
       );
 
+      // Sync AR account balance (replaces trg_sync_customer_to_ar)
+      await client.query(`
+        UPDATE accounts SET "CurrentBalance" = COALESCE(
+          (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+        ), "UpdatedAt" = NOW()
+        WHERE "AccountCode" = '1200'
+      `);
+
       return freshInvoice;
     });
 
@@ -696,6 +704,14 @@ export const invoiceService = {
         );
 
         const newBalance = balanceResult.rows[0]?.balance || 0;
+
+        // Sync AR account balance (replaces trg_sync_customer_to_ar)
+        await client.query(`
+          UPDATE accounts SET "CurrentBalance" = COALESCE(
+            (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+          ), "UpdatedAt" = NOW()
+          WHERE "AccountCode" = '1200'
+        `);
 
         logger.info('Customer balance recalculated from invoices', {
           invoiceId,

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { pool as globalPool } from '../db/pool.js';
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
 const router = Router();
 

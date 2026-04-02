@@ -19,6 +19,7 @@ import { AccountingCore } from './accountingCore.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID, getValidUserId } from '../utils/constants.js';
+import { checkAccountingPeriodOpen } from '../utils/periodGuard.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -105,13 +106,14 @@ export class JournalEntryService {
       // VALIDATION 1: Check period is open
       // =================================================================
       const periodCheck = await client.query(
-        `
-                SELECT fn_is_period_open($1::DATE) as is_open
-            `,
+        `SELECT status FROM accounting_periods
+         WHERE period_year = EXTRACT(YEAR FROM $1::date)::int
+           AND period_month = EXTRACT(MONTH FROM $1::date)::int`,
         [request.entryDate]
       );
+      const periodStatus = periodCheck.rows[0]?.status;
 
-      if (!periodCheck.rows[0]?.is_open) {
+      if (periodStatus && periodStatus !== 'OPEN') {
         throw new BusinessError(
           `Cannot post to closed period. Entry date: ${request.entryDate}`,
           'ERR_JOURNAL_001',
@@ -235,6 +237,9 @@ export class JournalEntryService {
       // =================================================================
       // CREATE JOURNAL ENTRY
       // =================================================================
+      // Period enforcement (replaces trg_manual_je_period_check)
+      await checkAccountingPeriodOpen(client, request.entryDate);
+
       const entryId = uuidv4();
       const entryNumber = await this.generateEntryNumber(client);
 
@@ -396,13 +401,14 @@ export class JournalEntryService {
 
       // Check reversal period is open
       const periodCheck = await client.query(
-        `
-                SELECT fn_is_period_open($1::DATE) as is_open
-            `,
+        `SELECT status FROM accounting_periods
+         WHERE period_year = EXTRACT(YEAR FROM $1::date)::int
+           AND period_month = EXTRACT(MONTH FROM $1::date)::int`,
         [request.reversalDate]
       );
+      const revPeriodStatus = periodCheck.rows[0]?.status;
 
-      if (!periodCheck.rows[0]?.is_open) {
+      if (revPeriodStatus && revPeriodStatus !== 'OPEN') {
         throw new BusinessError(
           `Cannot post reversal to closed period. Reversal date: ${request.reversalDate}`,
           'ERR_JOURNAL_001',

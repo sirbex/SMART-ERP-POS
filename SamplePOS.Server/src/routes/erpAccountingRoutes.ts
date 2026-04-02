@@ -294,13 +294,20 @@ router.get(
     }
 
     const pool = req.tenantPool || globalPool;
-    const result = await pool.query(`SELECT fn_is_period_open($1::DATE) as is_open`, [date]);
+    const result = await pool.query(
+      `SELECT status FROM accounting_periods
+       WHERE period_year = EXTRACT(YEAR FROM $1::date)::int
+         AND period_month = EXTRACT(MONTH FROM $1::date)::int`,
+      [date]
+    );
+    // No period row → implicitly open
+    const isOpen = result.rows.length === 0 || result.rows[0].status === 'OPEN';
 
     return res.json({
       success: true,
       data: {
         date,
-        isOpen: result.rows[0]?.is_open ?? true,
+        isOpen,
       },
     });
   })

@@ -37,6 +37,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'HR & Payroll', path: '/hr', icon: '📇', color: 'text-pink-600' },
     { name: 'Delivery Notes', path: '/delivery-notes', icon: '📋', color: 'text-orange-600' },
     { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600' },
+    { name: 'Pricing', path: '/pricing', icon: '🏷️', color: 'text-rose-600' },
     { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600' },
     { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600' },
   ];

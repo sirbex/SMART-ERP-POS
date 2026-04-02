@@ -674,6 +674,15 @@ export async function bulkInsertProducts(
            updated_at = NOW()`,
         piValues
       );
+
+      // Mirror quantity_on_hand to products table (app-layer sync)
+      for (const r of syncRows) {
+        const productId = skuToProductId.get(r.sku.toLowerCase())!;
+        await client.query(
+          `UPDATE products SET quantity_on_hand = $1, updated_at = NOW() WHERE id = $2`,
+          [r.quantityOnHand ?? 0, productId]
+        );
+      }
     }
 
     // ── product_uoms: assign UOM to imported products ──

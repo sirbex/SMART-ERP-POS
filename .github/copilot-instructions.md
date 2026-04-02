@@ -26,13 +26,43 @@
 3. Does this change API response shape? → STOP and extend instead
 4. Could this break existing functionality? → STOP and add, don't modify
 
+### Database is PASSIVE STORAGE ONLY (Zero Tolerance)
+
+**ABSOLUTE PROHIBITION — applies to ALL changes, NO EXCEPTIONS:**
+
+| Prohibited | Why |
+|---|---|
+| ❌ Database triggers | Hidden side effects, untestable, violates service layer |
+| ❌ Generated columns | Business logic belongs in service, not schema |
+| ❌ DB-side functions that mutate data | All writes must originate from service layer |
+| ❌ ON INSERT/UPDATE side effects | No automatic cascading writes |
+| ❌ Trigger-based number generation | Service layer generates all business IDs |
+| ❌ Trigger-based GL posting | glEntryService handles all ledger writes |
+| ❌ Trigger-based balance sync | Service layer computes and writes balances |
+
+**The database is allowed ONLY:**
+- Primary keys, Foreign keys, Unique constraints
+- NOT NULL, CHECK constraints (simple invariants only)
+- Indexes
+
+**ALL business logic MUST exist in the Service layer**, including:
+- Generating business numbers (sale numbers, PO numbers, etc.)
+- Updating prices, stock, balances
+- Creating GL entries
+- Deriving totals
+- Enforcing workflows
+- Audit logging
+- Validations beyond basic FK/NOT NULL/UNIQUE
+
+**If you think a trigger is needed, YOU ARE WRONG. Implement it in the Service layer.**
+
 ### Reconciliation & Balance Rules
-5. **Reconciliation must reference existing data**
+1. **Reconciliation must reference existing data**
    - Match bank transactions to ledger entries
    - Do NOT introduce parallel balance systems
    - All balances derive from GL (single source of truth)
 
-6. **Reports reuse existing infrastructure**
+2. **Reports reuse existing infrastructure**
    - Bank statements, cash flow, and reconciliations must reuse existing reporting patterns
    - Do NOT create duplicate reporting logic
 
@@ -541,19 +571,19 @@ Whenever a new field is added or modified in the Product entity/model (e.g., `ex
   - Product details popups/drawers
   - Product selectors (search dropdowns, GR/PO screens, stock adjustments, etc.)
 
-2) Centralized validation/logic
+1) Centralized validation/logic
 - Put validation and computed logic in shared Zod schemas/utilities in `shared/zod` (or a `useProductValidation()` hook). Import and reuse everywhere. Do NOT duplicate per page.
 
-3) Auto-update components
+1) Auto-update components
 - If a Product component is missing the field, update it to include it (with labels/help/accessibility).
 
-4) No page-specific expiry checks
+1) No page-specific expiry checks
 - Do not implement expiry validation only in GR. Move it to shared so rules are identical across UIs.
 
-5) Types and DTOs in sync
+1) Types and DTOs in sync
 - Update `shared/types` (Product, ProductDTO, etc.) and keep API DTOs aligned with backend schemas and DB fields.
 
-6) E2E completeness
+1) E2E completeness
 - After adding a field: update frontend schema, backend validation, DB migration (in `shared/sql`) if needed, and bind in all relevant UI.
 
 Reminder: Product fields must propagate globally. Avoid hardcoded field subsets.

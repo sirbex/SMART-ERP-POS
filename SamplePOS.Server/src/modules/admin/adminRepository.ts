@@ -77,33 +77,19 @@ export const adminRepository = {
       // =========================================================================
       logger.info('Phase 0: Complete accounting system reset...');
 
+      // Service-layer accounting reset (no DB functions)
+      deletedRecords.ledger_entries = await safeDelete('ledger_entries', step++);
+      deletedRecords.ledger_transactions = await safeDelete('ledger_transactions', step++);
+
       try {
-        await client.query(`SAVEPOINT sp_accounting_reset`);
-        const accountingResetResult = await client.query(`
-          SELECT step_name, records_affected, status 
-          FROM fn_reset_accounting_complete()
+        await client.query('SAVEPOINT sp_reset_account_balances');
+        const accountReset = await client.query(`
+          UPDATE accounts SET "CurrentBalance" = 0, updated_at = NOW() WHERE id IS NOT NULL
         `);
-        await client.query(`RELEASE SAVEPOINT sp_accounting_reset`);
-        deletedRecords.accounting_complete_reset = accountingResetResult.rowCount || 0;
-        logger.info('Accounting reset via fn_reset_accounting_complete() completed');
-      } catch (error: unknown) {
-        await client.query(`ROLLBACK TO SAVEPOINT sp_accounting_reset`);
-        logger.warn(`fn_reset_accounting_complete() failed: ${(error instanceof Error ? error.message : String(error))}, using manual reset`);
-
-        // Fallback: Manual accounting reset
-        deletedRecords.ledger_entries = await safeDelete('ledger_entries', step++);
-        deletedRecords.ledger_transactions = await safeDelete('ledger_transactions', step++);
-
-        try {
-          await client.query('SAVEPOINT sp_reset_account_balances');
-          const accountReset = await client.query(`
-            UPDATE accounts SET "CurrentBalance" = 0, updated_at = NOW() WHERE id IS NOT NULL
-          `);
-          deletedRecords.accounts_balance_reset = accountReset.rowCount || 0;
-          await client.query('RELEASE SAVEPOINT sp_reset_account_balances');
-        } catch {
-          deletedRecords.accounts_balance_reset = 0;
-        }
+        deletedRecords.accounts_balance_reset = accountReset.rowCount || 0;
+        await client.query('RELEASE SAVEPOINT sp_reset_account_balances');
+      } catch {
+        deletedRecords.accounts_balance_reset = 0;
       }
 
       // =========================================================================
@@ -307,118 +293,86 @@ export const adminRepository = {
       // Note: cash_registers table is preserved (physical register configuration)
 
       // =========================================================================
-      // PHASE 8: RECALCULATE ALL BALANCES (Using Database Functions)
+      // PHASE 8: RESET ALL BALANCES (Service-layer — no DB functions)
       // =========================================================================
-      // ARCHITECTURE: Balances are NEVER set directly. Instead, we call the
-      // database recalculation functions which derive correct values from the
-      // source data (transactions, batches, ledger entries).
-      // After deleting all transactions, these functions will calculate 0.
-      // This ensures consistency with the single source of truth pattern.
+      // After deleting all transactions, all balances must be zero.
       // =========================================================================
 
       let resetInventory = 0;
 
-      // Recalculate product stock quantities (derives from inventory_batches)
+      // Reset product stock quantities to zero
       try {
-        await client.query('SAVEPOINT sp_recalc_inventory');
-        const invResult = await client.query(`
-          SELECT COUNT(*) FILTER (WHERE status = 'UPDATED') as updated_count
-          FROM fn_recalculate_all_product_stock()
+        await client.query('SAVEPOINT sp_reset_inventory');
+        const inventoryReset = await client.query(`
+          UPDATE product_inventory 
+          SET quantity_on_hand = 0, updated_at = NOW()
+          WHERE product_id IS NOT NULL
         `);
-        resetInventory = parseInt(invResult.rows[0]?.updated_count || '0');
-        await client.query('RELEASE SAVEPOINT sp_recalc_inventory');
-        logger.info(`Recalculated ${resetInventory} product quantities`);
-      } catch (error: unknown) {
-        await client.query('ROLLBACK TO SAVEPOINT sp_recalc_inventory');
-        logger.warn(`Product stock recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
-        // Fallback: Direct reset if function doesn't exist
-        try {
-          await client.query('SAVEPOINT sp_reset_inventory_fallback');
-          const inventoryReset = await client.query(`
-            UPDATE product_inventory 
-            SET quantity_on_hand = 0,
-                updated_at = NOW()
-            WHERE product_id IS NOT NULL
-          `);
-          resetInventory = inventoryReset.rowCount || 0;
-          await client.query('RELEASE SAVEPOINT sp_reset_inventory_fallback');
-          logger.warn('Used fallback direct reset for product quantities');
-        } catch {
-          resetInventory = 0;
-        }
+        await client.query(`
+          UPDATE products SET quantity_on_hand = 0, updated_at = NOW()
+        `);
+        resetInventory = inventoryReset.rowCount || 0;
+        await client.query('RELEASE SAVEPOINT sp_reset_inventory');
+        logger.info(`Reset ${resetInventory} product quantities to zero`);
+      } catch {
+        resetInventory = 0;
       }
 
-      // Recalculate customer balances (derives from sales + customer_payments)
+      // Reset customer balances to zero
       try {
-        await client.query('SAVEPOINT sp_recalc_customers');
-        const custResult = await client.query(`
-          SELECT COUNT(*) FILTER (WHERE status = 'UPDATED') as updated_count
-          FROM fn_recalculate_all_customer_balances()
+        await client.query('SAVEPOINT sp_reset_customers');
+        await client.query(`
+          UPDATE customers 
+          SET balance = 0, updated_at = NOW()
+          WHERE id IS NOT NULL
         `);
-        const customerCount = parseInt(custResult.rows[0]?.updated_count || '0');
-        await client.query('RELEASE SAVEPOINT sp_recalc_customers');
-        logger.info(`Recalculated ${customerCount} customer balances`);
-      } catch (error: unknown) {
-        await client.query('ROLLBACK TO SAVEPOINT sp_recalc_customers');
-        logger.warn(`Customer balance recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
-        // Fallback: Direct reset if function doesn't exist
-        try {
-          await client.query('SAVEPOINT sp_reset_customers_fallback');
-          await client.query(`
-            UPDATE customers 
-            SET balance = 0, updated_at = NOW()
-            WHERE id IS NOT NULL
-          `);
-          await client.query('RELEASE SAVEPOINT sp_reset_customers_fallback');
-          logger.warn('Used fallback direct reset for customer balances');
-        } catch (error) {
-          logger.warn('Balance reset fallback failed', { error: (error as Error).message });
-        }
+        await client.query('RELEASE SAVEPOINT sp_reset_customers');
+        logger.info('Reset customer balances to zero');
+      } catch (error) {
+        logger.warn('Customer balance reset failed', { error: (error as Error).message });
       }
 
-      // Recalculate supplier balances (derives from goods_receipts + supplier_payments)
+      // Reset supplier balances to zero
       try {
-        await client.query('SAVEPOINT sp_recalc_suppliers');
-        const suppResult = await client.query(`
-          SELECT COUNT(*) FILTER (WHERE status = 'UPDATED') as updated_count
-          FROM fn_recalculate_all_supplier_balances()
+        await client.query('SAVEPOINT sp_reset_suppliers');
+        await client.query(`
+          UPDATE suppliers 
+          SET "OutstandingBalance" = 0, "UpdatedAt" = NOW()
+          WHERE "Id" IS NOT NULL
         `);
-        const supplierCount = parseInt(suppResult.rows[0]?.updated_count || '0');
-        await client.query('RELEASE SAVEPOINT sp_recalc_suppliers');
-        logger.info(`Recalculated ${supplierCount} supplier balances`);
-      } catch (error: unknown) {
-        await client.query('ROLLBACK TO SAVEPOINT sp_recalc_suppliers');
-        logger.warn(`Supplier balance recalculation skipped: ${(error instanceof Error ? error.message : String(error))}`);
-        // Fallback: Direct reset if function doesn't exist (correct column name)
-        try {
-          await client.query('SAVEPOINT sp_reset_suppliers_fallback');
-          await client.query(`
-            UPDATE suppliers 
-            SET "OutstandingBalance" = 0, "UpdatedAt" = NOW()
-            WHERE "Id" IS NOT NULL
-          `);
-          await client.query('RELEASE SAVEPOINT sp_reset_suppliers_fallback');
-          logger.warn('Used fallback direct reset for supplier balances');
-        } catch (error) {
-          logger.warn('Balance reset fallback failed', { error: (error as Error).message });
-        }
+        await client.query('RELEASE SAVEPOINT sp_reset_suppliers');
+        logger.info('Reset supplier balances to zero');
+      } catch (error) {
+        logger.warn('Supplier balance reset failed', { error: (error as Error).message });
       }
 
-      // ========== VERIFY POST-RESET INTEGRITY ==========
+      // ========== VERIFY POST-RESET INTEGRITY (inline checks) ==========
       try {
         await client.query('SAVEPOINT sp_verify_integrity');
-        const verifyResult = await client.query(`
-          SELECT check_name, status, details
-          FROM fn_verify_post_reset_integrity()
-          WHERE status = 'FAIL'
+        const checks = await client.query(`
+          SELECT 'non_zero_customer_balances' AS check_name,
+            CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+            json_build_object('count', COUNT(*))::text AS details
+          FROM customers WHERE balance != 0
+          UNION ALL
+          SELECT 'non_zero_supplier_balances',
+            CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END,
+            json_build_object('count', COUNT(*))::text
+          FROM suppliers WHERE "OutstandingBalance" != 0
+          UNION ALL
+          SELECT 'non_zero_account_balances',
+            CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END,
+            json_build_object('count', COUNT(*))::text
+          FROM accounts WHERE "CurrentBalance" != 0
         `);
         await client.query('RELEASE SAVEPOINT sp_verify_integrity');
 
-        if (verifyResult.rows.length > 0) {
-          const failures = verifyResult.rows.map((r: { check_name: string; details: string }) =>
+        const failures = checks.rows.filter((r: { status: string }) => r.status === 'FAIL');
+        if (failures.length > 0) {
+          const failStr = failures.map((r: { check_name: string; details: string }) =>
             `${r.check_name}: ${r.details}`
           ).join('; ');
-          logger.warn(`Post-reset integrity issues detected: ${failures}`);
+          logger.warn(`Post-reset integrity issues detected: ${failStr}`);
         } else {
           logger.info('Post-reset integrity verification passed');
         }

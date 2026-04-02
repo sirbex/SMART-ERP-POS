@@ -238,7 +238,27 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     RETURNING ${PRODUCT_RETURNING_COLUMNS}`;
 
   const result = await pool.query(sql, params);
-  return result.rows[0];
+  const product = result.rows[0];
+
+  // Create child rows (replaces fn_product_create_children trigger)
+  await pool.query(
+    `INSERT INTO product_inventory (product_id, quantity_on_hand, reorder_level)
+     VALUES ($1, 0, $2)
+     ON CONFLICT (product_id) DO NOTHING`,
+    [product.id, data.reorderLevel ?? 0]
+  );
+  await pool.query(
+    `INSERT INTO product_valuation (
+       product_id, cost_price, selling_price, costing_method,
+       average_cost, last_cost, pricing_formula, auto_update_price
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (product_id) DO NOTHING`,
+    [product.id, data.costPrice ?? 0, data.sellingPrice ?? 0,
+     data.costingMethod || 'FIFO', data.costPrice ?? 0, data.costPrice ?? 0,
+     data.pricingFormula || null, data.autoUpdatePrice ?? false]
+  );
+
+  return product;
 }
 
 export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product | null> {
@@ -328,6 +348,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   // Execute updates (each only if there are fields to set)
   if (masterFields.length > 0) {
     masterFields.push(`version = version + 1`);
+    masterFields.push(`updated_at = NOW()`);
     masterValues.push(id);
     let whereClause = `WHERE id = $${masterIdx}`;
     if (clientVersion !== undefined) {
@@ -368,7 +389,7 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
 export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<boolean> {
   const pool = dbPool || globalPool;
   // Soft delete
-  const result = await pool.query('UPDATE products SET is_active = false WHERE id = $1', [id]);
+  const result = await pool.query('UPDATE products SET is_active = false, updated_at = NOW() WHERE id = $1', [id]);
 
   return result.rowCount !== null && result.rowCount > 0;
 }

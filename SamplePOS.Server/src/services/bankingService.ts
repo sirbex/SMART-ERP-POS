@@ -102,6 +102,40 @@ interface ColumnMappings {
 
 export class BankingService {
     // ---------------------------------------------------------------------------
+    // NUMBER GENERATORS (replaces DB functions fn_generate_bank_txn_number, fn_generate_statement_number)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Generate bank transaction number: BTX-YYYY-0001
+     * Replaces fn_generate_bank_txn_number() which used a sequence
+     */
+    private static async generateBankTxnNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
+        const year = new Date().getFullYear();
+        const prefix = `BTX-${year}-`;
+        const result = await client.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(transaction_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+             FROM bank_transactions WHERE transaction_number LIKE $1`,
+            [`${prefix}%`, prefix.length + 1]
+        );
+        return `${prefix}${String(result.rows[0].next_num).padStart(4, '0')}`;
+    }
+
+    /**
+     * Generate bank statement number: STM-YYYY-0001
+     * Replaces fn_generate_statement_number()
+     */
+    private static async generateStatementNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
+        const year = new Date().getFullYear();
+        const prefix = `STM-${year}-`;
+        const result = await client.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(statement_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+             FROM bank_statements WHERE statement_number LIKE $1`,
+            [`${prefix}%`, prefix.length + 1]
+        );
+        return `${prefix}${String(result.rows[0].next_num).padStart(4, '0')}`;
+    }
+
+    // ---------------------------------------------------------------------------
     // BANK ACCOUNTS
     // ---------------------------------------------------------------------------
 
@@ -577,8 +611,7 @@ export class BankingService {
             }
 
             // Generate transaction number
-            const txnNumResult = await client.query(`SELECT fn_generate_bank_txn_number() as txn_num`);
-            const transactionNumber = txnNumResult.rows[0].txn_num;
+            const transactionNumber = await BankingService.generateBankTxnNumber(client);
             const transactionId = uuidv4();
 
             // Determine GL entry pattern based on transaction type
@@ -735,10 +768,8 @@ export class BankingService {
             }
 
             // Generate transaction numbers
-            const outTxnNum = (await client.query(`SELECT fn_generate_bank_txn_number() as num`)).rows[0]
-                .num;
-            const inTxnNum = (await client.query(`SELECT fn_generate_bank_txn_number() as num`)).rows[0]
-                .num;
+            const outTxnNum = await BankingService.generateBankTxnNumber(client);
+            const inTxnNum = await BankingService.generateBankTxnNumber(client);
 
             const outTxnId = uuidv4();
             const inTxnId = uuidv4();
@@ -889,8 +920,7 @@ export class BankingService {
             );
 
             // Generate reversal transaction number
-            const revTxnNum = (await client.query(`SELECT fn_generate_bank_txn_number() as num`)).rows[0]
-                .num;
+            const revTxnNum = await BankingService.generateBankTxnNumber(client);
             const revTxnId = uuidv4();
 
             // Create reversal bank transaction
@@ -2319,8 +2349,7 @@ export class BankingService {
             );
 
             // Generate statement number
-            const stmtNumResult = await client.query(`SELECT fn_generate_statement_number() as num`);
-            const statementNumber = stmtNumResult.rows[0].num;
+            const statementNumber = await BankingService.generateStatementNumber(client);
             const statementId = uuidv4();
 
             // Create statement record
@@ -2680,6 +2709,7 @@ export class BankingService {
                 );
 
                 // Update transaction with statement line reference
+                // Protection: skip reconciled transactions (replaces trg_protect_reconciled_bank_txn)
                 await client.query(
                     `
           UPDATE bank_transactions
@@ -2687,6 +2717,7 @@ export class BankingService {
               matched_at = NOW(),
               match_confidence = 100
           WHERE id = $2
+            AND is_reconciled = FALSE
         `,
                     [lineId, options.transactionId]
                 );

@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import logger from '../utils/logger.js';
 
 /**
@@ -18,7 +18,7 @@ export class DistributedCacheService {
             host: process.env.REDIS_HOST || 'localhost',
             port: parseInt(process.env.REDIS_PORT || '6379'),
             password: process.env.REDIS_PASSWORD,
-            retryStrategy: (times) => {
+            retryStrategy: (times: number) => {
                 const delay = Math.min(times * 50, 2000);
                 return delay;
             },
@@ -26,7 +26,7 @@ export class DistributedCacheService {
             enableOfflineQueue: false, // Don't queue commands when disconnected
         });
 
-        this.redis.on('error', (err) => {
+        this.redis.on('error', (err: Error) => {
             logger.error('Redis connection error:', err);
         });
 

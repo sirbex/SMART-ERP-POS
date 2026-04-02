@@ -143,7 +143,8 @@ export async function setup2FA(userId: string, email: string, dbPool?: pg.Pool):
      SET totp_secret = $1, 
          backup_codes = $2,
          totp_enabled = FALSE,
-         totp_verified_at = NULL
+         totp_verified_at = NULL,
+         updated_at = NOW()
      WHERE id = $3`,
         [secret, hashedBackupCodes, userId]
     );
@@ -189,7 +190,8 @@ export async function verify2FASetup(userId: string, token: string, dbPool?: pg.
     await queryPool.query(
         `UPDATE users 
      SET totp_enabled = TRUE, 
-         totp_verified_at = NOW()
+         totp_verified_at = NOW(),
+         updated_at = NOW()
      WHERE id = $1`,
         [userId]
     );
@@ -241,7 +243,7 @@ export async function verify2FALogin(userId: string, token: string, dbPool?: pg.
             newBackupCodes.splice(codeIndex, 1);
 
             await queryPool.query(
-                `UPDATE users SET backup_codes = $1 WHERE id = $2`,
+                `UPDATE users SET backup_codes = $1, updated_at = NOW() WHERE id = $2`,
                 [newBackupCodes, userId]
             );
 
@@ -275,7 +277,8 @@ export async function disable2FA(userId: string, token: string, dbPool?: pg.Pool
      SET totp_secret = NULL, 
          totp_enabled = FALSE, 
          totp_verified_at = NULL,
-         backup_codes = NULL
+         backup_codes = NULL,
+         updated_at = NOW()
      WHERE id = $1`,
         [userId]
     );
@@ -351,7 +354,7 @@ export async function regenerateBackupCodes(userId: string, token: string, dbPoo
 
     const queryPool = dbPool || globalPool;
     await queryPool.query(
-        `UPDATE users SET backup_codes = $1 WHERE id = $2`,
+        `UPDATE users SET backup_codes = $1, updated_at = NOW() WHERE id = $2`,
         [hashedBackupCodes, userId]
     );
 
