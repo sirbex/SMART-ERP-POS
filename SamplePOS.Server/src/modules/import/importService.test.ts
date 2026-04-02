@@ -46,6 +46,7 @@ jest.unstable_mockModule('../../services/jobQueue.js', () => ({
 
 const mockTemplateHeaders = {
   PRODUCT: ['SKU', 'Name', 'Barcode', 'Description', 'Category', 'Generic Name',
+    'Unit of Measure',
     'Cost Price', 'Selling Price', 'Quantity On Hand', 'Batch Number', 'Expiry Date',
     'Taxable', 'Tax Rate', 'Costing Method',
     'Pricing Formula', 'Auto Update Price', 'Reorder Level', 'Track Expiry',
@@ -302,14 +303,14 @@ describe('importService', () => {
     it('should return headers for PRODUCT entity', () => {
       const result = importService.generateCsvTemplate('PRODUCT');
 
-      expect(result.filename).toBe('product-template.csv');
+      expect(result.filename).toBe('opening-inventory-template.csv');
       expect(result.headers).toContain('SKU');
       expect(result.headers).toContain('Name');
       expect(result.headers).toContain('Cost Price');
       expect(result.headers).toContain('Selling Price');
       expect(result.headers).toContain('Batch Number');
       expect(result.headers).toContain('Expiry Date');
-      expect(result.headers.length).toBe(21);
+      expect(result.headers.length).toBe(22);
     });
 
     it('should return headers for CUSTOMER entity', () => {
