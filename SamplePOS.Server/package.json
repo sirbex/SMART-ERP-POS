@@ -20,6 +20,8 @@
     "test:accounting": "tsx src/tests/accounting-integrity.test.ts",
     "migrate": "node ../shared/sql/migrate.mjs",
     "migrate:dry": "node ../shared/sql/migrate.mjs --dry-run",
+    "migrate:tenants": "node ../shared/sql/migrate-tenants.mjs",
+    "migrate:tenants:dry": "node ../shared/sql/migrate-tenants.mjs --dry-run",
     "test:integrity": "tsx src/tests/accounting-integrity.test.ts",
     "health-check": "curl -f http://localhost:3001/api/health || exit 1"
   },

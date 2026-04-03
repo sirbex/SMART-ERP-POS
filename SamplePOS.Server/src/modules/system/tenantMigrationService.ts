@@ -1,10 +1,13 @@
 import type { Pool } from 'pg';
+import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { schemaVersionRepository } from './schemaVersionRepository.js';
 import { CURRENT_SCHEMA_VERSION } from '../../constants/schemaVersion.js';
 import logger from '../../utils/logger.js';
+
+const { Pool: PgPool } = pg;
 
 // ============================================================================
 // SQL directory resolution
@@ -174,5 +177,181 @@ export const tenantMigrationService = {
     clearCache(): void {
         verifiedTenants.clear();
         migrationLocks.clear();
+    },
+
+    // ========================================================================
+    // Startup: sync ALL tenants to master schema version
+    // ========================================================================
+
+    /**
+     * Required tables that every tenant DB must have for core features.
+     * If any are missing after migration, a CRITICAL error is logged.
+     */
+    REQUIRED_TABLES: [
+        'products', 'product_inventory', 'product_valuation',
+        'customers', 'suppliers', 'sales', 'sale_items',
+        'invoices', 'invoice_line_items',
+        'purchase_orders', 'purchase_order_items',
+        'inventory_batches', 'stock_movements',
+        'users', 'schema_migrations', 'schema_version',
+        'accounts', 'ledger_transactions', 'ledger_entries',
+        'product_categories', 'uoms', 'product_uoms',
+    ] as readonly string[],
+
+    /**
+     * Sync ALL active tenants to current schema version.
+     * Called at application startup and by the CLI `migrate:tenants` command.
+     *
+     * Returns a summary of what happened per tenant.
+     */
+    async syncAllTenants(masterPool: Pool): Promise<{
+        total: number;
+        upgraded: number;
+        upToDate: number;
+        failed: string[];
+    }> {
+        const result = { total: 0, upgraded: 0, upToDate: 0, failed: [] as string[] };
+
+        // 1. Read all active tenants from master registry
+        const { rows: tenants } = await masterPool.query<{
+            slug: string;
+            database_name: string;
+            database_host: string;
+            database_port: number;
+        }>(
+            `SELECT slug, database_name, database_host, database_port
+             FROM tenants WHERE status = 'ACTIVE'`
+        );
+        result.total = tenants.length;
+
+        if (tenants.length === 0) {
+            logger.info('No active tenants found — nothing to sync.');
+            return result;
+        }
+
+        logger.info(`Starting tenant schema sync for ${tenants.length} active tenant(s)...`);
+
+        // 2. For each tenant, connect and run pending migrations
+        const dbUser = process.env.DB_USER || 'postgres';
+        const dbPassword = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || 'password';
+
+        for (const tenant of tenants) {
+            let tenantPool: pg.Pool | null = null;
+            try {
+                tenantPool = new PgPool({
+                    host: tenant.database_host,
+                    port: tenant.database_port,
+                    database: tenant.database_name,
+                    user: dbUser,
+                    password: dbPassword,
+                    max: 3, // small pool for migration work
+                    idleTimeoutMillis: 5000,
+                    connectionTimeoutMillis: 10000,
+                });
+
+                // Set UTC timezone on every connection
+                tenantPool.on('connect', (client: pg.PoolClient) => {
+                    client.query('SET timezone = "UTC"');
+                });
+
+                const versionBefore = await schemaVersionRepository.getSchemaVersion(tenantPool);
+
+                if (versionBefore >= CURRENT_SCHEMA_VERSION) {
+                    verifiedTenants.add(tenant.slug);
+                    result.upToDate++;
+                    continue;
+                }
+
+                logger.warn(
+                    `Tenant "${tenant.slug}" schema v${versionBefore} is behind master v${CURRENT_SCHEMA_VERSION}. Upgrading...`
+                );
+
+                await this._runPendingMigrations(tenantPool, tenant.slug);
+
+                const versionAfter = await schemaVersionRepository.getSchemaVersion(tenantPool);
+                verifiedTenants.add(tenant.slug);
+                result.upgraded++;
+                logger.info(
+                    `Tenant "${tenant.slug}" upgraded from v${versionBefore} to v${versionAfter}`
+                );
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                result.failed.push(tenant.slug);
+                logger.error(`Tenant "${tenant.slug}" migration FAILED: ${msg}`);
+            } finally {
+                if (tenantPool) {
+                    await tenantPool.end().catch(() => { /* ignore */ });
+                }
+            }
+        }
+
+        // 3. Summary
+        logger.info(
+            `Tenant schema sync complete: ${result.total} total, ${result.upgraded} upgraded, ${result.upToDate} up-to-date, ${result.failed.length} failed`
+        );
+        if (result.failed.length > 0) {
+            logger.error(`FAILED tenants: ${result.failed.join(', ')}`);
+        }
+
+        return result;
+    },
+
+    /**
+     * Startup health check: verify all active tenants have required tables.
+     * Logs CRITICAL for any missing tables. Non-blocking — does not prevent startup.
+     */
+    async healthCheckAllTenants(masterPool: Pool): Promise<void> {
+        const { rows: tenants } = await masterPool.query<{
+            slug: string;
+            database_name: string;
+            database_host: string;
+            database_port: number;
+        }>(
+            `SELECT slug, database_name, database_host, database_port
+             FROM tenants WHERE status = 'ACTIVE'`
+        );
+
+        if (tenants.length === 0) return;
+
+        const dbUser = process.env.DB_USER || 'postgres';
+        const dbPassword = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || 'password';
+
+        for (const tenant of tenants) {
+            let tenantPool: pg.Pool | null = null;
+            try {
+                tenantPool = new PgPool({
+                    host: tenant.database_host,
+                    port: tenant.database_port,
+                    database: tenant.database_name,
+                    user: dbUser,
+                    password: dbPassword,
+                    max: 2,
+                    idleTimeoutMillis: 5000,
+                    connectionTimeoutMillis: 10000,
+                });
+
+                const { rows } = await tenantPool.query<{ tablename: string }>(
+                    `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
+                );
+                const existingTables = new Set(rows.map(r => r.tablename));
+
+                const missing = this.REQUIRED_TABLES.filter(t => !existingTables.has(t));
+
+                if (missing.length > 0) {
+                    logger.error(
+                        `CRITICAL: Tenant "${tenant.slug}" missing ${missing.length} required table(s): ${missing.join(', ')}`
+                    );
+                } else {
+                    logger.info(`Tenant "${tenant.slug}" health check OK — all ${this.REQUIRED_TABLES.length} required tables present`);
+                }
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.error(`CRITICAL: Tenant "${tenant.slug}" health check FAILED: ${msg}`);
+            } finally {
+                if (tenantPool) {
+                    await tenantPool.end().catch(() => { /* ignore */ });
+                }
+            }
+        }
     },
 };

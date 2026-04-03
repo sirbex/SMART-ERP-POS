@@ -434,6 +434,19 @@ async function startServer() {
             });
           }
           logger.info(`Pre-warmed ${rows.length} active tenant pool(s)`);
+
+          // ── Tenant Schema Sync ──────────────────────────────────────────
+          // Auto-sync all tenant databases to master schema version on startup.
+          // Non-blocking: failures are logged but don't crash the server.
+          const { tenantMigrationService: tms } = await import('./modules/system/tenantMigrationService.js');
+          const syncResult = await tms.syncAllTenants(masterPool);
+          if (syncResult.failed.length > 0) {
+            logger.error(`⚠️  ${syncResult.failed.length} tenant(s) failed schema sync — check logs`);
+          }
+
+          // ── Tenant Health Check ─────────────────────────────────────────
+          // Verify all tenants have required tables after migration.
+          await tms.healthCheckAllTenants(masterPool);
         } catch (err) {
           logger.warn('Tenant pool pre-warm failed (non-fatal)', {
             error: err instanceof Error ? err.message : String(err),
