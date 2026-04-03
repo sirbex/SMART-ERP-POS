@@ -164,44 +164,56 @@ export const systemManagementRepository = {
             statsSnapshot: Record<string, unknown>;
         }
     ): Promise<BackupRecord> {
-        // Generate backup number in service layer (replaces generate_backup_number() DB function)
+        // Generate backup number with retry on conflict (race-safe)
         const year = new Date().getFullYear();
-        const seqResult = await pool.query(
-            `SELECT COALESCE(MAX(CAST(SUBSTRING(backup_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
-             FROM system_backups WHERE backup_number LIKE $1`,
-            [`BACKUP-${year}-%`, `BACKUP-${year}-`.length + 1]
-        );
-        const backupNumber = `BACKUP-${year}-${String(seqResult.rows[0].next_num).padStart(4, '0')}`;
+        const maxRetries = 5;
 
-        const result = await pool.query(
-            `
-      INSERT INTO system_backups (
-        backup_number, file_name, file_path, file_size, checksum,
-        backup_type, status, reason, created_by, created_by_name,
-        stats_snapshot
-      )
-      VALUES (
-        $1, $2, $3, $4, $5,
-        $6, 'COMPLETED', $7, $8, $9,
-        $10
-      )
-      RETURNING *
-    `,
-            [
-                backupNumber,
-                data.fileName,
-                data.filePath,
-                data.fileSize,
-                data.checksum,
-                data.backupType,
-                data.reason,
-                data.userId,
-                data.userName,
-                JSON.stringify(data.statsSnapshot),
-            ]
-        );
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const seqResult = await pool.query(
+                `SELECT COALESCE(MAX(CAST(SUBSTRING(backup_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+                 FROM system_backups WHERE backup_number LIKE $1`,
+                [`BACKUP-${year}-%`, `BACKUP-${year}-`.length + 1]
+            );
+            const backupNumber = `BACKUP-${year}-${String(seqResult.rows[0].next_num).padStart(4, '0')}`;
 
-        return this.mapBackupRow(result.rows[0]);
+            try {
+                const result = await pool.query(
+                    `
+          INSERT INTO system_backups (
+            backup_number, file_name, file_path, file_size, checksum,
+            backup_type, status, reason, created_by, created_by_name,
+            stats_snapshot
+          )
+          VALUES (
+            $1, $2, $3, $4, $5,
+            $6, 'COMPLETED', $7, $8, $9,
+            $10
+          )
+          RETURNING *
+        `,
+                    [
+                        backupNumber,
+                        data.fileName,
+                        data.filePath,
+                        data.fileSize,
+                        data.checksum,
+                        data.backupType,
+                        data.reason,
+                        data.userId,
+                        data.userName,
+                        JSON.stringify(data.statsSnapshot),
+                    ]
+                );
+
+                return this.mapBackupRow(result.rows[0]);
+            } catch (err: unknown) {
+                const isUniqueViolation = err instanceof Error && err.message.includes('duplicate key');
+                if (!isUniqueViolation || attempt === maxRetries - 1) throw err;
+                // Retry with next number
+            }
+        }
+
+        throw new Error('Failed to generate unique backup number after retries');
     },
 
     async getBackupById(pool: Pool, id: string): Promise<BackupRecord | null> {
@@ -319,44 +331,56 @@ export const systemManagementRepository = {
             userAgent?: string;
         }
     ): Promise<string> {
-        // Generate reset number in service layer (replaces generate_reset_number() DB function)
+        // Generate reset number with retry on conflict (race-safe)
         const year = new Date().getFullYear();
-        const seqResult = await pool.query(
-            `SELECT COALESCE(MAX(CAST(SUBSTRING(reset_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
-             FROM system_reset_log WHERE reset_number LIKE $1`,
-            [`RESET-${year}-%`, `RESET-${year}-`.length + 1]
-        );
-        const resetNumber = `RESET-${year}-${String(seqResult.rows[0].next_num).padStart(4, '0')}`;
+        const maxRetries = 5;
 
-        const result = await pool.query(
-            `
-      INSERT INTO system_reset_log (
-        reset_number, reset_type, backup_id, backup_number,
-        authorized_by, authorized_by_name, confirmation_phrase,
-        reason, ip_address, user_agent, status
-      )
-      VALUES (
-        $1, $2, $3, $4,
-        $5, $6, $7,
-        $8, $9, $10, 'IN_PROGRESS'
-      )
-      RETURNING id, reset_number
-    `,
-            [
-                resetNumber,
-                data.resetType,
-                data.backupId,
-                data.backupNumber,
-                data.userId,
-                data.userName,
-                data.confirmationPhrase,
-                data.reason,
-                data.ipAddress,
-                data.userAgent,
-            ]
-        );
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const seqResult = await pool.query(
+                `SELECT COALESCE(MAX(CAST(SUBSTRING(reset_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+                 FROM system_reset_log WHERE reset_number LIKE $1`,
+                [`RESET-${year}-%`, `RESET-${year}-`.length + 1]
+            );
+            const resetNumber = `RESET-${year}-${String(seqResult.rows[0].next_num).padStart(4, '0')}`;
 
-        return result.rows[0].reset_number;
+            try {
+                const result = await pool.query(
+                    `
+          INSERT INTO system_reset_log (
+            reset_number, reset_type, backup_id, backup_number,
+            authorized_by, authorized_by_name, confirmation_phrase,
+            reason, ip_address, user_agent, status
+          )
+          VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7,
+            $8, $9, $10, 'IN_PROGRESS'
+          )
+          RETURNING id, reset_number
+        `,
+                    [
+                        resetNumber,
+                        data.resetType,
+                        data.backupId,
+                        data.backupNumber,
+                        data.userId,
+                        data.userName,
+                        data.confirmationPhrase,
+                        data.reason,
+                        data.ipAddress,
+                        data.userAgent,
+                    ]
+                );
+
+                return result.rows[0].reset_number;
+            } catch (err: unknown) {
+                const isUniqueViolation = err instanceof Error && err.message.includes('duplicate key');
+                if (!isUniqueViolation || attempt === maxRetries - 1) throw err;
+                // Retry with next number
+            }
+        }
+
+        throw new Error('Failed to generate unique reset number after retries');
     },
 
     async completeResetLog(

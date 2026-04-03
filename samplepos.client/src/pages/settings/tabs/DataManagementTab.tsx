@@ -629,6 +629,8 @@ function ResetSection({
     };
 
     const handleReset = async () => {
+        if (isResetting) return; // Guard against double-invocation
+
         if (confirmText !== 'RESET ALL TRANSACTIONS') {
             onError('Please type the exact confirmation phrase');
             return;
