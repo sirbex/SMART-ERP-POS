@@ -224,6 +224,8 @@ export const api = {
       apiClient.get<ApiResponse>('products', { params }),
     getById: (id: string, includeUoms: boolean = false) =>
       apiClient.get<ApiResponse>(`products/${id}`, { params: { includeUoms } }),
+    procurementSearch: (params: { q: string; supplierId?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('products/procurement-search', { params }),
     create: (data: CreateProductInput) => apiClient.post<ApiResponse>('products', data),
     update: (id: string, data: UpdateProductInput) =>
       apiClient.put<ApiResponse>(`products/${id}`, data),
@@ -396,6 +398,8 @@ export const api = {
       apiClient.post<ApiResponse>('purchase-orders/invoices', data),
     recordPayment: (data: RecordPOPaymentInput) =>
       apiClient.post<ApiResponse>('purchase-orders/payments', data),
+    resolveUnitCost: (params: { productId: string; supplierId: string }) =>
+      apiClient.get<ApiResponse>('purchase-orders/resolve-unit-cost', { params }),
   },
 
   // Goods Receipts

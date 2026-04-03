@@ -14,6 +14,7 @@
 export { SupplierSelector } from "./SupplierSelector";
 export { NotesField } from "./NotesField";
 export { ProductSearchBar, type SearchableProduct } from "./ProductSearchBar";
+export { ProcurementProductSearch, type ProcurementProduct } from "./ProcurementProductSearch";
 export { BusinessRulesInfo, PURCHASE_ORDER_RULES, GOODS_RECEIPT_RULES } from "./BusinessRulesInfo";
 export { TotalsSummary } from "./TotalsSummary";
 export { ModalHeader } from "./ModalHeader";

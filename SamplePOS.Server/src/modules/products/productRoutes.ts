@@ -13,6 +13,10 @@ const router = Router();
 // All routes require authentication
 // List products - any authenticated user
 router.get('/', authenticate, productController.getProducts);
+
+// Procurement search - must be before :id to avoid being captured
+router.get('/procurement-search', authenticate, productController.procurementSearch);
+
 router.get('/:id', authenticate, productController.getProduct);
 router.post('/:id/convert-quantity', authenticate, productController.convertProductQuantity);
 router.get('/:id/history', authenticate, getProductHistory);

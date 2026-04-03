@@ -714,3 +714,99 @@ export async function bulkUpsertForImport(
 
   return { inserted, skipped, skuToProductId };
 }
+
+// ── Procurement Search (ERP-grade PO search) ────────────────────────────
+
+export interface ProcurementSearchResult {
+  id: string;
+  name: string;
+  sku: string | null;
+  barcode: string | null;
+  genericName: string | null;
+  quantityOnHand: number;
+  reorderLevel: number;
+  reorderQuantity: number;
+  costPrice: number;
+  lastCost: number;
+  preferredSupplierId: string | null;
+  supplierProductCode: string | null;
+  purchaseUomId: string | null;
+  leadTimeDays: number;
+  trackExpiry: boolean;
+  // Supplier-specific pricing (when supplierId provided)
+  supplierLastPrice: number | null;
+  supplierPurchaseCount: number | null;
+  supplierName: string | null;
+}
+
+/**
+ * Procurement-aware product search for PO creation.
+ * Searches: name, sku, barcode, generic_name, supplier_product_code.
+ * Returns inventory intelligence: on-hand, reorder, last cost, supplier pricing.
+ * 
+ * When supplierId is provided, also returns that supplier's last purchase price.
+ */
+export async function procurementSearch(
+  query: string,
+  supplierId: string | null,
+  limit: number = 20,
+  dbPool?: pg.Pool
+): Promise<ProcurementSearchResult[]> {
+  const pool = dbPool || globalPool;
+  const pattern = `%${query.trim()}%`;
+  const params: (string | number)[] = [pattern, limit];
+  let supplierJoin = '';
+  let supplierSelect = `
+      NULL::numeric AS "supplierLastPrice",
+      NULL::integer AS "supplierPurchaseCount",
+      NULL::text AS "supplierName"`;
+
+  if (supplierId) {
+    params.push(supplierId);
+    const supplierIdx = params.length; // $3
+    supplierJoin = `LEFT JOIN supplier_product_prices spp ON spp.product_id = p.id AND spp.supplier_id = $${supplierIdx}
+    LEFT JOIN suppliers s ON s."Id" = spp.supplier_id`;
+    supplierSelect = `
+      spp.last_purchase_price AS "supplierLastPrice",
+      spp.purchase_count AS "supplierPurchaseCount",
+      s."CompanyName" AS "supplierName"`;
+  }
+
+  const sql = `
+    SELECT
+      p.id,
+      p.name,
+      p.sku,
+      p.barcode,
+      p.generic_name AS "genericName",
+      COALESCE(pi.quantity_on_hand, 0) AS "quantityOnHand",
+      COALESCE(pi.reorder_level, 0) AS "reorderLevel",
+      COALESCE(pi.reorder_quantity, 0) AS "reorderQuantity",
+      COALESCE(pv.cost_price, 0) AS "costPrice",
+      COALESCE(pv.last_cost, 0) AS "lastCost",
+      p.preferred_supplier_id AS "preferredSupplierId",
+      p.supplier_product_code AS "supplierProductCode",
+      p.purchase_uom_id AS "purchaseUomId",
+      COALESCE(p.lead_time_days, 0) AS "leadTimeDays",
+      p.track_expiry AS "trackExpiry",
+      ${supplierSelect}
+    FROM products p
+    LEFT JOIN product_inventory pi ON pi.product_id = p.id
+    LEFT JOIN product_valuation pv ON pv.product_id = p.id
+    ${supplierJoin}
+    WHERE p.is_active = true
+      AND (
+        p.name ILIKE $1
+        OR p.sku ILIKE $1
+        OR p.barcode ILIKE $1
+        OR p.generic_name ILIKE $1
+        OR p.supplier_product_code ILIKE $1
+      )
+    ORDER BY
+      CASE WHEN p.name ILIKE $1 THEN 0 ELSE 1 END,
+      p.name ASC
+    LIMIT $2`;
+
+  const result = await pool.query(sql, params);
+  return result.rows;
+}

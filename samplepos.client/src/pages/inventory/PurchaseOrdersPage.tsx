@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   usePurchaseOrders,
   useCreatePurchaseOrder,
@@ -8,23 +8,21 @@ import {
   useSendPOToSupplier,
 } from '../../hooks/usePurchaseOrders';
 import { useSuppliers } from '../../hooks/useSuppliers';
-import { useProducts } from '../../hooks/useProducts';
 import { formatCurrency } from '../../utils/currency';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import Decimal from 'decimal.js';
-import { UomSelector } from '../../components/inventory/UomSelector';
-import { computeUnitCost, convertQtyToBase, convertCostToBase } from '../../utils/uom';
+
 import { DatePicker } from '../../components/ui/date-picker';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { Product, Supplier } from '../../types';
+import type { Supplier } from '../../types';
 import {
   SupplierSelector,
   NotesField,
-  ProductSearchBar,
+  ProcurementProductSearch,
   BusinessRulesInfo,
   TotalsSummary,
   ModalHeader,
@@ -32,6 +30,7 @@ import {
   ModalContainer,
   PURCHASE_ORDER_RULES,
 } from '../../components/inventory/shared';
+import type { ProcurementProduct } from '../../components/inventory/shared';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -55,21 +54,11 @@ interface POLineItem {
   unitCost: string;
   // Optional selected UoM tracking (for display and future conversions)
   selectedUomId?: string | null;
-}
-
-/** UoM option for a product */
-interface ProductUom {
-  id: string;
-  uomName?: string;
-  conversionFactor: number | string;
-  isDefault: boolean;
-  costOverride?: number | string | null;
-}
-
-/** Product with optional UoM data from API */
-interface ProductWithUoms extends Product {
-  product_uoms?: ProductUom[];
-  productUoms?: ProductUom[];
+  // Procurement intelligence (from search result)
+  quantityOnHand?: number;
+  reorderLevel?: number;
+  reorderQuantity?: number;
+  costSource?: string;
 }
 
 /** PO row — supports both snake_case (raw API) and camelCase (mapped) fields */
@@ -138,90 +127,124 @@ interface POItemRow {
   notes?: string;
 }
 
-// Row component to handle UoM selection per product
+// Spreadsheet-style Line Item Row with Tab/Enter navigation
 function LineItemRow({
   item,
+  index,
   onUpdate,
   onRemove,
   disabled,
-  product,
+  onQtyRef,
+  onCostRef,
+  onTab,
 }: {
   item: POLineItem;
+  index: number;
   onUpdate: (id: string, field: keyof POLineItem, value: string) => void;
   onRemove: (id: string) => void;
   disabled: boolean;
-  product: Product | undefined;
+  onQtyRef: (el: HTMLInputElement | null) => void;
+  onCostRef: (el: HTMLInputElement | null) => void;
+  onTab: (fromField: 'qty' | 'cost', index: number) => void;
 }) {
+  const localCostRef = useRef<HTMLInputElement | null>(null);
+
   // Compute line total
   let lineTotal = new Decimal(0);
   try {
     lineTotal = new Decimal(item.quantity || 0).times(new Decimal(item.unitCost || 0));
   } catch { }
 
-  const handleUomChange = (params: {
-    uomId: string | null;
-    newCost: string;
-    conversionFactor: string;
-    uomName: string;
-  }) => {
-    onUpdate(item.id, 'unitCost', params.newCost);
-    onUpdate(item.id, 'selectedUomId', params.uomId || '');
+  const needsReorder = item.quantityOnHand !== undefined &&
+    item.reorderLevel !== undefined &&
+    item.quantityOnHand <= item.reorderLevel;
+
+  const handleKeyDown = (field: 'qty' | 'cost') => (e: React.KeyboardEvent) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      if (field === 'qty') {
+        // Tab from quantity → unit cost (same row)
+        e.preventDefault();
+        localCostRef.current?.focus();
+        localCostRef.current?.select();
+      } else if (field === 'cost') {
+        // Tab from unit cost → next product search (next row)
+        e.preventDefault();
+        onTab('cost', index);
+      }
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (field === 'qty') {
+        localCostRef.current?.focus();
+        localCostRef.current?.select();
+      } else {
+        onTab('cost', index);
+      }
+    }
   };
 
   return (
-    <tr>
-      <td className="px-4 py-3 text-sm text-gray-900">
-        <div className="flex flex-col gap-1">
-          <div className="font-medium">{item.productName}</div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600">UOM:</span>
-            <UomSelector
-              productId={product?.id ?? ''}
-              baseCost={product ? String(product.costPrice) : '0'}
-              selectedUomId={item.selectedUomId}
-              disabled={disabled}
-              onChange={handleUomChange}
-              className="px-2 py-1 text-xs border border-blue-300 rounded bg-blue-50 hover:border-blue-500 focus:ring-2 focus:ring-blue-500"
-            />
+    <tr className={needsReorder ? 'bg-red-50' : ''}>
+      <td className="px-3 py-2 text-sm text-gray-900">
+        <div className="flex flex-col gap-0.5">
+          <div className="font-medium truncate max-w-[200px]" title={item.productName}>
+            {item.productName}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            {item.quantityOnHand !== undefined && (
+              <span className={needsReorder ? 'text-red-600 font-medium' : 'text-green-600'}>
+                OH: {Number(item.quantityOnHand).toLocaleString()}
+              </span>
+            )}
+            {item.costSource && (
+              <span className="text-blue-500">({item.costSource})</span>
+            )}
           </div>
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-2 py-2">
         <input
+          ref={(el) => { onQtyRef(el); }}
           type="number"
           value={item.quantity}
           onChange={(e) => onUpdate(item.id, 'quantity', e.target.value)}
-          step="0.01"
-          min="0.01"
-          className="w-full px-2 py-1 text-right border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          onFocus={(e) => e.target.select()}
+          onKeyDown={handleKeyDown('qty')}
+          step="1"
+          min="1"
+          className="w-20 px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="0"
           disabled={disabled}
         />
       </td>
-      <td className="px-4 py-3">
+      <td className="px-2 py-2">
         <input
+          ref={(el) => { localCostRef.current = el; onCostRef(el); }}
           type="number"
           value={item.unitCost}
           onChange={(e) => onUpdate(item.id, 'unitCost', e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onKeyDown={handleKeyDown('cost')}
           step="0.01"
           min="0"
-          className="w-full px-2 py-1 text-right border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-28 px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="0.00"
           disabled={disabled}
         />
       </td>
-      <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">
+      <td className="px-2 py-2 text-right text-sm font-medium text-gray-900 whitespace-nowrap">
         {formatCurrency(lineTotal.toNumber())}
       </td>
-      <td className="px-4 py-3 text-center">
+      <td className="px-2 py-2 text-center">
         <button
           type="button"
           onClick={() => onRemove(item.id)}
-          className="text-red-600 hover:text-red-900"
+          className="text-red-500 hover:text-red-700 text-sm"
           title="Remove item"
           disabled={disabled}
+          tabIndex={-1}
         >
-          🗑️
+          ✕
         </button>
       </td>
     </tr>
@@ -242,15 +265,22 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
   const [lineItems, setLineItems] = useState<POLineItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { data: productsData } = useProducts();
   const createPOMutation = useCreatePurchaseOrder();
 
-  // Extract products
-  const allProducts = useMemo(() => {
-    if (!productsData) return [];
-    if (productsData.data && Array.isArray(productsData.data)) return productsData.data;
-    return Array.isArray(productsData) ? productsData : [];
-  }, [productsData]);
+  // ── Refs for spreadsheet keyboard navigation ──
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const qtyRefs = useRef<Map<number, HTMLInputElement>>(new Map());
+  const costRefs = useRef<Map<number, HTMLInputElement>>(new Map());
+
+  // Focus the search bar after adding a line (keyboard flow: search → qty → cost → search)
+  const focusSearch = useCallback(() => {
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  }, []);
+
+  // Tab handler: from cost field → back to product search
+  const handleTabFromRow = useCallback((_fromField: 'qty' | 'cost', _index: number) => {
+    focusSearch();
+  }, [focusSearch]);
 
   // Calculate totals with Decimal.js precision
   const totals = useMemo(() => {
@@ -263,7 +293,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         const cost = new Decimal(item.unitCost || 0);
         subtotal = subtotal.plus(qty.times(cost));
         itemCount++;
-      } catch (error) {
+      } catch {
         // Invalid number, skip
       }
     });
@@ -275,98 +305,105 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
     };
   }, [lineItems]);
 
-  // Add line item
-  const addLineItem = (product: ProductWithUoms) => {
-    // Odoo/SAP pattern: auto-select default purchase UOM, or first UOM with factor > 1
-    const productUoms = product.product_uoms || product.productUoms || [];
-    const defaultUom = productUoms.find((u: ProductUom) => u.isDefault) ||
-      productUoms.find((u: ProductUom) => parseFloat(String(u.conversionFactor || 1)) > 1);
+  // ── Add line item from procurement search result ──
+  // Auto unit cost: supplier history → last_cost → cost_price
+  // Auto quantity: reorder_quantity when on_hand < reorder_level
+  const addLineItem = useCallback((product: ProcurementProduct) => {
+    // Resolve best unit cost (priority: supplier → last → cost)
+    let initialCost = '0.00';
+    let costSource = '';
+    if (product.supplierLastPrice && product.supplierLastPrice > 0) {
+      initialCost = new Decimal(product.supplierLastPrice).toFixed(2);
+      costSource = 'Supplier';
+    } else if (product.lastCost > 0) {
+      initialCost = new Decimal(product.lastCost).toFixed(2);
+      costSource = 'Last';
+    } else if (product.costPrice > 0) {
+      initialCost = new Decimal(product.costPrice).toFixed(2);
+      costSource = 'Cost';
+    }
 
-    let initialCost = new Decimal(product.costPrice || 0).toFixed(2);
-    let selectedUom = null;
-
-    // Cost = baseCost × factor (or costOverride if set)
-    if (defaultUom && parseFloat(String(defaultUom.conversionFactor)) > 1) {
-      selectedUom = defaultUom.id;
-      initialCost = computeUnitCost(
-        parseFloat(String(product.costPrice || 0)),
-        defaultUom.conversionFactor,
-        defaultUom.costOverride,
-      );
+    // Auto-suggest quantity when stock is below reorder level
+    let suggestedQty = '1';
+    if (product.quantityOnHand <= product.reorderLevel && product.reorderQuantity > 0) {
+      suggestedQty = String(product.reorderQuantity);
     }
 
     const newItem: POLineItem = {
       id: `temp-${Date.now()}-${Math.random()}`,
       productId: product.id,
       productName: product.name,
-      quantity: '1',
+      quantity: suggestedQty,
       unitCost: initialCost,
-      selectedUomId: selectedUom,
+      selectedUomId: product.purchaseUomId || null,
+      quantityOnHand: product.quantityOnHand,
+      reorderLevel: product.reorderLevel,
+      reorderQuantity: product.reorderQuantity,
+      costSource,
     };
-    setLineItems([...lineItems, newItem]);
-  };
+
+    setLineItems((prev) => [...prev, newItem]);
+
+    // Auto-focus the quantity field of the new row
+    const newIndex = lineItems.length;
+    setTimeout(() => {
+      const qtyEl = qtyRefs.current.get(newIndex);
+      if (qtyEl) {
+        qtyEl.focus();
+        qtyEl.select();
+      }
+    }, 100);
+  }, [lineItems.length]);
 
   // Update line item
-  const updateLineItem = (id: string, field: keyof POLineItem, value: string) => {
-    setLineItems((prevItems) => {
-      const updated = prevItems.map((item) =>
+  const updateLineItem = useCallback((id: string, field: keyof POLineItem, value: string) => {
+    setLineItems((prevItems) =>
+      prevItems.map((item) =>
         item.id === id ? { ...item, [field]: value } : item
-      );
-      return updated;
-    });
-  };
+      )
+    );
+  }, []);
 
   // Remove line item
-  const removeLineItem = (id: string) => {
-    setLineItems(lineItems.filter((item) => item.id !== id));
-  };
+  const removeLineItem = useCallback((id: string) => {
+    setLineItems((prev) => prev.filter((item) => item.id !== id));
+    focusSearch();
+  }, [focusSearch]);
 
   // Validate form
   const validateForm = (): string | null => {
-    // BR-PO-001: Supplier required
     if (!supplierId) {
       return 'BR-PO-001: Please select a supplier';
     }
-
-    // BR-PO-002: At least one line item required
     if (lineItems.length === 0) {
       return 'BR-PO-002: Purchase order must have at least one line item';
     }
-
-    // BR-PO-003: Expected delivery date validation
     if (expectedDelivery) {
       const deliveryDate = new Date(expectedDelivery);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-
       if (deliveryDate <= today) {
         return 'BR-PO-005: Expected delivery date must be in the future';
       }
     }
-
-    // Validate each line item
     for (const item of lineItems) {
-      // Quantity validation
       try {
         const qty = new Decimal(item.quantity);
         if (qty.lte(0)) {
           return `BR-INV-002: ${item.productName} - Quantity must be positive`;
         }
-      } catch (error) {
+      } catch {
         return `${item.productName} - Invalid quantity format`;
       }
-
-      // Unit cost validation
       try {
         const cost = new Decimal(item.unitCost);
         if (cost.lt(0)) {
           return `BR-PO-004: ${item.productName} - Unit cost cannot be negative`;
         }
-      } catch (error) {
+      } catch {
         return `${item.productName} - Invalid unit cost format`;
       }
     }
-
     return null;
   };
 
@@ -398,53 +435,13 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         expectedDate: expectedDelivery || undefined,
         notes: notes || undefined,
         createdBy: user.id,
-        items: await Promise.all(
-          lineItems.map(async (item) => {
-            // Convert quantity to base units if UoM is selected
-            let baseQuantity = parseFloat(item.quantity);
-            let baseUnitCost = parseFloat(item.unitCost);
-
-            if (item.selectedUomId) {
-              // Fetch UoM data to get conversion factor
-              const product = allProducts.find((p: Product) => p.id === item.productId);
-              if (product) {
-                try {
-                  const response = await fetch(`/api/products/${product.id}?includeUoms=true`, {
-                    headers: {
-                      Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
-                    },
-                  });
-                  const json = await response.json();
-                  if (json.success) {
-                    const uom = json.data.uoms?.find(
-                      (u: ProductUom) => u.id === item.selectedUomId
-                    );
-                    if (uom) {
-                      // Convert: quantity × conversionFactor = base quantity
-                      baseQuantity = parseFloat(
-                        convertQtyToBase(item.quantity, uom.conversionFactor)
-                      );
-                      // Convert: unit cost ÷ conversionFactor = base unit cost
-                      baseUnitCost = parseFloat(
-                        convertCostToBase(item.unitCost, uom.conversionFactor)
-                      );
-                    }
-                  }
-                } catch (err) {
-                  console.error('Failed to fetch UoM for conversion:', err);
-                }
-              }
-            }
-
-            return {
-              productId: item.productId,
-              productName: item.productName,
-              quantity: baseQuantity,
-              unitCost: baseUnitCost,
-              uomId: item.selectedUomId || null,
-            };
-          })
-        ),
+        items: lineItems.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: parseFloat(item.quantity),
+          unitCost: parseFloat(item.unitCost),
+          uomId: item.selectedUomId || null,
+        })),
       };
 
       await createPOMutation.mutateAsync(poData);
@@ -459,11 +456,23 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
     }
   };
 
+  // ── Keyboard shortcut: Ctrl+Enter to submit ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'Enter' && lineItems.length > 0 && !isSubmitting) {
+        e.preventDefault();
+        handleSubmit(new Event('submit') as unknown as React.FormEvent);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  });
+
   return (
     <ModalContainer>
       <ModalHeader
         title="Create Purchase Order"
-        description="Add products and specify quantities for this order"
+        description="ERP-grade procurement — search, add, Tab through. Ctrl+Enter to submit."
         onClose={onClose}
       />
 
@@ -498,68 +507,73 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
           onChange={setNotes}
           disabled={isSubmitting}
           placeholder="Optional notes about this purchase order..."
-          className="mb-6"
+          className="mb-4"
         />
 
         {/* Line Items Section */}
         <div className="mb-6 border border-gray-300 rounded-lg p-4">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-3">
             <h4 className="text-sm font-semibold text-gray-900">
               Line Items <span className="text-red-500">*</span>
             </h4>
-            <div className="text-xs text-gray-600">BR-PO-002: At least one item required</div>
+            <div className="text-xs text-gray-500">
+              {lineItems.length} item{lineItems.length !== 1 ? 's' : ''} &middot; Tab through fields &middot; Ctrl+Enter to submit
+            </div>
           </div>
 
-          {/* Product Search/Add */}
-          <ProductSearchBar
-            onProductSelect={(p) => addLineItem(p as unknown as ProductWithUoms)}
+          {/* Procurement Product Search */}
+          <ProcurementProductSearch
+            supplierId={supplierId}
+            onProductSelect={addLineItem}
             disabled={isSubmitting}
-            className="mb-4"
+            className="mb-3"
+            inputRef={searchInputRef}
           />
 
-          {/* Line Items Table */}
+          {/* Spreadsheet-style Line Items Table */}
           {lineItems.length > 0 ? (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                       Product
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-32">
-                      Quantity
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">
+                      Qty
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-40">
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
                       Unit Cost
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase w-40">
+                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
                       Line Total
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-20">
-                      Action
+                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12">
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {lineItems.map((item) => {
-                    const product = allProducts.find((p: Product) => p.id === item.productId);
-                    return (
-                      <LineItemRow
-                        key={item.id}
-                        item={item}
-                        onUpdate={updateLineItem}
-                        onRemove={removeLineItem}
-                        disabled={isSubmitting}
-                        product={product}
-                      />
-                    );
-                  })}
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {lineItems.map((item, idx) => (
+                    <LineItemRow
+                      key={item.id}
+                      item={item}
+                      index={idx}
+                      onUpdate={updateLineItem}
+                      onRemove={removeLineItem}
+                      disabled={isSubmitting}
+                      onQtyRef={(el) => { if (el) qtyRefs.current.set(idx, el); else qtyRefs.current.delete(idx); }}
+                      onCostRef={(el) => { if (el) costRefs.current.set(idx, el); else costRefs.current.delete(idx); }}
+                      onTab={handleTabFromRow}
+                    />
+                  ))}
                 </tbody>
               </table>
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-              No line items added yet. Search and add products above.
+              {supplierId
+                ? 'Search products above to add line items.'
+                : 'Select a supplier first, then search products.'}
             </div>
           )}
 
@@ -569,7 +583,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
               itemCount={totals.itemCount}
               subtotal={totals.subtotal}
               avgCost={totals.avgCost}
-              className="mt-4 pt-4 border-t border-gray-200"
+              className="mt-3 pt-3 border-t border-gray-200"
             />
           )}
         </div>

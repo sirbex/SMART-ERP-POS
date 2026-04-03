@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { CreateProductSchema, UpdateProductSchema } from '../../../../shared/zod/product.js';
 import * as productService from './productService.js';
+import * as productRepository from './productRepository.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 import { normalizeResponse } from '../../utils/caseConverter.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
@@ -180,4 +181,24 @@ export const deleteProduct = asyncHandler(async (req: Request, res: Response) =>
     success: true,
     message: 'Product deleted successfully',
   });
+});
+
+// ── Procurement Search (ERP-grade) ──────────────────────────────────────
+
+const ProcurementSearchQuerySchema = z.object({
+  q: z.string().min(1, 'Search query is required'),
+  supplierId: z.string().uuid().optional(),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? Math.min(parseInt(v), 50) : 20)),
+});
+
+export const procurementSearch = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { q, supplierId, limit } = ProcurementSearchQuerySchema.parse(req.query);
+
+  const results = await productRepository.procurementSearch(q, supplierId || null, limit, pool);
+
+  res.json({ success: true, data: results });
 });

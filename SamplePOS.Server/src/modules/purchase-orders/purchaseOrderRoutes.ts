@@ -5,6 +5,7 @@ import { purchaseOrderService } from './purchaseOrderService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 
 // Validation schemas
 const POItemSchema = z.object({
@@ -355,11 +356,72 @@ export const purchaseOrderController = {
   },
 };
 
+// ── Resolve Unit Cost ─────────────────────────────────────────────────
+
+const ResolveUnitCostSchema = z.object({
+  productId: z.string().uuid(),
+  supplierId: z.string().uuid(),
+});
+
+/**
+ * GET /purchase-orders/resolve-unit-cost?productId=&supplierId=
+ * Priority: supplier_product_prices → product_valuation.last_cost → cost_price
+ */
+async function resolveUnitCost(req: Request, res: Response): Promise<void> {
+  const pool = req.tenantPool || globalPool;
+  const { productId, supplierId } = ResolveUnitCostSchema.parse(req.query);
+
+  // 1. Try supplier-specific price
+  const supplierPrices = await supplierProductPriceRepository.getSupplierPricesForProduct(productId, pool);
+  const forThisSupplier = supplierPrices.find((sp) => sp.supplierId === supplierId);
+  if (forThisSupplier && Number(forThisSupplier.lastPurchasePrice) > 0) {
+    res.json({
+      success: true,
+      data: {
+        unitCost: Number(forThisSupplier.lastPurchasePrice),
+        source: 'supplier_history',
+        supplierName: (forThisSupplier as unknown as Record<string, unknown>).supplierName || null,
+        purchaseCount: forThisSupplier.purchaseCount,
+      },
+    });
+    return;
+  }
+
+  // 2. Try product_valuation.last_cost → cost_price
+  const valResult = await pool.query(
+    `SELECT COALESCE(last_cost, 0) AS "lastCost", COALESCE(cost_price, 0) AS "costPrice"
+     FROM product_valuation WHERE product_id = $1`,
+    [productId]
+  );
+
+  if (valResult.rows.length > 0) {
+    const { lastCost, costPrice } = valResult.rows[0];
+    const last = Number(lastCost);
+    const cost = Number(costPrice);
+
+    if (last > 0) {
+      res.json({ success: true, data: { unitCost: last, source: 'last_purchase' } });
+      return;
+    }
+    if (cost > 0) {
+      res.json({ success: true, data: { unitCost: cost, source: 'cost_price' } });
+      return;
+    }
+  }
+
+  // 3. Fallback
+  res.json({ success: true, data: { unitCost: 0, source: 'none' } });
+}
+
 // Routes
 export const purchaseOrderRoutes = Router();
 
 // View routes - all authenticated users
 purchaseOrderRoutes.get('/', authenticate, asyncHandler(purchaseOrderController.listPOs));
+
+// Resolve unit cost — must be before /:id
+purchaseOrderRoutes.get('/resolve-unit-cost', authenticate, asyncHandler(resolveUnitCost));
+
 purchaseOrderRoutes.get('/:id', authenticate, asyncHandler(purchaseOrderController.getPOById));
 
 // Create/modify routes - requires purchasing permissions
