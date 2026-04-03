@@ -27,7 +27,7 @@ import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapp
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { useProductWithUoms, findUom, getDefaultUom } from '../../hooks/useProductWithUoms';
 import { useStockLevelByProduct, inventoryKeys } from '../../hooks/useInventory';
-import { DatePicker } from '../../components/ui/date-picker';
+// DatePicker removed — GR uses native date input for keyboard-driven receiving
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -475,6 +475,39 @@ export default function GoodsReceiptsPage() {
   const grDetail = detailsQuery.data?.data?.data as GRDetailData | undefined;
   const items = useMemo(() => grDetail?.items || [], [grDetail]);
 
+  // Determine if GR is linked to a PO (strict discipline applies)
+  const isFromPO = !!(selectedGR?.purchaseOrderId || selectedGR?.purchase_order_id);
+
+  // Receive All Remaining: set every line's receivedQuantity = orderedQuantity
+  const handleReceiveAllRemaining = () => {
+    const updates = { ...editItems };
+    items.forEach((it: GRItemRow) => {
+      const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
+      updates[it.id] = {
+        ...(updates[it.id] || {}),
+        receivedQuantity: ordered,
+        receivedUomQty: undefined,
+        receivedLooseQty: undefined,
+      };
+    });
+    setEditItems(updates);
+  };
+
+  // Accounting preview: live DR Inventory (1300) / CR GRNI (2200) totals
+  const accountingPreview = useMemo(() => {
+    let total = 0;
+    items.forEach((it: GRItemRow) => {
+      const es = editItems[it.id] || {};
+      const qty = Number(es.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
+      const cost = Number(es.unitCost ?? it.unitCost ?? it.unit_cost ?? 0);
+      const bonus = !!(es.isBonus ?? it.isBonus ?? it.is_bonus ?? false);
+      if (!bonus && qty > 0) {
+        total += qty * cost;
+      }
+    });
+    return total;
+  }, [items, editItems]);
+
   useEffect(() => {
     if (showDetailsModal && items.length > 0) {
       // initialize edit state with current values
@@ -496,6 +529,40 @@ export default function GoodsReceiptsPage() {
   }, [showDetailsModal, items]);
 
   const handleFinalize = async (id: string) => {
+    // ── Part 4: Required field enforcement ──
+    if (isFromPO) {
+      const validationErrors: string[] = [];
+      let anyReceived = false;
+
+      items.forEach((it: GRItemRow) => {
+        const es = editItems[it.id] || {};
+        const productName = it.productName || it.product_name || 'Unknown';
+        const qty = Number(es.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
+        const batch = es.batchNumber ?? it.batchNumber ?? it.batch_number ?? '';
+        const expiry = es.expiryDate ?? it.expiryDate ?? it.expiry_date ?? '';
+
+        if (qty > 0) {
+          anyReceived = true;
+          if (!batch || String(batch).trim() === '') {
+            validationErrors.push(`${productName}: Batch number is required`);
+          }
+          if (!expiry || String(expiry).trim() === '') {
+            validationErrors.push(`${productName}: Expiry date is required`);
+          }
+        }
+      });
+
+      if (!anyReceived) {
+        alert('Cannot finalize: At least one line must have a received quantity greater than zero.');
+        return;
+      }
+
+      if (validationErrors.length > 0) {
+        alert(`Cannot finalize. Please fix the following:\n\n${validationErrors.join('\n')}`);
+        return;
+      }
+    }
+
     if (
       !confirm(
         'Finalize this goods receipt? This will create inventory batches and update stock levels.'
@@ -1071,9 +1138,21 @@ export default function GoodsReceiptsPage() {
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-lg font-semibold text-gray-900">Items</h4>
-                  {detailsQuery.isLoading && (
-                    <span className="text-sm text-gray-500">Loading items…</span>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {selectedGR.status === 'DRAFT' && isFromPO && (
+                      <button
+                        onClick={handleReceiveAllRemaining}
+                        className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium flex items-center gap-1.5"
+                        title="Set all lines to ordered quantity"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Receive All Remaining
+                      </button>
+                    )}
+                    {detailsQuery.isLoading && (
+                      <span className="text-sm text-gray-500">Loading items…</span>
+                    )}
+                  </div>
                 </div>
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -1128,7 +1207,7 @@ export default function GoodsReceiptsPage() {
                           </td>
                         </tr>
                       ) : (
-                        items.map((it: GRItemRow) => (
+                        items.map((it: GRItemRow, idx: number) => (
                           <GRItemRow
                             key={it.id}
                             item={it}
@@ -1141,6 +1220,9 @@ export default function GoodsReceiptsPage() {
                             batchWarnings={batchWarnings}
                             validationTimeout={validationTimeout}
                             checkBatchDuplicate={checkBatchDuplicate}
+                            isFromPO={isFromPO}
+                            itemIndex={idx}
+                            totalItems={items.length}
                           />
                         ))
                       )}
@@ -1148,6 +1230,32 @@ export default function GoodsReceiptsPage() {
                   </table>
                 </div>
               </div>
+
+              {/* Accounting Preview Panel */}
+              {isFromPO && items.length > 0 && (
+                <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  <h5 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                    This receipt will post
+                  </h5>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between bg-white rounded-md px-3 py-2 border">
+                      <div>
+                        <span className="text-xs text-slate-500">DR</span>
+                        <span className="ml-2 text-sm font-medium text-slate-900">Inventory (1300)</span>
+                      </div>
+                      <span className="text-sm font-bold text-green-700">{formatCurrency(accountingPreview)}</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-white rounded-md px-3 py-2 border">
+                      <div>
+                        <span className="text-xs text-slate-500">CR</span>
+                        <span className="ml-2 text-sm font-medium text-slate-900">GRNI / AP (2200)</span>
+                      </div>
+                      <span className="text-sm font-bold text-red-700">{formatCurrency(accountingPreview)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
@@ -1685,6 +1793,9 @@ function GRItemRow({
   batchWarnings,
   validationTimeout,
   checkBatchDuplicate,
+  isFromPO,
+  itemIndex,
+  totalItems,
 }: {
   item: GRItemRow;
   baseline: 'PO' | 'PRODUCT';
@@ -1700,6 +1811,9 @@ function GRItemRow({
   batchWarnings: Record<string, string>;
   validationTimeout: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
   checkBatchDuplicate: (itemId: string, batchNumber: string) => Promise<void>;
+  isFromPO: boolean;
+  itemIndex: number;
+  totalItems: number;
 }) {
   const es = editState || {};
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
@@ -1837,11 +1951,11 @@ function GRItemRow({
         ) : (
           <select
             className="border rounded px-2 py-1"
-            disabled={disabled}
+            disabled={disabled || isFromPO}
             value={selectedUomId}
             onChange={(e) => onFieldChange(item.id, 'selectedUomId', e.target.value)}
             aria-label={`Unit of Measure for ${item.productName || item.product_name}`}
-            title="Unit of Measure"
+            title={isFromPO ? 'UoM locked — defined by Purchase Order' : 'Unit of Measure'}
           >
             {uomList.map((u) => (
               <option key={u.id} value={u.id}>
@@ -1919,30 +2033,44 @@ function GRItemRow({
         {receivedError && <div className="text-xs text-red-600 mt-1">{receivedError}</div>}
       </td>
       <td className="px-4 py-2 text-sm">
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          className={`w-32 border rounded px-2 py-1 ${unitCostError ? 'border-red-500' : ''}`}
-          value={Number.isFinite(displayedUnitCost) ? displayedUnitCost : ''}
-          disabled={disabled}
-          aria-label={`Unit cost for ${item.productName || item.product_name}`}
-          title="Unit cost"
-          onChange={(e) => {
-            const v = e.target.value === '' ? undefined : Number(e.target.value);
-            if (v === undefined) {
-              onFieldChange(item.id, 'unitCost', undefined);
-            } else {
-              const baseVal = new Decimal(v).div(factor).toNumber();
-              onFieldChange(item.id, 'unitCost', baseVal);
-            }
-          }}
-        />
-        {unitCostError && <div className="text-xs text-red-600 mt-1">{unitCostError}</div>}
+        {isFromPO ? (
+          <div>
+            <div className="text-sm font-medium text-gray-900">
+              {formatCurrency(displayedUnitCost)}
+            </div>
+            <div className="text-xs text-blue-600 mt-0.5">
+              PO Agreed Price
+            </div>
+          </div>
+        ) : (
+          <>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              className={`w-32 border rounded px-2 py-1 ${unitCostError ? 'border-red-500' : ''}`}
+              value={Number.isFinite(displayedUnitCost) ? displayedUnitCost : ''}
+              disabled={disabled}
+              aria-label={`Unit cost for ${item.productName || item.product_name}`}
+              title="Unit cost"
+              onChange={(e) => {
+                const v = e.target.value === '' ? undefined : Number(e.target.value);
+                if (v === undefined) {
+                  onFieldChange(item.id, 'unitCost', undefined);
+                } else {
+                  const baseVal = new Decimal(v).div(factor).toNumber();
+                  onFieldChange(item.id, 'unitCost', baseVal);
+                }
+              }}
+            />
+            {unitCostError && <div className="text-xs text-red-600 mt-1">{unitCostError}</div>}
+          </>
+        )}
       </td>
       <td className="px-4 py-2 text-sm">
         <input
           type="text"
+          data-gr-batch-idx={itemIndex}
           className={`w-40 border rounded px-2 py-1 ${batchWarnings[item.id] ? 'border-red-500' : ''}`}
           value={es.batchNumber ?? ''}
           disabled={disabled}
@@ -1957,20 +2085,38 @@ function GRItemRow({
               checkBatchDuplicate(item.id, value);
             }, 500);
           }}
-          placeholder="Auto on finalize if empty"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const expiryInput = document.querySelector(`[data-gr-expiry-idx="${itemIndex}"]`) as HTMLInputElement;
+              expiryInput?.focus();
+            }
+          }}
+          placeholder="Enter batch number"
+          autoFocus={itemIndex === 0 && !disabled}
         />
         {batchWarnings[item.id] && (
           <div className="text-xs text-red-600 mt-1">{batchWarnings[item.id]}</div>
         )}
       </td>
       <td className="px-4 py-2 text-sm">
-        <DatePicker
+        <input
+          type="date"
+          data-gr-expiry-idx={itemIndex}
+          className={`w-36 border rounded px-2 py-1 text-sm ${expiryError ? 'border-red-500' : ''}`}
           value={es.expiryDate ?? ''}
-          onChange={(date) => onFieldChange(item.id, 'expiryDate', date || undefined)}
-          placeholder="Expiry date"
           disabled={disabled}
-          minDate={new Date()}
-          className={expiryError ? 'border-red-500' : ''}
+          min={new Date().toISOString().split('T')[0]}
+          onChange={(e) => onFieldChange(item.id, 'expiryDate', e.target.value || undefined)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (itemIndex + 1 < totalItems) {
+                const nextBatch = document.querySelector(`[data-gr-batch-idx="${itemIndex + 1}"]`) as HTMLInputElement;
+                nextBatch?.focus();
+              }
+            }
+          }}
         />
         {expiryError && <div className="text-xs text-red-600 mt-1">{expiryError}</div>}
       </td>

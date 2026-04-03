@@ -225,9 +225,8 @@ export function ProcurementProductSearch({
                     aria-selected={isHighlighted}
                     onClick={() => handleSelect(product)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    className={`w-full px-3 py-2 text-left border-b border-gray-50 last:border-b-0 transition-colors ${
-                      isHighlighted ? 'bg-blue-50 border-blue-100' : 'hover:bg-gray-50'
-                    }`}
+                    className={`w-full px-3 py-2 text-left border-b border-gray-50 last:border-b-0 transition-colors ${isHighlighted ? 'bg-blue-50 border-blue-100' : 'hover:bg-gray-50'
+                      }`}
                   >
                     {/* Row 1: Name + badges */}
                     <div className="flex items-center gap-2">
@@ -260,9 +259,8 @@ export function ProcurementProductSearch({
                     {/* Row 3: Inventory + Cost intelligence */}
                     <div className="flex items-center gap-4 mt-1 text-xs">
                       <span
-                        className={`font-medium ${
-                          reorder ? 'text-red-600' : 'text-green-600'
-                        }`}
+                        className={`font-medium ${reorder ? 'text-red-600' : 'text-green-600'
+                          }`}
                       >
                         On hand: {Number(product.quantityOnHand).toLocaleString()}
                       </span>
