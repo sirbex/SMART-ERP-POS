@@ -107,20 +107,34 @@ export async function findAllProducts(limit: number = 50, offset: number = 0, db
  * Lightweight list query — SAP/Odoo style.
  * NO json_agg, NO GROUP BY, NO product_uoms join.
  * Only flat 1:1 JOINs on indexed columns. Sub-50ms for any dataset size.
+ * Optional server-side search on name, SKU, and barcode.
  */
 export async function findProductsForListView(
   limit: number = 50,
   offset: number = 0,
-  dbPool?: pg.Pool
+  dbPool?: pg.Pool,
+  search?: string
 ): Promise<Product[]> {
   const pool = dbPool || globalPool;
+  const params: (string | number)[] = [];
+  let paramIdx = 1;
+
+  let whereClause = 'WHERE p.is_active = true';
+  if (search && search.trim().length > 0) {
+    const pattern = `%${search.trim()}%`;
+    whereClause += ` AND (p.name ILIKE $${paramIdx} OR p.sku ILIKE $${paramIdx} OR p.barcode ILIKE $${paramIdx})`;
+    params.push(pattern);
+    paramIdx++;
+  }
+
+  params.push(limit, offset);
   const result = await pool.query(
     `SELECT ${PRODUCT_SELECT_COLUMNS}
     ${PRODUCT_JOINS}
-    WHERE p.is_active = true
+    ${whereClause}
     ORDER BY p.name ASC
-    LIMIT $1 OFFSET $2`,
-    [limit, offset]
+    LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+    params
   );
   return result.rows;
 }
@@ -395,9 +409,16 @@ export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<boole
   return result.rowCount !== null && result.rowCount > 0;
 }
 
-export async function countProducts(dbPool?: pg.Pool): Promise<number> {
+export async function countProducts(dbPool?: pg.Pool, search?: string): Promise<number> {
   const pool = dbPool || globalPool;
-  const result = await pool.query('SELECT COUNT(*) as count FROM products WHERE is_active = true');
+  const params: string[] = [];
+  let whereClause = 'WHERE is_active = true';
+  if (search && search.trim().length > 0) {
+    const pattern = `%${search.trim()}%`;
+    whereClause += ` AND (name ILIKE $1 OR sku ILIKE $1 OR barcode ILIKE $1)`;
+    params.push(pattern);
+  }
+  const result = await pool.query(`SELECT COUNT(*) as count FROM products ${whereClause}`, params);
 
   return parseInt(result.rows[0].count, 10);
 }

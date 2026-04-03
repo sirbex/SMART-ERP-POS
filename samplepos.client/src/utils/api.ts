@@ -220,7 +220,7 @@ export const api = {
 
   // Products
   products: {
-    list: (params?: { page?: number; limit?: number; includeUoms?: boolean }) =>
+    list: (params?: { page?: number; limit?: number; includeUoms?: boolean; search?: string }) =>
       apiClient.get<ApiResponse>('products', { params }),
     getById: (id: string, includeUoms: boolean = false) =>
       apiClient.get<ApiResponse>(`products/${id}`, { params: { includeUoms } }),

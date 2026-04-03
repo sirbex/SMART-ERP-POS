@@ -22,7 +22,7 @@ export const productKeys = {
 /**
  * Fetch all products
  */
-export function useProducts(params?: { page?: number; limit?: number; includeUoms?: boolean }) {
+export function useProducts(params?: { page?: number; limit?: number; includeUoms?: boolean; search?: string }) {
   return useQuery({
     queryKey: productKeys.list(params || {}),
     queryFn: async () => {

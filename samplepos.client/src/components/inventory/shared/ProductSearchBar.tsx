@@ -1,5 +1,7 @@
-import { useState, useMemo } from "react";
-import { useProducts } from "@/hooks/useProducts";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/utils/api";
+import { productKeys } from "@/hooks/useProducts";
 
 export interface SearchableProduct {
   id: string;
@@ -20,7 +22,7 @@ interface ProductSearchBarProps {
 /**
  * Shared Product Search Bar Component
  * Used in: Purchase Orders, Manual Goods Receipt
- * Provides unified product search with dropdown results
+ * Provides unified product search with server-side filtering
  */
 export function ProductSearchBar({
   onProductSelect,
@@ -29,9 +31,33 @@ export function ProductSearchBar({
   placeholder = "Search products to add (name or SKU)...",
 }: ProductSearchBarProps) {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: productsData } = useProducts();
+  // Debounce search input (300ms)
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 300);
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [search]);
+
+  // Server-side search: only fetch when there's a query (min 2 chars)
+  const shouldSearch = debouncedSearch.length >= 2;
+  const searchParams = { search: debouncedSearch, limit: 20 };
+  const { data: productsData, isLoading } = useQuery({
+    queryKey: productKeys.list(searchParams),
+    queryFn: async () => {
+      const response = await api.products.list(searchParams);
+      return response.data;
+    },
+    enabled: shouldSearch,
+    staleTime: 30000,
+  });
 
   // Extract products
   const allProducts = useMemo(() => {
@@ -39,25 +65,6 @@ export function ProductSearchBar({
     if (productsData.data && Array.isArray(productsData.data)) return productsData.data;
     return Array.isArray(productsData) ? productsData : [];
   }, [productsData]);
-
-  // Filter products by search
-  const filteredProducts = useMemo(() => {
-    if (!search) return allProducts;
-    const query = search.toLowerCase();
-    return allProducts.filter((p: SearchableProduct) => {
-      try {
-        // Safely handle potential null/undefined/non-string values
-        const name = p.name ? String(p.name).toLowerCase() : '';
-        const sku = p.sku ? String(p.sku).toLowerCase() : '';
-        const barcode = p.barcode ? String(p.barcode).toLowerCase() : '';
-
-        return name.includes(query) || sku.includes(query) || barcode.includes(query);
-      } catch (error) {
-        console.error('Error filtering product:', error, p);
-        return false;
-      }
-    });
-  }, [allProducts, search]);
 
   const handleSelect = (product: SearchableProduct) => {
     onProductSelect(product);
@@ -81,10 +88,16 @@ export function ProductSearchBar({
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={disabled}
           />
+          {/* Loading indicator */}
+          {isLoading && debouncedSearch.length >= 2 && (
+            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm text-gray-500">
+              Searching...
+            </div>
+          )}
           {/* Product Dropdown */}
-          {showDropdown && search && filteredProducts.length > 0 && (
+          {showDropdown && !isLoading && debouncedSearch.length >= 2 && allProducts.length > 0 && (
             <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-              {filteredProducts.slice(0, 10).map((product: SearchableProduct) => (
+              {allProducts.slice(0, 20).map((product: SearchableProduct) => (
                 <button
                   key={product.id}
                   type="button"
@@ -109,6 +122,12 @@ export function ProductSearchBar({
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+          {/* No results */}
+          {showDropdown && !isLoading && debouncedSearch.length >= 2 && allProducts.length === 0 && (
+            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm text-gray-500">
+              No products found for &quot;{debouncedSearch}&quot;
             </div>
           )}
         </div>

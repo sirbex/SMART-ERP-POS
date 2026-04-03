@@ -152,6 +152,9 @@ if (process.env.SENTRY_DSN) {
 // Make pool available to routes via app.get('pool')
 app.set('pool', pool);
 
+// Trust first proxy (nginx) so express-rate-limit reads correct client IP
+app.set('trust proxy', 1);
+
 // Initialize RBAC middleware with database pool
 initializeRbacMiddleware(pool);
 

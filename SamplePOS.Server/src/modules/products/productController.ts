@@ -27,6 +27,7 @@ const ListProductsQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  search: z.string().optional(),
 });
 
 const ConvertQuantitySchema = z.object({
@@ -56,9 +57,9 @@ interface AuthRequest extends Request {
 
 export const getProducts = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { page, limit, includeUoms } = ListProductsQuerySchema.parse(req.query);
+  const { page, limit, includeUoms, search } = ListProductsQuerySchema.parse(req.query);
 
-  const result = await productService.getAllProducts(page, limit, includeUoms, pool);
+  const result = await productService.getAllProducts(page, limit, includeUoms, pool, search);
 
   res.json({
     success: true,

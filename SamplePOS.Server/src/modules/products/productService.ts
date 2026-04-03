@@ -23,7 +23,8 @@ export async function getAllProducts(
   page: number = 1,
   limit: number = 50,
   includeUoms: boolean = false,
-  dbPool?: pg.Pool
+  dbPool?: pg.Pool,
+  search?: string
 ): Promise<{
   data: Product[];
   pagination: {
@@ -41,8 +42,8 @@ export async function getAllProducts(
   // 1. Lightweight flat query — no json_agg, no GROUP BY
   // 2. Batch UOM fetch for the page's products (single query)
   const [products, total] = await Promise.all([
-    productRepository.findProductsForListView(safeLimit, offset, dbPool),
-    productRepository.countProducts(dbPool),
+    productRepository.findProductsForListView(safeLimit, offset, dbPool, search),
+    productRepository.countProducts(dbPool, search),
   ]);
 
   // Attach UOMs via a single batch query (not N+1)
