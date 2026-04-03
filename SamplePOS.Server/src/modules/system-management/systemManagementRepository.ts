@@ -170,7 +170,7 @@ export const systemManagementRepository = {
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             const seqResult = await pool.query(
-                `SELECT COALESCE(MAX(CAST(SUBSTRING(backup_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+                `SELECT COALESCE(MAX(CAST(SUBSTRING(backup_number FROM $2::int) AS INTEGER)), 0) + 1 AS next_num
                  FROM system_backups WHERE backup_number LIKE $1`,
                 [`BACKUP-${year}-%`, `BACKUP-${year}-`.length + 1]
             );
@@ -337,7 +337,7 @@ export const systemManagementRepository = {
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             const seqResult = await pool.query(
-                `SELECT COALESCE(MAX(CAST(SUBSTRING(reset_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+                `SELECT COALESCE(MAX(CAST(SUBSTRING(reset_number FROM $2::int) AS INTEGER)), 0) + 1 AS next_num
                  FROM system_reset_log WHERE reset_number LIKE $1`,
                 [`RESET-${year}-%`, `RESET-${year}-`.length + 1]
             );
