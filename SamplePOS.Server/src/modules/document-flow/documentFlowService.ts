@@ -14,6 +14,11 @@ import logger from '../../utils/logger.js';
 /**
  * Link two documents. Safe to call multiple times (idempotent).
  * Designed to be called inside existing UnitOfWork transactions.
+ *
+ * IMPORTANT: Uses a SAVEPOINT so that a SQL failure (e.g. missing table)
+ * does NOT abort the outer PostgreSQL transaction. Without the savepoint,
+ * any SQL error marks the PG transaction as "aborted" and the subsequent
+ * COMMIT silently becomes a ROLLBACK — destroying ALL work in the txn.
  */
 export async function linkDocuments(
   conn: DbConnection,
@@ -23,14 +28,19 @@ export async function linkDocuments(
   toId: string,
   relationType: RelationType,
 ): Promise<void> {
+  const sp = `sp_docflow_${Date.now()}`;
   try {
+    await conn.query(`SAVEPOINT ${sp}`);
     await repo.link(conn, fromType, fromId, toType, toId, relationType);
+    await conn.query(`RELEASE SAVEPOINT ${sp}`);
     logger.debug('Document flow link created', {
       from: `${fromType}:${fromId}`,
       to: `${toType}:${toId}`,
       relation: relationType,
     });
   } catch (err: unknown) {
+    // Roll back to the savepoint so the outer transaction remains healthy
+    await conn.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => { /* best effort */ });
     // Non-fatal: document flow is an enrichment, not a critical path
     logger.warn('Document flow link failed (non-fatal)', {
       from: `${fromType}:${fromId}`,

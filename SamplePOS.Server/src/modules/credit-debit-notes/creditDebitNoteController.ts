@@ -68,7 +68,7 @@ export const creditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             if (msg.includes('exceed')) throw new ConflictError(msg);
             throw new ValidationError(msg);
         }
@@ -88,7 +88,7 @@ export const creditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             throw new ValidationError(msg);
         }
     }),
@@ -107,7 +107,7 @@ export const creditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             throw new ValidationError(msg);
         }
     }),
@@ -166,7 +166,7 @@ export const creditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             if (msg.includes('Only posted')) throw new ConflictError(msg);
             throw new ValidationError(msg);
         }
@@ -193,7 +193,7 @@ export const supplierCreditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             if (msg.includes('exceed')) throw new ConflictError(msg);
             throw new ValidationError(msg);
         }
@@ -213,7 +213,7 @@ export const supplierCreditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             throw new ValidationError(msg);
         }
     }),
@@ -232,7 +232,7 @@ export const supplierCreditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             throw new ValidationError(msg);
         }
     }),
@@ -291,7 +291,7 @@ export const supplierCreditDebitNoteController = {
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;
             const msg = error instanceof Error ? error.message : String(error);
-            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('not found')) throw new AppError(404, msg);
             if (msg.includes('Only posted')) throw new ConflictError(msg);
             throw new ValidationError(msg);
         }
