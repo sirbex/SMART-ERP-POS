@@ -660,8 +660,8 @@ export class AccountingCore {
           "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
           "ReferenceId", "ReferenceNumber", "Description",
           "TotalDebitAmount", "TotalCreditAmount", "Status",
-          "ReversesTransactionId", "IdempotencyKey", "CreatedBy", "CreatedAt"
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED', $10, $11, $12, NOW())
+          "ReversesTransactionId", "IdempotencyKey", "CreatedBy", "CreatedAt", "UpdatedAt", "IsReversed"
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED', $10, $11, $12, NOW(), NOW(), FALSE)
       `,
                     [
                         transactionId,
@@ -734,7 +734,9 @@ export class AccountingCore {
         UPDATE ledger_transactions
         SET "Status" = 'REVERSED',
             "ReversedByTransactionId" = $2,
-            "ReversedAt" = NOW()
+            "ReversedAt" = NOW(),
+            "IsReversed" = TRUE,
+            "UpdatedAt" = NOW()
         WHERE "Id" = $1
       `,
                     [request.originalTransactionId, transactionId]
