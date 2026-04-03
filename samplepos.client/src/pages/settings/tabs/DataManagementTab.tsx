@@ -93,10 +93,19 @@ async function deleteBackup(id: string, deleteFile: boolean): Promise<void> {
     await api.delete(`/system/backups/${id}?deleteFile=${deleteFile}`);
 }
 
-async function executeReset(confirmText: string, reason: string): Promise<unknown> {
-    const response = await api.post<ApiResponse<unknown>>('/system/reset', { confirmText, reason });
+interface ResetResult {
+    resetNumber: string;
+    backupNumber: string;
+    totalRecordsDeleted: number;
+    tablesCleared: string[];
+    balancesReset: Record<string, unknown>;
+    duration: string;
+}
+
+async function executeReset(confirmText: string, reason: string): Promise<ResetResult> {
+    const response = await api.post<ApiResponse<ResetResult>>('/system/reset', { confirmText, reason });
     if (!response.data.success) throw new Error(response.data.error);
-    return response.data.data;
+    return response.data.data!;
 }
 
 async function downloadBackup(id: string, fileName: string): Promise<void> {
@@ -113,10 +122,17 @@ async function downloadBackup(id: string, fileName: string): Promise<void> {
     window.URL.revokeObjectURL(url);
 }
 
-async function restoreBackup(backupId: string): Promise<unknown> {
-    const response = await api.post<ApiResponse<unknown>>(`/system/restore/${backupId}`);
+interface RestoreResult {
+    backupNumber: string;
+    restoredAt: string;
+    tablesRestored: number;
+    integrityCheck: Record<string, unknown>;
+}
+
+async function restoreBackup(backupId: string): Promise<RestoreResult> {
+    const response = await api.post<ApiResponse<RestoreResult>>(`/system/restore/${backupId}`);
     if (!response.data.success) throw new Error(response.data.error);
-    return response.data.data;
+    return response.data.data!;
 }
 
 // ============================================================================
@@ -229,10 +245,10 @@ export default function DataManagementTab() {
 
             {activeSection === 'reset' && (
                 <ResetSection
-                    onResetComplete={() => {
+                    onResetComplete={(details?: string) => {
                         refetchStats();
                         refetchBackups();
-                        showMessage('success', 'System reset completed successfully');
+                        showMessage('success', details || 'System reset completed successfully');
                     }}
                     onError={(error) => showMessage('error', error)}
                 />
@@ -242,9 +258,10 @@ export default function DataManagementTab() {
                 <RestoreSection
                     backups={backups || []}
                     isLoading={backupsLoading}
-                    onRestoreComplete={() => {
+                    onRestoreComplete={(details?: string) => {
                         refetchStats();
-                        showMessage('success', 'Database restored successfully');
+                        refetchBackups();
+                        showMessage('success', details || 'Database restored successfully');
                     }}
                     onError={(error) => showMessage('error', error)}
                 />
@@ -355,6 +372,19 @@ function OverviewSection({
                             <p className="font-medium text-yellow-800">No backups found</p>
                             <p className="text-sm text-yellow-600">
                                 Create a backup to protect your data
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Last Reset Info */}
+                {stats.lastReset && (
+                    <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-200">
+                        <RefreshCw className="w-6 h-6 text-red-500" />
+                        <div>
+                            <p className="font-medium text-gray-900">Last Reset</p>
+                            <p className="text-sm text-gray-500">
+                                {new Date(stats.lastReset).toLocaleString()}
                             </p>
                         </div>
                     </div>
@@ -601,7 +631,7 @@ function ResetSection({
     onResetComplete,
     onError
 }: {
-    onResetComplete: () => void;
+    onResetComplete: (details?: string) => void;
     onError: (error: string) => void;
 }) {
     const [preview, setPreview] = useState<ResetPreview | null>(null);
@@ -643,7 +673,7 @@ function ResetSection({
 
         setIsResetting(true);
         try {
-            await executeReset(confirmText, reason);
+            const result = await executeReset(confirmText, reason);
             setShowConfirmDialog(false);
             setConfirmText('');
             setReason('');
@@ -667,8 +697,12 @@ function ResetSection({
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
             queryClient.invalidateQueries({ queryKey: ['quotations'] });
             queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+            queryClient.invalidateQueries({ queryKey: ['systemStats'] });
+            queryClient.invalidateQueries({ queryKey: ['systemBackups'] });
 
-            onResetComplete();
+            onResetComplete(
+                `Reset ${result.resetNumber} completed. ${result.totalRecordsDeleted.toLocaleString()} records deleted in ${result.duration}. Backup ${result.backupNumber} created.`
+            );
             loadPreview();
         } catch (error: unknown) {
             onError(error instanceof Error ? error.message : 'Reset failed');
@@ -892,12 +926,13 @@ function RestoreSection({
 }: {
     backups: BackupRecord[];
     isLoading: boolean;
-    onRestoreComplete: () => void;
+    onRestoreComplete: (details?: string) => void;
     onError: (error: string) => void;
 }) {
     const [selectedBackup, setSelectedBackup] = useState<string>('');
     const [isRestoring, setIsRestoring] = useState(false);
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+    const queryClient = useQueryClient();
 
     const handleRestore = async () => {
         if (!selectedBackup) {
@@ -907,10 +942,35 @@ function RestoreSection({
 
         setIsRestoring(true);
         try {
-            await restoreBackup(selectedBackup);
+            const result = await restoreBackup(selectedBackup);
             setShowConfirmDialog(false);
             setSelectedBackup('');
-            onRestoreComplete();
+
+            // Invalidate all cached data - restore changes everything
+            queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
+            queryClient.invalidateQueries({ queryKey: ['sales'] });
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory'] });
+            queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+            queryClient.invalidateQueries({ queryKey: ['customers'] });
+            queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+            queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+            queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+            queryClient.invalidateQueries({ queryKey: ['ledger'] });
+            queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+            queryClient.invalidateQueries({ queryKey: ['accounting'] });
+            queryClient.invalidateQueries({ queryKey: ['erp-accounting'] });
+            queryClient.invalidateQueries({ queryKey: ['expenses'] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['quotations'] });
+            queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+            queryClient.invalidateQueries({ queryKey: ['systemStats'] });
+            queryClient.invalidateQueries({ queryKey: ['systemBackups'] });
+
+            onRestoreComplete(
+                `Database restored from ${result.backupNumber}. A safety backup was created automatically.`
+            );
         } catch (error: unknown) {
             onError(error instanceof Error ? error.message : 'Restore failed');
         } finally {
@@ -1013,8 +1073,11 @@ function RestoreSection({
                             </p>
                         </div>
 
-                        <p className="text-red-600 text-sm mb-4">
+                        <p className="text-red-600 text-sm mb-2">
                             ⚠️ All current data will be replaced with backup data.
+                        </p>
+                        <p className="text-green-700 text-sm mb-4 bg-green-50 p-2 rounded">
+                            A safety backup of current data will be created automatically before restoring.
                         </p>
 
                         <div className="flex gap-3">
