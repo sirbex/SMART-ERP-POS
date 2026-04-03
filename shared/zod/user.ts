@@ -72,8 +72,17 @@ export const ChangePasswordSchema = z.object({
   path: ['newPassword'],
 });
 
+export const AdminResetPasswordSchema = z.object({
+  newPassword: StrongPasswordSchema,
+  confirmPassword: z.string().min(1, 'Please confirm new password'),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ['confirmPassword'],
+});
+
 export type User = z.infer<typeof UserSchema>;
 export type CreateUser = z.infer<typeof CreateUserSchema>;
 export type UpdateUser = z.infer<typeof UpdateUserSchema>;
 export type Login = z.infer<typeof LoginSchema>;
 export type ChangePassword = z.infer<typeof ChangePasswordSchema>;
+export type AdminResetPassword = z.infer<typeof AdminResetPasswordSchema>;

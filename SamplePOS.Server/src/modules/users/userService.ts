@@ -2,7 +2,7 @@
 
 import type { Pool } from 'pg';
 import * as userRepository from './userRepository.js';
-import type { User, CreateUser, UpdateUser, ChangePassword } from '../../../../shared/zod/user.js';
+import type { User, CreateUser, UpdateUser, ChangePassword, AdminResetPassword } from '../../../../shared/zod/user.js';
 import logger from '../../utils/logger.js';
 import { BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
@@ -169,6 +169,29 @@ export async function changePassword(
   }
 
   logger.info('Password changed', { userId });
+}
+
+/**
+ * Admin reset password (no current password required)
+ */
+export async function adminResetPassword(
+  pool: Pool,
+  userId: string,
+  data: AdminResetPassword
+): Promise<void> {
+  const user = await userRepository.findUserById(userId, pool);
+
+  if (!user) {
+    throw new NotFoundError('User');
+  }
+
+  const success = await userRepository.changeUserPassword(userId, data.newPassword, pool);
+
+  if (!success) {
+    throw new BusinessError('Failed to reset password', 'ERR_USER_004', { userId });
+  }
+
+  logger.info('Password reset by admin', { userId });
 }
 
 /**

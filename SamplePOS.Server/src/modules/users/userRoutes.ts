@@ -20,6 +20,7 @@ export function createUserRoutes(): Router {
   router.post('/', requirePermission('system.users_create'), userController.createUser);
   router.put('/:id', requirePermission('system.users_update'), userController.updateUser);
   router.post('/:id/change-password', requirePermission('system.users_update'), userController.changePassword);
+  router.post('/:id/reset-password', requirePermission('system.users_update'), userController.resetPassword);
   router.delete('/:id', requirePermission('system.users_delete'), userController.deleteUser);
 
   return router;

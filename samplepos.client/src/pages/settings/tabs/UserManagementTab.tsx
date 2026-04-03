@@ -67,8 +67,7 @@ interface UpdateUserData {
   isActive?: boolean;
 }
 
-interface ChangePasswordData {
-  currentPassword: string;
+interface ResetPasswordData {
   newPassword: string;
   confirmPassword: string;
 }
@@ -153,18 +152,18 @@ export default function UserManagementTab() {
     }
   };
 
-  const handleChangePassword = async (userId: string, data: ChangePasswordData) => {
+  const handleResetPassword = async (userId: string, data: ResetPasswordData) => {
     try {
-      const { data: result } = await api.post(`/users/${userId}/change-password`, data);
+      const { data: result } = await api.post(`/users/${userId}/reset-password`, data);
       if (result.success) {
         setIsPasswordModalOpen(false);
         setSelectedUser(null);
-        alert('Password changed successfully');
+        alert('Password reset successfully');
       } else {
-        handleApiError(new Error(result.error || 'Failed to change password'));
+        handleApiError(new Error(result.error || 'Failed to reset password'));
       }
     } catch (err) {
-      handleApiError(err, { fallback: 'Failed to change password' });
+      handleApiError(err, { fallback: 'Failed to reset password' });
     }
   };
 
@@ -501,13 +500,13 @@ export default function UserManagementTab() {
       )}
 
       {isPasswordModalOpen && selectedUser && (
-        <ChangePasswordModal
+        <ResetPasswordModal
           user={selectedUser}
           onClose={() => {
             setIsPasswordModalOpen(false);
             setSelectedUser(null);
           }}
-          onChangePassword={(data) => handleChangePassword(selectedUser.id, data)}
+          onResetPassword={(data) => handleResetPassword(selectedUser.id, data)}
         />
       )}
 
@@ -789,18 +788,17 @@ function EditUserModal({
   );
 }
 
-// Change Password Modal Component
-function ChangePasswordModal({
+// Reset Password Modal (admin reset - no current password required)
+function ResetPasswordModal({
   user,
   onClose,
-  onChangePassword,
+  onResetPassword,
 }: {
   user: User;
   onClose: () => void;
-  onChangePassword: (data: ChangePasswordData) => void;
+  onResetPassword: (data: ResetPasswordData) => void;
 }) {
-  const [formData, setFormData] = useState<ChangePasswordData>({
-    currentPassword: '',
+  const [formData, setFormData] = useState<ResetPasswordData>({
     newPassword: '',
     confirmPassword: '',
   });
@@ -809,16 +807,16 @@ function ChangePasswordModal({
     e.preventDefault();
 
     if (formData.newPassword !== formData.confirmPassword) {
-      alert('New passwords do not match');
+      alert('Passwords do not match');
       return;
     }
 
     if (formData.newPassword.length < 8) {
-      alert('New password must be at least 8 characters long');
+      alert('Password must be at least 8 characters long');
       return;
     }
 
-    onChangePassword(formData);
+    onResetPassword(formData);
   };
 
   return (
@@ -831,34 +829,17 @@ function ChangePasswordModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Change Password: {user.fullName}</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Reset Password: {user.fullName}</h3>
+          <p className="text-sm text-gray-500 mt-1">Set a new password for this user.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label
-              htmlFor="currentPassword"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
-              Current Password *
-            </label>
-            <input
-              id="currentPassword"
-              type="password"
-              required
-              value={formData.currentPassword}
-              onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              aria-label="Current password"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="resetNewPassword" className="block text-sm font-medium text-gray-700 mb-1">
               New Password *
             </label>
             <input
-              id="newPassword"
+              id="resetNewPassword"
               type="password"
               required
               minLength={8}
@@ -872,13 +853,13 @@ function ChangePasswordModal({
 
           <div>
             <label
-              htmlFor="confirmPassword"
+              htmlFor="resetConfirmPassword"
               className="block text-sm font-medium text-gray-700 mb-1"
             >
-              Confirm New Password *
+              Confirm Password *
             </label>
             <input
-              id="confirmPassword"
+              id="resetConfirmPassword"
               type="password"
               required
               minLength={8}
@@ -902,7 +883,7 @@ function ChangePasswordModal({
               type="submit"
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
-              Change Password
+              Reset Password
             </button>
           </div>
         </form>

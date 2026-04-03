@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { pool as globalPool } from '../../db/pool.js';
 import * as userService from './userService.js';
-import { CreateUserSchema, UpdateUserSchema, ChangePasswordSchema } from '../../../../shared/zod/user.js';
+import { CreateUserSchema, UpdateUserSchema, ChangePasswordSchema, AdminResetPasswordSchema } from '../../../../shared/zod/user.js';
 import { asyncHandler, NotFoundError, ValidationError, ConflictError, UnauthorizedError } from '../../middleware/errorHandler.js';
 
 /** Map service-layer error messages to appropriate AppError subclasses */
@@ -77,6 +77,20 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   try {
     await userService.changePassword(pool, req.params.id, data);
     res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    mapServiceError(error);
+  }
+});
+
+/**
+ * POST /api/users/:id/reset-password (admin only, no current password required)
+ */
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const data = AdminResetPasswordSchema.parse(req.body);
+  try {
+    await userService.adminResetPassword(pool, req.params.id, data);
+    res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
     mapServiceError(error);
   }
