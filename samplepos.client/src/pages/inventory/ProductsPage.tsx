@@ -5,6 +5,7 @@ import { BUSINESS_RULES } from '../../utils/constants';
 // Zod-based form validation
 import { validateProductValues } from '@/validation/product';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } from '../../hooks/useProducts';
+import { useSuppliers } from '../../hooks/useSuppliers';
 import { useOfflineProducts } from '../../hooks/useOfflineData';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { getErrorMessage, api } from '../../utils/api';
@@ -79,6 +80,12 @@ interface ProductFormData {
   isActive: boolean;
   trackExpiry: boolean;
   minDaysBeforeExpirySale: string;
+  // Procurement fields
+  preferredSupplierId: string;
+  supplierProductCode: string;
+  purchaseUomId: string;
+  leadTimeDays: string;
+  reorderQuantity: string;
 }
 
 interface ProductUomFormData {
@@ -121,6 +128,11 @@ const initialFormData: ProductFormData = {
   isActive: true,
   trackExpiry: false,
   minDaysBeforeExpirySale: '0',
+  preferredSupplierId: '',
+  supplierProductCode: '',
+  purchaseUomId: '',
+  leadTimeDays: '0',
+  reorderQuantity: '0',
 };
 
 export default function ProductsPage() {
@@ -133,6 +145,13 @@ export default function ProductsPage() {
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();
+
+  // Suppliers for Procurement tab
+  const { data: suppliersData } = useSuppliers();
+  const suppliersList = useMemo(() => {
+    const raw = suppliersData?.data;
+    return (Array.isArray(raw) ? raw : []) as Array<{ id: string; name: string }>;
+  }, [suppliersData]);
 
   // Pagination
   const ITEMS_PER_PAGE = 50;
@@ -479,6 +498,11 @@ export default function ProductsPage() {
       isActive: product.isActive ?? true,
       trackExpiry: product.trackExpiry ?? false,
       minDaysBeforeExpirySale: String(product.minDaysBeforeExpirySale ?? '0'),
+      preferredSupplierId: String((product as Record<string, unknown>).preferredSupplierId ?? ''),
+      supplierProductCode: String((product as Record<string, unknown>).supplierProductCode ?? ''),
+      purchaseUomId: String((product as Record<string, unknown>).purchaseUomId ?? ''),
+      leadTimeDays: String((product as Record<string, unknown>).leadTimeDays ?? '0'),
+      reorderQuantity: String((product as Record<string, unknown>).reorderQuantity ?? '0'),
     });
     setValidationErrors({});
     setShowModal(true);
@@ -521,6 +545,11 @@ export default function ProductsPage() {
         trackExpiry: !!formData.trackExpiry,
         genericName: formData.genericName || undefined,
         minDaysBeforeExpirySale: parseInt(formData.minDaysBeforeExpirySale) || 0,
+        preferredSupplierId: formData.preferredSupplierId || undefined,
+        supplierProductCode: formData.supplierProductCode || undefined,
+        purchaseUomId: formData.purchaseUomId || undefined,
+        leadTimeDays: parseInt(formData.leadTimeDays) || 0,
+        reorderQuantity: parseFloat(formData.reorderQuantity) || 0,
       };
 
       let productId: string;
@@ -1237,9 +1266,17 @@ export default function ProductsPage() {
                   isActive: formData.isActive,
                   genericName: formData.genericName,
                   minDaysBeforeExpirySale: formData.minDaysBeforeExpirySale,
+                  preferredSupplierId: formData.preferredSupplierId,
+                  supplierProductCode: formData.supplierProductCode,
+                  purchaseUomId: formData.purchaseUomId,
+                  leadTimeDays: formData.leadTimeDays,
+                  reorderQuantity: formData.reorderQuantity,
                 }}
                 onChange={(field: ProductFormField, value: string | boolean) => handleFieldChange(field as keyof ProductFormData, value)}
                 validationErrors={validationErrors as Partial<Record<ProductFormField, string>>}
+                suppliers={suppliersList}
+                masterUoms={masterUoms}
+                lastPurchasePrice={formData.lastCost !== '0' ? formData.lastCost : undefined}
               />
 
               {/* Cost Tracking (Read-only for AVCO/FIFO) */}

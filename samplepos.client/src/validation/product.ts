@@ -33,6 +33,11 @@ function coerceToSchemaInput(values: ProductFormValues) {
     trackExpiry: !!values.trackExpiry,
     minDaysBeforeExpirySale: parseInt(String(values.minDaysBeforeExpirySale || '0'), 10) || 0,
     isActive: !!values.isActive,
+    preferredSupplierId: toStrOrUndefined(values.preferredSupplierId),
+    supplierProductCode: toStrOrUndefined(values.supplierProductCode),
+    purchaseUomId: toStrOrUndefined(values.purchaseUomId),
+    leadTimeDays: parseInt(String(values.leadTimeDays || '0'), 10) || 0,
+    reorderQuantity: parseFloat(String(values.reorderQuantity || '0')) || 0,
   };
 }
 

@@ -25,6 +25,12 @@ export interface CreateProductInput {
   trackExpiry?: boolean;
   isActive?: boolean;
   supplierId?: string;
+  // Procurement fields
+  preferredSupplierId?: string;
+  supplierProductCode?: string;
+  purchaseUomId?: string;
+  leadTimeDays?: number;
+  reorderQuantity?: number;
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;

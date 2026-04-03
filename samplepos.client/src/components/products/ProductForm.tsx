@@ -18,6 +18,12 @@ export interface ProductFormValues {
   trackExpiry: boolean;
   minDaysBeforeExpirySale: string;
   isActive: boolean;
+  // Procurement fields (Part 9)
+  preferredSupplierId: string;
+  supplierProductCode: string;
+  purchaseUomId: string;
+  leadTimeDays: string;
+  reorderQuantity: string;
 }
 
 export type ProductFormField = keyof ProductFormValues;
@@ -27,9 +33,15 @@ export interface ProductFormProps {
   onChange: (field: ProductFormField, value: string | boolean) => void;
   validationErrors?: Partial<Record<ProductFormField, string>>;
   disabled?: boolean;
+  /** Supplier list for the Procurement tab dropdown (if not provided, tab is hidden) */
+  suppliers?: Array<{ id: string; name: string }>;
+  /** Master UoMs for the Purchase UoM dropdown */
+  masterUoms?: Array<{ id: string; name: string; symbol?: string | null }>;
+  /** Last purchase price (read-only, populated from DB) */
+  lastPurchasePrice?: string;
 }
 
-export default function ProductForm({ values, onChange, validationErrors = {}, disabled = false }: ProductFormProps) {
+export default function ProductForm({ values, onChange, validationErrors = {}, disabled = false, suppliers, masterUoms, lastPurchasePrice }: ProductFormProps) {
   return (
     <div className="space-y-4">
       {/* Basic Information */}
@@ -358,6 +370,134 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
           </div>
         )}
       </div>
+
+      {/* Procurement Tab (Part 9) - only shown when suppliers prop is provided */}
+      {suppliers && (
+        <div className="border-t pt-4">
+          <h4 className="font-medium text-gray-900 mb-3">Procurement</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="preferred-supplier" className="block text-sm font-medium text-gray-700 mb-1">
+                Preferred Supplier
+              </label>
+              <select
+                id="preferred-supplier"
+                value={values.preferredSupplierId}
+                onChange={(e) => onChange("preferredSupplierId", e.target.value)}
+                disabled={disabled}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">None</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Auto-selected when creating POs for this product</p>
+            </div>
+
+            <div>
+              <label htmlFor="supplier-product-code" className="block text-sm font-medium text-gray-700 mb-1">
+                Supplier Product Code
+              </label>
+              <input
+                id="supplier-product-code"
+                type="text"
+                value={values.supplierProductCode}
+                onChange={(e) => onChange("supplierProductCode", e.target.value)}
+                disabled={disabled}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="e.g., SUP-SKU-001"
+                maxLength={100}
+              />
+              <p className="text-xs text-gray-500 mt-1">Supplier&apos;s catalog code (searchable in PO)</p>
+            </div>
+
+            <div>
+              <label htmlFor="purchase-uom" className="block text-sm font-medium text-gray-700 mb-1">
+                Purchase UoM
+              </label>
+              {masterUoms && masterUoms.length > 0 ? (
+                <select
+                  id="purchase-uom"
+                  value={values.purchaseUomId}
+                  onChange={(e) => onChange("purchaseUomId", e.target.value)}
+                  disabled={disabled}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">Default (base unit)</option>
+                  {masterUoms.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}{u.symbol ? ` (${u.symbol})` : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="purchase-uom"
+                  type="text"
+                  value=""
+                  readOnly
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
+                  placeholder="No UoMs configured"
+                />
+              )}
+              <p className="text-xs text-gray-500 mt-1">Default unit of measure for purchasing</p>
+            </div>
+
+            <div>
+              <label htmlFor="lead-time-days" className="block text-sm font-medium text-gray-700 mb-1">
+                Lead Time (days)
+              </label>
+              <input
+                id="lead-time-days"
+                type="number"
+                min="0"
+                step="1"
+                value={values.leadTimeDays}
+                onChange={(e) => onChange("leadTimeDays", e.target.value)}
+                disabled={disabled}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">Average delivery time from supplier</p>
+            </div>
+
+            <div>
+              <label htmlFor="reorder-quantity" className="block text-sm font-medium text-gray-700 mb-1">
+                Reorder Quantity
+              </label>
+              <input
+                id="reorder-quantity"
+                type="number"
+                min="0"
+                step="0.01"
+                value={values.reorderQuantity}
+                onChange={(e) => onChange("reorderQuantity", e.target.value)}
+                disabled={disabled}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">Auto-suggested qty when stock drops below reorder level</p>
+            </div>
+
+            <div>
+              <label htmlFor="last-purchase-price" className="block text-sm font-medium text-gray-700 mb-1">
+                Last Purchase Price (read-only)
+              </label>
+              <input
+                id="last-purchase-price"
+                type="text"
+                value={lastPurchasePrice || '—'}
+                readOnly
+                disabled
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+              />
+              <p className="text-xs text-gray-500 mt-1">From latest goods receipt</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

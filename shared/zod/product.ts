@@ -75,6 +75,28 @@ export const ProductCoreObject = z.object({
   trackExpiry: z.boolean().default(false),
   minDaysBeforeExpirySale: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),
+  // Procurement fields (from migration 501)
+  preferredSupplierId: z
+    .string()
+    .uuid()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v === "" ? undefined : v)),
+  supplierProductCode: z
+    .string()
+    .trim()
+    .max(100)
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v === "" ? undefined : v)),
+  purchaseUomId: z
+    .string()
+    .uuid()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v === "" ? undefined : v)),
+  leadTimeDays: z.number().int().min(0).default(0),
+  reorderQuantity: z.number().min(0).finite().default(0),
   // Import-only passthrough fields — used to create inventory batches during CSV import.
   // Not stored on the products table; the worker extracts them after validation.
   batchNumber: z.string().max(100).optional(),
@@ -176,6 +198,11 @@ export const ProductSchema = z
     trackExpiry: z.boolean(),
     minDaysBeforeExpirySale: z.number().optional(),
     isActive: z.boolean(),
+    preferredSupplierId: z.string().uuid().optional(),
+    supplierProductCode: z.string().optional(),
+    purchaseUomId: z.string().uuid().optional(),
+    leadTimeDays: z.number().optional(),
+    reorderQuantity: z.number().optional(),
     createdAt: z.string().optional(),
     updatedAt: z.string().optional(),
     version: z.number().int().optional(),

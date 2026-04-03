@@ -65,6 +65,11 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     isActive: true,
     genericName: "",
     minDaysBeforeExpirySale: "0",
+    preferredSupplierId: "",
+    supplierProductCode: "",
+    purchaseUomId: "",
+    leadTimeDays: "0",
+    reorderQuantity: "0",
   });
   const [productValidationErrors, setProductValidationErrors] = useState<ProductValidationErrors>({});
 

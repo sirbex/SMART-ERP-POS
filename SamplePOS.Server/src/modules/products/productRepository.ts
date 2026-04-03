@@ -29,6 +29,11 @@ const PRODUCT_SELECT_COLUMNS = `
       p.track_expiry as "trackExpiry",
       p.min_days_before_expiry_sale as "minDaysBeforeExpirySale",
       p.is_active as "isActive",
+      p.preferred_supplier_id as "preferredSupplierId",
+      p.supplier_product_code as "supplierProductCode",
+      p.purchase_uom_id as "purchaseUomId",
+      COALESCE(p.lead_time_days, 0) as "leadTimeDays",
+      COALESCE(pi.reorder_quantity, 0) as "reorderQuantity",
       p.created_at as "createdAt",
       GREATEST(p.updated_at, pi.updated_at, pv.updated_at) as "updatedAt",
       p.version`;
@@ -59,8 +64,9 @@ const PRODUCT_GROUP_BY = `p.id, p.product_number, p.sku, p.barcode, p.name, p.de
              p.generic_name, p.conversion_factor, pv.cost_price, pv.selling_price,
              p.is_taxable, p.tax_rate, pv.costing_method, pv.average_cost, pv.last_cost,
              pv.pricing_formula, pv.auto_update_price, pi.quantity_on_hand,
-             pi.reorder_level, p.track_expiry, p.min_days_before_expiry_sale, p.is_active, p.created_at,
-             p.updated_at, pi.updated_at, pv.updated_at, p.version`;
+             pi.reorder_level, pi.reorder_quantity, p.track_expiry, p.min_days_before_expiry_sale, p.is_active,
+             p.preferred_supplier_id, p.supplier_product_code, p.purchase_uom_id, p.lead_time_days,
+             p.created_at, p.updated_at, pi.updated_at, pv.updated_at, p.version`;
 
 // RETURNING clause for INSERT/UPDATE (no table alias prefix needed)
 const PRODUCT_RETURNING_COLUMNS = `
@@ -242,14 +248,19 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     data.trackExpiry ?? false,
     data.minDaysBeforeExpirySale ?? 0,
     data.isActive ?? true,
+    data.preferredSupplierId || null,
+    data.supplierProductCode || null,
+    data.purchaseUomId || null,
+    data.leadTimeDays ?? 0,
   ];
 
   const sql = `INSERT INTO products (
       product_number, sku, barcode, name, description, category, generic_name,
       conversion_factor,
       cost_price, selling_price, is_taxable, tax_rate, costing_method,
-      pricing_formula, auto_update_price, reorder_level, track_expiry, min_days_before_expiry_sale, is_active
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      pricing_formula, auto_update_price, reorder_level, track_expiry, min_days_before_expiry_sale, is_active,
+      preferred_supplier_id, supplier_product_code, purchase_uom_id, lead_time_days
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
     RETURNING ${PRODUCT_RETURNING_COLUMNS}`;
 
   const result = await pool.query(sql, params);
@@ -257,10 +268,10 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
 
   // Create child rows (replaces fn_product_create_children trigger)
   await pool.query(
-    `INSERT INTO product_inventory (product_id, quantity_on_hand, reorder_level)
-     VALUES ($1, 0, $2)
+    `INSERT INTO product_inventory (product_id, quantity_on_hand, reorder_level, reorder_quantity)
+     VALUES ($1, 0, $2, $3)
      ON CONFLICT (product_id) DO NOTHING`,
-    [product.id, data.reorderLevel ?? 0]
+    [product.id, data.reorderLevel ?? 0, data.reorderQuantity ?? 0]
   );
   await pool.query(
     `INSERT INTO product_valuation (
@@ -338,6 +349,22 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
     masterFields.push(`is_active = $${masterIdx++}`);
     masterValues.push(data.isActive);
   }
+  if (data.preferredSupplierId !== undefined) {
+    masterFields.push(`preferred_supplier_id = $${masterIdx++}`);
+    masterValues.push(data.preferredSupplierId || null);
+  }
+  if (data.supplierProductCode !== undefined) {
+    masterFields.push(`supplier_product_code = $${masterIdx++}`);
+    masterValues.push(data.supplierProductCode || null);
+  }
+  if (data.purchaseUomId !== undefined) {
+    masterFields.push(`purchase_uom_id = $${masterIdx++}`);
+    masterValues.push(data.purchaseUomId || null);
+  }
+  if (data.leadTimeDays !== undefined) {
+    masterFields.push(`lead_time_days = $${masterIdx++}`);
+    masterValues.push(data.leadTimeDays);
+  }
 
   // ── Valuation (product_valuation table) ──
   if (data.costPrice !== undefined) {
@@ -353,6 +380,10 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   if (data.reorderLevel !== undefined) {
     invFields.push(`reorder_level = $${invIdx++}`);
     invValues.push(data.reorderLevel);
+  }
+  if (data.reorderQuantity !== undefined) {
+    invFields.push(`reorder_quantity = $${invIdx++}`);
+    invValues.push(data.reorderQuantity);
   }
 
   const hasChanges = masterFields.length > 0 || valFields.length > 0 || invFields.length > 0;

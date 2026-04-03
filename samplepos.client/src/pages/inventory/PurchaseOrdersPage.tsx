@@ -23,6 +23,8 @@ import {
   SupplierSelector,
   NotesField,
   ProcurementProductSearch,
+  QuickCreateSupplierModal,
+  QuickCreateProductModal,
   BusinessRulesInfo,
   TotalsSummary,
   ModalHeader,
@@ -267,6 +269,10 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 
   const createPOMutation = useCreatePurchaseOrder();
 
+  // ── Quick-create inline modals ──
+  const [showQuickSupplier, setShowQuickSupplier] = useState(false);
+  const [showQuickProduct, setShowQuickProduct] = useState(false);
+
   // ── Refs for spreadsheet keyboard navigation ──
   const searchInputRef = useRef<HTMLInputElement>(null);
   const qtyRefs = useRef<Map<number, HTMLInputElement>>(new Map());
@@ -480,7 +486,18 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
         {/* Header Section */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* Supplier Selection */}
-          <SupplierSelector value={supplierId} onChange={setSupplierId} disabled={isSubmitting} />
+          <div className="flex items-end gap-2">
+            <SupplierSelector value={supplierId} onChange={setSupplierId} disabled={isSubmitting} className="flex-1" />
+            <button
+              type="button"
+              onClick={() => setShowQuickSupplier(true)}
+              disabled={isSubmitting}
+              className="px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+              title="Quick-create a new supplier"
+            >
+              + New
+            </button>
+          </div>
 
           {/* Expected Delivery Date */}
           <div>
@@ -522,13 +539,24 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
           </div>
 
           {/* Procurement Product Search */}
-          <ProcurementProductSearch
-            supplierId={supplierId}
-            onProductSelect={addLineItem}
-            disabled={isSubmitting}
-            className="mb-3"
-            inputRef={searchInputRef}
-          />
+          <div className="flex items-start gap-2 mb-3">
+            <ProcurementProductSearch
+              supplierId={supplierId}
+              onProductSelect={addLineItem}
+              disabled={isSubmitting}
+              className="flex-1"
+              inputRef={searchInputRef}
+            />
+            <button
+              type="button"
+              onClick={() => setShowQuickProduct(true)}
+              disabled={isSubmitting}
+              className="mt-6 px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+              title="Quick-create a new product"
+            >
+              + New
+            </button>
+          </div>
 
           {/* Spreadsheet-style Line Items Table */}
           {lineItems.length > 0 ? (
@@ -602,6 +630,29 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
           submitDisabled={lineItems.length === 0}
         />
       </form>
+
+      {/* Quick-create supplier inline modal */}
+      {showQuickSupplier && (
+        <QuickCreateSupplierModal
+          onClose={() => setShowQuickSupplier(false)}
+          onCreated={(supplier) => {
+            setSupplierId(supplier.id);
+            setShowQuickSupplier(false);
+          }}
+        />
+      )}
+
+      {/* Quick-create product inline modal */}
+      {showQuickProduct && (
+        <QuickCreateProductModal
+          onClose={() => setShowQuickProduct(false)}
+          onCreated={() => {
+            setShowQuickProduct(false);
+            // Focus the search bar so user can find the newly created product
+            focusSearch();
+          }}
+        />
+      )}
     </ModalContainer>
   );
 }
