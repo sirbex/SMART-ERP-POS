@@ -255,8 +255,8 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (product_id) DO NOTHING`,
     [product.id, data.costPrice ?? 0, data.sellingPrice ?? 0,
-     data.costingMethod || 'FIFO', data.costPrice ?? 0, data.costPrice ?? 0,
-     data.pricingFormula || null, data.autoUpdatePrice ?? false]
+    data.costingMethod || 'FIFO', data.costPrice ?? 0, data.costPrice ?? 0,
+    data.pricingFormula || null, data.autoUpdatePrice ?? false]
   );
 
   return product;
@@ -399,7 +399,8 @@ export async function countProducts(dbPool?: pg.Pool): Promise<number> {
   const pool = dbPool || globalPool;
   const result = await pool.query('SELECT COUNT(*) as count FROM products WHERE is_active = true');
 
-  return parseInt(result.rows[0].count, 10);}
+  return parseInt(result.rows[0].count, 10);
+}
 
 // ── Bulk Upsert for Opening Inventory Import ──────────────────────────────
 

@@ -1013,6 +1013,7 @@ export const goodsReceiptService = {
       movementId: string;
       movementNumber: string;
       productId: string;
+      batchNumber: string;
       quantity: number;
       unitCost: number;
       movementValue: number;
@@ -1162,6 +1163,7 @@ export const goodsReceiptService = {
           movementId: sm.id as string,
           movementNumber: sm.movement_number as string,
           productId: item.productId,
+          batchNumber,
           quantity: Math.abs(qtyDelta),
           unitCost: batchCost,
           movementValue: valueDelta,
@@ -1200,7 +1202,7 @@ export const goodsReceiptService = {
       for (const costData of costLayerData) {
         try {
           await costLayerService.createCostLayer(
-            { ...costData, skipGlPosting: true },
+            costData,
             undefined,
             client
           );
@@ -1243,6 +1245,8 @@ export const goodsReceiptService = {
               movementNumber: sm.movementNumber,
               movementDate: importDate,
               movementValue: sm.movementValue,
+              productId: sm.productId,
+              batchNumber: sm.batchNumber,
               productName: nameMap.get(sm.productId) || 'Imported product',
             },
             pool

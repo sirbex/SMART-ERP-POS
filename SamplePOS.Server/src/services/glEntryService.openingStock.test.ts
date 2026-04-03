@@ -39,6 +39,8 @@ describe('recordOpeningStockToGL', () => {
         movementDate: '2026-03-22',
         movementValue: 500,
         productName: 'Widget A',
+        productId: 'prod-abc',
+        batchNumber: 'BATCH-001',
     };
 
     it('should create a balanced journal entry (DR 1300 / CR 3050)', async () => {
@@ -80,7 +82,7 @@ describe('recordOpeningStockToGL', () => {
         const callArgs = mockCreateJournalEntry.mock.calls[0]![0] as Record<string, unknown>;
         expect(callArgs.referenceType).toBe('OPENING_STOCK');
         expect(callArgs.referenceId).toBe('mov-001');
-        expect(callArgs.idempotencyKey).toBe('OPENING_STOCK-mov-001');
+        expect(callArgs.idempotencyKey).toBe('OPENING_STOCK-prod-abc-BATCH-001');
     });
 
     it('should skip GL posting when movementValue is zero', async () => {

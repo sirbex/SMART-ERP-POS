@@ -1016,6 +1016,75 @@ export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData, p
 }
 
 // =============================================================================
+// DELIVERY NOTE INVOICE JOURNAL ENTRIES (DR AR / CR Revenue)
+// =============================================================================
+
+export interface DeliveryNoteInvoiceData {
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  totalAmount: number;
+  deliveryNoteNumber: string;
+  customerId: string;
+  customerName: string;
+}
+
+/**
+ * Record a delivery note invoice in the GL.
+ * DR Accounts Receivable (1200) / CR Sales Revenue (4000)
+ */
+export async function recordDeliveryNoteInvoiceToGL(
+  data: DeliveryNoteInvoiceData,
+  pool?: pg.Pool,
+): Promise<void> {
+  try {
+    if (data.totalAmount <= 0) {
+      logger.debug('Skipping DN invoice GL posting (zero or negative amount)', {
+        invoiceNumber: data.invoiceNumber,
+      });
+      return;
+    }
+
+    const lines: JournalLine[] = [
+      {
+        accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+        description: `AR: DN Invoice ${data.invoiceNumber} from ${data.deliveryNoteNumber}`,
+        debitAmount: data.totalAmount,
+        creditAmount: 0,
+        entityType: 'customer',
+        entityId: data.customerId,
+      },
+      {
+        accountCode: AccountCodes.SALES_REVENUE,
+        description: `Revenue: DN Invoice ${data.invoiceNumber} from ${data.deliveryNoteNumber}`,
+        debitAmount: 0,
+        creditAmount: data.totalAmount,
+      },
+    ];
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.invoiceDate,
+      description: `DN Invoice ${data.invoiceNumber} from ${data.deliveryNoteNumber} — ${data.customerName}`,
+      referenceType: 'DELIVERY_NOTE_INVOICE',
+      referenceId: data.invoiceId,
+      referenceNumber: data.invoiceNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DN_INVOICE-${data.invoiceId}`,
+    }, pool);
+
+    logger.info('Recorded DN invoice to GL', {
+      invoiceId: data.invoiceId,
+      invoiceNumber: data.invoiceNumber,
+      totalAmount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record DN invoice to GL', { error, data });
+    throw new Error(`GL posting failed for DN invoice ${data.invoiceNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// =============================================================================
 // SALE VOID (REVERSAL) JOURNAL ENTRIES
 // =============================================================================
 
@@ -1408,6 +1477,8 @@ export interface OpeningStockData {
   movementNumber: string;
   movementDate: string;
   movementValue: number;     // quantity * unit_cost
+  productId: string;         // for idempotency key (product-scoped, not movement-scoped)
+  batchNumber: string;       // for idempotency key (product+batch = stable key across re-imports)
   productName?: string;
 }
 
@@ -1480,7 +1551,7 @@ export async function recordOpeningStockToGL(data: OpeningStockData, pool?: pg.P
       referenceNumber: data.movementNumber,
       lines,
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `OPENING_STOCK-${data.movementId}`,
+      idempotencyKey: `OPENING_STOCK-${data.productId}-${data.batchNumber}`,
     }, pool);
 
     logger.info('Recorded opening stock to GL', {
@@ -1832,11 +1903,16 @@ export async function recordSupplierCreditNoteToGL(
 
 /**
  * Supplier Debit Note GL posting.
- * We charge the supplier more — increases our AP obligation or asset.
+ * We charge the supplier more — increases our AP obligation.
  *
- * DR  Inventory (1300) — subtotal (additional cost)
+ * DR  COGS (5000) — additional cost (not Inventory, since we cannot
+ *     identify which specific batches/cost layers to revalue)
  * DR  Tax Payable / Input VAT (2300) — tax
  * CR  Accounts Payable (2100) — total
+ *
+ * NOTE: To properly debit Inventory (1300), the system would need
+ * to revalue specific inventory_batches and cost_layers. Until that
+ * feature is built, COGS absorbs the cost to prevent GL-vs-batch drift.
  */
 export async function recordSupplierDebitNoteToGL(
   data: CreditNoteGLData,
@@ -1847,7 +1923,7 @@ export async function recordSupplierDebitNoteToGL(
 
     if (data.subtotal > 0) {
       lines.push({
-        accountCode: AccountCodes.INVENTORY,
+        accountCode: AccountCodes.COGS,
         description: `Supplier debit note ${data.noteNumber} - additional cost`,
         debitAmount: data.subtotal,
         creditAmount: 0,

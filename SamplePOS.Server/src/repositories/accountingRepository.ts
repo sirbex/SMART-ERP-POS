@@ -20,7 +20,6 @@ import { v4 as uuidv4 } from 'uuid';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { Money } from '../utils/money.js';
-import { UnitOfWork } from '../db/unitOfWork.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -64,22 +63,6 @@ export interface JournalEntryLine {
   entityType: string | null;
   entityId: string | null;
   transactionId: string | null;
-}
-
-export interface CreateJournalEntryData {
-  description: string;
-  entryDate: string;
-  sourceEventType: string;
-  sourceEntityType: string;
-  idempotencyKey: string;
-  lines: {
-    accountCode: string;
-    description: string;
-    debitAmount: number;
-    creditAmount: number;
-    entityType?: string;
-    entityId?: string;
-  }[];
 }
 
 export interface TrialBalanceAccount {
@@ -425,271 +408,11 @@ export async function deleteAccount(id: string, dbPool?: pg.Pool): Promise<boole
   }
 }
 
-// =============================================================================
-// LEDGER TRANSACTIONS - Write to GL tables that the General Ledger reads from
-// =============================================================================
 
-export interface CreateLedgerTransactionData {
-  referenceType: string; // 'SALE', 'PURCHASE', 'EXPENSE', 'ADJUSTMENT'
-  referenceId: string; // The source entity UUID
-  referenceNumber: string; // Human-readable reference like SALE-2025-0001
-  description: string;
-  transactionDate: string;
-  lines: {
-    accountCode: string;
-    description: string;
-    debitAmount: number;
-    creditAmount: number;
-  }[];
-}
 
-/**
- * Create a ledger transaction with entries
- * This writes to ledger_transactions and ledger_entries tables
- * which are read by the General Ledger page
- */
-export async function createLedgerTransaction(
-  data: CreateLedgerTransactionData,
-  dbPool?: pg.Pool
-): Promise<{ transactionId: string; transactionNumber: string }> {
-  const pool = dbPool || globalPool;
-
-  // Validate double-entry: total debits must equal total credits
-  const totalDebits = data.lines
-    .reduce((sum, line) => sum.plus(line.debitAmount), new Decimal(0))
-    .toNumber();
-  const totalCredits = data.lines
-    .reduce((sum, line) => sum.plus(line.creditAmount), new Decimal(0))
-    .toNumber();
-
-  if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
-    throw new Error(
-      `Ledger transaction is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`
-    );
-  }
-
-  return UnitOfWork.run(pool, async (client) => {
-    // Generate transaction number (auto-increment style)
-    const countResult = await client.query(
-      `SELECT COUNT(*) + 1 as next_num FROM ledger_transactions`
-    );
-    const nextNum = parseInt(countResult.rows[0].next_num);
-    const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
-    const transactionId = uuidv4();
-
-    // Create ledger transaction header
-    await client.query(
-      `
-      INSERT INTO ledger_transactions (
-        "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
-        "ReferenceId", "ReferenceNumber", "Description",
-        "TotalDebitAmount", "TotalCreditAmount", "Status"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED')
-    `,
-      [
-        transactionId,
-        transactionNumber,
-        data.transactionDate,
-        data.referenceType,
-        data.referenceId,
-        data.referenceNumber,
-        data.description,
-        totalDebits,
-        totalCredits,
-      ]
-    );
-
-    // Create ledger entries
-    let lineNumber = 1;
-    for (const line of data.lines) {
-      // Get account by code
-      const accountResult = await client.query(
-        `
-        SELECT "Id" FROM accounts WHERE "AccountCode" = $1
-      `,
-        [line.accountCode]
-      );
-
-      if (accountResult.rows.length === 0) {
-        throw new Error(`Account not found: ${line.accountCode}`);
-      }
-
-      const accountId = accountResult.rows[0].Id;
-      const entryId = uuidv4();
-      const entryType = line.debitAmount > 0 ? 'DEBIT' : 'CREDIT';
-      const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
-
-      await client.query(
-        `
-        INSERT INTO ledger_entries (
-          "Id", "TransactionId", "AccountId", "EntryType", "Amount",
-          "DebitAmount", "CreditAmount", "Description", "LineNumber", "CreatedAt"
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-      `,
-        [
-          entryId,
-          transactionId,
-          accountId,
-          entryType,
-          amount,
-          line.debitAmount,
-          line.creditAmount,
-          line.description,
-          lineNumber++,
-        ]
-      );
-    }
-
-    logger.info('Created ledger transaction', {
-      transactionId,
-      transactionNumber,
-      referenceNumber: data.referenceNumber,
-      totalDebits,
-      totalCredits,
-    });
-
-    return { transactionId, transactionNumber };
-  });
-}
-
-// =============================================================================
-// JOURNAL ENTRIES - Core Double-Entry Bookkeeping
-// =============================================================================
-
-/**
- * Create a journal entry with lines
- * Validates that debits = credits (double-entry principle)
- */
-export async function createJournalEntry(
-  data: CreateJournalEntryData,
-  dbPool?: pg.Pool
-): Promise<JournalEntry> {
-  const pool = dbPool || globalPool;
-
-  // Validate double-entry: total debits must equal total credits
-  const totalDebits = data.lines
-    .reduce((sum, line) => sum.plus(line.debitAmount), new Decimal(0))
-    .toNumber();
-  const totalCredits = data.lines
-    .reduce((sum, line) => sum.plus(line.creditAmount), new Decimal(0))
-    .toNumber();
-
-  if (new Decimal(totalDebits).minus(totalCredits).abs().greaterThan('0.01')) {
-    throw new Error(
-      `Journal entry is not balanced. Debits: ${totalDebits}, Credits: ${totalCredits}`
-    );
-  }
-
-  return UnitOfWork.run(pool, async (client) => {
-    // Check for idempotency - prevent duplicate entries
-    if (data.idempotencyKey) {
-      const existing = await client.query(
-        `
-        SELECT "Id" FROM journal_entries WHERE "IdempotencyKey" = $1
-      `,
-        [data.idempotencyKey]
-      );
-
-      if (existing.rows.length > 0) {
-        throw new Error(`Journal entry already exists for idempotency key: ${data.idempotencyKey}`);
-      }
-    }
-
-    // Create journal entry header
-    const entryId = uuidv4();
-    const transactionId = `JE-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    const entryResult = await client.query(
-      `
-      INSERT INTO journal_entries (
-        "Id", "TransactionId", "Description", "EntryDate", "CreatedAt",
-        "Status", "IdempotencyKey", "SourceEventType", "SourceEntityType"
-      ) VALUES ($1, $2, $3, $4, NOW(), 'POSTED', $5, $6, $7)
-      RETURNING 
-        "Id" as id,
-        "TransactionId" as "transactionId",
-        "Description" as description,
-        "EntryDate"::text as "entryDate",
-        "CreatedAt"::text as "createdAt",
-        "Status" as status,
-        "IdempotencyKey" as "idempotencyKey",
-        "SourceEventType" as "sourceEventType",
-        "SourceEntityType" as "sourceEntityType"
-    `,
-      [
-        entryId,
-        transactionId,
-        data.description,
-        data.entryDate,
-        data.idempotencyKey,
-        data.sourceEventType,
-        data.sourceEntityType,
-      ]
-    );
-
-    const journalEntry = entryResult.rows[0];
-    journalEntry.lines = [];
-
-    // Create journal entry lines
-    for (const line of data.lines) {
-      // Get account by code
-      const accountResult = await client.query(
-        `
-        SELECT "Id" FROM accounts WHERE "AccountCode" = $1
-      `,
-        [line.accountCode]
-      );
-
-      if (accountResult.rows.length === 0) {
-        throw new Error(`Account not found: ${line.accountCode}`);
-      }
-
-      const accountId = accountResult.rows[0].Id;
-      const lineId = uuidv4();
-
-      const lineResult = await client.query(
-        `
-        INSERT INTO journal_entry_lines (
-          "Id", "JournalEntryId", "AccountId", "Description",
-          "DebitAmount", "CreditAmount", "EntityType", "EntityId", "TransactionId"
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING 
-          "Id" as id,
-          "JournalEntryId" as "journalEntryId",
-          "AccountId" as "accountId",
-          "Description" as description,
-          "DebitAmount" as "debitAmount",
-          "CreditAmount" as "creditAmount",
-          "EntityType" as "entityType",
-          "EntityId" as "entityId"
-      `,
-        [
-          lineId,
-          entryId,
-          accountId,
-          line.description,
-          line.debitAmount,
-          line.creditAmount,
-          line.entityType || null,
-          line.entityId || null,
-          transactionId,
-        ]
-      );
-
-      journalEntry.lines.push(lineResult.rows[0]);
-    }
-
-    logger.info('Created journal entry', {
-      entryId,
-      transactionId,
-      description: data.description,
-      totalDebits,
-      totalCredits,
-    });
-
-    return journalEntry;
-  });
-}
+// REMOVED: createLedgerTransaction and createJournalEntry — dead code.
+// ALL GL writes must go through AccountingCore.createJournalEntry() via glEntryService.
+// See ACCOUNTING_SINGLE_SOURCE_OF_TRUTH.md
 
 /**
  * Get journal entry by ID with all lines
@@ -1386,7 +1109,6 @@ export default {
   updateAccount,
   deleteAccount,
   // Journal Entries
-  createJournalEntry,
   getJournalEntryById,
   // General Ledger
   getLedgerEntries,

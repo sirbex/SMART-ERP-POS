@@ -9,6 +9,7 @@ import { invoiceRepository, InvoiceRecord } from '../invoices/invoiceRepository.
 import { deliveryNoteRepository } from './deliveryNoteRepository.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
+import { recordDeliveryNoteInvoiceToGL } from '../../services/glEntryService.js';
 import Decimal from 'decimal.js';
 
 /**
@@ -94,56 +95,6 @@ export async function invoiceFromDeliveryNote(
       [deliveryNoteId, inv.id]
     );
 
-    // GL posting: DR Accounts Receivable, CR Revenue
-    // Use savepoint so GL failure doesn't block invoice creation
-    try {
-      await client.query('SAVEPOINT gl_dn_invoice');
-
-      // Find account IDs
-      const arAccount = await client.query(
-        `SELECT id FROM accounts WHERE account_code = '1200' LIMIT 1`
-      );
-      const revenueAccount = await client.query(
-        `SELECT id FROM accounts WHERE account_code = '4000' LIMIT 1`
-      );
-
-      if (arAccount.rows.length > 0 && revenueAccount.rows.length > 0) {
-        await client.query(
-          `INSERT INTO ledger_entries (account_id, entry_date, debit, credit, description, reference_type, reference_id)
-           VALUES ($1, CURRENT_DATE, $3, 0, $4, 'DELIVERY_NOTE_INVOICE', $5),
-                  ($2, CURRENT_DATE, 0, $3, $4, 'DELIVERY_NOTE_INVOICE', $5)`,
-          [
-            arAccount.rows[0].id,
-            revenueAccount.rows[0].id,
-            totalAmount,
-            `DN Invoice ${inv.invoice_number} from ${dn.deliveryNoteNumber}`,
-            inv.id,
-          ]
-        );
-
-        // Update account balances (replaces trg_sync_account_balance trigger)
-        // AR is ASSET: debit increases balance
-        await client.query(
-          `UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2, "UpdatedAt" = NOW() WHERE id = $1`,
-          [arAccount.rows[0].id, totalAmount]
-        );
-        // Revenue is REVENUE: credit increases balance
-        await client.query(
-          `UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2, "UpdatedAt" = NOW() WHERE id = $1`,
-          [revenueAccount.rows[0].id, totalAmount]
-        );
-      }
-
-      await client.query('RELEASE SAVEPOINT gl_dn_invoice');
-    } catch (glError) {
-      logger.error('GL posting failed for DN invoice', {
-        invoiceId: inv.id,
-        deliveryNoteId,
-        error: glError instanceof Error ? glError.message : String(glError),
-      });
-      await client.query('ROLLBACK TO SAVEPOINT gl_dn_invoice');
-    }
-
     // Recalc invoice
     const freshInvoice = await invoiceRepository.recalcInvoice(client, inv.id);
     if (!freshInvoice) throw new Error('Failed to refresh invoice after creation');
@@ -167,7 +118,7 @@ export async function invoiceFromDeliveryNote(
         `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [dn.customerId, r.customer_name, r.old_balance ?? 0, r.balance ?? 0,
-         (r.balance ?? 0) - (r.old_balance ?? 0), 'INVOICE_FROM_DN']
+        (r.balance ?? 0) - (r.old_balance ?? 0), 'INVOICE_FROM_DN']
       );
     }
 
@@ -181,6 +132,27 @@ export async function invoiceFromDeliveryNote(
 
     return freshInvoice;
   });
+
+  // GL posting AFTER transaction commits (same pattern as goodsReceiptService)
+  // Uses glEntryService → AccountingCore (single source of truth for GL writes)
+  try {
+    await recordDeliveryNoteInvoiceToGL({
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoice_number,
+      invoiceDate: new Date().toLocaleDateString('en-CA'),
+      totalAmount,
+      deliveryNoteNumber: dn.deliveryNoteNumber,
+      customerId: dn.customerId,
+      customerName,
+    }, pool);
+  } catch (glError) {
+    logger.error('GL posting failed for DN invoice', {
+      invoiceId: invoice.id,
+      deliveryNoteId,
+      error: glError instanceof Error ? glError.message : String(glError),
+    });
+    // GL failure logged but does not block invoice creation
+  }
 
   logger.info('Invoice created from delivery note', {
     invoiceId: invoice.id,

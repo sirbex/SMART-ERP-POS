@@ -24,10 +24,6 @@ export const CreateCostLayerSchema = z.object({
   receivedDate: z.string().datetime().optional(),
   goodsReceiptId: z.string().uuid().optional(),
   batchNumber: z.string().max(100).optional(),
-  // GL posting options - used when creating cost layers outside of GR workflow
-  offsetAccountCode: z.string().max(20).optional(), // Account to credit (default: 3200 Opening Balance Equity)
-  skipGlPosting: z.boolean().optional(), // Skip GL posting if GR trigger will handle it
-  userId: z.string().uuid().optional(), // Required for GL posting audit trail
 }).strict();
 
 export const ConsumeCostLayerSchema = z.object({

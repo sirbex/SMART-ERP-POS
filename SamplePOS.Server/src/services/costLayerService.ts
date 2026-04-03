@@ -166,149 +166,15 @@ async function _createCostLayerOnClient(
   // Recalculate average cost
   await updateAverageCost(data.productId, client);
 
-  // ========================================================================
-  // GL POSTING: Post inventory increase to ledger
-  // Only post if NOT coming from a Goods Receipt (GR has its own trigger)
-  // ========================================================================
-  const shouldPostGL = !data.goodsReceiptId && !data.skipGlPosting && totalValue.gt(0);
-
-  if (shouldPostGL) {
-    const inventoryAccountCode = '1300'; // Inventory
-    const offsetAccountCode = data.offsetAccountCode || '3200'; // Opening Balance Equity (default)
-
-    // Get account IDs
-    const inventoryAcct = await client.query(
-      `SELECT "Id" FROM accounts WHERE "AccountCode" = $1 AND "IsActive" = true`,
-      [inventoryAccountCode]
-    );
-    const offsetAcct = await client.query(
-      `SELECT "Id" FROM accounts WHERE "AccountCode" = $1 AND "IsActive" = true`,
-      [offsetAccountCode]
-    );
-
-    if (inventoryAcct.rows.length === 0) {
-      throw new NotFoundError(`Inventory account ${inventoryAccountCode}`);
-    }
-    if (offsetAcct.rows.length === 0) {
-      throw new NotFoundError(`Offset account ${offsetAccountCode}`);
-    }
-
-    const inventoryAccountId = inventoryAcct.rows[0].Id;
-    const offsetAccountId = offsetAcct.rows[0].Id;
-    const transactionId = crypto.randomUUID();
-
-    // Generate transaction number
-    const countResult = await client.query(`
-        SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER)), 0) + 1 as next_num 
-        FROM ledger_transactions
-        WHERE "TransactionNumber" LIKE 'TXN-%'
-      `);
-    const nextNum = parseInt(countResult.rows[0].next_num);
-    const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
-
-    // Get product name for description
-    const productResult = await client.query(`SELECT name FROM products WHERE id = $1`, [
-      data.productId,
-    ]);
-    const productName = productResult.rows[0]?.name || 'Unknown Product';
-    const description = `Inventory addition: ${productName} (${quantity.toString()} @ ${unitCost.toString()})`;
-
-    // Create ledger transaction header
-    await client.query(
-      `
-        INSERT INTO ledger_transactions (
-          "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
-          "ReferenceId", "ReferenceNumber", "Description",
-          "TotalDebitAmount", "TotalCreditAmount", "Status",
-          "CreatedBy", "CreatedAt", "UpdatedAt", "IsReversed"
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED', $10, NOW(), NOW(), FALSE)
-      `,
-      [
-        transactionId,
-        transactionNumber,
-        receivedDate,
-        'COST_LAYER',
-        data.productId,
-        data.batchNumber || `CL-${transactionNumber}`,
-        description,
-        totalValue.toFixed(2),
-        totalValue.toFixed(2),
-        data.userId || null,
-      ]
-    );
-
-    // DR Inventory (increase asset)
-    await client.query(
-      `
-        INSERT INTO ledger_entries (
-          "Id", "TransactionId", "AccountId", "EntryType",
-          "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
-          "EntityType", "EntityId", "CreatedAt"
-        ) VALUES ($1, $2, $3, 'DEBIT', $4, $5, 0, $6, 1, 'PRODUCT', $7, NOW())
-      `,
-      [
-        crypto.randomUUID(),
-        transactionId,
-        inventoryAccountId,
-        totalValue.toFixed(2),
-        totalValue.toFixed(2),
-        `Inventory received: ${productName}`,
-        data.productId,
-      ]
-    );
-
-    // CR Offset Account (Opening Balance Equity or specified account)
-    await client.query(
-      `
-        INSERT INTO ledger_entries (
-          "Id", "TransactionId", "AccountId", "EntryType",
-          "Amount", "DebitAmount", "CreditAmount", "Description", "LineNumber",
-          "EntityType", "EntityId", "CreatedAt"
-        ) VALUES ($1, $2, $3, 'CREDIT', $4, 0, $5, $6, 2, 'PRODUCT', $7, NOW())
-      `,
-      [
-        crypto.randomUUID(),
-        transactionId,
-        offsetAccountId,
-        totalValue.toFixed(2),
-        totalValue.toFixed(2),
-        `Opening balance: ${productName}`,
-        data.productId,
-      ]
-    );
-
-    // Update account balances
-    await client.query(
-      `
-        UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2, "UpdatedAt" = NOW()
-        WHERE "Id" = $1
-      `,
-      [inventoryAccountId, totalValue.toFixed(2)]
-    );
-
-    await client.query(
-      `
-        UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2, "UpdatedAt" = NOW()
-        WHERE "Id" = $1
-      `,
-      [offsetAccountId, totalValue.toFixed(2)]
-    ); // Credit to equity increases balance
-
-    logger.info('GL entry posted for cost layer', {
-      transactionId,
-      transactionNumber,
-      inventoryAccount: inventoryAccountCode,
-      offsetAccount: offsetAccountCode,
-      amount: totalValue.toString(),
-    });
-  }
+  // GL posting is handled ONLY by AccountingCore via glEntryService.
+  // costLayerService must NEVER write directly to ledger_transactions/ledger_entries.
+  // Callers (goodsReceiptService, etc.) are responsible for GL posting.
 
   logger.info('Cost layer created', {
     productId: data.productId,
     quantity: quantity.toString(),
     unitCost: unitCost.toString(),
     grId: data.goodsReceiptId,
-    glPosted: shouldPostGL,
   });
 }
 
@@ -699,25 +565,5 @@ export async function getCostLayerSummary(
   };
 }
 
-/**
- * Add quantity back to cost layers (for returns/adjustments)
- * Creates a new layer at average cost
- */
-export async function returnToCostLayers(
-  productId: string,
-  quantity: number,
-  averageCost: number
-): Promise<void> {
-  await createCostLayer({
-    productId,
-    quantity,
-    unitCost: averageCost,
-    receivedDate: new Date().toISOString(),
-  });
-
-  logger.info('Quantity returned to cost layers', {
-    productId,
-    quantity,
-    averageCost,
-  });
-}
+// returnToCostLayers removed: was dead code with no callers and bypassed GL guards.
+// For stock returns, use goodsReceiptService which handles cost layers + GL atomically.
