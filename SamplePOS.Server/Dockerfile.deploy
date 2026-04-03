@@ -43,6 +43,8 @@ COPY --from=builder /app/SamplePOS.Server/dist ./dist
 COPY --from=deps /app/SamplePOS.Server/node_modules ./node_modules
 COPY --from=builder /app/SamplePOS.Server/package.json ./package.json
 COPY --from=builder /app/config ../config
+# SQL migrations — needed at runtime for tenant auto-migration
+COPY --from=builder /app/shared/sql ../shared/sql
 
 # Create logs, backups, and uploads directories writable by nodejs user
 RUN mkdir -p /app/dist/SamplePOS.Server/logs /app/backups /app/uploads/imports \

@@ -22,6 +22,7 @@ import {
   TenantUnavailableError,
   type TenantPoolConfig,
 } from '../db/connectionManager.js';
+import { tenantMigrationService } from '../modules/system/tenantMigrationService.js';
 import type { Tenant, TenantDbRow } from '../../../shared/types/tenant.js';
 import { normalizeTenant } from '../../../shared/types/tenant.js';
 import logger from '../utils/logger.js';
@@ -123,6 +124,25 @@ async function resolveTenant(req: Request, res: Response, next: NextFunction): P
   req.tenantPool = connectionManager.getPool(poolConfig);
   req.tenant = tenant;
   req.tenantId = tenant.id;
+
+  // ── Schema Version Enforcement ──────────────────────────────────────────
+  // Ensure the tenant DB is at CURRENT_SCHEMA_VERSION before any controller
+  // executes. If the tenant is behind, pending migrations run automatically.
+  // If migration fails, the request is rejected with HTTP 503.
+  try {
+    await tenantMigrationService.ensureTenantUpToDate(req.tenantPool, tenant.slug);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error('Tenant schema migration failed', {
+      slug: tenant.slug,
+      error: msg,
+    });
+    res.status(503).json({
+      success: false,
+      error: 'Tenant database schema outdated and migration failed. Contact support.',
+    });
+    return;
+  }
 
   next();
 }
