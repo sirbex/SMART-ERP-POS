@@ -57,7 +57,7 @@ async function main() {
         const allFiles = fs
             .readdirSync(sqlDir)
             .filter((f) => f.endsWith('.sql'))
-            .filter((f) => !/^999_rollback|^apply-|^fix_/i.test(f))
+            .filter((f) => !/^999_rollback|^apply-|^fix_|^backfill_/i.test(f))
             .sort();
 
         // 4. Filter to pending migrations

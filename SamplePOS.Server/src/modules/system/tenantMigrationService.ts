@@ -126,7 +126,7 @@ export const tenantMigrationService = {
         const allFiles = fs
             .readdirSync(sqlDir)
             .filter((f: string) => f.endsWith('.sql'))
-            .filter((f: string) => !/^999_rollback|^apply-|^fix_/i.test(f))
+            .filter((f: string) => !/^999_rollback|^apply-|^fix_|^backfill_/i.test(f))
             .sort();
 
         // 4. Filter to pending
