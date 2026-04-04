@@ -5,13 +5,16 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { MovementType, MANUAL_MOVEMENT_TYPES, MovementFilters } from './types.js';
 import * as stockMovementRepository from './stockMovementRepository.js';
-import * as glEntryService from '../../services/glEntryService.js';
+import { StockMovementHandler, StockMovementType } from '../inventory/stockMovementHandler.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import logger from '../../utils/logger.js';
 
 /**
  * Record manual stock movement
  * Only ADJUSTMENT_IN, ADJUSTMENT_OUT, DAMAGE, EXPIRY, RETURN can be created manually
+ *
+ * Routes through StockMovementHandler which is the SINGLE authoritative entry point
+ * for all stock changes: updates batch, product QoH, audit trail, AND GL posting.
  */
 export async function recordMovement(
   pool: Pool,
@@ -49,77 +52,39 @@ export async function recordMovement(
     });
   }
 
-  const result = await stockMovementRepository.recordMovement(pool, {
-    ...data,
-    quantity: quantityDecimal.toNumber(),
+  // Delegate to StockMovementHandler — single authoritative path that
+  // updates batch, product QoH, records audit trail, AND posts GL.
+  const handler = new StockMovementHandler(pool);
+  const result = await handler.processMovement({
+    productId: data.productId,
+    batchId: data.batchId,
+    movementType: data.movementType as StockMovementType,
+    quantity: Math.abs(quantityDecimal.toNumber()),
+    reason: data.notes || 'Manual stock movement',
+    notes: data.notes,
+    userId: data.createdBy,
     referenceType: 'MANUAL',
-    referenceId: null,
   });
 
-  logger.info('Stock movement recorded successfully', {
-    movementId: result.id,
+  logger.info('Stock movement recorded via handler', {
+    movementId: result.movementId,
+    movementNumber: result.movementNumber,
     productId: data.productId,
     movementType: data.movementType,
     quantity: quantityDecimal.toString(),
   });
 
-  // ============================================================
-  // GL POSTING: Record stock movement to ledger
-  // Only for ADJUSTMENT_IN, ADJUSTMENT_OUT, DAMAGE, EXPIRY
-  // RETURN movements do not get GL entries here (handled elsewhere)
-  // ============================================================
-  const glMovementTypes = ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY'] as const;
-  if (glMovementTypes.includes(data.movementType as (typeof glMovementTypes)[number])) {
-    // Resolve unit cost: use stored value, or fall back to batch cost / product cost
-    let unitCost = result.unitCost ? new Decimal(result.unitCost).toNumber() : 0;
-    if (unitCost === 0 && data.batchId) {
-      const batchRes = await pool.query(
-        'SELECT cost_price FROM inventory_batches WHERE id = $1',
-        [data.batchId]
-      );
-      if (batchRes.rows[0]?.cost_price) {
-        unitCost = new Decimal(batchRes.rows[0].cost_price).toNumber();
-      }
-    }
-    if (unitCost === 0) {
-      const prodRes = await pool.query(
-        'SELECT cost_price FROM products WHERE id = $1',
-        [data.productId]
-      );
-      if (prodRes.rows[0]?.cost_price) {
-        unitCost = new Decimal(prodRes.rows[0].cost_price).toNumber();
-      }
-    }
-
-    const movementValue = new Decimal(Math.abs(result.quantity))
-      .times(new Decimal(unitCost))
-      .toNumber();
-
-    // Get product name for GL description
-    const productResult = await pool.query('SELECT name FROM products WHERE id = $1', [
-      data.productId,
-    ]);
-    const productName = productResult.rows[0]?.name || 'Unknown';
-
-    // GL failure is fatal — consistency with sales/GR error handling
-    await glEntryService.recordStockMovementToGL(
-      {
-        movementId: result.id,
-        movementNumber: result.movementNumber,
-        movementDate: new Date().toLocaleDateString('en-CA'),
-        movementType: data.movementType as
-          | 'ADJUSTMENT_IN'
-          | 'ADJUSTMENT_OUT'
-          | 'DAMAGE'
-          | 'EXPIRY',
-        movementValue,
-        productName,
-      },
-      pool
-    );
-  }
-
-  return result;
+  // Return shape compatible with existing callers
+  return {
+    id: result.movementId,
+    movementNumber: result.movementNumber,
+    productId: data.productId,
+    batchId: result.batchId,
+    movementType: data.movementType,
+    quantity: quantityDecimal.toNumber(),
+    unitCost: null as number | null,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 /**

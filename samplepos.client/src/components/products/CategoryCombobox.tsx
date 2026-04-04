@@ -213,11 +213,10 @@ export default function CategoryCombobox({ value, onChange, disabled = false }: 
               aria-selected={highlightedIndex === index}
               data-combobox-item
               onClick={() => selectCategory(cat.name)}
-              className={`px-3 py-2 cursor-pointer text-sm ${
-                highlightedIndex === index
+              className={`px-3 py-2 cursor-pointer text-sm ${highlightedIndex === index
                   ? 'bg-blue-50 text-blue-900'
                   : 'text-gray-900 hover:bg-gray-50'
-              } ${cat.name.toLowerCase() === search.trim().toLowerCase() ? 'font-medium' : ''}`}
+                } ${cat.name.toLowerCase() === search.trim().toLowerCase() ? 'font-medium' : ''}`}
             >
               {cat.name}
             </div>
@@ -230,11 +229,10 @@ export default function CategoryCombobox({ value, onChange, disabled = false }: 
               aria-selected={highlightedIndex === categories.length}
               data-combobox-item
               onClick={handleCreateNew}
-              className={`px-3 py-2 cursor-pointer text-sm border-t border-gray-100 flex items-center gap-1.5 ${
-                highlightedIndex === categories.length
+              className={`px-3 py-2 cursor-pointer text-sm border-t border-gray-100 flex items-center gap-1.5 ${highlightedIndex === categories.length
                   ? 'bg-blue-50 text-blue-900'
                   : 'text-blue-600 hover:bg-blue-50'
-              }`}
+                }`}
             >
               {isCreating ? (
                 <span className="text-gray-500">Creating...</span>

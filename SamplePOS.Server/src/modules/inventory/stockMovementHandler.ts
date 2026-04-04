@@ -15,6 +15,7 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import logger from '../../utils/logger.js';
 
 export type StockMovementType =
@@ -28,6 +29,11 @@ export type StockMovementType =
   | 'DAMAGE'
   | 'EXPIRY'
   | 'PHYSICAL_COUNT';
+
+/** Movement types that require GL journal entries (SAP/Odoo pattern) */
+const GL_MOVEMENT_TYPES: ReadonlySet<StockMovementType> = new Set([
+  'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY',
+]);
 
 export interface StockMovementParams {
   productId: string;
@@ -143,6 +149,27 @@ export class StockMovementHandler {
       await this.updateProductQuantity(client, params.productId);
 
       await client.query('COMMIT');
+
+      // Step 11: Post GL journal entry for adjustment/damage/expiry movements
+      // Done AFTER commit so inventory state is persisted first (same pattern as GRN).
+      // GL failure is fatal — consistency with sales/GR error handling.
+      if (GL_MOVEMENT_TYPES.has(params.movementType)) {
+        const movementValue = Math.abs(valueAfter - valueBefore);
+        if (movementValue > 0) {
+          // Get product name for GL description
+          const prodRes = await this.pool.query('SELECT name FROM products WHERE id = $1', [params.productId]);
+          const productName = prodRes.rows[0]?.name || 'Unknown';
+
+          await glEntryService.recordStockMovementToGL({
+            movementId: movementResult.rows[0].id,
+            movementNumber: movementResult.rows[0].movement_number,
+            movementDate: new Date().toLocaleDateString('en-CA'),
+            movementType: params.movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
+            movementValue,
+            productName,
+          }, this.pool);
+        }
+      }
 
       logger.info('Stock movement processed successfully', {
         movementId: movementResult.rows[0].id,
