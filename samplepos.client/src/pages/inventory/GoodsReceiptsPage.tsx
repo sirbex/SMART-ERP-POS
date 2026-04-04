@@ -533,14 +533,11 @@ export default function GoodsReceiptsPage() {
         const es = editItems[it.id] || {};
         const productName = it.productName || it.product_name || 'Unknown';
         const qty = Number(es.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
-        const batch = es.batchNumber ?? it.batchNumber ?? it.batch_number ?? '';
         const expiry = es.expiryDate ?? it.expiryDate ?? it.expiry_date ?? '';
 
         if (qty > 0) {
           anyReceived = true;
-          if (!batch || String(batch).trim() === '') {
-            validationErrors.push(`${productName}: Batch number is required`);
-          }
+          // Batch is optional — backend auto-generates BATCH-YYYYMMDD-### if blank
           if (!expiry || String(expiry).trim() === '') {
             validationErrors.push(`${productName}: Expiry date is required`);
           }
@@ -1827,12 +1824,12 @@ function GRItemRow({
     return d <= today ? 'Must be a future date' : null;
   })();
 
-  // Line completeness indicator (Problem 6)
+  // Line completeness indicator — batch optional (auto-generated if blank)
   const hasBatch = !!(es.batchNumber ?? '').trim();
   const hasExpiry = !!(es.expiryDate ?? '').trim();
   const hasQty = baseReceived > 0;
-  const isComplete = hasBatch && hasExpiry && hasQty;
-  const isPartial = hasQty && (!hasBatch || !hasExpiry);
+  const isComplete = hasExpiry && hasQty; // batch optional — auto-generated
+  const isPartial = hasQty && !hasExpiry;
   const rowBorderColor = disabled
     ? ''
     : isComplete
@@ -1847,6 +1844,7 @@ function GRItemRow({
       <td className="px-4 py-2 text-sm font-medium text-gray-900">
         {item.productName || item.product_name}
         {isComplete && !disabled && <span className="ml-1 text-green-600">✓</span>}
+        {isComplete && !hasBatch && !disabled && <span className="ml-1 text-xs text-gray-400">(auto-batch)</span>}
       </td>
       {/* UoM */}
       <td className="px-4 py-2 text-sm">
@@ -1960,7 +1958,7 @@ function GRItemRow({
                   expiryInput?.focus();
                 }
               }}
-              placeholder="Batch #"
+              placeholder="Auto if blank"
             />
             {batchWarnings[item.id] && (
               <div className="text-xs text-red-600 mt-0.5 truncate max-w-[120px]" title={batchWarnings[item.id]}>{batchWarnings[item.id]}</div>
