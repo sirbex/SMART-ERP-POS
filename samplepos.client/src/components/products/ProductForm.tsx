@@ -1,4 +1,5 @@
 // Reusable Product Form used across ProductsPage and ManualGRModal
+import CategoryCombobox from './CategoryCombobox';
 
 export interface ProductFormValues {
   name: string;
@@ -103,14 +104,10 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
           <label htmlFor="product-category" className="block text-sm font-medium text-gray-700 mb-1">
             Category
           </label>
-          <input
-            id="product-category"
-            type="text"
+          <CategoryCombobox
             value={values.category}
-            onChange={(e) => onChange("category", e.target.value)}
+            onChange={(val) => onChange("category", val)}
             disabled={disabled}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="e.g., Electronics, Beverages"
           />
         </div>
 
