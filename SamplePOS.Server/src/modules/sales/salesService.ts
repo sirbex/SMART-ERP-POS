@@ -1393,6 +1393,33 @@ export const salesService = {
             creditAmount: creditAmount.toFixed(2),
             workflow: 'Credit sale → Invoice with initial payment',
           });
+
+          // Recalculate customer balance from invoices (SINGLE SOURCE OF TRUTH)
+          // Canonical formula: exclude Paid, Cancelled, Voided, Draft
+          await client.query(
+            `UPDATE customers 
+             SET balance = (
+               SELECT COALESCE(SUM("OutstandingBalance"), 0)
+               FROM invoices
+               WHERE "CustomerId" = $1
+               AND "Status" NOT IN ('Paid', 'Cancelled', 'Voided', 'Draft')
+             )
+             WHERE id = $1`,
+            [input.customerId]
+          );
+
+          // Sync AR account balance (replaces trg_sync_customer_to_ar)
+          await client.query(`
+            UPDATE accounts SET "CurrentBalance" = COALESCE(
+              (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+            ), "UpdatedAt" = NOW()
+            WHERE "AccountCode" = '1200'
+          `);
+
+          logger.info('Customer balance synced from invoices', {
+            customerId: input.customerId,
+            saleId: sale.id,
+          });
         } catch (invoiceError) {
           logger.error('❌ Failed to create invoice for credit sale - ROLLING BACK TRANSACTION', {
             saleId: sale.id,
