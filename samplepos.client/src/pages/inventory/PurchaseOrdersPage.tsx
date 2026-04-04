@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   usePurchaseOrders,
   useCreatePurchaseOrder,
@@ -661,6 +662,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
 }
 
 export default function PurchaseOrdersPage() {
+  const location = useLocation();
   // State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PORow | null>(null);
@@ -688,6 +690,16 @@ export default function PurchaseOrdersPage() {
   const sendToSupplierMutation = useSendPOToSupplier();
   const cancelPOMutation = useCancelPurchaseOrder();
   const deletePOMutation = useDeletePurchaseOrder();
+
+  // Auto-open create modal when navigated with state
+  useEffect(() => {
+    const state = location.state as { openCreate?: boolean } | null;
+    if (state?.openCreate) {
+      setShowCreateModal(true);
+      // Clear the state so refreshing doesn't re-open
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
 
   // Helper to map snake_case DB columns to camelCase
   const mapPOFromDB = (po: PORow): PORow => ({

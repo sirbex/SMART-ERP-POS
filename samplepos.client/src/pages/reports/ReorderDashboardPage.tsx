@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../../utils/currency';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
-import { api } from '../../utils/api';
 
 // ── Types ──
 type ReorderPriority = 'URGENT' | 'HIGH' | 'MEDIUM' | 'DEAD_STOCK' | 'HEALTHY';
@@ -78,7 +77,6 @@ export default function ReorderDashboardPage() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [sortField, setSortField] = useState<SortField>('daysUntilStockout');
     const [sortAsc, setSortAsc] = useState(true);
-    const [creatingPO, setCreatingPO] = useState(false);
 
     const fetchDashboard = useCallback(async () => {
         setLoading(true);
@@ -264,64 +262,12 @@ export default function ReorderDashboardPage() {
                             {selectedIds.size} item{selectedIds.size > 1 ? 's' : ''} selected
                         </span>
                         <button
-                            disabled={creatingPO}
-                            onClick={async () => {
-                                const items = tabItems.filter((i) => selectedIds.has(i.productId));
-                                // Group by supplier
-                                const bySupplier = new Map<string, { name: string; items: ReorderItem[] }>();
-                                const noSupplier: ReorderItem[] = [];
-                                for (const item of items) {
-                                    if (item.preferredSupplierId) {
-                                        const existing = bySupplier.get(item.preferredSupplierId);
-                                        if (existing) { existing.items.push(item); }
-                                        else { bySupplier.set(item.preferredSupplierId, { name: item.preferredSupplier || 'Unknown', items: [item] }); }
-                                    } else {
-                                        noSupplier.push(item);
-                                    }
-                                }
-                                if (noSupplier.length > 0) {
-                                    const names = noSupplier.map(i => i.name).slice(0, 5).join(', ');
-                                    const extra = noSupplier.length > 5 ? ` and ${noSupplier.length - 5} more` : '';
-                                    alert(`${noSupplier.length} item(s) have no linked supplier and were skipped: ${names}${extra}\n\nPlease create POs for these manually.`);
-                                }
-                                if (bySupplier.size === 0) return;
-
-                                setCreatingPO(true);
-                                const created: string[] = [];
-                                const failed: string[] = [];
-                                for (const [supplierId, group] of bySupplier) {
-                                    try {
-                                        const poItems = group.items
-                                            .filter(i => i.suggestedOrderQty > 0)
-                                            .map(i => ({
-                                                productId: i.productId,
-                                                quantity: i.suggestedOrderQty,
-                                                unitCost: i.costPrice ?? 0,
-                                            }));
-                                        if (poItems.length === 0) continue;
-                                        const resp = await api.purchaseOrders.create({
-                                            supplierId,
-                                            items: poItems,
-                                            notes: `Auto-generated from Reorder Dashboard (${poItems.length} items)`,
-                                        });
-                                        const poNumber = (resp.data as { data?: { poNumber?: string } })?.data?.poNumber || 'PO';
-                                        created.push(`${poNumber} → ${group.name} (${poItems.length} items)`);
-                                    } catch {
-                                        failed.push(group.name);
-                                    }
-                                }
-                                setCreatingPO(false);
-                                setSelectedIds(new Set());
-
-                                let msg = '';
-                                if (created.length > 0) msg += `Created ${created.length} PO(s):\n${created.join('\n')}`;
-                                if (failed.length > 0) msg += `${msg ? '\n\n' : ''}Failed for: ${failed.join(', ')}`;
-                                if (msg) alert(msg);
-                                if (created.length > 0) navigate('/inventory/purchase-orders');
+                            onClick={() => {
+                                navigate('/inventory/purchase-orders', { state: { openCreate: true } });
                             }}
-                            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                         >
-                            {creatingPO ? 'Creating POs...' : `Generate PO for Selected (${selectedIds.size})`}
+                            Create Purchase Order ({selectedIds.size} selected)
                         </button>
                     </div>
                 )}
