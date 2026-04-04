@@ -6,6 +6,7 @@ import { TwoFactorVerifyModal } from '../components/auth/TwoFactorVerifyModal';
 import type { UserRole } from '../types';
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff } from 'lucide-react';
 import { useTenant } from '../contexts/TenantContext';
+import { MathCaptcha } from '../components/auth/MathCaptcha';
 
 /** Shape returned by POST /auth/login inside `data.data` */
 interface LoginResponseData {
@@ -178,6 +179,10 @@ export default function LoginPage() {
   const [requires2FA, setRequires2FA] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  // CAPTCHA state — server tells us when to require it
+  const [requiresCaptcha, setRequiresCaptcha] = useState(false);
+  const [captchaVerified, setCaptchaVerified] = useState(false);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const { login, isAuthenticated } = useAuth();
   const { config } = useTenant();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
@@ -213,6 +218,12 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Block if CAPTCHA is required but not yet solved
+    if (requiresCaptcha && !captchaVerified) {
+      setError('Please solve the security challenge first.');
+      return;
+    }
     setLoading(true);
 
     try {
@@ -274,7 +285,7 @@ export default function LoginPage() {
       }
     } catch (err: unknown) {
       // Determine if this is a server-unreachable error (not a clear auth rejection)
-      const axiosErr = err as { code?: string; response?: { status?: number; data?: { error?: string } } };
+      const axiosErr = err as { code?: string; response?: { status?: number; data?: { error?: string; data?: { requiresCaptcha?: boolean; failedAttempts?: number; locked?: boolean; remainingMinutes?: number | null } } } };
       const status = axiosErr.response?.status;
       const isServerUnreachable =
         !navigator.onLine ||
@@ -296,6 +307,14 @@ export default function LoginPage() {
         } catch {
           // Offline validation failed (e.g. crypto.subtle unavailable) — fall through to error
         }
+      }
+
+      // Parse CAPTCHA requirement from structured error response
+      const loginMeta = axiosErr.response?.data?.data;
+      if (loginMeta?.requiresCaptcha) {
+        setRequiresCaptcha(true);
+        setCaptchaVerified(false);
+        setCaptchaResetKey(k => k + 1);
       }
 
       if (axiosErr.response?.data?.error) {
@@ -454,10 +473,18 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* CAPTCHA — shown after 3+ failed login attempts */}
+            {requiresCaptcha && (
+              <MathCaptcha
+                onVerified={() => setCaptchaVerified(true)}
+                resetKey={captchaResetKey}
+              />
+            )}
+
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (requiresCaptcha && !captchaVerified)}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
               {loading ? (

@@ -47,18 +47,19 @@ export const globalRateLimit = rateLimit({
 });
 
 /**
- * Auth rate limiter with a shared MemoryStore so we can reset the counter
- * for a given IP on successful login (prevents permanent lockout in dev / 
- * single-IP production setups like reverse-proxied deployments).
+ * Auth rate limiter — DDoS safety net only.
+ * Per-user lockout (passwordPolicyService) is the real brute-force guard.
+ * This is intentionally generous so shared-IP setups (reverse proxy, NAT)
+ * don't lock out all users when one person fat-fingers their password.
  */
 const authRateLimitStore = new MemoryStore();
 
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Allow generous attempts per window (account-level lockout is the real guard)
+  max: 500, // Very generous — per-user lockout is the real defense
   message: {
     success: false,
-    error: 'Too many login attempts from this IP, please try again after 15 minutes'
+    error: 'Too many requests, please try again later'
   },
   skipSuccessfulRequests: true,
   standardHeaders: true,

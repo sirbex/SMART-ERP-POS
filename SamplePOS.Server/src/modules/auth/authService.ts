@@ -9,6 +9,36 @@ import { findUserByEmail, findUserById, createUser, type UserRole } from './auth
 import * as passwordPolicy from './passwordPolicyService.js';
 import logger from '../../utils/logger.js';
 
+/**
+ * Structured login failure — carries attempt metadata so the controller
+ * can return CAPTCHA flags, attempts remaining, and lockout info.
+ */
+export class LoginFailedError extends Error {
+  public readonly failedAttempts: number;
+  public readonly maxAttempts: number;
+  public readonly locked: boolean;
+  public readonly remainingMinutes: number | null;
+  /** Frontend should gate login behind a CAPTCHA challenge */
+  public readonly requiresCaptcha: boolean;
+
+  constructor(opts: {
+    message: string;
+    failedAttempts: number;
+    maxAttempts?: number;
+    locked?: boolean;
+    remainingMinutes?: number | null;
+  }) {
+    super(opts.message);
+    this.name = 'LoginFailedError';
+    this.failedAttempts = opts.failedAttempts;
+    this.maxAttempts = opts.maxAttempts ?? 5;
+    this.locked = opts.locked ?? false;
+    this.remainingMinutes = opts.remainingMinutes ?? null;
+    // Require CAPTCHA after 3 consecutive failures
+    this.requiresCaptcha = opts.failedAttempts >= 3;
+  }
+}
+
 export interface LoginCredentials {
   email: string;
   password: string;
@@ -55,7 +85,10 @@ export async function authenticateUser(
   const user = await findUserByEmail(pool, validatedData.email);
   if (!user) {
     logger.warn('Login attempt with invalid email', { email: validatedData.email });
-    throw new Error('Invalid email or password');
+    throw new LoginFailedError({
+      message: 'Invalid email or password',
+      failedAttempts: 1,
+    });
   }
 
   // Check account lockout status
@@ -65,7 +98,12 @@ export async function authenticateUser(
       email: validatedData.email,
       remainingMinutes: lockoutStatus.remainingMinutes
     });
-    throw new Error(`Account is locked. Please try again in ${lockoutStatus.remainingMinutes} minutes.`);
+    throw new LoginFailedError({
+      message: `Account is locked. Please try again in ${lockoutStatus.remainingMinutes} minutes.`,
+      failedAttempts: lockoutStatus.failedAttempts,
+      locked: true,
+      remainingMinutes: lockoutStatus.remainingMinutes,
+    });
   }
 
   // Check if account is active
@@ -81,7 +119,12 @@ export async function authenticateUser(
     const failedStatus = await passwordPolicy.recordFailedLoginAttempt(user.id);
 
     if (failedStatus.locked) {
-      throw new Error(`Too many failed attempts. Account locked for ${failedStatus.remainingMinutes} minutes.`);
+      throw new LoginFailedError({
+        message: `Too many failed attempts. Account locked for ${failedStatus.remainingMinutes} minutes.`,
+        failedAttempts: failedStatus.failedAttempts,
+        locked: true,
+        remainingMinutes: failedStatus.remainingMinutes,
+      });
     }
 
     const attemptsRemaining = 5 - failedStatus.failedAttempts;
@@ -89,7 +132,10 @@ export async function authenticateUser(
       email: validatedData.email,
       attemptsRemaining,
     });
-    throw new Error(`Invalid email or password. ${attemptsRemaining} attempts remaining.`);
+    throw new LoginFailedError({
+      message: 'Invalid email or password',
+      failedAttempts: failedStatus.failedAttempts,
+    });
   }
 
   // Successful login - reset failed attempts

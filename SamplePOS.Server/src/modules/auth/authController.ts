@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from '../platform/tenantRepository.js';
-import { authenticateUser, registerUser, getUserProfile } from './authService.js';
+import { authenticateUser, registerUser, getUserProfile, LoginFailedError } from './authService.js';
 import * as auditService from '../audit/auditService.js';
 import * as twoFactorService from './twoFactorService.js';
 import * as refreshTokenService from './refreshTokenService.js';
@@ -161,6 +161,76 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       message: 'Login successful',
     });
   } catch (error) {
+    // ── Artificial delay on ALL login failures (600ms) ────────────
+    // Prevents timing attacks and slows brute-force automation.
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    // ── Structured LoginFailedError (per-user lockout) ───────────
+    if (error instanceof LoginFailedError) {
+      // ── Super admin fallback: check before returning failure ──
+      if (error.message === 'Invalid email or password') {
+        try {
+          const masterPool = connectionManager.getMasterPool();
+          const superAdmin = await tenantRepository.findSuperAdminByEmail(masterPool, req.body.email);
+
+          if (superAdmin && superAdmin.isActive) {
+            const validPassword = await bcrypt.compare(req.body.password, superAdmin.passwordHash);
+
+            if (validPassword) {
+              logger.info('Super admin detected via tenant login — redirecting to platform portal', { email: superAdmin.email });
+              res.json({
+                success: true,
+                data: { isSuperAdmin: true, redirectTo: '/platform/login' },
+                message: 'Please use the Platform Admin portal to log in.',
+              });
+              return;
+            }
+          }
+        } catch (superAdminError) {
+          logger.debug('Super admin fallback check failed (non-fatal)', {
+            error: superAdminError instanceof Error ? superAdminError.message : String(superAdminError),
+          });
+        }
+      }
+
+      // Log to audit trail
+      try {
+        const auditContext = {
+          userId: '00000000-0000-0000-0000-000000000000',
+          userName: 'Anonymous',
+          userRole: 'NONE' as string,
+          ipAddress: req.ip || req.socket.remoteAddress,
+          userAgent: req.headers['user-agent'],
+        };
+        await auditService.logLoginFailed(
+          req.tenantPool || globalPool,
+          req.body.email || 'unknown',
+          error.message,
+          auditContext
+        );
+      } catch (auditError) {
+        logger.error('Audit logging failed for failed login (non-fatal)', {
+          error: auditError instanceof Error ? auditError.message : String(auditError),
+        });
+      }
+
+      const statusCode = error.locked ? 423 : 401; // 423 Locked for account lockout
+      res.status(statusCode).json({
+        success: false,
+        error: error.locked
+          ? `Account is locked. Please try again in ${error.remainingMinutes} minutes.`
+          : `Invalid email or password. ${error.maxAttempts - error.failedAttempts} attempts remaining.`,
+        data: {
+          failedAttempts: error.failedAttempts,
+          maxAttempts: error.maxAttempts,
+          locked: error.locked,
+          remainingMinutes: error.remainingMinutes,
+          requiresCaptcha: error.requiresCaptcha,
+        },
+      });
+      return;
+    }
+
     // ── Super admin fallback ──────────────────────────────
     // If tenant login fails with "Invalid email or password",
     // check the master DB's super_admins table so platform
