@@ -572,6 +572,45 @@ export interface ReorderRecommendationRow {
     learningCycles: number;
 }
 
+// ── Reorder Dashboard (Business-Driven) ──
+export type ReorderPriority = 'URGENT' | 'HIGH' | 'MEDIUM' | 'DEAD_STOCK' | 'HEALTHY';
+
+export interface ReorderDashboardItem {
+    productId: string;
+    name: string;
+    sku: string;
+    category: string | null;
+    currentStock: number;
+    dailySalesVelocity: number;
+    daysUntilStockout: number | null;
+    suggestedOrderQty: number;
+    estimatedOrderCost: number | null;
+    priority: ReorderPriority;
+    reason: string;
+    leadTimeDays: number;
+    reorderPoint: number;
+    safetyStock: number;
+    costPrice: number | null;
+    preferredSupplier: string | null;
+}
+
+export interface ReorderDashboardSummary {
+    urgentCount: number;
+    highCount: number;
+    mediumCount: number;
+    deadStockCount: number;
+    totalReorderCost: number;
+    totalDeadStockValue: number;
+}
+
+export interface ReorderDashboardResponse {
+    summary: ReorderDashboardSummary;
+    urgent: ReorderDashboardItem[];
+    high: ReorderDashboardItem[];
+    deadStock: ReorderDashboardItem[];
+    medium: ReorderDashboardItem[];
+}
+
 // ── Sales Comparison ──
 export interface SalesComparisonRow {
     period: string;

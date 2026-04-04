@@ -33,6 +33,8 @@ import type {
   CustomerAgingRow,
   WasteDamageRow,
   ReorderRecommendationRow,
+  ReorderDashboardItem,
+  ReorderPriority,
   SalesComparisonRow,
   CustomerPurchaseHistoryRow,
   CashRegisterSessionSummaryData,
@@ -2261,6 +2263,147 @@ export const reportsRepository = {
         forecastDemand30d: useLearned ? learned.forecast30d : null,
         seasonalIndex: seasonalIdx,
         learningCycles: learned?.learningCycles ?? 0,
+      };
+    });
+  },
+
+  /**
+   * REORDER DASHBOARD — Business-driven decision engine
+   * Optimized: 1 bulk CTE query instead of N correlated subqueries
+   * Classifies ALL products into URGENT / HIGH / MEDIUM / DEAD_STOCK / HEALTHY
+   */
+  async getReorderDashboard(
+    pool: Pool,
+    options: { categoryId?: string }
+  ): Promise<ReorderDashboardItem[]> {
+    const params: unknown[] = [];
+    let categoryFilter = '';
+    if (options.categoryId) {
+      params.push(options.categoryId);
+      categoryFilter = `AND p.category = $${params.length}`;
+    }
+
+    const query = `
+      WITH product_base AS (
+        SELECT
+          p.id,
+          p.name,
+          p.sku,
+          p.category,
+          COALESCE(pi.reorder_level, 0)::numeric   AS reorder_level,
+          COALESCE(pi.quantity_on_hand, 0)::numeric AS current_stock,
+          COALESCE(pv.cost_price, 0)::numeric       AS cost_price
+        FROM products p
+        LEFT JOIN product_inventory pi ON pi.product_id = p.id
+        LEFT JOIN product_valuation pv ON pv.product_id = p.id
+        WHERE p.is_active = true ${categoryFilter}
+      ),
+      sales_30d AS (
+        SELECT si.product_id, SUM(si.quantity) AS units_sold
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE s.sale_date >= CURRENT_DATE - 30
+          AND s.status != 'CANCELLED'
+        GROUP BY si.product_id
+      ),
+      supplier_info AS (
+        SELECT DISTINCT ON (gri.product_id)
+          gri.product_id,
+          s."CompanyName"                      AS supplier_name,
+          COALESCE(s.lead_time_days, 7)        AS lead_time_days
+        FROM goods_receipt_items gri
+        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+        JOIN purchase_orders po ON po.id = gr.purchase_order_id
+        JOIN suppliers s ON s."Id" = po.supplier_id
+        ORDER BY gri.product_id, po.order_date DESC
+      )
+      SELECT
+        pb.id            AS product_id,
+        pb.name          AS product_name,
+        pb.sku,
+        pb.category,
+        pb.current_stock,
+        pb.cost_price,
+        pb.reorder_level,
+        COALESCE(s30.units_sold, 0) AS units_sold_30d,
+        si.supplier_name,
+        COALESCE(si.lead_time_days, 7) AS lead_time_days
+      FROM product_base pb
+      LEFT JOIN sales_30d s30 ON s30.product_id = pb.id
+      LEFT JOIN supplier_info si ON si.product_id = pb.id
+    `;
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map((row): ReorderDashboardItem => {
+      const currentStock = new Decimal(row.current_stock).toNumber();
+      const costPrice = new Decimal(row.cost_price).toNumber();
+      const unitsSold30d = new Decimal(row.units_sold_30d).toNumber();
+      const leadTimeDays = Number(row.lead_time_days) || 7;
+      const reorderLevel = new Decimal(row.reorder_level).toNumber();
+
+      // ── Core formulas ──
+      const dailySalesVelocity = new Decimal(unitsSold30d).dividedBy(30).toDecimalPlaces(2).toNumber();
+
+      const daysUntilStockout: number | null =
+        dailySalesVelocity > 0
+          ? new Decimal(currentStock).dividedBy(dailySalesVelocity).toDecimalPlaces(0).toNumber()
+          : null;
+
+      const safetyStock = dailySalesVelocity > 0
+        ? Math.ceil(dailySalesVelocity * Math.max(leadTimeDays * 0.5, 2))
+        : 0;
+
+      const reorderPoint = dailySalesVelocity > 0
+        ? Math.ceil(dailySalesVelocity * leadTimeDays + safetyStock)
+        : reorderLevel;
+
+      const suggestedOrderQty = Math.max(0, Math.ceil(reorderPoint - currentStock));
+      const estimatedOrderCost = costPrice > 0
+        ? new Decimal(suggestedOrderQty).times(costPrice).toDecimalPlaces(2).toNumber()
+        : null;
+
+      // ── Priority classification ──
+      let priority: ReorderPriority;
+      let reason: string;
+
+      if (currentStock <= 0 && (dailySalesVelocity > 0 || reorderLevel > 0)) {
+        priority = 'URGENT';
+        reason = 'Out of stock — immediate reorder required';
+      } else if (daysUntilStockout !== null && daysUntilStockout <= 2) {
+        priority = 'URGENT';
+        reason = `Will stock out in ${daysUntilStockout} day(s)`;
+      } else if (dailySalesVelocity > 0 && daysUntilStockout !== null && daysUntilStockout <= leadTimeDays) {
+        priority = 'HIGH';
+        reason = `${daysUntilStockout} days left vs ${leadTimeDays}-day lead time`;
+      } else if (currentStock < reorderPoint && currentStock > 0 && dailySalesVelocity > 0) {
+        priority = 'MEDIUM';
+        reason = `Stock ${currentStock} below reorder point ${reorderPoint}`;
+      } else if (currentStock > 0 && unitsSold30d === 0) {
+        priority = 'DEAD_STOCK';
+        reason = 'In stock but zero sales in 30 days';
+      } else {
+        priority = 'HEALTHY';
+        reason = 'Adequate stock levels';
+      }
+
+      return {
+        productId: row.product_id,
+        name: row.product_name,
+        sku: row.sku,
+        category: row.category,
+        currentStock,
+        dailySalesVelocity,
+        daysUntilStockout,
+        suggestedOrderQty,
+        estimatedOrderCost,
+        priority,
+        reason,
+        leadTimeDays,
+        reorderPoint,
+        safetyStock,
+        costPrice: costPrice > 0 ? costPrice : null,
+        preferredSupplier: row.supplier_name ?? null,
       };
     });
   },

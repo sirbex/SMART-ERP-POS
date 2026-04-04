@@ -42,7 +42,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
@@ -777,6 +777,7 @@ interface ReportData {
 }
 
 export default function ReportsPage() {
+  const navigate = useNavigate();
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -822,6 +823,12 @@ export default function ReportsPage() {
       return;
     }
 
+    // Redirect to dedicated dashboard for reorder intelligence
+    if (selectedReport === 'REORDER_RECOMMENDATIONS') {
+      navigate('/reports/reorder');
+      return;
+    }
+
     const reportOption = REPORT_OPTIONS.find((r) => r.value === selectedReport);
     if (reportOption?.requiresDateRange && (!startDate || !endDate)) {
       setError('Please select start and end dates');
@@ -863,8 +870,6 @@ export default function ReportsPage() {
         params.reason = reason;
       } else if (selectedReport === 'SUPPLIER_PAYMENT_STATUS' && status) {
         params.status = status;
-      } else if (selectedReport === 'REORDER_RECOMMENDATIONS') {
-        params.daysToConsider = daysToConsider;
       } else if (selectedReport === 'SALES_COMPARISON') {
         // Sales Comparison requires 4 dates: current period and previous period
         params.currentStartDate = startDate;

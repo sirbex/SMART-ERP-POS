@@ -165,6 +165,11 @@ export function createReportsRouter(pool: Pool) {
     asyncHandler(async (req, res) => reportsController.getReorderRecommendations(req, res, p(req)))
   );
   router.get(
+    '/reorder-dashboard',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getReorderDashboard(req, res, p(req)))
+  );
+  router.get(
     '/business-position',
     requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getBusinessPositionReport(req, res, p(req)))

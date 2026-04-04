@@ -2400,6 +2400,16 @@ export const reportsController = {
   },
 
   /**
+   * Reorder Dashboard — Business-driven decision engine
+   * GET /api/reports/reorder-dashboard
+   */
+  async getReorderDashboard(req: Request, res: Response, pool: Pool) {
+    const categoryId = typeof req.query.category_id === 'string' ? req.query.category_id : undefined;
+    const result = await reportsService.generateReorderDashboard(pool, { categoryId });
+    res.json({ success: true, data: result });
+  },
+
+  /**
    * Get list of available report types
    * GET /api/reports/types
    */

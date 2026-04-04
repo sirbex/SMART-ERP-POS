@@ -1820,6 +1820,78 @@ export const reportsService = {
   },
 
   /**
+   * Generate Reorder Dashboard — Business-driven decision engine
+   * Groups products by priority, caps per group, calculates summaries
+   */
+  async generateReorderDashboard(
+    pool: Pool,
+    options: { categoryId?: string }
+  ) {
+    const startTime = Date.now();
+    const allItems = await reportsRepository.getReorderDashboard(pool, options);
+
+    // Group by priority
+    const urgent = allItems
+      .filter((i) => i.priority === 'URGENT')
+      .sort((a, b) => (a.daysUntilStockout ?? -1) - (b.daysUntilStockout ?? -1))
+      .slice(0, 20);
+
+    const high = allItems
+      .filter((i) => i.priority === 'HIGH')
+      .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999))
+      .slice(0, 20);
+
+    const deadStock = allItems
+      .filter((i) => i.priority === 'DEAD_STOCK')
+      .sort((a, b) => {
+        const aVal = (a.currentStock) * (a.costPrice ?? 0);
+        const bVal = (b.currentStock) * (b.costPrice ?? 0);
+        return bVal - aVal; // highest value first
+      })
+      .slice(0, 20);
+
+    const medium = allItems
+      .filter((i) => i.priority === 'MEDIUM')
+      .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999))
+      .slice(0, 50);
+
+    // Summary
+    const allUrgent = allItems.filter((i) => i.priority === 'URGENT');
+    const allHigh = allItems.filter((i) => i.priority === 'HIGH');
+    const allMedium = allItems.filter((i) => i.priority === 'MEDIUM');
+    const allDead = allItems.filter((i) => i.priority === 'DEAD_STOCK');
+
+    const totalReorderCost = [...allUrgent, ...allHigh, ...allMedium]
+      .reduce((sum, i) => sum.plus(i.estimatedOrderCost ?? 0), new Decimal(0))
+      .toDecimalPlaces(2)
+      .toNumber();
+
+    const totalDeadStockValue = allDead
+      .reduce(
+        (sum, i) => sum.plus(new Decimal(i.currentStock).times(i.costPrice ?? 0)),
+        new Decimal(0)
+      )
+      .toDecimalPlaces(2)
+      .toNumber();
+
+    return {
+      summary: {
+        urgentCount: allUrgent.length,
+        highCount: allHigh.length,
+        mediumCount: allMedium.length,
+        deadStockCount: allDead.length,
+        totalReorderCost,
+        totalDeadStockValue,
+      },
+      urgent,
+      high,
+      deadStock,
+      medium,
+      executionTimeMs: Date.now() - startTime,
+    };
+  },
+
+  /**
    * Generate Reorder Recommendations Report
    */
   async generateReorderRecommendations(
