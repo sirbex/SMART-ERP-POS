@@ -659,9 +659,9 @@ export async function bulkUpsertForImport(
     let piIdx = 1;
     for (const r of syncRows) {
       const productId = skuToProductId.get(r.sku.toLowerCase())!;
-      piPlaceholders.push(`($${piIdx}::uuid, $${piIdx + 1}::numeric)`);
-      piValues.push(productId, r.reorderLevel ?? 0);
-      piIdx += 2;
+      piPlaceholders.push(`($${piIdx}::uuid, $${piIdx + 1}::numeric, $${piIdx + 2}::numeric)`);
+      piValues.push(productId, 0, r.reorderLevel ?? 0);
+      piIdx += 3;
     }
     if (piPlaceholders.length > 0) {
       await client.query(
