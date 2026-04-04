@@ -1739,7 +1739,9 @@ export default function POSPage() {
 
   // Can complete if: paid exact amount OR overpaid with cash OR credit with remaining balance
   const canCompleteSale = useMemo(() => {
-    if (paymentLines.length === 0) return false;
+    // Allow full credit sale (0 payment) when customer is selected
+    // handleFinalizeSale will auto-add CREDIT line for the full amount
+    if (paymentLines.length === 0 && !selectedCustomer) return false;
 
     // Check if any payment is CREDIT
     const hasCreditPayment = paymentLines.some((line) => line.paymentMethod === 'CREDIT');

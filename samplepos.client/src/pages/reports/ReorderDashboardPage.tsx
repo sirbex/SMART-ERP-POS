@@ -241,8 +241,8 @@ export default function ReorderDashboardPage() {
                                 key={tab.key}
                                 onClick={() => { setActiveTab(tab.key); setSelectedIds(new Set()); }}
                                 className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${isActive
-                                        ? `border-blue-600 ${tab.color} bg-blue-50/40`
-                                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                    ? `border-blue-600 ${tab.color} bg-blue-50/40`
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                                     }`}
                             >
                                 {tab.label}
