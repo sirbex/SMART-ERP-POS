@@ -256,17 +256,43 @@ function LineItemRow({
 }
 
 // Create PO Modal Component
+interface ReorderItemState {
+  productId: string;
+  productName: string;
+  suggestedQty: number;
+  costPrice: number | null;
+  currentStock: number;
+  reorderPoint: number;
+}
+
 interface CreatePOModalProps {
   onClose: () => void;
   onSuccess: () => void;
+  initialReorderItems?: ReorderItemState[];
 }
 
-function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
+function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModalProps) {
   const { user } = useAuth();
   const [supplierId, setSupplierId] = useState('');
   const [expectedDelivery, setExpectedDelivery] = useState('');
   const [notes, setNotes] = useState('');
-  const [lineItems, setLineItems] = useState<POLineItem[]>([]);
+  const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
+    if (initialReorderItems && initialReorderItems.length > 0) {
+      return initialReorderItems.map((item) => ({
+        id: `reorder-${item.productId}`,
+        productId: item.productId,
+        productName: item.productName,
+        quantity: String(item.suggestedQty || 1),
+        unitCost: item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00',
+        selectedUomId: null,
+        quantityOnHand: item.currentStock,
+        reorderLevel: item.reorderPoint,
+        reorderQuantity: item.suggestedQty,
+        costSource: item.costPrice ? 'Cost' : '',
+      }));
+    }
+    return [];
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const createPOMutation = useCreatePurchaseOrder();
@@ -692,9 +718,14 @@ export default function PurchaseOrdersPage() {
   const deletePOMutation = useDeletePurchaseOrder();
 
   // Auto-open create modal when navigated with state
+  const [pendingReorderItems, setPendingReorderItems] = useState<ReorderItemState[] | undefined>(undefined);
+
   useEffect(() => {
-    const state = location.state as { openCreate?: boolean } | null;
+    const state = location.state as { openCreate?: boolean; reorderItems?: ReorderItemState[] } | null;
     if (state?.openCreate) {
+      if (state.reorderItems && state.reorderItems.length > 0) {
+        setPendingReorderItems(state.reorderItems);
+      }
       setShowCreateModal(true);
       // Clear the state so refreshing doesn't re-open
       window.history.replaceState({}, '');
@@ -1404,7 +1435,11 @@ export default function PurchaseOrdersPage() {
 
       {/* Create PO Modal */}
       {showCreateModal && (
-        <CreatePOModal onClose={() => setShowCreateModal(false)} onSuccess={() => refetch()} />
+        <CreatePOModal
+          onClose={() => { setShowCreateModal(false); setPendingReorderItems(undefined); }}
+          onSuccess={() => { refetch(); setPendingReorderItems(undefined); }}
+          initialReorderItems={pendingReorderItems}
+        />
       )}
 
       {/* Details Modal */}

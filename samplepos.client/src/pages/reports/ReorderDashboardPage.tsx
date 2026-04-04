@@ -263,7 +263,17 @@ export default function ReorderDashboardPage() {
                         </span>
                         <button
                             onClick={() => {
-                                navigate('/inventory/purchase-orders', { state: { openCreate: true } });
+                                const selectedItems = tabItems
+                                    .filter((i) => selectedIds.has(i.productId))
+                                    .map((i) => ({
+                                        productId: i.productId,
+                                        productName: i.name,
+                                        suggestedQty: i.suggestedOrderQty,
+                                        costPrice: i.costPrice,
+                                        currentStock: i.currentStock,
+                                        reorderPoint: i.reorderPoint,
+                                    }));
+                                navigate('/inventory/purchase-orders', { state: { openCreate: true, reorderItems: selectedItems } });
                             }}
                             className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                         >
