@@ -118,6 +118,11 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
         isActive: true,
         genericName: "",
         minDaysBeforeExpirySale: "0",
+        preferredSupplierId: "",
+        supplierProductCode: "",
+        purchaseUomId: "",
+        leadTimeDays: "0",
+        reorderQuantity: "0",
       });
       setShowCreateProductModal(false);
     },
@@ -523,6 +528,11 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
                     isActive: true,
                     genericName: "",
                     minDaysBeforeExpirySale: "0",
+                    preferredSupplierId: "",
+                    supplierProductCode: "",
+                    purchaseUomId: "",
+                    leadTimeDays: "0",
+                    reorderQuantity: "0",
                   });
                 }}
               >

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { useSales, useSalesSummary, useSalesSummaryByDate } from '../hooks/useApi';
+import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
 import Decimal from 'decimal.js';
@@ -319,6 +319,12 @@ export default function SalesPage() {
     endDate: endDate ? endDate : undefined,
   });
 
+  // Fetch server-side cashier performance (correct totals, not limited by pagination)
+  const { data: cashierData } = useSalesByCashier({
+    startDate: startDate ? startDate : undefined,
+    endDate: endDate ? endDate : undefined,
+  });
+
   // Extract data from API responses
   // useSales now returns { data: [...], pagination: {...} }
   const sales = salesData?.data || [];
@@ -484,10 +490,33 @@ export default function SalesPage() {
     );
   }, [filteredSales]);
 
-  // Group sales by user
+  // Group sales by user — use SERVER-SIDE aggregation for accurate totals
+  // (client-side grouping from paginated data gives wrong totals)
   const salesByUser = useMemo(() => {
-    const grouped = new Map<string, UserGroup>();
+    const serverRows = Array.isArray(cashierData) ? cashierData : [];
 
+    // Build a map of paginated sales by cashier for the expandable detail view
+    const salesByCashierId = new Map<string, SaleRow[]>();
+    filteredSales.forEach((sale) => {
+      const uid = sale.cashierId || sale.soldById || 'UNKNOWN';
+      if (!salesByCashierId.has(uid)) salesByCashierId.set(uid, []);
+      salesByCashierId.get(uid)!.push(sale);
+    });
+
+    if (serverRows.length > 0) {
+      // Use server-side totals (accurate across all pages)
+      return serverRows.map((row: Record<string, unknown>) => ({
+        userId: String(row.user_id || ''),
+        userName: String(row.cashier_name || 'Unknown User'),
+        salesCount: Number(row.total_transactions || 0),
+        totalAmount: new Decimal(Number(row.total_revenue || 0)),
+        totalProfit: new Decimal(Number(row.total_profit || 0)),
+        sales: salesByCashierId.get(String(row.user_id || '')) || [],
+      })).sort((a: UserGroup, b: UserGroup) => b.salesCount - a.salesCount);
+    }
+
+    // Fallback: client-side grouping if server data not yet loaded
+    const grouped = new Map<string, UserGroup>();
     filteredSales.forEach((sale) => {
       const userId = sale.cashierId || sale.soldById || 'UNKNOWN';
       const userName = sale.cashierName || sale.soldByName || 'Unknown User';
@@ -511,7 +540,7 @@ export default function SalesPage() {
     });
 
     return Array.from(grouped.values()).sort((a, b) => b.salesCount - a.salesCount);
-  }, [filteredSales]);
+  }, [filteredSales, cashierData]);
 
   // Get credit/invoice sales
   const creditSales = useMemo(() => {

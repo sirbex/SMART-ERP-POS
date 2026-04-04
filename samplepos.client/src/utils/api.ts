@@ -338,6 +338,8 @@ export const api = {
       startDate?: string;
       endDate?: string;
     }) => apiClient.get<ApiResponse>('sales/reports/summary-by-date', { params }),
+    byCashier: (params?: { startDate?: string; endDate?: string }) =>
+      apiClient.get<ApiResponse>('sales/reports/by-cashier', { params }),
   },
 
   // Invoices

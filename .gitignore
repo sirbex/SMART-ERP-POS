@@ -42,3 +42,4 @@ dist-ssr
 *.sw?
 obj/
 bin/
+test_gl.sh

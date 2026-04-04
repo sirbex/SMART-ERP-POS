@@ -437,6 +437,11 @@ export default function ProductsPage() {
       isActive: formData.isActive,
       genericName: formData.genericName,
       minDaysBeforeExpirySale: formData.minDaysBeforeExpirySale,
+      preferredSupplierId: formData.preferredSupplierId,
+      supplierProductCode: formData.supplierProductCode,
+      purchaseUomId: formData.purchaseUomId,
+      leadTimeDays: formData.leadTimeDays,
+      reorderQuantity: formData.reorderQuantity,
     });
 
     const errors: Record<string, string> = { ...(z.valid ? {} : z.errors) };
@@ -498,11 +503,11 @@ export default function ProductsPage() {
       isActive: product.isActive ?? true,
       trackExpiry: product.trackExpiry ?? false,
       minDaysBeforeExpirySale: String(product.minDaysBeforeExpirySale ?? '0'),
-      preferredSupplierId: String((product as Record<string, unknown>).preferredSupplierId ?? ''),
-      supplierProductCode: String((product as Record<string, unknown>).supplierProductCode ?? ''),
-      purchaseUomId: String((product as Record<string, unknown>).purchaseUomId ?? ''),
-      leadTimeDays: String((product as Record<string, unknown>).leadTimeDays ?? '0'),
-      reorderQuantity: String((product as Record<string, unknown>).reorderQuantity ?? '0'),
+      preferredSupplierId: String(product.preferredSupplierId ?? ''),
+      supplierProductCode: String(product.supplierProductCode ?? ''),
+      purchaseUomId: String(product.purchaseUomId ?? ''),
+      leadTimeDays: String(product.leadTimeDays ?? '0'),
+      reorderQuantity: String(product.reorderQuantity ?? '0'),
     });
     setValidationErrors({});
     setShowModal(true);

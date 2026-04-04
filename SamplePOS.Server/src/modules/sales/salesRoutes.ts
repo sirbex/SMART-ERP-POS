@@ -396,6 +396,26 @@ export const salesController = {
   },
 
   /**
+   * Get sales grouped by cashier (server-side aggregation)
+   */
+  async getSalesByCashier(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { startDate, endDate } = SalesSummaryQuerySchema.parse(req.query);
+
+    const filters: { startDate?: string; endDate?: string; userId?: string } = {};
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    if (req.user?.role === 'CASHIER') filters.userId = req.user.id;
+
+    const result = await salesService.getSalesByCashier(pool, filters);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  },
+
+  /**
    * Void a sale (requires manager approval for high-value sales)
    * POST /api/sales/:id/void
    * Body: { reason: string, approvedById?: string }
@@ -526,6 +546,11 @@ salesRoutes.get(
   '/reports/summary-by-date',
   authenticate,
   asyncHandler(salesController.getSalesSummaryByDate)
+);
+salesRoutes.get(
+  '/reports/by-cashier',
+  authenticate,
+  asyncHandler(salesController.getSalesByCashier)
 );
 
 // Void sale - requires sales.void permission (with audit trail)

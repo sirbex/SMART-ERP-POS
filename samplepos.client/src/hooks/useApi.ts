@@ -47,6 +47,8 @@ export const queryKeys = {
       ['sales', 'reports', 'top-selling', limit, startDate, endDate] as const,
     summaryByDate: (groupBy?: string, startDate?: string, endDate?: string) =>
       ['sales', 'reports', 'summary-by-date', groupBy, startDate, endDate] as const,
+    byCashier: (startDate?: string, endDate?: string) =>
+      ['sales', 'reports', 'by-cashier', startDate, endDate] as const,
   },
   inventory: {
     stockLevels: ['inventory', 'stock-levels'] as const,
@@ -369,6 +371,15 @@ export function useSalesSummaryByDate(groupBy: 'day' | 'week' | 'month' = 'day',
     queryKeys.sales.summaryByDate(groupBy, startDate, endDate),
     () => api.sales.summaryByDate({ groupBy, startDate, endDate }),
     { staleTime: 60000 } // 1 minute
+  );
+}
+
+export function useSalesByCashier(filters?: { startDate?: string; endDate?: string }) {
+  const { startDate, endDate } = filters || {};
+  return useApiQuery(
+    queryKeys.sales.byCashier(startDate, endDate),
+    () => api.sales.byCashier({ startDate, endDate }),
+    { staleTime: 60000 }
   );
 }
 

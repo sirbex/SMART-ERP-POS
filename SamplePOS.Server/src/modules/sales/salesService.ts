@@ -1808,8 +1808,8 @@ export const salesService = {
   async getSalesByCashier(
     pool: Pool,
     filters?: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       userId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
