@@ -91,8 +91,8 @@ export async function authenticateUser(
     });
   }
 
-  // Check account lockout status
-  const lockoutStatus = await passwordPolicy.checkAccountLockout(user.id);
+  // Check account lockout status (must use tenant pool, not globalPool)
+  const lockoutStatus = await passwordPolicy.checkAccountLockout(user.id, pool);
   if (lockoutStatus.locked) {
     logger.warn('Login attempt for locked account', {
       email: validatedData.email,
@@ -115,8 +115,8 @@ export async function authenticateUser(
   // Verify password
   const isValidPassword = await bcrypt.compare(validatedData.password, user.passwordHash);
   if (!isValidPassword) {
-    // Record failed attempt
-    const failedStatus = await passwordPolicy.recordFailedLoginAttempt(user.id);
+    // Record failed attempt (must use tenant pool)
+    const failedStatus = await passwordPolicy.recordFailedLoginAttempt(user.id, pool);
 
     if (failedStatus.locked) {
       throw new LoginFailedError({
@@ -138,11 +138,11 @@ export async function authenticateUser(
     });
   }
 
-  // Successful login - reset failed attempts
-  await passwordPolicy.resetFailedLoginAttempts(user.id);
+  // Successful login - reset failed attempts (must use tenant pool)
+  await passwordPolicy.resetFailedLoginAttempts(user.id, pool);
 
   // Check password expiry
-  const expiryStatus = await passwordPolicy.getPasswordExpiryStatus(user.id);
+  const expiryStatus = await passwordPolicy.getPasswordExpiryStatus(user.id, pool);
 
   // Generate JWT token
   const token = generateToken(user);
