@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../../utils/currency';
+import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 
 // ── Types ──
 type ReorderPriority = 'URGENT' | 'HIGH' | 'MEDIUM' | 'DEAD_STOCK' | 'HEALTHY';
@@ -290,6 +291,7 @@ export default function ReorderDashboardPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
+            <ResponsiveTableWrapper>
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left text-gray-600 text-xs uppercase tracking-wider">
@@ -385,6 +387,7 @@ export default function ReorderDashboardPage() {
                 ))}
               </tbody>
             </table>
+            </ResponsiveTableWrapper>
           </div>
         )}
       </div>

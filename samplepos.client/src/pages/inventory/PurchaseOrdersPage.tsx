@@ -13,6 +13,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
+import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import Decimal from 'decimal.js';
 
 import { DatePicker } from '../../components/ui/date-picker';
@@ -155,7 +156,7 @@ function LineItemRow({
   let lineTotal = new Decimal(0);
   try {
     lineTotal = new Decimal(item.quantity || 0).times(new Decimal(item.unitCost || 0));
-  } catch { }
+  } catch { /* invalid decimal input */ }
 
   const needsReorder = item.quantityOnHand !== undefined &&
     item.reorderLevel !== undefined &&
@@ -284,7 +285,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
   }, []);
 
   // Tab handler: from cost field → back to product search
-  const handleTabFromRow = useCallback((_fromField: 'qty' | 'cost', _index: number) => {
+  const handleTabFromRow = useCallback(() => {
     focusSearch();
   }, [focusSearch]);
 
@@ -561,6 +562,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
           {/* Spreadsheet-style Line Items Table */}
           {lineItems.length > 0 ? (
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <ResponsiveTableWrapper>
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
@@ -596,6 +598,7 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
                   ))}
                 </tbody>
               </table>
+              </ResponsiveTableWrapper>
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
@@ -1192,6 +1195,7 @@ export default function PurchaseOrdersPage() {
 
         {/* Desktop Table View */}
         <div className="hidden sm:block overflow-x-auto">
+          <ResponsiveTableWrapper>
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -1320,6 +1324,7 @@ export default function PurchaseOrdersPage() {
               )}
             </tbody>
           </table>
+          </ResponsiveTableWrapper>
         </div>
       </div>
 
@@ -1473,6 +1478,7 @@ export default function PurchaseOrdersPage() {
               <div>
                 <h3 className="text-base font-semibold text-gray-900 mb-3">Line Items</h3>
                 <div className="border rounded-lg overflow-hidden">
+                  <ResponsiveTableWrapper>
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
@@ -1529,6 +1535,7 @@ export default function PurchaseOrdersPage() {
                       )}
                     </tbody>
                   </table>
+                  </ResponsiveTableWrapper>
                 </div>
               </div>
 

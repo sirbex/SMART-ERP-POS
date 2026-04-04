@@ -18,6 +18,7 @@ export interface CreateProductInput {
   costPrice: number | string;
   sellingPrice: number | string;
   costingMethod?: 'FIFO' | 'AVCO' | 'STANDARD';
+  isTaxable?: boolean;
   taxRate?: number | string;
   pricingFormula?: string | null;
   autoUpdatePrice?: boolean;

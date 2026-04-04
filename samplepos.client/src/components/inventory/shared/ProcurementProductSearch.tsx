@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/utils/api';
 import { formatCurrency } from '@/utils/currency';
@@ -82,7 +82,10 @@ export function ProcurementProductSearch({
     staleTime: 30000,
   });
 
-  const results: ProcurementProduct[] = searchResults || [];
+  const results = useMemo<ProcurementProduct[]>(
+    () => searchResults || [],
+    [searchResults]
+  );
 
   // Reset highlight when results change
   useEffect(() => {
