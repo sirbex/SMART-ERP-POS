@@ -26,7 +26,7 @@ import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { useProductWithUoms, findUom, getDefaultUom } from '../../hooks/useProductWithUoms';
-import { useStockLevelByProduct, inventoryKeys } from '../../hooks/useInventory';
+import { inventoryKeys } from '../../hooks/useInventory';
 // DatePicker removed — GR uses native date input for keyboard-driven receiving
 
 // Configure Decimal for financial calculations
@@ -178,15 +178,6 @@ interface GRItemUpdatePayload {
 interface GRDetailData {
   gr?: GRRow;
   items?: GRItemRow[];
-}
-
-interface StockLevelData {
-  totalQuantity?: number | string;
-  total_quantity?: number | string;
-  reorderLevel?: number | string;
-  reorder_level?: number | string;
-  needsReorder?: boolean;
-  needs_reorder?: boolean;
 }
 
 export default function GoodsReceiptsPage() {
@@ -513,20 +504,24 @@ export default function GoodsReceiptsPage() {
       // initialize edit state with current values
       const init: Record<string, EditItemState> = {};
       items.forEach((it: GRItemRow) => {
+        const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
+        const currentReceived = Number(it.receivedQuantity ?? it.received_quantity ?? 0);
+        // Problem 7: Auto-fill received = ordered for DRAFT GR from PO when not yet received
+        const shouldAutoFill = isFromPO && selectedGR?.status === 'DRAFT' && currentReceived === 0 && ordered > 0;
         init[it.id] = {
           batchNumber: it.batchNumber ?? it.batch_number ?? '',
           expiryDate:
             it.expiryDate || it.expiry_date
               ? new Date(String(it.expiryDate || it.expiry_date)).toISOString().slice(0, 10)
               : '',
-          receivedQuantity: Number(it.receivedQuantity ?? it.received_quantity ?? 0),
+          receivedQuantity: shouldAutoFill ? ordered : currentReceived,
           unitCost: Number(it.unitCost ?? it.unit_cost ?? 0),
           isBonus: !!(it.isBonus ?? it.is_bonus ?? false),
         };
       });
       setEditItems(init);
     }
-  }, [showDetailsModal, items]);
+  }, [showDetailsModal, items, isFromPO, selectedGR?.status]);
 
   const handleFinalize = async (id: string) => {
     // ── Part 4: Required field enforcement ──
@@ -729,42 +724,6 @@ export default function GoodsReceiptsPage() {
         [field]: value,
       } as EditItemState,
     }));
-  };
-
-  const saveItem = async (item: GRItemRow) => {
-    const id = item.id;
-    const current = editItems[id] || {};
-    const original = {
-      batchNumber: item.batchNumber ?? item.batch_number ?? '',
-      expiryDate:
-        item.expiryDate || item.expiry_date
-          ? new Date(String(item.expiryDate || item.expiry_date)).toISOString().slice(0, 10)
-          : '',
-      receivedQuantity: Number(item.receivedQuantity ?? item.received_quantity ?? 0),
-      unitCost: Number(item.unitCost ?? item.unit_cost ?? 0),
-    };
-
-    const payload: GRItemUpdatePayload = {};
-    if (current.batchNumber !== undefined && current.batchNumber !== original.batchNumber)
-      payload.batchNumber = current.batchNumber || null;
-    if (current.expiryDate !== undefined && current.expiryDate !== original.expiryDate)
-      payload.expiryDate = current.expiryDate || null;
-    if (
-      current.receivedQuantity !== undefined &&
-      current.receivedQuantity !== original.receivedQuantity
-    )
-      payload.receivedQuantity = Number(current.receivedQuantity);
-    if (current.unitCost !== undefined && current.unitCost !== original.unitCost)
-      payload.unitCost = Number(current.unitCost);
-    if (current.isBonus !== undefined) payload.isBonus = !!current.isBonus;
-
-    if (Object.keys(payload).length === 0) return; // nothing to save
-
-    try {
-      await updateItemMutation.mutateAsync({ grId: selectedGR!.id, itemId: id, data: payload });
-    } catch (e: unknown) {
-      handleApiError(e, { fallback: 'Failed to update item' });
-    }
   };
 
   const openCreateModal = () => {
@@ -1137,7 +1096,15 @@ export default function GoodsReceiptsPage() {
               {/* Items Table */}
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-lg font-semibold text-gray-900">Items</h4>
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900">Items</h4>
+                    {selectedGR.status === 'DRAFT' && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        <kbd className="px-1 py-0.5 bg-gray-100 border rounded text-[10px] font-mono">Enter</kbd> moves: Received → Batch → Expiry → next row
+                        {isFromPO && <span className="ml-2 text-green-600">● green = complete</span>}
+                      </p>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3">
                     {selectedGR.status === 'DRAFT' && isFromPO && (
                       <button
@@ -1162,25 +1129,19 @@ export default function GoodsReceiptsPage() {
                           Product
                         </th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          On Hand
-                        </th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           UoM
                         </th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Ordered
                         </th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Received
                         </th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Unit Cost
                         </th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Batch #
-                        </th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Expiry
+                          Batch # / Expiry
                         </th>
                         <th
                           className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider"
@@ -1189,20 +1150,14 @@ export default function GoodsReceiptsPage() {
                           Bonus
                         </th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Qty Var
-                        </th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Cost Var
-                        </th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
+                          Variance
                         </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {items.length === 0 ? (
                         <tr>
-                          <td className="px-4 py-6 text-center text-gray-500" colSpan={12}>
+                          <td className="px-4 py-6 text-center text-gray-500" colSpan={8}>
                             No items
                           </td>
                         </tr>
@@ -1215,8 +1170,6 @@ export default function GoodsReceiptsPage() {
                             selectedGR={selectedGR}
                             editState={editItems[it.id] || {}}
                             onFieldChange={handleItemFieldChange}
-                            onSave={saveItem}
-                            updatePending={updateItemMutation.isPending}
                             batchWarnings={batchWarnings}
                             validationTimeout={validationTimeout}
                             checkBatchDuplicate={checkBatchDuplicate}
@@ -1249,7 +1202,7 @@ export default function GoodsReceiptsPage() {
                     <div className="flex items-center justify-between bg-white rounded-md px-3 py-2 border">
                       <div>
                         <span className="text-xs text-slate-500">CR</span>
-                        <span className="ml-2 text-sm font-medium text-slate-900">GRNI / AP (2200)</span>
+                        <span className="ml-2 text-sm font-medium text-slate-900">Goods Received Not Invoiced (2200)</span>
                       </div>
                       <span className="text-sm font-bold text-red-700">{formatCurrency(accountingPreview)}</span>
                     </div>
@@ -1788,8 +1741,6 @@ function GRItemRow({
   selectedGR,
   editState,
   onFieldChange,
-  onSave,
-  updatePending,
   batchWarnings,
   validationTimeout,
   checkBatchDuplicate,
@@ -1806,8 +1757,6 @@ function GRItemRow({
     field: string,
     value: string | number | boolean | undefined
   ) => void;
-  onSave: (item: GRItemRow) => void;
-  updatePending: boolean;
   batchWarnings: Record<string, string>;
   validationTimeout: React.MutableRefObject<Record<string, NodeJS.Timeout>>;
   checkBatchDuplicate: (itemId: string, batchNumber: string) => Promise<void>;
@@ -1817,7 +1766,6 @@ function GRItemRow({
 }) {
   const es = editState || {};
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
-  // For DRAFT GRs, default received to ordered quantity if not set
   const baseReceived = Number(
     es.receivedQuantity ??
     item.receivedQuantity ??
@@ -1839,45 +1787,9 @@ function GRItemRow({
   const selectedUom = findUom(productWithUoms, selectedUomId || '');
   const factor = selectedUom ? new Decimal(selectedUom.conversionFactor).toNumber() : 1;
 
-  // Fetch current stock level for this product
-  const { data: stockLevelData, isLoading: stockLoading } = useStockLevelByProduct(productId ?? '');
-  const stockLevel = stockLevelData?.data as StockLevelData | undefined;
-  const onHandQty = Number(stockLevel?.totalQuantity ?? stockLevel?.total_quantity ?? 0);
-  const reorderLevel = Number(stockLevel?.reorderLevel ?? stockLevel?.reorder_level ?? 0);
-  const needsReorder = stockLevel?.needsReorder ?? stockLevel?.needs_reorder ?? false;
-
   const displayedOrdered = new Decimal(ordered || 0).div(factor).toNumber();
   const displayedReceived = new Decimal(baseReceived || 0).div(factor).toNumber();
   const displayedUnitCost = new Decimal(baseUnitCost || 0).mul(factor).toNumber();
-
-  // DEBUG: Log all relevant values
-  console.log('🔍 GR Debug:', {
-    productName: item.productName,
-    ordered,
-    baseReceived,
-    factor,
-    selectedUomId,
-    selectedUom: selectedUom?.uomSymbol,
-    conversionFactor: selectedUom?.conversionFactor,
-    displayedOrdered,
-    displayedReceived,
-    'es.receivedUomQty': es.receivedUomQty,
-    'es.receivedLooseQty': es.receivedLooseQty,
-    'es.receivedQuantity': es.receivedQuantity,
-  });
-
-  // DEBUG: Log variance calculation values
-  if (item.productName?.includes('SODA')) {
-    console.log('🔍 Variance Debug:', {
-      productName: item.productName,
-      ordered,
-      baseReceived,
-      factor,
-      displayedOrdered,
-      displayedReceived,
-      calculation: `(${baseReceived} - ${ordered}) / ${ordered} * 100`,
-    });
-  }
 
   // Calculate variance using BASE UNITS (not displayed UoM values)
   const qtyVariancePct =
@@ -1914,43 +1826,37 @@ function GRItemRow({
     today.setHours(0, 0, 0, 0);
     return d <= today ? 'Must be a future date' : null;
   })();
-  const hasErrors = !!(receivedError || unitCostError || expiryError);
+
+  // Line completeness indicator (Problem 6)
+  const hasBatch = !!(es.batchNumber ?? '').trim();
+  const hasExpiry = !!(es.expiryDate ?? '').trim();
+  const hasQty = baseReceived > 0;
+  const isComplete = hasBatch && hasExpiry && hasQty;
+  const isPartial = hasQty && (!hasBatch || !hasExpiry);
+  const rowBorderColor = disabled
+    ? ''
+    : isComplete
+      ? 'border-l-4 border-l-green-500 bg-green-50/30'
+      : isPartial
+        ? 'border-l-4 border-l-yellow-500 bg-yellow-50/30'
+        : 'border-l-4 border-l-red-300';
 
   return (
-    <tr className="hover:bg-gray-50">
-      <td className="px-4 py-2 text-sm text-gray-900">{item.productName || item.product_name}</td>
-      <td className="px-4 py-2 text-sm">
-        {stockLoading ? (
-          <span className="text-gray-400 text-xs">...</span>
-        ) : (
-          <div className="flex items-center gap-2">
-            <span
-              className={`px-2 py-1 rounded text-xs font-semibold ${needsReorder
-                ? 'bg-red-100 text-red-800'
-                : onHandQty > reorderLevel * 1.5
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-yellow-100 text-yellow-800'
-                }`}
-              title={`Reorder Level: ${reorderLevel}`}
-            >
-              {onHandQty.toFixed(4)}
-            </span>
-            {needsReorder && (
-              <span className="text-xs text-red-600" title="Below reorder level">
-                ⚠️
-              </span>
-            )}
-          </div>
-        )}
+    <tr className={`hover:bg-gray-50 ${rowBorderColor}`}>
+      {/* Product name */}
+      <td className="px-4 py-2 text-sm font-medium text-gray-900">
+        {item.productName || item.product_name}
+        {isComplete && !disabled && <span className="ml-1 text-green-600">✓</span>}
       </td>
+      {/* UoM */}
       <td className="px-4 py-2 text-sm">
         {uomsLoading ? (
-          <span className="text-gray-400">Loading…</span>
+          <span className="text-gray-400">…</span>
         ) : uomList.length === 0 ? (
           <span className="text-gray-400">—</span>
         ) : (
           <select
-            className="border rounded px-2 py-1"
+            className="border rounded px-2 py-1 text-sm"
             disabled={disabled || isFromPO}
             value={selectedUomId}
             onChange={(e) => onFieldChange(item.id, 'selectedUomId', e.target.value)}
@@ -1959,88 +1865,49 @@ function GRItemRow({
           >
             {uomList.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.uomSymbol || u.uomName} × {u.factor.toString()}
-                {u.isDefault ? ' • default' : ''}
+                {u.uomSymbol || u.uomName}
+                {u.isDefault ? ' •' : ''}
               </option>
             ))}
           </select>
         )}
       </td>
-      <td className="px-4 py-2 text-sm text-gray-700">{displayedOrdered}</td>
+      {/* Ordered */}
+      <td className="px-4 py-2 text-sm text-center text-gray-700 font-medium">{displayedOrdered}</td>
+      {/* Received — single input (Problem 3) */}
       <td className="px-4 py-2 text-sm">
-        {/* Dual Input: UoM Quantity + Base Units */}
-        <div className="flex items-center gap-2">
-          <div className="flex flex-col">
-            <input
-              type="number"
-              min={0}
-              className={`w-20 border rounded px-2 py-1 ${receivedError ? 'border-red-500' : ''}`}
-              value={
-                es.receivedUomQty !== undefined
-                  ? es.receivedUomQty
-                  : factor > 1
-                    ? Math.floor(baseReceived / factor)
-                    : baseReceived
-              }
-              disabled={disabled}
-              placeholder="0"
-              aria-label={`Received ${selectedUom?.uomSymbol || 'units'} for ${item.productName || item.product_name}`}
-              title={`Number of ${selectedUom?.uomSymbol || 'UoM units'}`}
-              onChange={(e) => {
-                const uomQty = e.target.value === '' ? 0 : Number(e.target.value);
-                const looseQty = es.receivedLooseQty ?? 0;
-                const totalBase = new Decimal(uomQty).mul(factor).plus(looseQty).toNumber();
-                onFieldChange(item.id, 'receivedUomQty', uomQty);
-                onFieldChange(item.id, 'receivedQuantity', totalBase);
-              }}
-            />
-            <span className="text-xs text-gray-500 mt-0.5">{selectedUom?.uomSymbol || 'UoM'}</span>
-          </div>
-
-          <span className="text-gray-400">+</span>
-
-          <div className="flex flex-col">
-            <input
-              type="number"
-              min={0}
-              max={factor > 1 ? factor - 1 : undefined}
-              className={`w-20 border rounded px-2 py-1 ${receivedError ? 'border-red-500' : ''}`}
-              value={
-                es.receivedLooseQty !== undefined
-                  ? es.receivedLooseQty
-                  : factor > 1
-                    ? baseReceived % factor
-                    : 0
-              }
-              disabled={disabled}
-              placeholder="0"
-              aria-label={`Loose base units for ${item.productName || item.product_name}`}
-              title="Loose base units"
-              onChange={(e) => {
-                const looseQty = e.target.value === '' ? 0 : Number(e.target.value);
-                const uomQty =
-                  es.receivedUomQty ?? (factor > 1 ? Math.floor(baseReceived / factor) : 0);
-                const totalBase = new Decimal(uomQty).mul(factor).plus(looseQty).toNumber();
-                onFieldChange(item.id, 'receivedLooseQty', looseQty);
-                onFieldChange(item.id, 'receivedQuantity', totalBase);
-              }}
-            />
-            <span className="text-xs text-gray-500 mt-0.5">base</span>
-          </div>
-
-          <div className="text-xs text-gray-600 ml-1">= {Number(baseReceived || 0).toFixed(4)}</div>
-        </div>
-        {receivedError && <div className="text-xs text-red-600 mt-1">{receivedError}</div>}
+        <input
+          type="number"
+          min={0}
+          data-gr-received-idx={itemIndex}
+          className={`w-20 border rounded px-2 py-1 text-center font-medium ${receivedError ? 'border-red-500 bg-red-50' : 'focus:ring-2 focus:ring-blue-400 focus:border-blue-400'}`}
+          value={displayedReceived}
+          disabled={disabled}
+          aria-label={`Received quantity for ${item.productName || item.product_name}`}
+          onChange={(e) => {
+            const uomQty = e.target.value === '' ? 0 : Number(e.target.value);
+            const totalBase = new Decimal(uomQty).mul(factor).toNumber();
+            onFieldChange(item.id, 'receivedQuantity', totalBase);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const batchInput = document.querySelector(`[data-gr-batch-idx="${itemIndex}"]`) as HTMLInputElement;
+              batchInput?.focus();
+            }
+          }}
+          autoFocus={itemIndex === 0 && !disabled}
+        />
+        {receivedError && <div className="text-xs text-red-600 mt-0.5">{receivedError}</div>}
       </td>
+      {/* Unit Cost */}
       <td className="px-4 py-2 text-sm">
         {isFromPO ? (
           <div>
             <div className="text-sm font-medium text-gray-900">
               {formatCurrency(displayedUnitCost)}
             </div>
-            <div className="text-xs text-blue-600 mt-0.5">
-              PO Agreed Price
-            </div>
+            <div className="text-xs text-blue-600 mt-0.5">PO Agreed</div>
           </div>
         ) : (
           <>
@@ -2048,11 +1915,10 @@ function GRItemRow({
               type="number"
               min={0}
               step="0.01"
-              className={`w-32 border rounded px-2 py-1 ${unitCostError ? 'border-red-500' : ''}`}
+              className={`w-28 border rounded px-2 py-1 ${unitCostError ? 'border-red-500' : ''}`}
               value={Number.isFinite(displayedUnitCost) ? displayedUnitCost : ''}
               disabled={disabled}
               aria-label={`Unit cost for ${item.productName || item.product_name}`}
-              title="Unit cost"
               onChange={(e) => {
                 const v = e.target.value === '' ? undefined : Number(e.target.value);
                 if (v === undefined) {
@@ -2067,59 +1933,63 @@ function GRItemRow({
           </>
         )}
       </td>
+      {/* Batch + Expiry — horizontal same cell (Problem 5) */}
       <td className="px-4 py-2 text-sm">
-        <input
-          type="text"
-          data-gr-batch-idx={itemIndex}
-          className={`w-40 border rounded px-2 py-1 ${batchWarnings[item.id] ? 'border-red-500' : ''}`}
-          value={es.batchNumber ?? ''}
-          disabled={disabled}
-          onChange={(e) => {
-            const value = e.target.value;
-            onFieldChange(item.id, 'batchNumber', value);
-            // Debounce validation to avoid too many API calls
-            if (validationTimeout.current[item.id]) {
-              clearTimeout(validationTimeout.current[item.id]);
-            }
-            validationTimeout.current[item.id] = setTimeout(() => {
-              checkBatchDuplicate(item.id, value);
-            }, 500);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              const expiryInput = document.querySelector(`[data-gr-expiry-idx="${itemIndex}"]`) as HTMLInputElement;
-              expiryInput?.focus();
-            }
-          }}
-          placeholder="Enter batch number"
-          autoFocus={itemIndex === 0 && !disabled}
-        />
-        {batchWarnings[item.id] && (
-          <div className="text-xs text-red-600 mt-1">{batchWarnings[item.id]}</div>
-        )}
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <input
+              type="text"
+              data-gr-batch-idx={itemIndex}
+              className={`w-full border rounded px-2 py-1 text-sm ${batchWarnings[item.id] ? 'border-red-500' : 'focus:ring-2 focus:ring-blue-400 focus:border-blue-400'}`}
+              value={es.batchNumber ?? ''}
+              disabled={disabled}
+              onChange={(e) => {
+                const value = e.target.value;
+                onFieldChange(item.id, 'batchNumber', value);
+                if (validationTimeout.current[item.id]) {
+                  clearTimeout(validationTimeout.current[item.id]);
+                }
+                validationTimeout.current[item.id] = setTimeout(() => {
+                  checkBatchDuplicate(item.id, value);
+                }, 500);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const expiryInput = document.querySelector(`[data-gr-expiry-idx="${itemIndex}"]`) as HTMLInputElement;
+                  expiryInput?.focus();
+                }
+              }}
+              placeholder="Batch #"
+            />
+            {batchWarnings[item.id] && (
+              <div className="text-xs text-red-600 mt-0.5 truncate max-w-[120px]" title={batchWarnings[item.id]}>{batchWarnings[item.id]}</div>
+            )}
+          </div>
+          <div className="flex-1">
+            <input
+              type="date"
+              data-gr-expiry-idx={itemIndex}
+              className={`w-full border rounded px-2 py-1 text-sm ${expiryError ? 'border-red-500' : 'focus:ring-2 focus:ring-blue-400 focus:border-blue-400'}`}
+              value={es.expiryDate ?? ''}
+              disabled={disabled}
+              min={new Date().toISOString().split('T')[0]}
+              onChange={(e) => onFieldChange(item.id, 'expiryDate', e.target.value || undefined)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (itemIndex + 1 < totalItems) {
+                    const nextReceived = document.querySelector(`[data-gr-received-idx="${itemIndex + 1}"]`) as HTMLInputElement;
+                    nextReceived?.focus();
+                  }
+                }
+              }}
+            />
+            {expiryError && <div className="text-xs text-red-600 mt-0.5">{expiryError}</div>}
+          </div>
+        </div>
       </td>
-      <td className="px-4 py-2 text-sm">
-        <input
-          type="date"
-          data-gr-expiry-idx={itemIndex}
-          className={`w-36 border rounded px-2 py-1 text-sm ${expiryError ? 'border-red-500' : ''}`}
-          value={es.expiryDate ?? ''}
-          disabled={disabled}
-          min={new Date().toISOString().split('T')[0]}
-          onChange={(e) => onFieldChange(item.id, 'expiryDate', e.target.value || undefined)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              if (itemIndex + 1 < totalItems) {
-                const nextBatch = document.querySelector(`[data-gr-batch-idx="${itemIndex + 1}"]`) as HTMLInputElement;
-                nextBatch?.focus();
-              }
-            }
-          }}
-        />
-        {expiryError && <div className="text-xs text-red-600 mt-1">{expiryError}</div>}
-      </td>
+      {/* Bonus */}
       <td className="px-4 py-2 text-sm text-center">
         <label
           className="inline-flex items-center gap-1 cursor-pointer"
@@ -2138,46 +2008,26 @@ function GRItemRow({
           )}
         </label>
       </td>
+      {/* Combined Variance column */}
       <td className="px-4 py-2 text-sm">
-        {displayedOrdered > 0 ? (
-          <span
-            className={`px-2 py-1 rounded text-xs font-semibold ${qtyVariancePct > 0 ? 'bg-yellow-100 text-yellow-800' : qtyVariancePct < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}
-          >
-            {qtyVariancePct > 0 ? '+' : ''}
-            {qtyVariancePct.toFixed(2)}%
-          </span>
-        ) : (
-          <span className="text-gray-400">-</span>
-        )}
-      </td>
-      <td className="px-4 py-2 text-sm">
-        {costVarPct === null ? (
-          <span className="text-gray-400">-</span>
-        ) : (
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-1">
+          {displayedOrdered > 0 && (
             <span
-              className={`px-2 py-1 rounded text-xs font-semibold ${costVarPct > 0 ? 'bg-red-100 text-red-800' : costVarPct < 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}
+              className={`inline-block px-1.5 py-0.5 rounded text-xs font-semibold ${qtyVariancePct > 0 ? 'bg-yellow-100 text-yellow-800' : qtyVariancePct < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}
+              title="Quantity variance"
             >
-              {costVarAbs !== null ? `${costVarAbs > 0 ? '+' : '-'}` : ''}
-              {costVarAbs !== null ? formatCurrency(Math.abs(costVarAbs)) : ''}
-              {` (${costVarPct > 0 ? '+' : ''}${costVarPct.toFixed(2)}%)`}
+              Qty {qtyVariancePct > 0 ? '+' : ''}{qtyVariancePct.toFixed(1)}%
             </span>
-            <span className="text-xs text-gray-500">
-              vs {baseline === 'PO' ? 'PO agreed price' : 'Product current cost'}{' '}
-              {base ? `(${formatCurrency(new Decimal(base).mul(factor).toNumber())})` : ''}
+          )}
+          {costVarPct !== null && (
+            <span
+              className={`inline-block px-1.5 py-0.5 rounded text-xs font-semibold ${costVarPct > 0 ? 'bg-red-100 text-red-800' : costVarPct < 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}
+              title={`Cost variance vs ${baseline === 'PO' ? 'PO' : 'product'}: ${costVarAbs !== null ? formatCurrency(Math.abs(costVarAbs)) : ''}`}
+            >
+              Cost {costVarPct > 0 ? '+' : ''}{costVarPct.toFixed(1)}%
             </span>
-          </div>
-        )}
-      </td>
-      <td className="px-4 py-2 text-sm">
-        <button
-          disabled={disabled || updatePending || hasErrors}
-          onClick={() => onSave(item)}
-          className={`px-3 py-1 rounded ${disabled ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-          title={disabled ? 'Cannot edit finalized GR' : 'Save changes'}
-        >
-          Save
-        </button>
+          )}
+        </div>
       </td>
     </tr>
   );
