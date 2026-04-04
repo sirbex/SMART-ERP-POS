@@ -2303,7 +2303,7 @@ export const reportsRepository = {
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         WHERE s.sale_date >= CURRENT_DATE - 30
-          AND s.status != 'CANCELLED'
+          AND s.status = 'COMPLETED'
         GROUP BY si.product_id
       ),
       supplier_info AS (
