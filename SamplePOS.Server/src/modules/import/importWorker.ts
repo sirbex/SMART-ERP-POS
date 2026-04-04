@@ -285,7 +285,8 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
             duplicateStrategy,
             jobId,
             pendingErrors,
-            dbPool
+            dbPool,
+            payload.userId
           );
           progress.rowsProcessed += chunkBuffer.length;
           progress.rowsImported += result.inserted;
@@ -359,7 +360,8 @@ export async function processImportJob(payload: ImportJobPayload): Promise<void>
         duplicateStrategy,
         jobId,
         pendingErrors,
-        dbPool
+        dbPool,
+        payload.userId
       );
       progress.rowsProcessed += chunkBuffer.length;
       progress.rowsImported += result.inserted;
@@ -480,7 +482,8 @@ async function flushChunk(
   duplicateStrategy: DuplicateStrategy,
   jobId: string,
   pendingErrors: PendingError[],
-  dbPool: pg.Pool
+  dbPool: pg.Pool,
+  userId?: string
 ): Promise<ChunkResult> {
   let failedCount = 0;
 
@@ -559,7 +562,7 @@ async function flushChunk(
         const grnResult = await goodsReceiptService.createOpeningBalanceGRN(
           dbPool,
           inventoryItems,
-          jobId, // userId placeholder — import job is system-level
+          userId || jobId, // Use authenticated userId; fall back to jobId only if unavailable
           duplicateStrategy
         );
         glWarnings = grnResult.warnings.length;
