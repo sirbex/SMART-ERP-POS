@@ -202,6 +202,7 @@ export default function GoodsReceiptsPage() {
   const [returnReason, setReturnReason] = useState('');
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [receiveAllFlash, setReceiveAllFlash] = useState('');
 
   const limit = 20;
 
@@ -471,9 +472,13 @@ export default function GoodsReceiptsPage() {
 
   // Receive All Remaining: set every line's receivedQuantity = orderedQuantity
   const handleReceiveAllRemaining = () => {
+    if (items.length === 0) return;
+    let changed = 0;
     const updates = { ...editItems };
     items.forEach((it: GRItemRow) => {
       const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
+      const current = Number(updates[it.id]?.receivedQuantity ?? 0);
+      if (current !== ordered) changed++;
       updates[it.id] = {
         ...(updates[it.id] || {}),
         receivedQuantity: ordered,
@@ -482,6 +487,11 @@ export default function GoodsReceiptsPage() {
       };
     });
     setEditItems(updates);
+    const msg = changed > 0
+      ? `✓ ${changed} line${changed > 1 ? 's' : ''} set to ordered qty`
+      : '✓ All lines already at ordered qty';
+    setReceiveAllFlash(msg);
+    setTimeout(() => setReceiveAllFlash(''), 2500);
   };
 
   // Accounting preview: live DR Inventory (1300) / CR GRNI (2200) totals
@@ -1104,14 +1114,20 @@ export default function GoodsReceiptsPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     {selectedGR.status === 'DRAFT' && isFromPO && (
-                      <button
-                        onClick={handleReceiveAllRemaining}
-                        className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium flex items-center gap-1.5"
-                        title="Set all lines to ordered quantity"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Receive All Remaining
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleReceiveAllRemaining}
+                          disabled={items.length === 0}
+                          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium flex items-center gap-1.5"
+                          title="Set all lines to ordered quantity"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          Receive All Remaining
+                        </button>
+                        {receiveAllFlash && (
+                          <span className="text-xs font-medium text-green-600 animate-pulse">{receiveAllFlash}</span>
+                        )}
+                      </div>
                     )}
                     {detailsQuery.isLoading && (
                       <span className="text-sm text-gray-500">Loading items…</span>
