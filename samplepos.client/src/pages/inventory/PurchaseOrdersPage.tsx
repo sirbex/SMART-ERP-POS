@@ -563,41 +563,41 @@ function CreatePOModal({ onClose, onSuccess }: CreatePOModalProps) {
           {lineItems.length > 0 ? (
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <ResponsiveTableWrapper>
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      Product
-                    </th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">
-                      Qty
-                    </th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
-                      Unit Cost
-                    </th>
-                    <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
-                      Line Total
-                    </th>
-                    <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12">
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {lineItems.map((item, idx) => (
-                    <LineItemRow
-                      key={item.id}
-                      item={item}
-                      index={idx}
-                      onUpdate={updateLineItem}
-                      onRemove={removeLineItem}
-                      disabled={isSubmitting}
-                      onQtyRef={(el) => { if (el) qtyRefs.current.set(idx, el); else qtyRefs.current.delete(idx); }}
-                      onCostRef={(el) => { if (el) costRefs.current.set(idx, el); else costRefs.current.delete(idx); }}
-                      onTab={handleTabFromRow}
-                    />
-                  ))}
-                </tbody>
-              </table>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Product
+                      </th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">
+                        Qty
+                      </th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
+                        Unit Cost
+                      </th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
+                        Line Total
+                      </th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12">
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {lineItems.map((item, idx) => (
+                      <LineItemRow
+                        key={item.id}
+                        item={item}
+                        index={idx}
+                        onUpdate={updateLineItem}
+                        onRemove={removeLineItem}
+                        disabled={isSubmitting}
+                        onQtyRef={(el) => { if (el) qtyRefs.current.set(idx, el); else qtyRefs.current.delete(idx); }}
+                        onCostRef={(el) => { if (el) costRefs.current.set(idx, el); else costRefs.current.delete(idx); }}
+                        onTab={handleTabFromRow}
+                      />
+                    ))}
+                  </tbody>
+                </table>
               </ResponsiveTableWrapper>
             </div>
           ) : (
@@ -1196,134 +1196,134 @@ export default function PurchaseOrdersPage() {
         {/* Desktop Table View */}
         <div className="hidden sm:block overflow-x-auto">
           <ResponsiveTableWrapper>
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  PO Number
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Supplier
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Order Date
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Expected Delivery
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total Amount
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {purchaseOrders.length === 0 ? (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    {selectedStatus !== 'ALL' || selectedSupplier
-                      ? 'No purchase orders match your filters'
-                      : 'No purchase orders yet. Create your first PO to get started!'}
-                  </td>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    PO Number
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Supplier
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Order Date
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Expected Delivery
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total Amount
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
-              ) : (
-                purchaseOrders.map((po: PORow) => {
-                  const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
-                  const totalAmount = new Decimal(po.totalAmount || 0);
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {purchaseOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                      {selectedStatus !== 'ALL' || selectedSupplier
+                        ? 'No purchase orders match your filters'
+                        : 'No purchase orders yet. Create your first PO to get started!'}
+                    </td>
+                  </tr>
+                ) : (
+                  purchaseOrders.map((po: PORow) => {
+                    const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
+                    const totalAmount = new Decimal(po.totalAmount || 0);
 
-                  return (
-                    <tr key={po.id} className="hover:bg-gray-50">
-                      {/* PO Number */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-blue-600">{po.poNumber}</div>
-                      </td>
+                    return (
+                      <tr key={po.id} className="hover:bg-gray-50">
+                        {/* PO Number */}
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-blue-600">{po.poNumber}</div>
+                        </td>
 
-                      {/* Supplier */}
-                      <td className="px-4 py-4">
-                        <div className="text-sm text-gray-900">{po.supplierName}</div>
-                        {po.supplierContact && (
-                          <div className="text-xs text-gray-500">{po.supplierContact}</div>
-                        )}
-                      </td>
-
-                      {/* Order Date */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{formatDate(po.orderDate)}</div>
-                      </td>
-
-                      {/* Expected Delivery */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {formatDate(po.expectedDelivery)}
-                        </div>
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}
-                        >
-                          {statusConfig.icon} {statusConfig.label}
-                        </span>
-                      </td>
-
-                      {/* Total Amount */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-medium text-gray-900">
-                          {formatCurrency(totalAmount.toNumber())}
-                        </div>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end gap-2">
-                          {po.status === 'DRAFT' && (
-                            <>
-                              <button
-                                onClick={() => handleSubmitPO(po.id)}
-                                className="text-blue-600 hover:text-blue-900"
-                                title="Submit PO & Send to Receiving"
-                              >
-                                📤
-                              </button>
-                              <button
-                                onClick={() => handleDeletePO(po.id)}
-                                className="text-red-600 hover:text-red-900"
-                                title="Delete"
-                              >
-                                🗑️
-                              </button>
-                            </>
+                        {/* Supplier */}
+                        <td className="px-4 py-4">
+                          <div className="text-sm text-gray-900">{po.supplierName}</div>
+                          {po.supplierContact && (
+                            <div className="text-xs text-gray-500">{po.supplierContact}</div>
                           )}
-                          {(po.status === 'PENDING' || po.status === 'APPROVED') && (
-                            <button
-                              onClick={() => handleCancelPO(po.id)}
-                              className="text-orange-600 hover:text-orange-900"
-                              title="Cancel PO"
-                            >
-                              ❌
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleViewDetails(po)}
-                            className="text-gray-600 hover:text-gray-900"
-                            title="View Details"
+                        </td>
+
+                        {/* Order Date */}
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{formatDate(po.orderDate)}</div>
+                        </td>
+
+                        {/* Expected Delivery */}
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {formatDate(po.expectedDelivery)}
+                          </div>
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}
                           >
-                            👁️
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                            {statusConfig.icon} {statusConfig.label}
+                          </span>
+                        </td>
+
+                        {/* Total Amount */}
+                        <td className="px-4 py-4 whitespace-nowrap text-right">
+                          <div className="text-sm font-medium text-gray-900">
+                            {formatCurrency(totalAmount.toNumber())}
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="flex justify-end gap-2">
+                            {po.status === 'DRAFT' && (
+                              <>
+                                <button
+                                  onClick={() => handleSubmitPO(po.id)}
+                                  className="text-blue-600 hover:text-blue-900"
+                                  title="Submit PO & Send to Receiving"
+                                >
+                                  📤
+                                </button>
+                                <button
+                                  onClick={() => handleDeletePO(po.id)}
+                                  className="text-red-600 hover:text-red-900"
+                                  title="Delete"
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            )}
+                            {(po.status === 'PENDING' || po.status === 'APPROVED') && (
+                              <button
+                                onClick={() => handleCancelPO(po.id)}
+                                className="text-orange-600 hover:text-orange-900"
+                                title="Cancel PO"
+                              >
+                                ❌
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleViewDetails(po)}
+                              className="text-gray-600 hover:text-gray-900"
+                              title="View Details"
+                            >
+                              👁️
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </ResponsiveTableWrapper>
         </div>
       </div>
@@ -1479,62 +1479,62 @@ export default function PurchaseOrdersPage() {
                 <h3 className="text-base font-semibold text-gray-900 mb-3">Line Items</h3>
                 <div className="border rounded-lg overflow-hidden">
                   <ResponsiveTableWrapper>
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Product
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Quantity
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          UOM
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Unit Cost
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Total
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {selectedPO.items && selectedPO.items.length > 0 ? (
-                        selectedPO.items.map((item: POItemRow, index: number) => {
-                          const quantity = new Decimal(item.quantity || 0);
-                          const unitCost = new Decimal(item.unitCost || 0);
-                          const total = quantity.times(unitCost);
-
-                          return (
-                            <tr key={index}>
-                              <td className="px-4 py-3 text-sm text-gray-900">
-                                {item.productName}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                                {quantity.toString()}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
-                                {item.uomName || item.uom_name || 'Base UoM'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                                {formatCurrency(unitCost.toNumber())}
-                              </td>
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 text-right">
-                                {formatCurrency(total.toNumber())}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
                         <tr>
-                          <td colSpan={5} className="px-4 py-3 text-sm text-gray-500 text-center">
-                            No line items
-                          </td>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Product
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                            Quantity
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            UOM
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                            Unit Cost
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                            Total
+                          </th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {selectedPO.items && selectedPO.items.length > 0 ? (
+                          selectedPO.items.map((item: POItemRow, index: number) => {
+                            const quantity = new Decimal(item.quantity || 0);
+                            const unitCost = new Decimal(item.unitCost || 0);
+                            const total = quantity.times(unitCost);
+
+                            return (
+                              <tr key={index}>
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  {item.productName}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right">
+                                  {quantity.toString()}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">
+                                  {item.uomName || item.uom_name || 'Base UoM'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right">
+                                  {formatCurrency(unitCost.toNumber())}
+                                </td>
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900 text-right">
+                                  {formatCurrency(total.toNumber())}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-3 text-sm text-gray-500 text-center">
+                              No line items
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </ResponsiveTableWrapper>
                 </div>
               </div>

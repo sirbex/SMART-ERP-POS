@@ -2309,6 +2309,7 @@ export const reportsRepository = {
       supplier_info AS (
         SELECT DISTINCT ON (gri.product_id)
           gri.product_id,
+          s."Id"                               AS supplier_id,
           s."CompanyName"                      AS supplier_name,
           COALESCE(s.lead_time_days, 7)        AS lead_time_days
         FROM goods_receipt_items gri
@@ -2326,6 +2327,7 @@ export const reportsRepository = {
         pb.cost_price,
         pb.reorder_level,
         COALESCE(s30.units_sold, 0) AS units_sold_30d,
+        si.supplier_id,
         si.supplier_name,
         COALESCE(si.lead_time_days, 7) AS lead_time_days
       FROM product_base pb
@@ -2404,6 +2406,7 @@ export const reportsRepository = {
         safetyStock,
         costPrice: costPrice > 0 ? costPrice : null,
         preferredSupplier: row.supplier_name ?? null,
+        preferredSupplierId: row.supplier_id ?? null,
       };
     });
   },

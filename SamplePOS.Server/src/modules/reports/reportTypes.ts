@@ -592,6 +592,7 @@ export interface ReorderDashboardItem {
     safetyStock: number;
     costPrice: number | null;
     preferredSupplier: string | null;
+    preferredSupplierId: string | null;
 }
 
 export interface ReorderDashboardSummary {
