@@ -16,6 +16,7 @@ import Decimal from 'decimal.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import * as costLayerService from '../../services/costLayerService.js';
 import logger from '../../utils/logger.js';
 
 export type StockMovementType =
@@ -145,12 +146,46 @@ export class StockMovementHandler {
         ]
       );
 
-      // Step 10: Update product quantity_on_hand (aggregate from batches)
+      // Step 10: Sync cost_layers to match batch/GL changes
+      // ADJUSTMENT_IN → create a new cost layer
+      // ADJUSTMENT_OUT/DAMAGE/EXPIRY → consume cost layers FIFO
+      if (GL_MOVEMENT_TYPES.has(params.movementType)) {
+        const absQty = Math.abs(quantityChange);
+        if (isInbound) {
+          // Create a cost layer for the incoming stock
+          await costLayerService.createCostLayer(
+            {
+              productId: params.productId,
+              quantity: absQty,
+              unitCost: unitCost,
+              batchNumber: batch.batch_number || undefined,
+            },
+            undefined,
+            client
+          );
+          logger.info('Cost layer created for stock adjustment', {
+            productId: params.productId,
+            quantity: absQty,
+            unitCost,
+            movementType: params.movementType,
+          });
+        } else {
+          // Consume cost layers FIFO for outbound adjustments
+          await this.consumeCostLayersFIFO(client, params.productId, absQty);
+          logger.info('Cost layers consumed for stock adjustment', {
+            productId: params.productId,
+            quantity: absQty,
+            movementType: params.movementType,
+          });
+        }
+      }
+
+      // Step 11: Update product quantity_on_hand (aggregate from batches)
       await this.updateProductQuantity(client, params.productId);
 
       await client.query('COMMIT');
 
-      // Step 11: Post GL journal entry for adjustment/damage/expiry movements
+      // Step 12: Post GL journal entry for adjustment/damage/expiry movements
       // Done AFTER commit so inventory state is persisted first (same pattern as GRN).
       // GL failure is fatal — consistency with sales/GR error handling.
       if (GL_MOVEMENT_TYPES.has(params.movementType)) {
@@ -362,6 +397,58 @@ export class StockMovementHandler {
     );
 
     return result.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+  }
+
+  /**
+   * Consume cost layers in FIFO order for outbound stock adjustments.
+   * Decrements remaining_quantity and deactivates fully depleted layers.
+   * Tolerates insufficient layers (logs warning, consumes what exists).
+   */
+  private async consumeCostLayersFIFO(
+    client: PoolClient,
+    productId: string,
+    quantity: number
+  ): Promise<void> {
+    const result = await client.query(
+      `SELECT id, remaining_quantity, unit_cost
+       FROM cost_layers
+       WHERE product_id = $1 AND is_active = TRUE AND remaining_quantity > 0
+       ORDER BY received_date ASC, created_at ASC
+       FOR UPDATE`,
+      [productId]
+    );
+
+    let remaining = new Decimal(quantity);
+
+    for (const layer of result.rows) {
+      if (remaining.lte(0)) break;
+
+      const available = new Decimal(layer.remaining_quantity);
+      const consume = Decimal.min(remaining, available);
+      const newQty = available.minus(consume);
+
+      await client.query(
+        `UPDATE cost_layers
+         SET remaining_quantity = $1,
+             is_active = CASE WHEN $1 <= 0 THEN false ELSE is_active END,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [newQty.toFixed(4), layer.id]
+      );
+
+      remaining = remaining.minus(consume);
+    }
+
+    if (remaining.gt(0)) {
+      logger.warn('Insufficient cost layers for FIFO consumption (stock adjustment)', {
+        productId,
+        requested: quantity,
+        shortfall: remaining.toNumber(),
+      });
+    }
+
+    // Recalculate average cost after consumption
+    await costLayerService.updateAverageCost(productId, client);
   }
 
   /**
