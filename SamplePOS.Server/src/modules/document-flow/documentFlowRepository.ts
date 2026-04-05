@@ -123,30 +123,42 @@ export async function getFullGraph(
   entityType: EntityType,
   entityId: string,
 ): Promise<Array<{ entity_type: string; entity_id: string; relation_type: string; direction: string }>> {
+  // PostgreSQL recursive CTEs allow only ONE recursive term after UNION ALL.
+  // We combine both traversal directions (children + parents) via a single
+  // UNION ALL that joins against an "edges" CTE containing both directions.
   const result = await conn.query(
-    `WITH RECURSIVE graph AS (
+    `WITH RECURSIVE
+     edges AS (
+       -- forward edges (parent → child)
+       SELECT from_entity_type AS src_type, from_entity_id AS src_id,
+              to_entity_type   AS dst_type, to_entity_id   AS dst_id,
+              relation_type, 'child'::text AS direction
+       FROM document_flow
+       UNION ALL
+       -- reverse edges (child → parent)
+       SELECT to_entity_type, to_entity_id,
+              from_entity_type, from_entity_id,
+              relation_type, 'parent'::text
+       FROM document_flow
+     ),
+     graph AS (
        -- seed: the starting document itself
        SELECT $1::text AS entity_type,
-              $2::uuid  AS entity_id,
+              $2::uuid AS entity_id,
               NULL::text AS relation_type,
               'root'::text AS direction,
               0 AS depth
-       UNION
-       -- walk children (from → to)
-       SELECT df.to_entity_type, df.to_entity_id, df.relation_type, 'child', g.depth + 1
-       FROM document_flow df
-       JOIN graph g ON g.entity_type = df.from_entity_type AND g.entity_id = df.from_entity_id
-       WHERE g.depth < 15
-       UNION
-       -- walk parents  (to → from)
-       SELECT df.from_entity_type, df.from_entity_id, df.relation_type, 'parent', g.depth + 1
-       FROM document_flow df
-       JOIN graph g ON g.entity_type = df.to_entity_type AND g.entity_id = df.to_entity_id
+       UNION ALL
+       -- walk all edges (both directions) in a single recursive term
+       SELECT e.dst_type, e.dst_id, e.relation_type, e.direction, g.depth + 1
+       FROM edges e
+       JOIN graph g ON g.entity_type = e.src_type AND g.entity_id = e.src_id
        WHERE g.depth < 15
      )
-     SELECT DISTINCT entity_type, entity_id::text, relation_type, direction
+     SELECT DISTINCT ON (entity_type, entity_id)
+            entity_type, entity_id::text, relation_type, direction
      FROM graph
-     ORDER BY entity_type`,
+     ORDER BY entity_type, entity_id`,
     [entityType, entityId],
   );
   return result.rows;
