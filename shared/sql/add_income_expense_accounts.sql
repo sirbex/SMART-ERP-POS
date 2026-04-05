@@ -51,7 +51,7 @@ INSERT INTO accounts ("Id", "AccountCode", "AccountName", "AccountType", "Normal
 VALUES 
   (gen_random_uuid(), '3100', 'Retained Earnings', 'EQUITY', 'CREDIT', NULL, 1, true, true),
   (gen_random_uuid(), '3200', 'Owner Capital', 'EQUITY', 'CREDIT', NULL, 1, true, true),
-  (gen_random_uuid(), '3300', 'Owner Draws', 'EQUITY', 'DEBIT', NULL, 1, true, true)
+  (gen_random_uuid(), '3300', 'Owner Drawings', 'EQUITY', 'DEBIT', NULL, 1, true, true)
 ON CONFLICT ("AccountCode") DO NOTHING;
 
 -- Verify the accounts were added

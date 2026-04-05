@@ -1,6 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool as globalPool } from '../db/pool.js';
-import logger from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
 // Types

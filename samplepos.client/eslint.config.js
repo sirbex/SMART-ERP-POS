@@ -28,7 +28,7 @@ export default defineConfig([
       'no-restricted-syntax': [
         'warn',
         {
-          selector: "JSXOpeningElement[name.name='table']:not(:has(JSXOpeningElement[name.name='ResponsiveTableWrapper']))",
+          selector: ":not(JSXElement[openingElement.name.name='ResponsiveTableWrapper']) > JSXElement[openingElement.name.name='table']",
           message: 'Wrap <table> in <ResponsiveTableWrapper> for mobile scroll support.',
         },
       ],

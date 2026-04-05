@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import Decimal from 'decimal.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, CheckCircle, X } from 'lucide-react';
+import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, CheckCircle, X, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 import { ResponsiveTableWrapper } from '../components/ui/ResponsiveTableWrapper';
@@ -267,6 +267,43 @@ export default function JournalEntriesPage() {
         });
     };
 
+    // Preset templates for common journal entries
+    const applyPreset = (preset: 'capital-investment' | 'owner-withdrawal') => {
+        const accountList = accounts as Account[];
+        const cashOrBank = accountList.find(a => a.accountNumber === '1010') || accountList.find(a => a.accountNumber === '1020');
+        const ownerCapital = accountList.find(a => a.accountNumber === '3200');
+        const ownerDrawings = accountList.find(a => a.accountNumber === '3300');
+
+        if (preset === 'capital-investment') {
+            if (!cashOrBank || !ownerCapital) {
+                setError('Required accounts not found (Cash/Bank 1010 or Owner Capital 3200). Check Chart of Accounts.');
+                return;
+            }
+            setForm(prev => ({
+                ...prev,
+                description: 'Capital investment by owner',
+                lines: [
+                    { accountId: cashOrBank.id, debitAmount: 0, creditAmount: 0, description: 'Capital received' },
+                    { accountId: ownerCapital.id, debitAmount: 0, creditAmount: 0, description: 'Owner capital contribution' }
+                ]
+            }));
+        } else {
+            if (!cashOrBank || !ownerDrawings) {
+                setError('Required accounts not found (Cash/Bank 1010 or Owner Drawings 3300). Check Chart of Accounts.');
+                return;
+            }
+            setForm(prev => ({
+                ...prev,
+                description: 'Owner withdrawal / drawings',
+                lines: [
+                    { accountId: ownerDrawings.id, debitAmount: 0, creditAmount: 0, description: 'Owner drawings' },
+                    { accountId: cashOrBank.id, debitAmount: 0, creditAmount: 0, description: 'Cash paid out' }
+                ]
+            }));
+        }
+        setError(null);
+    };
+
     const addLine = () => {
         setForm(prev => ({
             ...prev,
@@ -491,6 +528,29 @@ export default function JournalEntriesPage() {
                                     <span>{error}</span>
                                 </div>
                             )}
+
+                            {/* Quick Presets */}
+                            <div className="mb-5 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Quick Presets</p>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => applyPreset('capital-investment')}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
+                                    >
+                                        <ArrowDownLeft className="h-3.5 w-3.5" />
+                                        Capital Investment
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => applyPreset('owner-withdrawal')}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+                                    >
+                                        <ArrowUpRight className="h-3.5 w-3.5" />
+                                        Owner Withdrawal
+                                    </button>
+                                </div>
+                            </div>
 
                             {/* Header Fields */}
                             <div className="grid grid-cols-3 gap-4 mb-6">
