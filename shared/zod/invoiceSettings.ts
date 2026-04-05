@@ -49,6 +49,7 @@ export const InvoiceSettingsSchema = z.object({
   showCompanyLogo: z.boolean().default(false),
   showTaxBreakdown: z.boolean().default(true),
   showPaymentInstructions: z.boolean().default(true),
+  showPricesOnDnPdf: z.boolean().default(true),
 
   // Payment Accounts
   paymentAccounts: z.array(PaymentAccountSchema).default([]),
@@ -98,6 +99,7 @@ export const UpdateInvoiceSettingsSchema = z.object({
   showCompanyLogo: z.boolean().optional(),
   showTaxBreakdown: z.boolean().optional(),
   showPaymentInstructions: z.boolean().optional(),
+  showPricesOnDnPdf: z.boolean().optional(),
 
   paymentAccounts: z.array(PaymentAccountSchema).optional(),
 
