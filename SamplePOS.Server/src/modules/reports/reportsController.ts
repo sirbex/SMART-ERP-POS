@@ -3296,7 +3296,24 @@ export const reportsController = {
         },
       ];
 
-      pdfGen.addTable(columns, result);
+      // Normalize snake_case DB rows to camelCase for PDF table columns
+      const normalizedRows = result.map((row: Record<string, unknown>) => {
+        const revenue = Number(row.total_revenue) || 0;
+        const cost = Number(row.total_cost) || 0;
+        const profit = Number(row.total_profit) || 0;
+        const margin = revenue > 0 ? new Decimal(profit).dividedBy(revenue).times(100).toDecimalPlaces(1).toNumber() : 0;
+        return {
+          period: row.period,
+          transactionCount: parseInt(String(row.transaction_count ?? '0'), 10),
+          totalRevenue: revenue,
+          totalCost: cost,
+          totalProfit: profit,
+          profitMarginPercentage: margin,
+          avgTransactionValue: Number(row.avg_transaction_value) || 0,
+        };
+      });
+
+      pdfGen.addTable(columns, normalizedRows);
       pdfGen.end();
       return;
     }
