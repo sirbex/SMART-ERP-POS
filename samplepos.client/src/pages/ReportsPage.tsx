@@ -41,7 +41,7 @@
 // - Readable IDs (*Number): INDIGO
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
@@ -826,6 +826,28 @@ export default function ReportsPage() {
   const [noteSide, setNoteSide] = useState<string>('');
   const [noteDocumentType, setNoteDocumentType] = useState<string>('');
 
+  // Category filter for inventory valuation
+  const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+
+  // Fetch categories when inventory valuation is selected
+  useEffect(() => {
+    if (selectedReport === 'INVENTORY_VALUATION') {
+      setCategoriesLoading(true);
+      const token = localStorage.getItem('auth_token');
+      api.get('/reports/product-categories', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(res => {
+          const cats = res.data?.data;
+          if (Array.isArray(cats)) setAvailableCategories(cats);
+        })
+        .catch(() => { /* categories are optional, silently fail */ })
+        .finally(() => setCategoriesLoading(false));
+    }
+  }, [selectedReport]);
+
   const selectedReportOption = REPORT_OPTIONS.find((r) => r.value === selectedReport);
 
   const handleGenerateReport = async () => {
@@ -862,6 +884,7 @@ export default function ReportsPage() {
       // Add specific filters based on report type
       if (selectedReport === 'INVENTORY_VALUATION') {
         params.valuationMethod = valuationMethod;
+        if (categoryFilter) params.categoryId = categoryFilter;
       } else if (selectedReport === 'SALES_REPORT' || selectedReport === 'PROFIT_LOSS') {
         params.groupBy = groupBy;
       } else if (selectedReport === 'EXPIRING_ITEMS') {
@@ -1003,6 +1026,7 @@ export default function ReportsPage() {
       // Add report-specific parameters
       if (selectedReport === 'INVENTORY_VALUATION' && valuationMethod) {
         params.append('valuation_method', valuationMethod);
+        if (categoryFilter) params.append('category_id', categoryFilter);
       } else if (selectedReport === 'SALES_SUMMARY_BY_DATE' && groupBy) {
         params.append('group_by', groupBy);
       } else if (selectedReport === 'PROFIT_LOSS' && groupBy) {
@@ -1150,6 +1174,30 @@ export default function ReportsPage() {
               <option value="FIFO">FIFO (First In First Out)</option>
               <option value="AVCO">AVCO (Average Cost)</option>
               <option value="LIFO">LIFO (Last In First Out)</option>
+            </select>
+          </div>
+        )}
+
+        {/* Category Filter */}
+        {selectedReportOption.supportsFilters.includes('category') && (
+          <div>
+            <label htmlFor="categoryFilter" className="block text-sm font-semibold text-gray-700 mb-2">
+              📂 Category
+            </label>
+            <select
+              id="categoryFilter"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              disabled={categoriesLoading}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white disabled:bg-gray-100"
+              aria-label="Product category"
+            >
+              <option value="">All Categories</option>
+              {availableCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
             </select>
           </div>
         )}

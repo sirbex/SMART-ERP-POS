@@ -309,7 +309,7 @@ export type ReportResponse = z.infer<typeof ReportResponseSchema>;
 
 export const InventoryValuationParamsSchema = z.object({
   as_of_date: z.string().optional(),
-  category_id: z.string().uuid().optional(),
+  category_id: z.string().optional(),
   valuation_method: z.enum(['FIFO', 'AVCO', 'LIFO']).default('FIFO'),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });

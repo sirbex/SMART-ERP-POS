@@ -97,6 +97,18 @@ export interface ReportRunRecord {
 
 export const reportsRepository = {
   /**
+   * Get distinct product categories for filter dropdowns
+   */
+  async getProductCategories(pool: Pool): Promise<string[]> {
+    const result = await pool.query(
+      `SELECT DISTINCT category FROM products
+       WHERE is_active = true AND category IS NOT NULL AND category != ''
+       ORDER BY category`
+    );
+    return result.rows.map((r: { category: string }) => r.category);
+  },
+
+  /**
    * Log a report run for audit trail
    * Uses report_runs table created by migration 009
    */

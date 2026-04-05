@@ -38,6 +38,10 @@ export function createReportsRouter(pool: Pool) {
 
   // Inventory Reports
   router.get(
+    '/product-categories',
+    asyncHandler(async (req, res) => reportsController.getProductCategories(req, res, p(req)))
+  );
+  router.get(
     '/inventory-valuation',
     requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getInventoryValuation(req, res, p(req)))

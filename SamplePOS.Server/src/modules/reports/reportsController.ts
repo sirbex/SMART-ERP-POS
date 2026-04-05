@@ -147,6 +147,15 @@ export const reportsController = {
   },
 
   /**
+   * Get distinct product categories for filter dropdowns
+   * GET /api/reports/product-categories
+   */
+  async getProductCategories(req: Request, res: Response, pool: Pool) {
+    const categories = await reportsRepository.getProductCategories(pool);
+    res.json({ success: true, data: categories });
+  },
+
+  /**
    * Generate Inventory Valuation Report
    * GET /api/reports/inventory-valuation
    */
