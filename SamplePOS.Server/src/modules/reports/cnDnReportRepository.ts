@@ -518,48 +518,41 @@ export async function getInvoiceAdjustments(
 }
 
 // ─── 8. Supplier Statement ─────────────────────────────────────────
+/**
+ * GL-driven opening balance for supplier statement.
+ * Reads from AP (2100) ledger entries tagged to this supplier.
+ * Balance = SUM(Credit) - SUM(Debit) on AP account before startDate.
+ * (Credit to AP = we owe more, Debit to AP = we paid / reduced)
+ */
 export async function getSupplierStatementOpeningBalance(
     pool: Pool,
     supplierId: string,
     beforeDate: string,
 ): Promise<number> {
     const result = await pool.query(
-        `WITH debits AS (
-       SELECT COALESCE(SUM(
-         CASE WHEN si.document_type IS NULL OR si.document_type = 'SUPPLIER_INVOICE' OR si.document_type = 'SUPPLIER_DEBIT_NOTE'
-              THEN si."TotalAmount" ELSE 0 END
-       ), 0) AS amt
-       FROM supplier_invoices si
-       WHERE si."SupplierId" = $1
-         AND si."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-         AND si.deleted_at IS NULL
-         AND si."InvoiceDate"::date < $2::date
-     ),
-     credits_payments AS (
-       SELECT COALESCE(SUM(sp."Amount"), 0) AS amt
-       FROM supplier_payments sp
-       WHERE sp."SupplierId" = $1
-         AND sp."Status" != 'CANCELLED'
-         AND sp.deleted_at IS NULL
-         AND sp."PaymentDate"::date < $2::date
-     ),
-     credits_scn AS (
-       SELECT COALESCE(SUM(si."TotalAmount"), 0) AS amt
-       FROM supplier_invoices si
-       WHERE si."SupplierId" = $1
-         AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
-         AND si."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-         AND si.deleted_at IS NULL
-         AND si."InvoiceDate"::date < $2::date
-     )
-     SELECT (d.amt - cp.amt - cs.amt) AS opening
-     FROM debits d, credits_payments cp, credits_scn cs`,
+        `SELECT COALESCE(
+           SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0
+         ) AS opening
+         FROM ledger_entries le
+         JOIN accounts a ON le."AccountId" = a."Id"
+         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+         WHERE a."AccountCode" = '2100'
+           AND le."EntityId" = $1
+           AND le."EntityType" = 'supplier'
+           AND lt."Status" = 'POSTED'
+           AND le."EntryDate"::date < $2::date`,
         [supplierId, beforeDate],
     );
 
     return toNum(result.rows[0]?.opening);
 }
 
+/**
+ * GL-driven supplier statement entries.
+ * Reads from AP (2100) ledger entries tagged to this supplier.
+ * - Credit to AP → "debit" column (liability increased: GR, debit note)
+ * - Debit to AP  → "credit" column (liability reduced: payment, credit note)
+ */
 export async function getSupplierStatementEntries(
     pool: Pool,
     supplierId: string,
@@ -567,69 +560,23 @@ export async function getSupplierStatementEntries(
     endDate: string,
 ): Promise<SupplierStatementEntry[]> {
     const result = await pool.query(
-        `(
-       SELECT
-         si."InvoiceDate" AS date,
-         'SUPPLIER_INVOICE' AS type,
-         si."SupplierInvoiceNumber" AS reference,
-         CONCAT('Supplier Invoice ', si."SupplierInvoiceNumber") AS description,
-         si."TotalAmount" AS debit,
-         0::numeric AS credit
-       FROM supplier_invoices si
-       WHERE si."SupplierId" = $1
-         AND (si.document_type IS NULL OR si.document_type = 'SUPPLIER_INVOICE')
-         AND si."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-         AND si.deleted_at IS NULL
-         AND si."InvoiceDate"::date >= $2::date AND si."InvoiceDate"::date <= $3::date
-     )
-     UNION ALL
-     (
-       SELECT
-         si."InvoiceDate" AS date,
-         'SUPPLIER_CREDIT_NOTE' AS type,
-         si."SupplierInvoiceNumber" AS reference,
-         CONCAT('Supplier Credit Note ', si."SupplierInvoiceNumber", ' - ', COALESCE(si.reason, '')) AS description,
-         0::numeric AS debit,
-         si."TotalAmount" AS credit
-       FROM supplier_invoices si
-       WHERE si."SupplierId" = $1
-         AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
-         AND si."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-         AND si.deleted_at IS NULL
-         AND si."InvoiceDate"::date >= $2::date AND si."InvoiceDate"::date <= $3::date
-     )
-     UNION ALL
-     (
-       SELECT
-         si."InvoiceDate" AS date,
-         'SUPPLIER_DEBIT_NOTE' AS type,
-         si."SupplierInvoiceNumber" AS reference,
-         CONCAT('Supplier Debit Note ', si."SupplierInvoiceNumber", ' - ', COALESCE(si.reason, '')) AS description,
-         si."TotalAmount" AS debit,
-         0::numeric AS credit
-       FROM supplier_invoices si
-       WHERE si."SupplierId" = $1
-         AND si.document_type = 'SUPPLIER_DEBIT_NOTE'
-         AND si."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-         AND si.deleted_at IS NULL
-         AND si."InvoiceDate"::date >= $2::date AND si."InvoiceDate"::date <= $3::date
-     )
-     UNION ALL
-     (
-       SELECT
-         sp."PaymentDate" AS date,
-         'PAYMENT' AS type,
-         sp."PaymentNumber" AS reference,
-         CONCAT('Payment ', sp."PaymentNumber") AS description,
-         0::numeric AS debit,
-         sp."Amount" AS credit
-       FROM supplier_payments sp
-       WHERE sp."SupplierId" = $1
-         AND sp."Status" != 'CANCELLED'
-         AND sp.deleted_at IS NULL
-         AND sp."PaymentDate"::date >= $2::date AND sp."PaymentDate"::date <= $3::date
-     )
-     ORDER BY date ASC`,
+        `SELECT
+           le."EntryDate"::date AS date,
+           lt."ReferenceType" AS type,
+           COALESCE(lt."ReferenceNumber", '') AS reference,
+           COALESCE(le."Description", lt."Description", '') AS description,
+           le."CreditAmount" AS debit,
+           le."DebitAmount" AS credit
+         FROM ledger_entries le
+         JOIN accounts a ON le."AccountId" = a."Id"
+         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+         WHERE a."AccountCode" = '2100'
+           AND le."EntityId" = $1
+           AND le."EntityType" = 'supplier'
+           AND lt."Status" = 'POSTED'
+           AND le."EntryDate"::date >= $2::date
+           AND le."EntryDate"::date <= $3::date
+         ORDER BY le."EntryDate" ASC, le."CreatedAt" ASC`,
         [supplierId, startDate, endDate],
     );
 
@@ -643,39 +590,55 @@ export async function getSupplierStatementEntries(
     }));
 }
 
-// ─── 9. Supplier Aging (Aged Payables) ─────────────────────────────
-// Uses OutstandingBalance which already includes SCN/SDN adjustments.
+// ─── 9. Supplier Aging (Aged Payables) — GL-driven ─────────────────
+// Reads AP (2100) ledger entries per supplier.
+// Net balance per transaction = Credit - Debit on AP.
+// Ages outstanding transactions by their entry date against asOfDate.
+// Only includes transactions with net positive balance (still owed).
 export async function getSupplierAging(
     pool: Pool,
     asOfDate: string,
 ): Promise<SupplierAgingRow[]> {
     const result = await pool.query(
-        `WITH supplier_invs AS (
+        `WITH ap_transactions AS (
        SELECT
-         s."Id" AS supplier_id,
+         le."EntityId" AS supplier_id,
+         lt."Id" AS txn_id,
+         le."EntryDate"::date AS entry_date,
+         SUM(le."CreditAmount") - SUM(le."DebitAmount") AS net_amount
+       FROM ledger_entries le
+       JOIN accounts a ON le."AccountId" = a."Id"
+       JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+       WHERE a."AccountCode" = '2100'
+         AND le."EntityType" = 'supplier'
+         AND le."EntityId" IS NOT NULL
+         AND lt."Status" = 'POSTED'
+         AND le."EntryDate"::date <= $1::date
+       GROUP BY le."EntityId", lt."Id", le."EntryDate"::date
+       HAVING SUM(le."CreditAmount") - SUM(le."DebitAmount") > 0
+     ),
+     with_supplier AS (
+       SELECT
+         apt.supplier_id,
          s."CompanyName" AS supplier_name,
-         si."Id" AS invoice_id,
-         COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) AS outstanding_balance,
-         ($1::date - si."DueDate"::date) AS days_overdue
-       FROM suppliers s
-       INNER JOIN supplier_invoices si ON si."SupplierId" = s."Id"
-       WHERE (si.document_type IS NULL OR si.document_type = 'SUPPLIER_INVOICE')
-         AND COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) > 0
-         AND si."Status" NOT IN ('Cancelled', 'CANCELLED', 'PAID', 'Paid')
-         AND si.deleted_at IS NULL
+         apt.txn_id,
+         apt.net_amount,
+         ($1::date - apt.entry_date) AS days_overdue
+       FROM ap_transactions apt
+       JOIN suppliers s ON s."Id" = apt.supplier_id::uuid
      )
      SELECT
        supplier_id,
        supplier_name,
-       COUNT(invoice_id) AS total_invoices,
-       SUM(outstanding_balance) AS total_outstanding,
-       SUM(CASE WHEN days_overdue <= 0 THEN outstanding_balance ELSE 0 END) AS current_amount,
-       SUM(CASE WHEN days_overdue > 0 AND days_overdue <= 30 THEN outstanding_balance ELSE 0 END) AS days_1_30,
-       SUM(CASE WHEN days_overdue > 30 AND days_overdue <= 60 THEN outstanding_balance ELSE 0 END) AS days_31_60,
-       SUM(CASE WHEN days_overdue > 60 AND days_overdue <= 90 THEN outstanding_balance ELSE 0 END) AS days_61_90,
-       SUM(CASE WHEN days_overdue > 90 THEN outstanding_balance ELSE 0 END) AS days_over_90,
+       COUNT(txn_id) AS total_invoices,
+       SUM(net_amount) AS total_outstanding,
+       SUM(CASE WHEN days_overdue <= 0 THEN net_amount ELSE 0 END) AS current_amount,
+       SUM(CASE WHEN days_overdue > 0 AND days_overdue <= 30 THEN net_amount ELSE 0 END) AS days_1_30,
+       SUM(CASE WHEN days_overdue > 30 AND days_overdue <= 60 THEN net_amount ELSE 0 END) AS days_31_60,
+       SUM(CASE WHEN days_overdue > 60 AND days_overdue <= 90 THEN net_amount ELSE 0 END) AS days_61_90,
+       SUM(CASE WHEN days_overdue > 90 THEN net_amount ELSE 0 END) AS days_over_90,
        MAX(days_overdue) AS max_days_overdue
-     FROM supplier_invs
+     FROM with_supplier
      GROUP BY supplier_id, supplier_name
      ORDER BY total_outstanding DESC`,
         [asOfDate],
