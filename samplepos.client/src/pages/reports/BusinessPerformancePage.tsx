@@ -83,12 +83,26 @@ const PAYMENT_METHODS = [
   { value: 'CARD', label: 'Card' },
 ];
 
+const SECTION_OPTIONS = [
+  { value: 'ALL', label: 'All Sections' },
+  { value: 'MONEY_IN', label: '1 — Money In' },
+  { value: 'REVENUE', label: '2 — Revenue by Category' },
+  { value: 'COST_STOCK', label: '3 — Cost & Stock Impact' },
+  { value: 'EXPENSES', label: '4 — Expenses by Account' },
+  { value: 'NET_POSITION', label: '5 — Net Business Position' },
+];
+
+type SectionKey = 'ALL' | 'MONEY_IN' | 'REVENUE' | 'COST_STOCK' | 'EXPENSES' | 'NET_POSITION';
+
 const BusinessPerformancePage: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [includeStockAdj, setIncludeStockAdj] = useState(true);
   const [includeExpenses, setIncludeExpenses] = useState(true);
+  const [visibleSection, setVisibleSection] = useState<SectionKey>('ALL');
+
+  const showSection = (key: SectionKey) => visibleSection === 'ALL' || visibleSection === key;
 
   const { data, isLoading, error } = useBusinessPerformance({
     startDate,
@@ -174,6 +188,22 @@ const BusinessPerformancePage: React.FC = () => {
           <div className="flex flex-wrap gap-4 items-end">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
+                Section
+              </label>
+              <select
+                value={visibleSection}
+                onChange={(e) => setVisibleSection(e.target.value as SectionKey)}
+                className="border rounded-md px-3 py-1.5 text-sm bg-white"
+              >
+                {SECTION_OPTIONS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
                 Payment Method
               </label>
               <select
@@ -244,6 +274,7 @@ const BusinessPerformancePage: React.FC = () => {
             </div>
 
             {/* ── Section 1: Money In ── */}
+            {showSection('MONEY_IN') && (
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
                 <div className="flex items-center gap-2">
@@ -319,7 +350,10 @@ const BusinessPerformancePage: React.FC = () => {
               </div>
             </div>
 
+            )}
+
             {/* ── Section 2: Revenue by Product Category ── */}
+            {showSection('REVENUE') && (
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
                 <div className="flex items-center gap-2">
@@ -439,7 +473,10 @@ const BusinessPerformancePage: React.FC = () => {
               </div>
             </div>
 
+            )}
+
             {/* ── Section 3: Cost & Stock Impact ── */}
+            {showSection('COST_STOCK') && (
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
                 <div className="flex items-center gap-2">
@@ -515,8 +552,10 @@ const BusinessPerformancePage: React.FC = () => {
               </div>
             </div>
 
+            )}
+
             {/* ── Section 4: Expenses by GL Account ── */}
-            {includeExpenses && (
+            {includeExpenses && showSection('EXPENSES') && (
               <div className="bg-white rounded-lg border shadow-sm">
                 <div className="px-6 py-4 border-b">
                   <div className="flex items-center gap-2">
@@ -604,6 +643,7 @@ const BusinessPerformancePage: React.FC = () => {
             )}
 
             {/* ── Section 5: Net Business Position (Income Statement) ── */}
+            {showSection('NET_POSITION') && (
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
                 <div className="flex items-center gap-2">
@@ -705,6 +745,7 @@ const BusinessPerformancePage: React.FC = () => {
                 </ResponsiveTableWrapper>
               </div>
             </div>
+            )}
           </>
         )}
       </div>
