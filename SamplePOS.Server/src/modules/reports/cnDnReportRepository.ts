@@ -43,10 +43,10 @@ export async function getSalesReturnsReport(
         `WITH monthly_sales AS (
        SELECT
          to_char(lt."TransactionDate", 'YYYY-MM') AS period,
-         COALESCE(SUM(jel."CreditAmount"), 0) AS total_sales
+         COALESCE(SUM(le."CreditAmount"), 0) AS total_sales
        FROM ledger_transactions lt
-       JOIN journal_entry_lines jel ON jel."TransactionId" = lt."Id"::text
-       JOIN accounts a ON a."Id" = jel."AccountId"
+       JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+       JOIN accounts a ON a."Id" = le."AccountId"
        WHERE a."AccountCode" = '4000'
          AND lt."Status" = 'POSTED'
          AND lt."IsReversed" = false
@@ -57,11 +57,11 @@ export async function getSalesReturnsReport(
      monthly_returns AS (
        SELECT
          to_char(lt."TransactionDate", 'YYYY-MM') AS period,
-         COALESCE(SUM(jel."DebitAmount"), 0) AS sales_returns,
+         COALESCE(SUM(le."DebitAmount"), 0) AS sales_returns,
          COUNT(DISTINCT lt."Id") AS cn_count
        FROM ledger_transactions lt
-       JOIN journal_entry_lines jel ON jel."TransactionId" = lt."Id"::text
-       JOIN accounts a ON a."Id" = jel."AccountId"
+       JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+       JOIN accounts a ON a."Id" = le."AccountId"
        WHERE a."AccountCode" = '4010'
          AND lt."Status" = 'POSTED'
          AND lt."IsReversed" = false
@@ -100,10 +100,10 @@ export async function getPurchaseReturnsReport(
         `WITH monthly_purchases AS (
        SELECT
          to_char(lt."TransactionDate", 'YYYY-MM') AS period,
-         COALESCE(SUM(jel."DebitAmount"), 0) AS total_purchases
+         COALESCE(SUM(le."DebitAmount"), 0) AS total_purchases
        FROM ledger_transactions lt
-       JOIN journal_entry_lines jel ON jel."TransactionId" = lt."Id"::text
-       JOIN accounts a ON a."Id" = jel."AccountId"
+       JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+       JOIN accounts a ON a."Id" = le."AccountId"
        WHERE a."AccountCode" = '5000'
          AND lt."Status" = 'POSTED'
          AND lt."IsReversed" = false
@@ -114,11 +114,11 @@ export async function getPurchaseReturnsReport(
      monthly_returns AS (
        SELECT
          to_char(lt."TransactionDate", 'YYYY-MM') AS period,
-         COALESCE(SUM(jel."CreditAmount"), 0) AS purchase_returns,
+         COALESCE(SUM(le."CreditAmount"), 0) AS purchase_returns,
          COUNT(DISTINCT lt."Id") AS scn_count
        FROM ledger_transactions lt
-       JOIN journal_entry_lines jel ON jel."TransactionId" = lt."Id"::text
-       JOIN accounts a ON a."Id" = jel."AccountId"
+       JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+       JOIN accounts a ON a."Id" = le."AccountId"
        WHERE a."AccountCode" = '5010'
          AND lt."Status" = 'POSTED'
          AND lt."IsReversed" = false
@@ -158,7 +158,7 @@ export async function getArLedger(
     let customerFilter = '';
     if (customerId) {
         params.push(customerId);
-        customerFilter = `AND jel."EntityId" = $${params.length}`;
+        customerFilter = `AND le."EntityId" = $${params.length}`;
     }
 
     const result = await pool.query(
@@ -167,12 +167,12 @@ export async function getArLedger(
        lt."TransactionNumber" AS transaction_number,
        lt."ReferenceType" AS reference_type,
        lt."ReferenceNumber" AS reference_number,
-       lt."Description" AS description,
-       jel."DebitAmount" AS debit,
-       jel."CreditAmount" AS credit
+       COALESCE(le."Description", lt."Description") AS description,
+       le."DebitAmount" AS debit,
+       le."CreditAmount" AS credit
      FROM ledger_transactions lt
-     JOIN journal_entry_lines jel ON jel."TransactionId" = lt."Id"::text
-     JOIN accounts a ON a."Id" = jel."AccountId"
+     JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+     JOIN accounts a ON a."Id" = le."AccountId"
      WHERE a."AccountCode" = '1200'
        AND lt."Status" = 'POSTED'
        AND lt."IsReversed" = false
@@ -205,7 +205,7 @@ export async function getApLedger(
     let supplierFilter = '';
     if (supplierId) {
         params.push(supplierId);
-        supplierFilter = `AND jel."EntityId" = $${params.length}`;
+        supplierFilter = `AND le."EntityId" = $${params.length}`;
     }
 
     const result = await pool.query(
@@ -214,12 +214,12 @@ export async function getApLedger(
        lt."TransactionNumber" AS transaction_number,
        lt."ReferenceType" AS reference_type,
        lt."ReferenceNumber" AS reference_number,
-       lt."Description" AS description,
-       jel."DebitAmount" AS debit,
-       jel."CreditAmount" AS credit
+       COALESCE(le."Description", lt."Description") AS description,
+       le."DebitAmount" AS debit,
+       le."CreditAmount" AS credit
      FROM ledger_transactions lt
-     JOIN journal_entry_lines jel ON jel."TransactionId" = lt."Id"::text
-     JOIN accounts a ON a."Id" = jel."AccountId"
+     JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+     JOIN accounts a ON a."Id" = le."AccountId"
      WHERE a."AccountCode" = '2100'
        AND lt."Status" = 'POSTED'
        AND lt."IsReversed" = false

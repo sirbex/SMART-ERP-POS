@@ -1593,33 +1593,17 @@ export const reportsRepository = {
   ): Promise<SupplierPaymentStatusRow[]> {
     const params: unknown[] = [];
     const supplierFilters: string[] = [];
-    const invoiceFilters: string[] = ['deleted_at IS NULL'];
 
     if (options.supplierId) {
       params.push(options.supplierId);
       supplierFilters.push(`s."Id" = $${params.length}`);
     }
 
-    if (options.status) {
-      // Map report filter status to supplier_invoices status values
-      const statusMap: Record<string, string[]> = {
-        PAID: ['Paid'],
-        PARTIAL: ['PartiallyPaid'],
-        PENDING: ['Unpaid', 'Overdue'],
-      };
-      const invoiceStatuses = statusMap[options.status] || [options.status];
-      params.push(invoiceStatuses);
-      invoiceFilters.push(`"Status" = ANY($${params.length})`);
-    }
-
     const supplierWhereClause =
       supplierFilters.length > 0 ? `WHERE ${supplierFilters.join(' AND ')}` : '';
-    const invoiceWhereClause =
-      invoiceFilters.length > 0 ? `WHERE ${invoiceFilters.join(' AND ')}` : '';
 
-    // Use supplier_invoices as the source of truth for billing/payment amounts.
-    // purchase_orders.paid_amount is NOT synced when supplier_payments are recorded;
-    // supplier_invoices tracks AmountPaid/OutstandingBalance accurately via triggers.
+    // GL-driven: derive all billing/payment amounts from ledger_entries on AP (2100).
+    // Credits = liabilities incurred (GR postings), Debits = payments made against AP.
     const query = `
       SELECT 
         s."Id" as supplier_id,
@@ -1628,10 +1612,10 @@ export const reportsRepository = {
         s."Email" as email,
         s."Phone" as phone,
         COALESCE(po_agg.total_orders, 0) as total_orders,
-        COALESCE(inv_agg.total_amount, 0) as total_amount,
-        COALESCE(inv_agg.total_paid, 0) as total_paid,
-        COALESCE(inv_agg.outstanding_balance, 0) as outstanding_balance,
-        COALESCE(po_agg.last_order_date, inv_agg.last_invoice_date) as last_order_date,
+        COALESCE(gl_agg.total_amount, 0) as total_amount,
+        COALESCE(gl_agg.total_paid, 0) as total_paid,
+        COALESCE(gl_agg.outstanding_balance, 0) as outstanding_balance,
+        COALESCE(po_agg.last_order_date, gl_agg.last_transaction_date) as last_order_date,
         s."DefaultPaymentTerms" as payment_terms
       FROM suppliers s
       LEFT JOIN (
@@ -1642,23 +1626,46 @@ export const reportsRepository = {
         GROUP BY supplier_id
       ) po_agg ON po_agg.supplier_id = s."Id"
       LEFT JOIN (
-        SELECT "SupplierId",
-               SUM("TotalAmount") as total_amount,
-               SUM("AmountPaid") as total_paid,
-               SUM("OutstandingBalance") as outstanding_balance,
-               MAX("InvoiceDate") as last_invoice_date
-        FROM supplier_invoices
-        ${invoiceWhereClause}
-        GROUP BY "SupplierId"
-      ) inv_agg ON inv_agg."SupplierId" = s."Id"
+        SELECT 
+          le."EntityId" as supplier_id,
+          SUM(le."CreditAmount") as total_amount,
+          SUM(le."DebitAmount") as total_paid,
+          SUM(le."CreditAmount") - SUM(le."DebitAmount") as outstanding_balance,
+          MAX(lt."TransactionDate") as last_transaction_date
+        FROM ledger_entries le
+        JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+        JOIN accounts a ON le."AccountId" = a."Id"
+        WHERE a."AccountCode" = '2100'
+          AND le."EntityType" = 'SUPPLIER'
+          AND lt."Status" = 'POSTED'
+        GROUP BY le."EntityId"
+      ) gl_agg ON gl_agg.supplier_id = s."Id"
       ${supplierWhereClause}
       ORDER BY outstanding_balance DESC
     `;
 
     const result = await pool.query(query, params);
 
-    // Filter out rows with no invoices (no billing activity)
-    const filtered = result.rows.filter((row) => new Decimal(row.total_amount || 0).greaterThan(0));
+    // Filter out suppliers with no AP activity (no GL entries)
+    let filtered = result.rows.filter((row) => new Decimal(row.total_amount || 0).greaterThan(0));
+
+    // Apply status filter on GL-computed balances
+    if (options.status) {
+      filtered = filtered.filter((row) => {
+        const outstanding = new Decimal(row.outstanding_balance || 0);
+        const paid = new Decimal(row.total_paid || 0);
+        switch (options.status) {
+          case 'PAID':
+            return outstanding.lessThanOrEqualTo(0.01);
+          case 'PARTIAL':
+            return outstanding.greaterThan(0.01) && paid.greaterThan(0);
+          case 'PENDING':
+            return outstanding.greaterThan(0.01) && paid.lessThanOrEqualTo(0);
+          default:
+            return true;
+        }
+      });
+    }
 
     return filtered.map((row) => ({
       supplierId: row.supplier_id,
