@@ -169,74 +169,64 @@ export const reportsRepository = {
     }
   ): Promise<InventoryValuationRow[]> {
     const asOfDate = options.asOfDate || new Date();
-    const method = options.valuationMethod || 'FIFO';
 
     let categoryFilter = '';
     const params: unknown[] = [asOfDate];
-    let methodParamIndex = 2;
 
     if (options.categoryId) {
       categoryFilter = 'AND p.category = $2';
       params.push(options.categoryId);
-      methodParamIndex = 3;
     }
 
-    // Add method as a parameter to avoid SQL injection
-    params.push(method);
-
-    // Use product_inventory + product_valuation as the primary source;
-    // fall back to batch-level costing when batches exist.
+    // Ledger-driven valuation: derive inventory value from cost_layers
+    // (remaining_quantity * unit_cost) per product.
+    // This matches the Inventory Asset GL account (1300) —
+    // cost_layers are created during GR posting alongside the GL entry.
+    // valuationMethod param is accepted for API compatibility but
+    // cost_layers already represent the actual cost structure.
     const query = `
-      WITH batch_cost AS (
-        SELECT
-          b.product_id,
-          CASE
-            WHEN $${methodParamIndex} = 'FIFO' THEN
-              (SELECT b2.cost_price FROM inventory_batches b2
-               WHERE b2.product_id = b.product_id AND b2.received_date <= $1
-                 AND b2.remaining_quantity > 0
-               ORDER BY b2.received_date ASC LIMIT 1)
-            WHEN $${methodParamIndex} = 'LIFO' THEN
-              (SELECT b2.cost_price FROM inventory_batches b2
-               WHERE b2.product_id = b.product_id AND b2.received_date <= $1
-                 AND b2.remaining_quantity > 0
-               ORDER BY b2.received_date DESC LIMIT 1)
-            ELSE AVG(b.cost_price)
-          END AS batch_unit_cost
-        FROM inventory_batches b
-        WHERE b.received_date <= $1 AND b.remaining_quantity > 0
-        GROUP BY b.product_id
-      )
       SELECT
         p.id AS product_id,
         p.name AS product_name,
         p.sku,
         p.category,
-        COALESCE(pi.quantity_on_hand, 0) AS total_quantity,
-        COALESCE(bc.batch_unit_cost, pv.cost_price, 0) AS unit_cost,
+        COALESCE(cl_agg.remaining_qty, 0) AS total_quantity,
+        CASE WHEN COALESCE(cl_agg.remaining_qty, 0) > 0
+          THEN (cl_agg.remaining_value / cl_agg.remaining_qty)
+          ELSE 0
+        END AS unit_cost,
         COALESCE(pv.selling_price, 0) AS selling_price,
+        cl_agg.remaining_value AS total_value,
         NOW() AS last_updated
       FROM products p
-      LEFT JOIN product_inventory pi ON pi.product_id = p.id
+      LEFT JOIN (
+        SELECT
+          cl.product_id,
+          SUM(cl.remaining_quantity) AS remaining_qty,
+          SUM(cl.remaining_quantity * cl.unit_cost) AS remaining_value
+        FROM cost_layers cl
+        WHERE cl.is_active = true
+          AND cl.received_date <= $1
+          AND cl.remaining_quantity > 0
+        GROUP BY cl.product_id
+      ) cl_agg ON cl_agg.product_id = p.id
       LEFT JOIN product_valuation pv ON pv.product_id = p.id
-      LEFT JOIN batch_cost bc ON bc.product_id = p.id
       WHERE p.is_active = true
-        AND COALESCE(pi.quantity_on_hand, 0) > 0
+        AND COALESCE(cl_agg.remaining_qty, 0) > 0
         ${categoryFilter}
-      ORDER BY (COALESCE(pi.quantity_on_hand, 0) * COALESCE(bc.batch_unit_cost, pv.cost_price, 0)) DESC
+      ORDER BY cl_agg.remaining_value DESC
     `;
 
     const result = await pool.query(query, params);
 
-    // Use Decimal.js for precise calculations
     return result.rows.map((row) => {
       const qty = new Decimal(row.total_quantity || 0);
+      const totalValue = new Decimal(row.total_value || 0).toDecimalPlaces(2);
       const cost = new Decimal(row.unit_cost || 0);
       const sell = new Decimal(row.selling_price || 0);
-      const totalValue = qty.times(cost).toDecimalPlaces(2).toNumber();
       const potentialRevenue = qty.times(sell).toDecimalPlaces(2).toNumber();
       const profitPerUnit = sell.minus(cost).toDecimalPlaces(2).toNumber();
-      const potentialProfit = qty.times(sell.minus(cost)).toDecimalPlaces(2).toNumber();
+      const potentialProfit = new Decimal(potentialRevenue).minus(totalValue).toDecimalPlaces(2).toNumber();
       const profitMargin = sell.greaterThan(0)
         ? sell.minus(cost).dividedBy(sell).times(100).toDecimalPlaces(2).toNumber()
         : 0;
@@ -248,7 +238,7 @@ export const reportsRepository = {
         quantityOnHand: qty.toNumber(),
         unitCost: cost.toDecimalPlaces(2).toNumber(),
         sellingPrice: sell.toDecimalPlaces(2).toNumber(),
-        totalValue,
+        totalValue: totalValue.toNumber(),
         potentialRevenue,
         profitPerUnit,
         potentialProfit,

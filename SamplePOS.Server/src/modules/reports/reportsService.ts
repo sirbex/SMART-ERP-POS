@@ -168,6 +168,49 @@ export const reportsService = {
       executionTimeMs: executionTime,
     });
 
+    // Category-level summary (cost_layers driven valuation + profitability)
+    const categoryMap = new Map<string, {
+      category: string;
+      quantityOnHand: Decimal;
+      costValue: Decimal;
+      potentialRevenue: Decimal;
+      potentialProfit: Decimal;
+      productCount: number;
+    }>();
+    for (const item of data) {
+      const cat = item.category || 'Uncategorized';
+      const existing = categoryMap.get(cat);
+      if (existing) {
+        existing.quantityOnHand = existing.quantityOnHand.plus(item.quantityOnHand || 0);
+        existing.costValue = existing.costValue.plus(item.totalValue || 0);
+        existing.potentialRevenue = existing.potentialRevenue.plus(item.potentialRevenue || 0);
+        existing.potentialProfit = existing.potentialProfit.plus(item.potentialProfit || 0);
+        existing.productCount += 1;
+      } else {
+        categoryMap.set(cat, {
+          category: cat,
+          quantityOnHand: new Decimal(item.quantityOnHand || 0),
+          costValue: new Decimal(item.totalValue || 0),
+          potentialRevenue: new Decimal(item.potentialRevenue || 0),
+          potentialProfit: new Decimal(item.potentialProfit || 0),
+          productCount: 1,
+        });
+      }
+    }
+    const byCategory = Array.from(categoryMap.values())
+      .map((c) => ({
+        category: c.category,
+        productCount: c.productCount,
+        quantityOnHand: c.quantityOnHand.toDecimalPlaces(3).toNumber(),
+        costValue: c.costValue.toDecimalPlaces(2).toNumber(),
+        potentialRevenue: c.potentialRevenue.toDecimalPlaces(2).toNumber(),
+        potentialProfit: c.potentialProfit.toDecimalPlaces(2).toNumber(),
+        profitMargin: c.potentialRevenue.greaterThan(0)
+          ? c.potentialProfit.dividedBy(c.potentialRevenue).times(100).toDecimalPlaces(2).toNumber()
+          : 0,
+      }))
+      .sort((a, b) => b.costValue - a.costValue);
+
     return {
       reportType: 'INVENTORY_VALUATION' as const,
       reportName: 'Inventory Valuation Report',
@@ -183,6 +226,7 @@ export const reportsService = {
       systemSettings: systemContext,
       parameters: options,
       data,
+      byCategory,
       summary: {
         totalItems: data.length,
         totalValue: totalValue.toDecimalPlaces(2).toNumber(),
