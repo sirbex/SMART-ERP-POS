@@ -26,6 +26,8 @@ ENV NODE_ENV=production
 # Use relative URLs so nginx reverse proxy handles /api/ routing
 ENV VITE_API_URL=/api
 ENV VITE_API_BASE_URL=
+# Limit Node.js heap to avoid OOM on low-memory servers (production is 2GB)
+ENV NODE_OPTIONS="--max-old-space-size=768"
 RUN npx vite build
 
 # Production image — serve with nginx

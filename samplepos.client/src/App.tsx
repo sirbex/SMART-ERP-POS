@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Toaster as SonnerToaster } from 'sonner';
@@ -6,73 +7,77 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
 import OfflineAutoSync from './components/OfflineAutoSync';
-import LoginPage from './pages/LoginPage';
-import Dashboard from './pages/Dashboard';
-import POSPage from './pages/pos/POSPage';
-import CustomersPage from './pages/CustomersPage';
-import CustomerDetailPage from './pages/customers/CustomerDetailPage';
-import SuppliersPage from './pages/SuppliersPage';
-import SalesPage from './pages/SalesPage';
-import SettingsPage from './pages/settings/SettingsPage';
-import SecuritySettingsPage from './pages/settings/SecuritySettingsPage';
-import ReportsPage from './pages/ReportsPage';
-import ExpenseReportsPage from './pages/reports/ExpenseReportsPage';
-import ReorderDashboardPage from './pages/reports/ReorderDashboardPage';
-import BusinessPerformancePage from './pages/reports/BusinessPerformancePage';
-import AdminDataManagementPage from './pages/AdminDataManagementPage';
+
+// Layouts stay static (small, shared across routes)
 import InventoryLayout from './components/InventoryLayout';
-import StockLevelsPage from './pages/inventory/StockLevelsPage';
-import ProductsPage from './pages/inventory/ProductsPage';
-import StockMovementsPage from './pages/inventory/StockMovementsPage';
-import PurchaseOrdersPage from './pages/inventory/PurchaseOrdersPage';
-import GoodsReceiptsPage from './pages/inventory/GoodsReceiptsPage';
-import UomManagementPage from './pages/inventory/UomManagementPage';
-import BatchManagementPage from './pages/inventory/BatchManagementPage';
-import InventoryAdjustmentsPage from './pages/inventory/InventoryAdjustmentsPage';
-import AuditLogPage from './pages/AuditLogPage';
-import RoleManagementPage from './pages/admin/RoleManagementPage';
-import QuotationsPage from './pages/quotations/QuotationsPage';
-import NewQuotationPage from './pages/quotations/NewQuotationPage';
-import EditQuotationPage from './pages/quotations/EditQuotationPage';
-import QuoteDetailPage from './pages/quotations/QuoteDetailPage';
-import QuoteConversionPage from './pages/quotations/QuoteConversionPage';
 import AccountingLayout from './components/AccountingLayout';
-import ChartOfAccountsPage from './pages/accounting/ChartOfAccountsPage';
-import GeneralLedgerPage from './pages/accounting/GeneralLedgerPage';
-import TrialBalancePage from './pages/accounting/TrialBalancePage';
-import FinancialStatementsPage from './pages/accounting/FinancialStatementsPage';
-import AccountingIntegrationDashboard from './pages/accounting/AccountingIntegrationDashboard';
-import CustomerFinancialPage from './pages/accounting/CustomerFinancialPage';
-import InvoiceLedgerIntegrationPage from './pages/accounting/InvoiceLedgerIntegrationPage';
-import ExpensesPage from './pages/accounting/ExpensesPage';
-import ExpenseCategoriesPage from './pages/accounting/ExpenseCategoriesPage';
-import ComprehensiveInvoicesPage from './pages/accounting/ComprehensiveInvoicesPage';
-import CustomerPaymentsPage from './pages/accounting/CustomerPaymentsPage';
-import SupplierPaymentsPage from './pages/accounting/SupplierPaymentsPage';
-import CreditDebitNotesPage from './pages/accounting/CreditDebitNotesPage';
-import ProfitLossPage from './pages/ProfitLossPage';
-import ReconciliationPage from './pages/ReconciliationPage';
-import JournalEntriesPage from './pages/JournalEntriesPage';
-import PeriodManagementPage from './pages/PeriodManagementPage';
-import BankingPage from './pages/accounting/BankingPage';
-import DeliveryPage from './pages/delivery/DeliveryPage';
-import DeliveryNotesPage from './pages/delivery-notes/DeliveryNotesPage';
-import ImportPage from './pages/ImportPage';
-import BarcodeLookupPage from './pages/inventory/BarcodeLookupPage';
-import CRMPage from './pages/crm/CRMPage';
-import HRPage from './pages/hr/HRPage';
-import PriceRulesPage from './pages/pricing/PriceRulesPage';
-import CategoriesPage from './pages/pricing/CategoriesPage';
-import PricePreviewPage from './pages/pricing/PricePreviewPage';
+
+// Lazy-loaded pages — each becomes its own chunk
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const POSPage = lazy(() => import('./pages/pos/POSPage'));
+const CustomersPage = lazy(() => import('./pages/CustomersPage'));
+const CustomerDetailPage = lazy(() => import('./pages/customers/CustomerDetailPage'));
+const SuppliersPage = lazy(() => import('./pages/SuppliersPage'));
+const SalesPage = lazy(() => import('./pages/SalesPage'));
+const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'));
+const SecuritySettingsPage = lazy(() => import('./pages/settings/SecuritySettingsPage'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
+const ExpenseReportsPage = lazy(() => import('./pages/reports/ExpenseReportsPage'));
+const ReorderDashboardPage = lazy(() => import('./pages/reports/ReorderDashboardPage'));
+const BusinessPerformancePage = lazy(() => import('./pages/reports/BusinessPerformancePage'));
+const AdminDataManagementPage = lazy(() => import('./pages/AdminDataManagementPage'));
+const StockLevelsPage = lazy(() => import('./pages/inventory/StockLevelsPage'));
+const ProductsPage = lazy(() => import('./pages/inventory/ProductsPage'));
+const StockMovementsPage = lazy(() => import('./pages/inventory/StockMovementsPage'));
+const PurchaseOrdersPage = lazy(() => import('./pages/inventory/PurchaseOrdersPage'));
+const GoodsReceiptsPage = lazy(() => import('./pages/inventory/GoodsReceiptsPage'));
+const UomManagementPage = lazy(() => import('./pages/inventory/UomManagementPage'));
+const BatchManagementPage = lazy(() => import('./pages/inventory/BatchManagementPage'));
+const InventoryAdjustmentsPage = lazy(() => import('./pages/inventory/InventoryAdjustmentsPage'));
+const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
+const RoleManagementPage = lazy(() => import('./pages/admin/RoleManagementPage'));
+const QuotationsPage = lazy(() => import('./pages/quotations/QuotationsPage'));
+const NewQuotationPage = lazy(() => import('./pages/quotations/NewQuotationPage'));
+const EditQuotationPage = lazy(() => import('./pages/quotations/EditQuotationPage'));
+const QuoteDetailPage = lazy(() => import('./pages/quotations/QuoteDetailPage'));
+const QuoteConversionPage = lazy(() => import('./pages/quotations/QuoteConversionPage'));
+const ChartOfAccountsPage = lazy(() => import('./pages/accounting/ChartOfAccountsPage'));
+const GeneralLedgerPage = lazy(() => import('./pages/accounting/GeneralLedgerPage'));
+const TrialBalancePage = lazy(() => import('./pages/accounting/TrialBalancePage'));
+const FinancialStatementsPage = lazy(() => import('./pages/accounting/FinancialStatementsPage'));
+const AccountingIntegrationDashboard = lazy(() => import('./pages/accounting/AccountingIntegrationDashboard'));
+const CustomerFinancialPage = lazy(() => import('./pages/accounting/CustomerFinancialPage'));
+const InvoiceLedgerIntegrationPage = lazy(() => import('./pages/accounting/InvoiceLedgerIntegrationPage'));
+const ExpensesPage = lazy(() => import('./pages/accounting/ExpensesPage'));
+const ExpenseCategoriesPage = lazy(() => import('./pages/accounting/ExpenseCategoriesPage'));
+const ComprehensiveInvoicesPage = lazy(() => import('./pages/accounting/ComprehensiveInvoicesPage'));
+const CustomerPaymentsPage = lazy(() => import('./pages/accounting/CustomerPaymentsPage'));
+const SupplierPaymentsPage = lazy(() => import('./pages/accounting/SupplierPaymentsPage'));
+const CreditDebitNotesPage = lazy(() => import('./pages/accounting/CreditDebitNotesPage'));
+const ProfitLossPage = lazy(() => import('./pages/ProfitLossPage'));
+const ReconciliationPage = lazy(() => import('./pages/ReconciliationPage'));
+const JournalEntriesPage = lazy(() => import('./pages/JournalEntriesPage'));
+const PeriodManagementPage = lazy(() => import('./pages/PeriodManagementPage'));
+const BankingPage = lazy(() => import('./pages/accounting/BankingPage'));
+const DeliveryPage = lazy(() => import('./pages/delivery/DeliveryPage'));
+const DeliveryNotesPage = lazy(() => import('./pages/delivery-notes/DeliveryNotesPage'));
+const ImportPage = lazy(() => import('./pages/ImportPage'));
+const BarcodeLookupPage = lazy(() => import('./pages/inventory/BarcodeLookupPage'));
+const CRMPage = lazy(() => import('./pages/crm/CRMPage'));
+const HRPage = lazy(() => import('./pages/hr/HRPage'));
+const PriceRulesPage = lazy(() => import('./pages/pricing/PriceRulesPage'));
+const CategoriesPage = lazy(() => import('./pages/pricing/CategoriesPage'));
+const PricePreviewPage = lazy(() => import('./pages/pricing/PricePreviewPage'));
 
 // Platform (Super Admin) imports
 import { PlatformAuthProvider, usePlatformAuth } from './contexts/PlatformAuthContext';
-import PlatformLoginPage from './pages/platform/PlatformLoginPage';
+const PlatformLoginPage = lazy(() => import('./pages/platform/PlatformLoginPage'));
 import PlatformLayout from './components/platform/PlatformLayout';
-import PlatformDashboardPage from './pages/platform/PlatformDashboardPage';
-import TenantsPage from './pages/platform/TenantsPage';
-import AdminsPage from './pages/platform/AdminsPage';
-import PlatformHealthPage from './pages/platform/PlatformHealthPage';
+const PlatformDashboardPage = lazy(() => import('./pages/platform/PlatformDashboardPage'));
+const TenantsPage = lazy(() => import('./pages/platform/TenantsPage'));
+const AdminsPage = lazy(() => import('./pages/platform/AdminsPage'));
+const PlatformHealthPage = lazy(() => import('./pages/platform/PlatformHealthPage'));
 
 // Platform route guard
 function PlatformProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -139,6 +144,11 @@ function App() {
         />
         <SonnerToaster position="top-right" richColors />
         <ErrorBoundary section="Application">
+          <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+            </div>
+          }>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
 
@@ -714,6 +724,7 @@ function App() {
               <Route path="*" element={<Navigate to="/login" replace />} />
             )}
           </Routes>
+          </Suspense>
         </ErrorBoundary>
       </BrowserRouter>
     </PlatformAuthProvider>
