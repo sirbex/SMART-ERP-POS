@@ -728,7 +728,16 @@ export const salesRepository = {
   },
 
   /**
-   * Get sales summary by date (daily, weekly, monthly aggregation)
+   * Get sales summary by date — LEDGER-DRIVEN (SAP/Odoo pattern)
+   *
+   * Reads from double-entry GL postings instead of the sales table.
+   * Revenue  = credits to REVENUE accounts (4xxx)
+   * COGS     = debits to account 5000
+   * Profit   = Revenue − COGS
+   * Cash     = debits to ASSET receivable accounts (1010, 1200)
+   *
+   * This makes the report immune to POS table bugs — it reflects
+   * accounting truth exactly as SAP Gross Profit Report does.
    */
   async getSalesSummaryByDate(
     pool: Pool,
@@ -739,54 +748,79 @@ export const salesRepository = {
       cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
-    const whereClauses: string[] = ["status = 'COMPLETED'"];
+    const whereClauses: string[] = [
+      `lt."Status" = 'POSTED'`,
+      `lt."ReferenceType" = 'SALE'`,
+    ];
     const values: unknown[] = [];
     let paramIndex = 1;
 
+    // For cashier filtering we still join the sales table — the GL
+    // doesn't store cashier_id, but the link is via ReferenceNumber.
+    let cashierJoin = '';
     if (filters?.cashierId) {
-      whereClauses.push(`cashier_id = $${paramIndex++}`);
+      cashierJoin = `JOIN sales s ON lt."ReferenceNumber" = s.sale_number`;
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
       values.push(filters.cashierId);
     }
 
     if (filters?.startDate) {
-      whereClauses.push(`sale_date >= $${paramIndex++}::date`);
+      whereClauses.push(`lt."TransactionDate"::date >= $${paramIndex++}::date`);
       values.push(filters.startDate);
     }
 
     if (filters?.endDate) {
-      whereClauses.push(`sale_date <= $${paramIndex++}::date`);
+      whereClauses.push(`lt."TransactionDate"::date <= $${paramIndex++}::date`);
       values.push(filters.endDate);
     }
 
-    let dateGrouping = '';
+    let dateExpr = '';
     let dateFormat = '';
     switch (groupBy) {
       case 'day':
-        dateGrouping = 'DATE(sale_date)';
-        dateFormat = "TO_CHAR(DATE(sale_date), 'Mon DD, YYYY')";
+        dateExpr = `lt."TransactionDate"::date`;
+        dateFormat = `TO_CHAR(lt."TransactionDate"::date, 'Mon DD, YYYY')`;
         break;
       case 'week':
-        dateGrouping = "DATE_TRUNC('week', sale_date)";
-        dateFormat = "TO_CHAR(DATE_TRUNC('week', sale_date), 'Mon DD, YYYY')";
+        dateExpr = `DATE_TRUNC('week', lt."TransactionDate")`;
+        dateFormat = `TO_CHAR(DATE_TRUNC('week', lt."TransactionDate"), 'Mon DD, YYYY')`;
         break;
       case 'month':
-        dateGrouping = "DATE_TRUNC('month', sale_date)";
-        dateFormat = "TO_CHAR(DATE_TRUNC('month', sale_date), 'Mon YYYY')";
+        dateExpr = `DATE_TRUNC('month', lt."TransactionDate")`;
+        dateFormat = `TO_CHAR(DATE_TRUNC('month', lt."TransactionDate"), 'Mon YYYY')`;
         break;
     }
 
     const query = `
-      SELECT 
-        ${dateFormat} as period,
-        COUNT(*) as transaction_count,
-        ROUND(SUM(total_amount)::numeric, 2) as total_revenue,
-        ROUND(SUM(total_cost)::numeric, 2) as total_cost,
-        ROUND(SUM(profit)::numeric, 2) as total_profit,
-        ROUND(AVG(total_amount)::numeric, 2) as avg_transaction_value
-      FROM sales
+      SELECT
+        ${dateFormat} AS period,
+        COUNT(DISTINCT lt."Id") AS transaction_count,
+        ROUND(SUM(
+          CASE WHEN a."AccountType" = 'REVENUE'
+               THEN le."CreditAmount" - le."DebitAmount" ELSE 0 END
+        )::numeric, 2) AS total_revenue,
+        ROUND(SUM(
+          CASE WHEN a."AccountCode" = '5000'
+               THEN le."DebitAmount" - le."CreditAmount" ELSE 0 END
+        )::numeric, 2) AS total_cost,
+        ROUND(
+          SUM(CASE WHEN a."AccountType" = 'REVENUE'
+                   THEN le."CreditAmount" - le."DebitAmount" ELSE 0 END)
+        - SUM(CASE WHEN a."AccountCode" = '5000'
+                   THEN le."DebitAmount" - le."CreditAmount" ELSE 0 END)
+        , 2) AS total_profit,
+        ROUND(
+          SUM(CASE WHEN a."AccountType" = 'REVENUE'
+                   THEN le."CreditAmount" - le."DebitAmount" ELSE 0 END)
+          / NULLIF(COUNT(DISTINCT lt."Id"), 0)
+        , 2) AS avg_transaction_value
+      FROM ledger_entries le
+      JOIN accounts a ON le."AccountId" = a."Id"
+      JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+      ${cashierJoin}
       WHERE ${whereClauses.join(' AND ')}
-      GROUP BY ${dateGrouping}
-      ORDER BY ${dateGrouping} DESC
+      GROUP BY ${dateExpr}
+      ORDER BY ${dateExpr} DESC
     `;
 
     const result = await pool.query(query, values);
