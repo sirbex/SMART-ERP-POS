@@ -1,65 +1,116 @@
 import React, { useState } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, ShoppingCart, Receipt, BarChart3 } from 'lucide-react';
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  ShoppingCart,
+  Receipt,
+  BarChart3,
+  Wallet,
+  Package,
+} from 'lucide-react';
 import Layout from '../../components/Layout';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { formatCurrency } from '../../utils/currency';
 import { useBusinessPerformance } from '../../hooks/useApi';
 
-interface CategoryPerformance {
+// ---------------------------------------------------------------------------
+// Types matching the new ledger-based API response
+// ---------------------------------------------------------------------------
+
+interface MoneyInEntry {
+  accountCode: string;
+  accountName: string;
+  transactionCount: number;
+  totalAmount: number;
+}
+
+interface RevenueByCategoryEntry {
   categoryName: string;
   transactionCount: number;
   unitsSold: number;
-  totalSales: number;
+  totalRevenue: number;
   totalCogs: number;
   grossProfit: number;
   grossMarginPct: number;
 }
 
-interface ExpenseBreakdown {
-  categoryName: string;
-  expenseCount: number;
-  totalExpenses: number;
+interface CostAndStockEntry {
+  accountCode: string;
+  accountName: string;
+  entryCount: number;
+  totalAmount: number;
+}
+
+interface ExpenseByAccountEntry {
+  accountCode: string;
+  accountName: string;
+  entryCount: number;
+  totalAmount: number;
   pctOfTotal: number;
 }
 
 interface BusinessSummary {
-  totalSales: number;
+  totalRevenue: number;
   totalCogs: number;
   grossProfit: number;
   grossMarginPct: number;
   totalExpenses: number;
+  totalStockAdjustments: number;
   netProfit: number;
   netMarginPct: number;
-  completedSalesCount: number;
-  paidExpensesCount: number;
+  saleCount: number;
 }
 
 interface BusinessPerformanceData {
   summary: BusinessSummary;
-  revenueByCategory: CategoryPerformance[];
-  expensesByCategory: ExpenseBreakdown[];
+  moneyIn: MoneyInEntry[];
+  revenueByCategory: RevenueByCategoryEntry[];
+  costAndStock: CostAndStockEntry[];
+  expensesByAccount: ExpenseByAccountEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+const PAYMENT_METHODS = [
+  { value: '', label: 'All Methods' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CREDIT', label: 'Credit (A/R)' },
+  { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+  { value: 'CARD', label: 'Card' },
+];
 
 const BusinessPerformancePage: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [includeStockAdj, setIncludeStockAdj] = useState(true);
+  const [includeExpenses, setIncludeExpenses] = useState(true);
 
-  const { data, isLoading, error } = useBusinessPerformance({ startDate, endDate });
+  const { data, isLoading, error } = useBusinessPerformance({
+    startDate,
+    endDate,
+    paymentMethod: paymentMethod || undefined,
+    includeStockAdjustments: includeStockAdj,
+    includeExpenses,
+  });
   const report = data as BusinessPerformanceData | undefined;
 
   // Summary cards
   const summaryCards = report?.summary
     ? [
         {
-          label: 'Total Sales',
-          value: formatCurrency(report.summary.totalSales),
+          label: 'Total Revenue',
+          value: formatCurrency(report.summary.totalRevenue),
           icon: ShoppingCart,
           color: 'text-blue-600',
           bg: 'bg-blue-50',
         },
         {
-          label: 'Cost of Goods',
+          label: 'COGS',
           value: formatCurrency(report.summary.totalCogs),
           icon: Receipt,
           color: 'text-orange-600',
@@ -74,7 +125,7 @@ const BusinessPerformancePage: React.FC = () => {
           sub: `${report.summary.grossMarginPct.toFixed(1)}% margin`,
         },
         {
-          label: 'Total Expenses',
+          label: 'Expenses',
           value: formatCurrency(report.summary.totalExpenses),
           icon: DollarSign,
           color: 'text-red-600',
@@ -89,8 +140,8 @@ const BusinessPerformancePage: React.FC = () => {
           sub: `${report.summary.netMarginPct.toFixed(1)}% net margin`,
         },
         {
-          label: 'Transactions',
-          value: report.summary.completedSalesCount.toLocaleString(),
+          label: 'Sale Transactions',
+          value: report.summary.saleCount.toLocaleString(),
           icon: BarChart3,
           color: 'text-indigo-600',
           bg: 'bg-indigo-50',
@@ -104,15 +155,15 @@ const BusinessPerformancePage: React.FC = () => {
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
-            Business Performance by Category
+            Management P&amp;L by Category
           </h1>
           <p className="text-gray-500 mt-1">
-            Where did the money come from, and where did it go?
+            Ledger-based report — where did money come from, and where did it go?
           </p>
         </div>
 
-        {/* Date Filter */}
-        <div className="bg-white rounded-lg border shadow-sm p-4">
+        {/* Filters */}
+        <div className="bg-white rounded-lg border shadow-sm p-4 space-y-4">
           <DateRangeFilter
             startDate={startDate}
             endDate={endDate}
@@ -120,11 +171,47 @@ const BusinessPerformancePage: React.FC = () => {
             onEndDateChange={setEndDate}
             defaultPreset="THIS_MONTH"
           />
+          <div className="flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Payment Method
+              </label>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                className="border rounded-md px-3 py-1.5 text-sm bg-white"
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeStockAdj}
+                onChange={(e) => setIncludeStockAdj(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Include Stock Adjustments
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeExpenses}
+                onChange={(e) => setIncludeExpenses(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Include Expenses
+            </label>
+          </div>
         </div>
 
         {/* Loading */}
         {isLoading && (
-          <div className="text-center py-12 text-gray-500">Loading report...</div>
+          <div className="text-center py-12 text-gray-500">Loading report…</div>
         )}
 
         {/* Error */}
@@ -141,19 +228,14 @@ const BusinessPerformancePage: React.FC = () => {
             {/* Summary Cards */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {summaryCards.map((card) => (
-                <div
-                  key={card.label}
-                  className={`${card.bg} rounded-lg p-4 border`}
-                >
+                <div key={card.label} className={`${card.bg} rounded-lg p-4 border`}>
                   <div className="flex items-center gap-2 mb-1">
                     <card.icon className={`h-4 w-4 ${card.color}`} />
                     <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                       {card.label}
                     </span>
                   </div>
-                  <div className={`text-lg font-bold ${card.color}`}>
-                    {card.value}
-                  </div>
+                  <div className={`text-lg font-bold ${card.color}`}>{card.value}</div>
                   {card.sub && (
                     <div className="text-xs text-gray-500 mt-0.5">{card.sub}</div>
                   )}
@@ -161,280 +243,465 @@ const BusinessPerformancePage: React.FC = () => {
               ))}
             </div>
 
-            {/* Section 1: Revenue & COGS by Category */}
+            {/* ── Section 1: Money In ── */}
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Revenue &amp; Profitability by Product Category
-                </h2>
-                <p className="text-sm text-gray-500">
-                  Sales performance from completed transactions
+                <div className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5 text-blue-600" />
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Section 1 — Money In
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  How sales settled — Cash vs Accounts Receivable vs other asset accounts
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                {report.moneyIn.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No settlement entries for this period
+                  </div>
+                ) : (
+                  <ResponsiveTableWrapper>
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Account
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Name
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Transactions
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Amount
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {report.moneyIn.map((row) => (
+                          <tr key={row.accountCode} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-mono text-gray-600">
+                              {row.accountCode}
+                            </td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                              {row.accountName}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {row.transactionCount}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-blue-700 font-semibold">
+                              {formatCurrency(row.totalAmount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                        <tr className="font-bold">
+                          <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">
+                            TOTAL MONEY IN
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">
+                            {report.moneyIn.reduce((s, r) => s + r.transactionCount, 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-blue-700">
+                            {formatCurrency(
+                              report.moneyIn.reduce((s, r) => s + r.totalAmount, 0)
+                            )}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </ResponsiveTableWrapper>
+                )}
+              </div>
+            </div>
+
+            {/* ── Section 2: Revenue by Product Category ── */}
+            <div className="bg-white rounded-lg border shadow-sm">
+              <div className="px-6 py-4 border-b">
+                <div className="flex items-center gap-2">
+                  <ShoppingCart className="h-5 w-5 text-green-600" />
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Section 2 — Revenue by Product Category
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  GL revenue allocated proportionally to product categories
                 </p>
               </div>
               <div className="overflow-x-auto">
                 {report.revenueByCategory.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    No sales data for this period
+                    No revenue data for this period
                   </div>
                 ) : (
                   <ResponsiveTableWrapper>
-                  <table className="min-w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                          Category
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Sales
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          COGS
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Gross Profit
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Margin %
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Txns
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Units
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {report.revenueByCategory.map((row) => (
-                        <tr key={row.categoryName} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                            {row.categoryName}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-green-700 font-semibold">
-                            {formatCurrency(row.totalSales)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-orange-600">
-                            {formatCurrency(row.totalCogs)}
-                          </td>
-                          <td
-                            className={`px-4 py-3 text-sm text-right font-semibold ${
-                              row.grossProfit >= 0
-                                ? 'text-green-700'
-                                : 'text-red-600'
-                            }`}
-                          >
-                            {formatCurrency(row.grossProfit)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                row.grossMarginPct >= 30
-                                  ? 'bg-green-100 text-green-800'
-                                  : row.grossMarginPct >= 15
-                                  ? 'bg-yellow-100 text-yellow-800'
-                                  : 'bg-red-100 text-red-800'
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Category
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Revenue
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            COGS
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Gross Profit
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Margin %
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Txns
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Units
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {report.revenueByCategory.map((row) => (
+                          <tr key={row.categoryName} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                              {row.categoryName}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-green-700 font-semibold">
+                              {formatCurrency(row.totalRevenue)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-orange-600">
+                              {formatCurrency(row.totalCogs)}
+                            </td>
+                            <td
+                              className={`px-4 py-3 text-sm text-right font-semibold ${
+                                row.grossProfit >= 0 ? 'text-green-700' : 'text-red-600'
                               }`}
                             >
-                              {row.grossMarginPct.toFixed(1)}%
+                              {formatCurrency(row.grossProfit)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                  row.grossMarginPct >= 30
+                                    ? 'bg-green-100 text-green-800'
+                                    : row.grossMarginPct >= 15
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-red-100 text-red-800'
+                                }`}
+                              >
+                                {row.grossMarginPct.toFixed(1)}%
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {row.transactionCount}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {row.unitsSold.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                        <tr className="font-bold">
+                          <td className="px-4 py-3 text-sm text-gray-900">TOTAL</td>
+                          <td className="px-4 py-3 text-sm text-right text-green-700">
+                            {formatCurrency(report.summary.totalRevenue)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-orange-600">
+                            {formatCurrency(report.summary.totalCogs)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-green-700">
+                            {formatCurrency(report.summary.grossProfit)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                              {report.summary.grossMarginPct.toFixed(1)}%
                             </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {row.transactionCount}
+                            {report.summary.saleCount}
                           </td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {row.unitsSold.toLocaleString()}
+                            {report.revenueByCategory
+                              .reduce((s, r) => s + r.unitsSold, 0)
+                              .toLocaleString()}
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                    {/* Totals row */}
-                    <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-                      <tr className="font-bold">
-                        <td className="px-4 py-3 text-sm text-gray-900">TOTAL</td>
-                        <td className="px-4 py-3 text-sm text-right text-green-700">
-                          {formatCurrency(report.summary.totalSales)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-orange-600">
-                          {formatCurrency(report.summary.totalCogs)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-green-700">
-                          {formatCurrency(report.summary.grossProfit)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                            {report.summary.grossMarginPct.toFixed(1)}%
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-600">
-                          {report.summary.completedSalesCount}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-600">
-                          {report.revenueByCategory
-                            .reduce((sum, r) => sum + r.unitsSold, 0)
-                            .toLocaleString()}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                      </tfoot>
+                    </table>
                   </ResponsiveTableWrapper>
                 )}
               </div>
             </div>
 
-            {/* Section 2: Expense Breakdown */}
+            {/* ── Section 3: Cost & Stock Impact ── */}
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Expense Breakdown
-                </h2>
-                <p className="text-sm text-gray-500">
-                  Operating expenses by category (paid &amp; approved)
+                <div className="flex items-center gap-2">
+                  <Package className="h-5 w-5 text-orange-600" />
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Section 3 — Cost &amp; Stock Impact
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  COGS, shrinkage, damage, expiry, and stock adjustments from GL
                 </p>
               </div>
               <div className="overflow-x-auto">
-                {report.expensesByCategory.length === 0 ? (
+                {report.costAndStock.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    No expenses recorded for this period
+                    No cost / stock entries for this period
                   </div>
                 ) : (
                   <ResponsiveTableWrapper>
-                  <table className="min-w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                          Expense Category
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Amount
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          % of Total
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Count
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {report.expensesByCategory.map((row) => (
-                        <tr key={row.categoryName} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                            {row.categoryName}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-red-600 font-semibold">
-                            {formatCurrency(row.totalExpenses)}
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Account
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Name
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Entries
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Amount
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {report.costAndStock.map((row) => (
+                          <tr key={row.accountCode} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-mono text-gray-600">
+                              {row.accountCode}
+                            </td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                              {row.accountName}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {row.entryCount}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-orange-700 font-semibold">
+                              {formatCurrency(row.totalAmount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                        <tr className="font-bold">
+                          <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">
+                            TOTAL COST &amp; STOCK
                           </td>
                           <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {row.pctOfTotal.toFixed(1)}%
+                            {report.costAndStock.reduce((s, r) => s + r.entryCount, 0)}
                           </td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {row.expenseCount}
+                          <td className="px-4 py-3 text-sm text-right text-orange-700">
+                            {formatCurrency(
+                              report.costAndStock.reduce((s, r) => s + r.totalAmount, 0)
+                            )}
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-                      <tr className="font-bold">
-                        <td className="px-4 py-3 text-sm text-gray-900">TOTAL EXPENSES</td>
-                        <td className="px-4 py-3 text-sm text-right text-red-600">
-                          {formatCurrency(report.summary.totalExpenses)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-600">
-                          100%
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-600">
-                          {report.summary.paidExpensesCount}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                      </tfoot>
+                    </table>
                   </ResponsiveTableWrapper>
                 )}
               </div>
             </div>
 
-            {/* Section 3: Net Business View */}
+            {/* ── Section 4: Expenses by GL Account ── */}
+            {includeExpenses && (
+              <div className="bg-white rounded-lg border shadow-sm">
+                <div className="px-6 py-4 border-b">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="h-5 w-5 text-red-600" />
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      Section 4 — Expenses by Account
+                    </h2>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Operating &amp; financial expenses from GL (6xxx/7xxx accounts)
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  {report.expensesByAccount.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No expense entries for this period
+                    </div>
+                  ) : (
+                    <ResponsiveTableWrapper>
+                      <table className="min-w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                              Account
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                              Name
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                              Amount
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                              % of Total
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                              Entries
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {report.expensesByAccount.map((row) => (
+                            <tr key={row.accountCode} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-mono text-gray-600">
+                                {row.accountCode}
+                              </td>
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                                {row.accountName}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-red-600 font-semibold">
+                                {formatCurrency(row.totalAmount)}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-gray-600">
+                                {row.pctOfTotal.toFixed(1)}%
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-gray-600">
+                                {row.entryCount}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                          <tr className="font-bold">
+                            <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">
+                              TOTAL EXPENSES
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-red-600">
+                              {formatCurrency(report.summary.totalExpenses)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              100%
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {report.expensesByAccount.reduce(
+                                (s, r) => s + r.entryCount,
+                                0
+                              )}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </ResponsiveTableWrapper>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Section 5: Net Business Position (Income Statement) ── */}
             <div className="bg-white rounded-lg border shadow-sm">
               <div className="px-6 py-4 border-b">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Net Business View
-                </h2>
-                <p className="text-sm text-gray-500">
-                  Combined revenue, costs, and expenses — bottom line
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-indigo-600" />
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Section 5 — Net Business Position
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Combined income statement — revenue, cost, expenses, bottom line
                 </p>
               </div>
               <div className="overflow-x-auto">
                 <ResponsiveTableWrapper>
-                <table className="min-w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-1/2">
-                        Line Item
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                        Amount
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    <tr>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        Total Sales Revenue
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right text-green-700 font-semibold">
-                        {formatCurrency(report.summary.totalSales)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        Less: Cost of Goods Sold
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right text-orange-600">
-                        ({formatCurrency(report.summary.totalCogs)})
-                      </td>
-                    </tr>
-                    <tr className="bg-green-50">
-                      <td className="px-4 py-3 text-sm font-bold text-gray-900">
-                        Gross Profit
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right font-bold text-green-700">
-                        {formatCurrency(report.summary.grossProfit)}
-                        <span className="ml-2 text-xs text-gray-500">
-                          ({report.summary.grossMarginPct.toFixed(1)}%)
-                        </span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        Less: Operating Expenses
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right text-red-600">
-                        ({formatCurrency(report.summary.totalExpenses)})
-                      </td>
-                    </tr>
-                    <tr
-                      className={`${
-                        report.summary.netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'
-                      } border-t-2 border-gray-300`}
-                    >
-                      <td className="px-4 py-4 text-base font-bold text-gray-900">
-                        Net Profit
-                      </td>
-                      <td
-                        className={`px-4 py-4 text-base text-right font-bold ${
-                          report.summary.netProfit >= 0
-                            ? 'text-emerald-700'
-                            : 'text-red-700'
-                        }`}
+                  <table className="min-w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-1/2">
+                          Line Item
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                          Amount
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      <tr>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          Total Revenue (GL)
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right text-green-700 font-semibold">
+                          {formatCurrency(report.summary.totalRevenue)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          Less: Cost of Goods Sold
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right text-orange-600">
+                          ({formatCurrency(report.summary.totalCogs)})
+                        </td>
+                      </tr>
+                      <tr className="bg-green-50">
+                        <td className="px-4 py-3 text-sm font-bold text-gray-900">
+                          Gross Profit
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right font-bold text-green-700">
+                          {formatCurrency(report.summary.grossProfit)}
+                          <span className="ml-2 text-xs text-gray-500">
+                            ({report.summary.grossMarginPct.toFixed(1)}%)
+                          </span>
+                        </td>
+                      </tr>
+                      {report.summary.totalStockAdjustments !== 0 && (
+                        <tr>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            Stock Adjustments (net)
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-orange-600">
+                            {report.summary.totalStockAdjustments >= 0
+                              ? formatCurrency(report.summary.totalStockAdjustments)
+                              : `(${formatCurrency(
+                                  Math.abs(report.summary.totalStockAdjustments)
+                                )})`}
+                          </td>
+                        </tr>
+                      )}
+                      <tr>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          Less: Operating Expenses
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right text-red-600">
+                          ({formatCurrency(report.summary.totalExpenses)})
+                        </td>
+                      </tr>
+                      <tr
+                        className={`${
+                          report.summary.netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'
+                        } border-t-2 border-gray-300`}
                       >
-                        {formatCurrency(report.summary.netProfit)}
-                        <span className="ml-2 text-xs text-gray-500">
-                          ({report.summary.netMarginPct.toFixed(1)}% net margin)
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                        <td className="px-4 py-4 text-base font-bold text-gray-900">
+                          Net Profit
+                        </td>
+                        <td
+                          className={`px-4 py-4 text-base text-right font-bold ${
+                            report.summary.netProfit >= 0
+                              ? 'text-emerald-700'
+                              : 'text-red-700'
+                          }`}
+                        >
+                          {formatCurrency(report.summary.netProfit)}
+                          <span className="ml-2 text-xs text-gray-500">
+                            ({report.summary.netMarginPct.toFixed(1)}% net margin)
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </ResponsiveTableWrapper>
               </div>
             </div>

@@ -90,8 +90,8 @@ export const queryKeys = {
       ['import', 'errors', jobId, page, limit] as const,
   },
   reports: {
-    businessPerformance: (startDate?: string, endDate?: string) =>
-      ['reports', 'business-performance', startDate, endDate] as const,
+    businessPerformance: (filters?: Record<string, string | undefined>) =>
+      ['reports', 'business-performance', filters] as const,
   },
 };
 
@@ -388,11 +388,26 @@ export function useSalesByCashier(filters?: { startDate?: string; endDate?: stri
 }
 
 // Report Hooks
-export function useBusinessPerformance(filters?: { startDate?: string; endDate?: string }) {
-  const { startDate, endDate } = filters || {};
+export interface BusinessPerformanceFilters {
+  startDate?: string;
+  endDate?: string;
+  paymentMethod?: string;
+  includeStockAdjustments?: boolean;
+  includeExpenses?: boolean;
+}
+
+export function useBusinessPerformance(filters?: BusinessPerformanceFilters) {
+  const { startDate, endDate, paymentMethod, includeStockAdjustments, includeExpenses } = filters || {};
+  const params: Record<string, string | undefined> = {
+    start_date: startDate,
+    end_date: endDate,
+    payment_method: paymentMethod,
+    include_stock_adjustments: includeStockAdjustments === false ? 'false' : undefined,
+    include_expenses: includeExpenses === false ? 'false' : undefined,
+  };
   return useApiQuery(
-    queryKeys.reports.businessPerformance(startDate, endDate),
-    () => api.reports.businessPerformance({ start_date: startDate, end_date: endDate }),
+    queryKeys.reports.businessPerformance(params),
+    () => api.reports.businessPerformance(params),
     { staleTime: 60000 }
   );
 }

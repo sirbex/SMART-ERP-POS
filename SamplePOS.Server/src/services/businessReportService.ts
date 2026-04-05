@@ -5,40 +5,85 @@ import logger from '../utils/logger.js';
 import * as repo from '../repositories/businessReportRepository.js';
 import type { BusinessReportFilters } from '../repositories/businessReportRepository.js';
 
-export interface CategoryPerformance {
+// ---------------------------------------------------------------------------
+// Section 1 — Money In
+// ---------------------------------------------------------------------------
+
+export interface MoneyInEntry {
+  accountCode: string;
+  accountName: string;
+  transactionCount: number;
+  totalAmount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Section 2 — Revenue by Product Category
+// ---------------------------------------------------------------------------
+
+export interface RevenueByCategoryEntry {
   categoryName: string;
   transactionCount: number;
   unitsSold: number;
-  totalSales: number;
+  totalRevenue: number;
   totalCogs: number;
   grossProfit: number;
   grossMarginPct: number;
 }
 
-export interface ExpenseBreakdown {
-  categoryName: string;
-  expenseCount: number;
-  totalExpenses: number;
+// ---------------------------------------------------------------------------
+// Section 3 — Cost & Stock Impact
+// ---------------------------------------------------------------------------
+
+export interface CostAndStockEntry {
+  accountCode: string;
+  accountName: string;
+  entryCount: number;
+  totalAmount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Section 4 — Expenses by Account
+// ---------------------------------------------------------------------------
+
+export interface ExpenseByAccountEntry {
+  accountCode: string;
+  accountName: string;
+  entryCount: number;
+  totalAmount: number;
   pctOfTotal: number;
 }
 
+// ---------------------------------------------------------------------------
+// Section 5 — Summary
+// ---------------------------------------------------------------------------
+
 export interface BusinessSummary {
-  totalSales: number;
+  totalRevenue: number;
   totalCogs: number;
   grossProfit: number;
   grossMarginPct: number;
   totalExpenses: number;
+  totalStockAdjustments: number;
   netProfit: number;
   netMarginPct: number;
-  completedSalesCount: number;
-  paidExpensesCount: number;
+  saleCount: number;
 }
+
+// ---------------------------------------------------------------------------
+// Full report shape
+// ---------------------------------------------------------------------------
 
 export interface BusinessPerformanceReport {
   summary: BusinessSummary;
-  revenueByCategory: CategoryPerformance[];
-  expensesByCategory: ExpenseBreakdown[];
+  moneyIn: MoneyInEntry[];
+  revenueByCategory: RevenueByCategoryEntry[];
+  costAndStock: CostAndStockEntry[];
+  expensesByAccount: ExpenseByAccountEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// Main report builder
+// ---------------------------------------------------------------------------
 
 export async function getBusinessPerformanceReport(
   filters: BusinessReportFilters,
@@ -47,57 +92,86 @@ export async function getBusinessPerformanceReport(
   const pool = dbPool || globalPool;
 
   try {
-    const [revenueRows, expenseRows, totals] = await Promise.all([
-      repo.getRevenueByCategorySQL(filters, pool),
-      repo.getExpensesByCategory(filters, pool),
-      repo.getBusinessSummaryTotals(filters, pool),
+    // Run all 5 sections in parallel
+    const [moneyInRows, revRows, costRows, expRows, totals] = await Promise.all([
+      repo.getMoneyIn(filters, pool),
+      repo.getRevenueByCategory(filters, pool),
+      repo.getCostAndStock(filters, pool),
+      filters.includeExpenses !== false
+        ? repo.getExpensesByAccount(filters, pool)
+        : Promise.resolve([]),
+      repo.getSummaryTotals(filters, pool),
     ]);
 
-    // Normalize revenue rows: snake_case → camelCase, string → number via Money
-    const revenueByCategory: CategoryPerformance[] = revenueRows.map((row) => ({
-      categoryName: row.category_name,
-      transactionCount: row.transaction_count,
-      unitsSold: Money.toNumber(Money.parseDb(row.units_sold)),
-      totalSales: Money.toNumber(Money.parseDb(row.total_sales)),
-      totalCogs: Money.toNumber(Money.parseDb(row.total_cogs)),
-      grossProfit: Money.toNumber(Money.parseDb(row.gross_profit)),
-      grossMarginPct: Money.toNumber(Money.parseDb(row.gross_margin_pct)),
+    // --- Normalize Section 1 ---
+    const moneyIn: MoneyInEntry[] = moneyInRows.map((r) => ({
+      accountCode: r.account_code,
+      accountName: r.account_name,
+      transactionCount: r.transaction_count,
+      totalAmount: Money.toNumber(Money.parseDb(r.total_amount)),
     }));
 
-    // Normalize expense rows
-    const expensesByCategory: ExpenseBreakdown[] = expenseRows.map((row) => ({
-      categoryName: row.category_name,
-      expenseCount: row.expense_count,
-      totalExpenses: Money.toNumber(Money.parseDb(row.total_expenses)),
-      pctOfTotal: Money.toNumber(Money.parseDb(row.pct_of_total)),
+    // --- Normalize Section 2 ---
+    const revenueByCategory: RevenueByCategoryEntry[] = revRows.map((r) => ({
+      categoryName: r.category_name,
+      transactionCount: r.transaction_count,
+      unitsSold: Money.toNumber(Money.parseDb(r.units_sold)),
+      totalRevenue: Money.toNumber(Money.parseDb(r.total_revenue)),
+      totalCogs: Money.toNumber(Money.parseDb(r.total_cogs)),
+      grossProfit: Money.toNumber(Money.parseDb(r.gross_profit)),
+      grossMarginPct: Money.toNumber(Money.parseDb(r.gross_margin_pct)),
     }));
 
-    // Compute summary using Money utility
-    const totalSales = Money.toNumber(Money.parseDb(totals.total_sales));
+    // --- Normalize Section 3 ---
+    const costAndStock: CostAndStockEntry[] = costRows.map((r) => ({
+      accountCode: r.account_code,
+      accountName: r.account_name,
+      entryCount: r.entry_count,
+      totalAmount: Money.toNumber(Money.parseDb(r.total_amount)),
+    }));
+
+    // --- Normalize Section 4 ---
+    const expensesByAccount: ExpenseByAccountEntry[] = expRows.map((r) => ({
+      accountCode: r.account_code,
+      accountName: r.account_name,
+      entryCount: r.entry_count,
+      totalAmount: Money.toNumber(Money.parseDb(r.total_amount)),
+      pctOfTotal: Money.toNumber(Money.parseDb(r.pct_of_total)),
+    }));
+
+    // --- Section 5: Summary ---
+    const totalRevenue = Money.toNumber(Money.parseDb(totals.total_revenue));
     const totalCogs = Money.toNumber(Money.parseDb(totals.total_cogs));
-    const grossProfit = Money.toNumber(Money.parseDb(totals.gross_profit));
     const totalExpenses = Money.toNumber(Money.parseDb(totals.total_expenses));
+    const totalStockAdjustments = Money.toNumber(Money.parseDb(totals.total_stock_adjustments));
+    const grossProfit = Money.toNumber(Money.subtract(totalRevenue, totalCogs));
     const netProfit = Money.toNumber(Money.subtract(grossProfit, totalExpenses));
-    const grossMarginPct = totalSales > 0
-      ? Money.toNumber(Money.percentageRate(grossProfit, totalSales))
+    const grossMarginPct = totalRevenue > 0
+      ? Money.toNumber(Money.percentageRate(grossProfit, totalRevenue))
       : 0;
-    const netMarginPct = totalSales > 0
-      ? Money.toNumber(Money.percentageRate(netProfit, totalSales))
+    const netMarginPct = totalRevenue > 0
+      ? Money.toNumber(Money.percentageRate(netProfit, totalRevenue))
       : 0;
 
     const summary: BusinessSummary = {
-      totalSales,
+      totalRevenue,
       totalCogs,
       grossProfit,
       grossMarginPct,
       totalExpenses,
+      totalStockAdjustments,
       netProfit,
       netMarginPct,
-      completedSalesCount: totals.completed_sales_count,
-      paidExpensesCount: totals.paid_expenses_count,
+      saleCount: totals.sale_count,
     };
 
-    return { summary, revenueByCategory, expensesByCategory };
+    return {
+      summary,
+      moneyIn,
+      revenueByCategory,
+      costAndStock,
+      expensesByAccount,
+    };
   } catch (error) {
     logger.error('Error generating business performance report', { error, filters });
     throw error;

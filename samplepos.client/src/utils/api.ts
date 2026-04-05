@@ -505,7 +505,14 @@ export const api = {
 
   // Business Reports
   reports: {
-    businessPerformance: (params?: { start_date?: string; end_date?: string }) =>
+    businessPerformance: (params?: {
+      start_date?: string;
+      end_date?: string;
+      payment_method?: string;
+      transaction_type?: string;
+      include_stock_adjustments?: string;
+      include_expenses?: string;
+    }) =>
       apiClient.get<ApiResponse>('reports/business-performance', { params }),
   },
 
