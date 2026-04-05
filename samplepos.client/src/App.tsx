@@ -18,6 +18,7 @@ import SecuritySettingsPage from './pages/settings/SecuritySettingsPage';
 import ReportsPage from './pages/ReportsPage';
 import ExpenseReportsPage from './pages/reports/ExpenseReportsPage';
 import ReorderDashboardPage from './pages/reports/ReorderDashboardPage';
+import BusinessPerformancePage from './pages/reports/BusinessPerformancePage';
 import AdminDataManagementPage from './pages/AdminDataManagementPage';
 import InventoryLayout from './components/InventoryLayout';
 import StockLevelsPage from './pages/inventory/StockLevelsPage';
@@ -535,6 +536,16 @@ function App() {
                   element={
                     <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
                       <ExpenseReportsPage />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* Business Performance Report - ADMIN, MANAGER */}
+                <Route
+                  path="/reports/business-performance"
+                  element={
+                    <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <BusinessPerformancePage />
                     </ProtectedRoute>
                   }
                 />

@@ -2065,11 +2065,18 @@ export default function ReportsPage() {
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">📊 Reports & Analytics</h1>
               <p className="text-sm sm:text-base text-gray-600">Generate comprehensive reports across sales, inventory, and financial metrics</p>
             </div>
-            <Link to="/reports/expenses">
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                💰 Expense Reports
-              </button>
-            </Link>
+            <div className="flex gap-2">
+              <Link to="/reports/business-performance">
+                <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+                  📊 Business Performance
+                </button>
+              </Link>
+              <Link to="/reports/expenses">
+                <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+                  💰 Expense Reports
+                </button>
+              </Link>
+            </div>
           </div>
 
           {/* Report Selection - Categorized Cards */}

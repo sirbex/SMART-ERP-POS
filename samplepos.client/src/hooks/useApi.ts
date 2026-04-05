@@ -89,6 +89,10 @@ export const queryKeys = {
     errors: (jobId: string, page?: number, limit?: number) =>
       ['import', 'errors', jobId, page, limit] as const,
   },
+  reports: {
+    businessPerformance: (startDate?: string, endDate?: string) =>
+      ['reports', 'business-performance', startDate, endDate] as const,
+  },
 };
 
 // Generic Hooks
@@ -379,6 +383,16 @@ export function useSalesByCashier(filters?: { startDate?: string; endDate?: stri
   return useApiQuery(
     queryKeys.sales.byCashier(startDate, endDate),
     () => api.sales.byCashier({ startDate, endDate }),
+    { staleTime: 60000 }
+  );
+}
+
+// Report Hooks
+export function useBusinessPerformance(filters?: { startDate?: string; endDate?: string }) {
+  const { startDate, endDate } = filters || {};
+  return useApiQuery(
+    queryKeys.reports.businessPerformance(startDate, endDate),
+    () => api.reports.businessPerformance({ start_date: startDate, end_date: endDate }),
     { staleTime: 60000 }
   );
 }

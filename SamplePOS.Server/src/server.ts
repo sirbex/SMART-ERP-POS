@@ -45,6 +45,7 @@ import documentRoutes from './modules/documents/documentController.js';
 import expenseRoutes from './routes/expenseRoutes.js';
 import erpAccountingRoutes from './routes/erpAccountingRoutes.js';
 import bankingRoutes from './routes/bankingRoutes.js';
+import businessReportRoutes from './routes/businessReportRoutes.js';
 import { createSupplierPaymentRoutes } from './modules/supplier-payments/supplierPaymentRoutes.js';
 import { cashRegisterRoutes } from './modules/cash-register/index.js';
 import { crmRoutes } from './modules/crm/crmRoutes.js';
@@ -286,6 +287,7 @@ app.use('/api/erp-accounting', erpAccountingRoutes); // ERP-grade financial repo
 app.use('/api/banking', bankingRoutes); // Banking module - accounts, transactions, reconciliation
 app.use('/api/documents', documentRoutes); // Document management for file uploads
 app.use('/api/expenses', expenseRoutes); // Expense management system
+app.use('/api/reports', businessReportRoutes); // Business performance reports
 app.use('/api/products', productRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/suppliers', supplierRoutes);

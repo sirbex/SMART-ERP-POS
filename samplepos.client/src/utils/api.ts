@@ -503,6 +503,12 @@ export const api = {
     getConfig: () => apiClient.get<ApiResponse>('tenant/config'),
   },
 
+  // Business Reports
+  reports: {
+    businessPerformance: (params?: { start_date?: string; end_date?: string }) =>
+      apiClient.get<ApiResponse>('reports/business-performance', { params }),
+  },
+
   // Generic HTTP methods for backward compatibility
   get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) => apiClient.get<T>(url, config),
   post: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
