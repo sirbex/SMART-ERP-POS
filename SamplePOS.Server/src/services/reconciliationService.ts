@@ -265,7 +265,7 @@ export class ReconciliationService {
                     JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
                     JOIN accounts a ON le."AccountId" = a."Id"
                     WHERE a."AccountCode" = '2100'
-                      AND le."EntityType" = 'SUPPLIER'
+                      AND UPPER(le."EntityType") = 'SUPPLIER'
                       AND lt."TransactionDate"::DATE <= $1
                       AND lt."Status" = 'POSTED'
                 ),
@@ -471,7 +471,7 @@ export class ReconciliationService {
                             JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
                             JOIN accounts a ON le."AccountId" = a."Id"
                             WHERE a."AccountCode" = '2100'
-                              AND le."EntityType" = 'SUPPLIER'
+                              AND UPPER(le."EntityType") = 'SUPPLIER'
                               AND lt."TransactionDate"::DATE <= $1
                               AND lt."Status" = 'POSTED'
                             GROUP BY le."EntityId"
@@ -484,7 +484,7 @@ export class ReconciliationService {
                             COALESCE(s."OutstandingBalance", 0) as subledger_balance,
                             COALESCE(sg.gl_balance, 0) - COALESCE(s."OutstandingBalance", 0) as difference
                         FROM suppliers s
-                        LEFT JOIN supplier_gl sg ON sg.entity_id = s."Id"
+                        LEFT JOIN supplier_gl sg ON sg.entity_id = s."Id"::text
                         WHERE ABS(COALESCE(sg.gl_balance, 0) - COALESCE(s."OutstandingBalance", 0)) > 0.01
                         ORDER BY ABS(COALESCE(sg.gl_balance, 0) - COALESCE(s."OutstandingBalance", 0)) DESC
                     `;

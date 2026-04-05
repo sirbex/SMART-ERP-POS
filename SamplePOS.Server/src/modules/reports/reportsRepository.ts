@@ -1636,10 +1636,10 @@ export const reportsRepository = {
         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
         JOIN accounts a ON le."AccountId" = a."Id"
         WHERE a."AccountCode" = '2100'
-          AND le."EntityType" = 'SUPPLIER'
+          AND UPPER(le."EntityType") = 'SUPPLIER'
           AND lt."Status" = 'POSTED'
         GROUP BY le."EntityId"
-      ) gl_agg ON gl_agg.supplier_id = s."Id"
+      ) gl_agg ON gl_agg.supplier_id = s."Id"::text
       ${supplierWhereClause}
       ORDER BY outstanding_balance DESC
     `;
