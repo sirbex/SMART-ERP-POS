@@ -4,6 +4,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import type {
   SalesReportRow,
@@ -80,14 +81,37 @@ function formatDateOnly(date: Date | string | null | undefined): string | null {
   });
 }
 
+/** SQL constant for AT TIME ZONE expressions */
+const TZ = BUSINESS_TIMEZONE;
+
+/**
+ * Convert incoming Date or string dates to UTC-bounded params
+ * suitable for WHERE col >= $start AND col < $end queries.
+ */
+function toUtcParams(
+  startDate: Date | string,
+  endDate: Date | string
+): [string, string] {
+  const start =
+    startDate instanceof Date
+      ? startDate.toISOString().slice(0, 10)
+      : String(startDate).slice(0, 10);
+  const end =
+    endDate instanceof Date
+      ? endDate.toISOString().slice(0, 10)
+      : String(endDate).slice(0, 10);
+  const { startUtc, endUtc } = toUtcRange(start, end, TZ);
+  return [startUtc, endUtc];
+}
+
 export interface ReportRunRecord {
   id: string;
   report_type: string;
   report_name: string;
   parameters: Record<string, unknown>;
   generated_by_id: string | null;
-  start_date: Date | null;
-  end_date: Date | null;
+  start_date: string | null;
+  end_date: string | null;
   record_count: number;
   file_path: string | null;
   file_format: string | null;
@@ -119,8 +143,8 @@ export const reportsRepository = {
       reportName: string;
       parameters: Record<string, unknown>;
       generatedById: string | null;
-      startDate?: Date | null;
-      endDate?: Date | null;
+      startDate?: string | Date | null;
+      endDate?: string | Date | null;
       recordCount: number;
       filePath?: string | null;
       fileFormat?: string | null;
@@ -176,7 +200,7 @@ export const reportsRepository = {
   async getInventoryValuation(
     pool: Pool,
     options: {
-      asOfDate?: Date;
+      asOfDate?: Date | string;
       categoryId?: string;
       valuationMethod?: 'FIFO' | 'AVCO' | 'LIFO';
       page?: number;
@@ -340,8 +364,8 @@ export const reportsRepository = {
   async getSalesReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
       customerId?: string;
     }
@@ -349,7 +373,8 @@ export const reportsRepository = {
     rows: SalesReportRow[];
     summary: { totalSales: number; totalDiscounts: number; netRevenue: number; totalCost: number; grossProfit: number; profitMargin: number; totalTransactions: number; averageDiscountRate: number };
   }> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
     let customerFilter = '';
 
     if (options.customerId) {
@@ -362,7 +387,7 @@ export const reportsRepository = {
       WITH filtered_sales AS (
         SELECT s.id, s.total_amount, s.discount_amount
         FROM sales s
-        WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+        WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
           ${customerFilter}
       ),
@@ -392,16 +417,16 @@ export const reportsRepository = {
 
     switch (options.groupBy) {
       case 'day':
-        selectClause = 'DATE(fs.sale_date) as period';
-        groupByClause = 'DATE(fs.sale_date)';
+        selectClause = `(fs.sale_date AT TIME ZONE '${TZ}')::date as period`;
+        groupByClause = `(fs.sale_date AT TIME ZONE '${TZ}')::date`;
         break;
       case 'week':
-        selectClause = "DATE_TRUNC('week', fs.sale_date)::DATE as period";
-        groupByClause = "DATE_TRUNC('week', fs.sale_date)";
+        selectClause = `DATE_TRUNC('week', fs.sale_date AT TIME ZONE '${TZ}')::DATE as period`;
+        groupByClause = `DATE_TRUNC('week', fs.sale_date AT TIME ZONE '${TZ}')`;
         break;
       case 'month':
-        selectClause = "DATE_TRUNC('month', fs.sale_date)::DATE as period";
-        groupByClause = "DATE_TRUNC('month', fs.sale_date)";
+        selectClause = `DATE_TRUNC('month', fs.sale_date AT TIME ZONE '${TZ}')::DATE as period`;
+        groupByClause = `DATE_TRUNC('month', fs.sale_date AT TIME ZONE '${TZ}')`;
         break;
       case 'product':
         selectClause = '';
@@ -416,8 +441,8 @@ export const reportsRepository = {
         groupByClause = 'fs.payment_method';
         break;
       default:
-        selectClause = 'DATE(fs.sale_date) as period';
-        groupByClause = 'DATE(fs.sale_date)';
+        selectClause = `(fs.sale_date AT TIME ZONE '${TZ}')::date as period`;
+        groupByClause = `(fs.sale_date AT TIME ZONE '${TZ}')::date`;
     }
 
     let rowQuery: string;
@@ -436,7 +461,7 @@ export const reportsRepository = {
         FROM sale_items si
         INNER JOIN sales s ON s.id = si.sale_id
         LEFT JOIN products p ON p.id = si.product_id
-        WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+        WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
           ${customerFilter}
         GROUP BY COALESCE(p.name, si.product_name, 'Custom Item')
@@ -448,7 +473,7 @@ export const reportsRepository = {
           SELECT s.id, s.sale_date, s.customer_id, s.payment_method,
                  s.total_amount, s.discount_amount
           FROM sales s
-          WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+          WHERE s.sale_date >= $1 AND s.sale_date < $2
             AND s.status NOT IN ('VOID', 'REFUNDED')
             ${customerFilter}
         ),
@@ -690,13 +715,14 @@ export const reportsRepository = {
   async getBestSellingProducts(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       limit: number;
       categoryId?: string;
     }
   ): Promise<BestSellingProductRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate, options.limit];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc, options.limit];
     let categoryFilter = '';
 
     if (options.categoryId) {
@@ -717,7 +743,7 @@ export const reportsRepository = {
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
       LEFT JOIN products p ON p.id = si.product_id
-      WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+      WHERE s.sale_date >= $1 AND s.sale_date < $2
         AND s.status NOT IN ('VOID', 'REFUNDED')
         ${categoryFilter}
       GROUP BY p.id, COALESCE(p.name, si.product_name, 'Custom Item'), p.sku
@@ -756,12 +782,13 @@ export const reportsRepository = {
   async getSupplierCostAnalysis(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       supplierId?: string;
     }
   ): Promise<SupplierCostAnalysisRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
     let supplierFilter = '';
 
     if (options.supplierId) {
@@ -778,7 +805,7 @@ export const reportsRepository = {
           COUNT(id) as total_purchase_orders,
           SUM(total_amount) as total_purchase_value
         FROM purchase_orders
-        WHERE DATE(order_date) BETWEEN DATE($1) AND DATE($2)
+        WHERE order_date >= $1 AND order_date < $2
         GROUP BY supplier_id
       ),
       gr_agg AS (
@@ -791,7 +818,7 @@ export const reportsRepository = {
         FROM purchase_orders po
         INNER JOIN goods_receipts gr ON gr.purchase_order_id = po.id
         LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
-        WHERE DATE(po.order_date) BETWEEN DATE($1) AND DATE($2)
+        WHERE po.order_date >= $1 AND po.order_date < $2
         GROUP BY po.supplier_id
       )
       SELECT 
@@ -836,13 +863,14 @@ export const reportsRepository = {
   async getGoodsReceivedReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       supplierId?: string;
       productId?: string;
     }
   ): Promise<GoodsReceivedRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
     let filters = '';
 
     if (options.supplierId) {
@@ -874,7 +902,7 @@ export const reportsRepository = {
       INNER JOIN purchase_orders po ON po.id = gr.purchase_order_id
       INNER JOIN suppliers s ON s."Id" = po.supplier_id
       LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
-      WHERE DATE(gr.received_date) BETWEEN DATE($1) AND DATE($2)
+      WHERE gr.received_date >= $1 AND gr.received_date < $2
         ${filters}
       GROUP BY gr.id, gr.receipt_number, po.order_number, s."SupplierCode", s."CompanyName", gr.received_date, gr.status
       ORDER BY gr.received_date DESC
@@ -902,12 +930,13 @@ export const reportsRepository = {
   async getPaymentReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       paymentMethod?: string;
     }
   ): Promise<PaymentReportRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
     let methodFilter = '';
 
     if (options.paymentMethod) {
@@ -922,7 +951,7 @@ export const reportsRepository = {
           COUNT(*) as transaction_count,
           SUM(s.total_amount) as total_amount
         FROM sales s
-        WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+        WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
           ${methodFilter}
         GROUP BY s.payment_method
@@ -959,8 +988,8 @@ export const reportsRepository = {
   async getCustomerPaymentsReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       customerId?: string;
       status?: string;
     }
@@ -976,7 +1005,8 @@ export const reportsRepository = {
       depositAvailable: number;
     };
   }> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
     let filters = '';
 
     if (options.customerId) {
@@ -1006,7 +1036,7 @@ export const reportsRepository = {
             ELSE 0 
           END) as overdue_amount
         FROM invoices i
-        WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
+        WHERE i."InvoiceDate" >= $1 AND i."InvoiceDate" < $2
           ${filters}
         GROUP BY i."CustomerId"
       ),
@@ -1016,7 +1046,7 @@ export const reportsRepository = {
           AVG(EXTRACT(EPOCH FROM (ip.payment_date - i."InvoiceDate")) / 86400) as average_payment_days
         FROM invoices i
         INNER JOIN invoice_payments ip ON ip.invoice_id = i."Id"
-        WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
+        WHERE i."InvoiceDate" >= $1 AND i."InvoiceDate" < $2
           ${filters}
         GROUP BY i."CustomerId"
       )
@@ -1050,7 +1080,7 @@ export const reportsRepository = {
             ELSE 0 
           END) as overdue_amount
         FROM invoices i
-        WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
+        WHERE i."InvoiceDate" >= $1 AND i."InvoiceDate" < $2
           ${filters}
         GROUP BY i."CustomerId"
       ),
@@ -1117,8 +1147,8 @@ export const reportsRepository = {
   async getProfitLossReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       groupBy: 'day' | 'week' | 'month';
     }
   ): Promise<{
@@ -1130,16 +1160,17 @@ export const reportsRepository = {
       grossProfitMargin: number;
     };
   }> {
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
     let dateGroup = '';
     switch (options.groupBy) {
       case 'day':
-        dateGroup = 'DATE(s.sale_date)';
+        dateGroup = `(s.sale_date AT TIME ZONE '${TZ}')::date`;
         break;
       case 'week':
-        dateGroup = "DATE_TRUNC('week', s.sale_date)::DATE";
+        dateGroup = `DATE_TRUNC('week', s.sale_date AT TIME ZONE '${TZ}')::DATE`;
         break;
       case 'month':
-        dateGroup = "DATE_TRUNC('month', s.sale_date)::DATE";
+        dateGroup = `DATE_TRUNC('month', s.sale_date AT TIME ZONE '${TZ}')::DATE`;
         break;
     }
 
@@ -1150,7 +1181,7 @@ export const reportsRepository = {
         SUM(s.total_cost) as cost_of_goods_sold,
         SUM(s.profit) as gross_profit
       FROM sales s
-      WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+      WHERE s.sale_date >= $1 AND s.sale_date < $2
         AND s.status NOT IN ('VOID', 'REFUNDED')
       GROUP BY ${dateGroup}
       ORDER BY period
@@ -1166,13 +1197,13 @@ export const reportsRepository = {
           ELSE 0
         END as gross_profit_margin
       FROM sales s
-      WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+      WHERE s.sale_date >= $1 AND s.sale_date < $2
         AND s.status NOT IN ('VOID', 'REFUNDED')
     `;
 
     const [result, summaryResult] = await Promise.all([
-      pool.query(query, [options.startDate, options.endDate]),
-      pool.query(summaryQuery, [options.startDate, options.endDate]),
+      pool.query(query, [startUtc, endUtc]),
+      pool.query(summaryQuery, [startUtc, endUtc]),
     ]);
 
     const sRow = summaryResult.rows[0] || {};
@@ -1210,8 +1241,8 @@ export const reportsRepository = {
   async getDeletedItemsReport(
     pool: Pool,
     options: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
     }
   ): Promise<DeletedItemRow[]> {
     const params: unknown[] = [];
@@ -1263,8 +1294,8 @@ export const reportsRepository = {
   async getInventoryAdjustmentsReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       productId?: string;
     }
   ): Promise<InventoryAdjustmentRow[]> {
@@ -1320,8 +1351,8 @@ export const reportsRepository = {
   async getPurchaseOrderSummary(
     pool: Pool,
     options: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       status?: string;
       supplierId?: string;
     }
@@ -1330,9 +1361,10 @@ export const reportsRepository = {
     const filters: string[] = [];
 
     if (options.startDate && options.endDate) {
-      params.push(options.startDate, options.endDate);
+      const [su, eu] = toUtcParams(options.startDate, options.endDate);
+      params.push(su, eu);
       filters.push(
-        `DATE(po.order_date) BETWEEN DATE($${params.length - 1}) AND DATE($${params.length})`
+        `po.order_date >= $${params.length - 1} AND po.order_date < $${params.length}`
       );
     }
 
@@ -1401,8 +1433,8 @@ export const reportsRepository = {
   async getStockMovementAnalysis(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       productId?: string;
       movementType?: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'movement_type';
@@ -1416,8 +1448,9 @@ export const reportsRepository = {
       netMovement: number;
     };
   }> {
-    const params: unknown[] = [options.startDate, options.endDate];
-    const filters: string[] = ['sm.created_at BETWEEN $1 AND $2'];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
+    const filters: string[] = ['sm.created_at >= $1 AND sm.created_at < $2'];
 
     if (options.productId) {
       params.push(options.productId);
@@ -1436,16 +1469,16 @@ export const reportsRepository = {
 
     switch (options.groupBy) {
       case 'day':
-        groupByClause = 'DATE(sm.created_at)';
-        selectFields = `DATE(sm.created_at) as period`;
+        groupByClause = `(sm.created_at AT TIME ZONE '${TZ}')::date`;
+        selectFields = `(sm.created_at AT TIME ZONE '${TZ}')::date as period`;
         break;
       case 'week':
-        groupByClause = "DATE_TRUNC('week', sm.created_at)";
-        selectFields = `DATE_TRUNC('week', sm.created_at) as period`;
+        groupByClause = `DATE_TRUNC('week', sm.created_at AT TIME ZONE '${TZ}')`;
+        selectFields = `DATE_TRUNC('week', sm.created_at AT TIME ZONE '${TZ}') as period`;
         break;
       case 'month':
-        groupByClause = "DATE_TRUNC('month', sm.created_at)";
-        selectFields = `DATE_TRUNC('month', sm.created_at) as period`;
+        groupByClause = `DATE_TRUNC('month', sm.created_at AT TIME ZONE '${TZ}')`;
+        selectFields = `DATE_TRUNC('month', sm.created_at AT TIME ZONE '${TZ}') as period`;
         break;
       case 'product':
         groupByClause = 'p.id, p.name, p.sku';
@@ -1518,8 +1551,8 @@ export const reportsRepository = {
     pool: Pool,
     options: {
       customerId: string;
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
     }
   ): Promise<CustomerAccountStatementData> {
     const params: unknown[] = [options.customerId];
@@ -1639,8 +1672,8 @@ export const reportsRepository = {
   async getProfitMarginByProduct(
     pool: Pool,
     options: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       categoryId?: string;
       minMarginPercent?: number;
     }
@@ -1785,8 +1818,8 @@ export const reportsRepository = {
   async getDailyCashFlow(
     pool: Pool,
     options: {
-      startDate: Date | string;
-      endDate: Date | string;
+      startDate: string;
+      endDate: string;
       paymentMethod?: string;
       includeDebCollections?: boolean;
     }
@@ -1808,15 +1841,7 @@ export const reportsRepository = {
       creditExtended: number;
     };
   }> {
-    // Convert dates to YYYY-MM-DD strings to avoid timezone issues
-    const startDateStr =
-      options.startDate instanceof Date
-        ? options.startDate.toLocaleDateString('en-CA')
-        : options.startDate;
-    const endDateStr =
-      options.endDate instanceof Date
-        ? options.endDate.toLocaleDateString('en-CA')
-        : options.endDate;
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
 
     try {
       // Enhanced query that separates sales revenue from debt collections
@@ -1824,7 +1849,7 @@ export const reportsRepository = {
         WITH daily_sales AS (
           -- Fresh sales revenue (new business)
           SELECT 
-            DATE(s.sale_date) as transaction_date,
+            (s.sale_date AT TIME ZONE '${TZ}')::date as transaction_date,
             s.payment_method as payment_method,
             'SALES_REVENUE' as revenue_type,
             COUNT(s.id) as transaction_count,
@@ -1835,16 +1860,16 @@ export const reportsRepository = {
             SUM(COALESCE(s.total_amount, 0) - COALESCE(s.amount_paid, 0)) as credit_created,
             AVG(COALESCE(s.total_amount, 0)) as average_sale_value
           FROM sales s
-          WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+          WHERE s.sale_date >= $1 AND s.sale_date < $2
             AND s.status NOT IN ('VOID', 'REFUNDED')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
-          GROUP BY DATE(s.sale_date), s.payment_method
+          GROUP BY (s.sale_date AT TIME ZONE '${TZ}')::date, s.payment_method
         ),
         daily_collections AS (
           -- Debt collections (invoice payments from previous sales)
           SELECT 
-            DATE(ip.payment_date) as transaction_date,
+            (ip.payment_date AT TIME ZONE '${TZ}')::date as transaction_date,
             ip.payment_method as payment_method,
             'DEBT_COLLECTION' as revenue_type,
             COUNT(ip.id) as transaction_count,
@@ -1856,10 +1881,10 @@ export const reportsRepository = {
             AVG(COALESCE(ip.amount, 0)) as average_collection_value
           FROM invoice_payments ip
           INNER JOIN invoices i ON ip.invoice_id = i."Id"
-          WHERE DATE(ip.payment_date) BETWEEN $1::date AND $2::date
+          WHERE ip.payment_date >= $1 AND ip.payment_date < $2
             AND ip.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND ip.payment_method = $3' : ''}
-          GROUP BY DATE(ip.payment_date), ip.payment_method
+          GROUP BY (ip.payment_date AT TIME ZONE '${TZ}')::date, ip.payment_method
         ),
         combined_cash_flow AS (
           SELECT 
@@ -1913,9 +1938,9 @@ export const reportsRepository = {
             SUM(COALESCE(s.total_amount, 0)) as total_sales,
             SUM(COALESCE(s.profit, 0)) as gross_profit,
             SUM(COALESCE(s.total_amount, 0) - COALESCE(s.amount_paid, 0)) as credit_created,
-            COUNT(DISTINCT DATE(s.sale_date)) as sale_days
+            COUNT(DISTINCT (s.sale_date AT TIME ZONE '${TZ}')::date) as sale_days
           FROM sales s
-          WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+          WHERE s.sale_date >= $1 AND s.sale_date < $2
             AND s.status NOT IN ('VOID', 'REFUNDED')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
@@ -1924,10 +1949,10 @@ export const reportsRepository = {
           SELECT
             COUNT(ip.id) as txn_count,
             SUM(COALESCE(ip.amount, 0)) as cash_amount,
-            COUNT(DISTINCT DATE(ip.payment_date)) as coll_days
+            COUNT(DISTINCT (ip.payment_date AT TIME ZONE '${TZ}')::date) as coll_days
           FROM invoice_payments ip
           INNER JOIN invoices i ON ip.invoice_id = i."Id"
-          WHERE DATE(ip.payment_date) BETWEEN $1::date AND $2::date
+          WHERE ip.payment_date >= $1 AND ip.payment_date < $2
             AND ip.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND ip.payment_method = $3' : ''}
         ),
@@ -1935,9 +1960,9 @@ export const reportsRepository = {
           SELECT
             COUNT(cd.id) as txn_count,
             SUM(COALESCE(cd.amount, 0)) as cash_amount,
-            COUNT(DISTINCT DATE(cd.created_at)) as dep_days
+            COUNT(DISTINCT (cd.created_at AT TIME ZONE '${TZ}')::date) as dep_days
           FROM customer_deposits cd
-          WHERE DATE(cd.created_at) BETWEEN $1::date AND $2::date
+          WHERE cd.created_at >= $1 AND cd.created_at < $2
             AND cd.status = 'ACTIVE'
         )
         SELECT
@@ -1956,7 +1981,7 @@ export const reportsRepository = {
         FROM sales_summary ss, collections_summary cs, deposit_summary ds
       `;
 
-      const params = [startDateStr, endDateStr];
+      const params = [startUtc, endUtc];
       if (options.paymentMethod) {
         params.push(options.paymentMethod);
       }
@@ -2181,8 +2206,8 @@ export const reportsRepository = {
   async getTopCustomers(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       limit?: number;
       minPurchaseAmount?: number;
       sortBy?: 'REVENUE' | 'ORDERS' | 'PROFIT';
@@ -2252,7 +2277,7 @@ export const reportsRepository = {
   async getCustomerAging(
     pool: Pool,
     options: {
-      asOfDate?: Date;
+      asOfDate?: Date | string;
     }
   ): Promise<{
     rows: CustomerAgingRow[];
@@ -2466,8 +2491,8 @@ export const reportsRepository = {
   async getWasteDamageReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       productId?: string;
       reason?: 'DAMAGE' | 'EXPIRY' | 'THEFT' | 'OTHER';
     }
@@ -2973,20 +2998,12 @@ export const reportsRepository = {
   async getSalesByCategory(
     pool: Pool,
     options: {
-      startDate: Date | string;
-      endDate: Date | string;
+      startDate: string;
+      endDate: string;
     }
   ): Promise<SalesByCategoryRow[]> {
-    const startDateStr =
-      options.startDate instanceof Date
-        ? options.startDate.toLocaleDateString('en-CA')
-        : options.startDate;
-    const endDateStr =
-      options.endDate instanceof Date
-        ? options.endDate.toLocaleDateString('en-CA')
-        : options.endDate;
-
-    const params: unknown[] = [startDateStr, endDateStr];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
 
     const query = `
       SELECT 
@@ -3002,7 +3019,7 @@ export const reportsRepository = {
       FROM sales s
       INNER JOIN sale_items si ON si.sale_id = s.id
       LEFT JOIN products p ON p.id = si.product_id
-      WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+      WHERE s.sale_date >= $1 AND s.sale_date < $2
         AND s.status NOT IN ('VOID', 'REFUNDED')
       GROUP BY COALESCE(p.category, 'Uncategorized')
       ORDER BY total_revenue DESC
@@ -3042,20 +3059,12 @@ export const reportsRepository = {
   async getSalesByPaymentMethod(
     pool: Pool,
     options: {
-      startDate: Date | string;
-      endDate: Date | string;
+      startDate: string;
+      endDate: string;
     }
   ): Promise<SalesByPaymentMethodRow[]> {
-    const startDateStr =
-      options.startDate instanceof Date
-        ? options.startDate.toLocaleDateString('en-CA')
-        : options.startDate;
-    const endDateStr =
-      options.endDate instanceof Date
-        ? options.endDate.toLocaleDateString('en-CA')
-        : options.endDate;
-
-    const params: unknown[] = [startDateStr, endDateStr];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
 
     const query = `
       WITH payment_totals AS (
@@ -3066,7 +3075,7 @@ export const reportsRepository = {
           AVG(s.total_amount) as average_transaction_value,
           COALESCE(SUM(s.discount_amount), 0) as total_discounts
         FROM sales s
-        WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+        WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
         GROUP BY s.payment_method
       ),
@@ -3106,32 +3115,24 @@ export const reportsRepository = {
   async getHourlySalesAnalysis(
     pool: Pool,
     options: {
-      startDate: Date | string;
-      endDate: Date | string;
+      startDate: string;
+      endDate: string;
     }
   ): Promise<HourlySalesAnalysisRow[]> {
-    const startDateStr =
-      options.startDate instanceof Date
-        ? options.startDate.toLocaleDateString('en-CA')
-        : options.startDate;
-    const endDateStr =
-      options.endDate instanceof Date
-        ? options.endDate.toLocaleDateString('en-CA')
-        : options.endDate;
-
-    const params: unknown[] = [startDateStr, endDateStr];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
 
     const query = `
       SELECT 
-        EXTRACT(HOUR FROM s.sale_date) as hour,
+        EXTRACT(HOUR FROM s.sale_date AT TIME ZONE '${TZ}') as hour,
         COUNT(s.id) as transaction_count,
         SUM(s.total_amount) as total_revenue,
         AVG(s.total_amount) as average_transaction_value,
-        MODE() WITHIN GROUP (ORDER BY to_char(s.sale_date, 'Day')) as peak_day
+        MODE() WITHIN GROUP (ORDER BY to_char(s.sale_date AT TIME ZONE '${TZ}', 'Day')) as peak_day
       FROM sales s
-      WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+      WHERE s.sale_date >= $1 AND s.sale_date < $2
         AND s.status NOT IN ('VOID', 'REFUNDED')
-      GROUP BY EXTRACT(HOUR FROM s.sale_date)
+      GROUP BY EXTRACT(HOUR FROM s.sale_date AT TIME ZONE '${TZ}')
       ORDER BY hour
     `;
 
@@ -3155,47 +3156,33 @@ export const reportsRepository = {
   async getSalesComparison(
     pool: Pool,
     options: {
-      currentStartDate: Date | string;
-      currentEndDate: Date | string;
-      previousStartDate: Date | string;
-      previousEndDate: Date | string;
+      currentStartDate: string;
+      currentEndDate: string;
+      previousStartDate: string;
+      previousEndDate: string;
       groupBy: 'day' | 'week' | 'month';
     }
   ): Promise<SalesComparisonRow[]> {
-    const currentStartStr =
-      options.currentStartDate instanceof Date
-        ? options.currentStartDate.toLocaleDateString('en-CA')
-        : options.currentStartDate;
-    const currentEndStr =
-      options.currentEndDate instanceof Date
-        ? options.currentEndDate.toLocaleDateString('en-CA')
-        : options.currentEndDate;
-    const previousStartStr =
-      options.previousStartDate instanceof Date
-        ? options.previousStartDate.toLocaleDateString('en-CA')
-        : options.previousStartDate;
-    const previousEndStr =
-      options.previousEndDate instanceof Date
-        ? options.previousEndDate.toLocaleDateString('en-CA')
-        : options.previousEndDate;
+    const [curStartUtc, curEndUtc] = toUtcParams(options.currentStartDate, options.currentEndDate);
+    const [prevStartUtc, prevEndUtc] = toUtcParams(options.previousStartDate, options.previousEndDate);
 
-    const params: unknown[] = [currentStartStr, currentEndStr, previousStartStr, previousEndStr];
+    const params: unknown[] = [curStartUtc, curEndUtc, prevStartUtc, prevEndUtc];
 
     let groupByClause = '';
     let selectClause = '';
 
     switch (options.groupBy) {
       case 'day':
-        selectClause = "to_char(DATE(s.sale_date), 'YYYY-MM-DD')";
-        groupByClause = 'DATE(s.sale_date)';
+        selectClause = `to_char((s.sale_date AT TIME ZONE '${TZ}')::date, 'YYYY-MM-DD')`;
+        groupByClause = `(s.sale_date AT TIME ZONE '${TZ}')::date`;
         break;
       case 'week':
-        selectClause = "to_char(DATE_TRUNC('week', s.sale_date), 'YYYY-MM-DD')";
-        groupByClause = "DATE_TRUNC('week', s.sale_date)";
+        selectClause = `to_char(DATE_TRUNC('week', s.sale_date AT TIME ZONE '${TZ}'), 'YYYY-MM-DD')`;
+        groupByClause = `DATE_TRUNC('week', s.sale_date AT TIME ZONE '${TZ}')`;
         break;
       case 'month':
-        selectClause = "to_char(DATE_TRUNC('month', s.sale_date), 'YYYY-MM-DD')";
-        groupByClause = "DATE_TRUNC('month', s.sale_date)";
+        selectClause = `to_char(DATE_TRUNC('month', s.sale_date AT TIME ZONE '${TZ}'), 'YYYY-MM-DD')`;
+        groupByClause = `DATE_TRUNC('month', s.sale_date AT TIME ZONE '${TZ}')`;
         break;
     }
 
@@ -3206,7 +3193,7 @@ export const reportsRepository = {
           SUM(s.total_amount) as total_sales,
           COUNT(s.id) as transaction_count
         FROM sales s
-        WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+        WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
         GROUP BY ${groupByClause}
       ),
@@ -3216,7 +3203,7 @@ export const reportsRepository = {
           SUM(s.total_amount) as total_sales,
           COUNT(s.id) as transaction_count
         FROM sales s
-        WHERE DATE(s.sale_date) BETWEEN $3::date AND $4::date
+        WHERE s.sale_date >= $3 AND s.sale_date < $4
           AND s.status NOT IN ('VOID', 'REFUNDED')
         GROUP BY ${groupByClause}
       )
@@ -3257,18 +3244,11 @@ export const reportsRepository = {
     pool: Pool,
     options: {
       customerId: string;
-      startDate: Date | string;
-      endDate: Date | string;
+      startDate: string;
+      endDate: string;
     }
   ): Promise<CustomerPurchaseHistoryRow[]> {
-    const startDateStr =
-      options.startDate instanceof Date
-        ? options.startDate.toLocaleDateString('en-CA')
-        : options.startDate;
-    const endDateStr =
-      options.endDate instanceof Date
-        ? options.endDate.toLocaleDateString('en-CA')
-        : options.endDate;
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
 
     // Determine if input is UUID or customer_number
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -3289,7 +3269,7 @@ export const reportsRepository = {
       customerUuid = customerLookup.rows[0].id;
     }
 
-    const params: unknown[] = [customerUuid, startDateStr, endDateStr];
+    const params: unknown[] = [customerUuid, startUtc, endUtc];
 
     const query = `
       SELECT 
@@ -3306,7 +3286,7 @@ export const reportsRepository = {
       LEFT JOIN invoices i ON i."SaleId" = s.id
       LEFT JOIN sale_items si ON si.sale_id = s.id
       WHERE s.customer_id = $1
-        AND DATE(s.sale_date) BETWEEN $2::date AND $3::date
+        AND s.sale_date >= $2 AND s.sale_date < $3
       GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid,
                s.payment_method, s.status, i."AmountPaid", i."OutstandingBalance", i."Status"
       ORDER BY s.sale_date DESC
@@ -3335,15 +3315,13 @@ export const reportsRepository = {
   async getBusinessPositionReport(
     pool: Pool,
     options: {
-      reportDate: Date | string;
+      reportDate: string;
       includeComparisons?: boolean;
       includeForecasts?: boolean;
     }
   ): Promise<BusinessPositionData> {
-    const reportDateStr =
-      options.reportDate instanceof Date
-        ? options.reportDate.toLocaleDateString('en-CA')
-        : options.reportDate;
+    const reportDateStr = String(options.reportDate).slice(0, 10);
+    const [dayStartUtc, dayEndUtc] = toUtcParams(reportDateStr, reportDateStr);
 
     // Complex multi-CTE query for comprehensive business metrics
     const query = `
@@ -3362,7 +3340,7 @@ export const reportsRepository = {
           SUM(s.amount_paid) as cash_collected,
           SUM(s.total_amount - s.amount_paid) as credit_extended
         FROM sales s
-        WHERE DATE(s.sale_date) = $1::date
+        WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
       ),
       daily_collections AS (
@@ -3374,14 +3352,14 @@ export const reportsRepository = {
           COUNT(DISTINCT i."CustomerId") as paying_customers
         FROM invoice_payments ip
         INNER JOIN invoices i ON ip.invoice_id = i."Id"
-        WHERE DATE(ip.payment_date) = $1::date
+        WHERE ip.payment_date >= $1 AND ip.payment_date < $2
       ),
       inventory_health AS (
         -- Current inventory position
         SELECT 
           COUNT(DISTINCT p.id) as total_products,
           SUM(CASE WHEN COALESCE(ib.remaining_quantity, 0) <= pi.reorder_level THEN 1 ELSE 0 END) as low_stock_items,
-          SUM(CASE WHEN ib.expiry_date <= ($1::date + INTERVAL '30 days') THEN ib.remaining_quantity ELSE 0 END) as expiring_units,
+          SUM(CASE WHEN ib.expiry_date <= ($3::date + INTERVAL '30 days') THEN ib.remaining_quantity ELSE 0 END) as expiring_units,
           SUM(ib.remaining_quantity * ib.cost_price) as inventory_value
         FROM products p
         LEFT JOIN product_inventory pi ON pi.product_id = p.id
@@ -3391,7 +3369,7 @@ export const reportsRepository = {
         -- Customer base health
         SELECT 
           COUNT(c.id) as total_customers,
-          COUNT(CASE WHEN c.created_at >= ($1::date - INTERVAL '30 days') THEN 1 END) as new_customers_30d,
+          COUNT(CASE WHEN c.created_at >= ($3::date - INTERVAL '30 days') THEN 1 END) as new_customers_30d,
           SUM(CASE WHEN c.balance > 0 THEN c.balance ELSE 0 END) as total_receivables,
           COUNT(CASE WHEN c.balance > 0 THEN 1 END) as customers_with_balance,
           AVG(c.balance) as avg_customer_balance
@@ -3487,7 +3465,7 @@ export const reportsRepository = {
       CROSS JOIN cash_position cp
     `;
 
-    const result = await pool.query(query, [reportDateStr]);
+    const result = await pool.query(query, [dayStartUtc, dayEndUtc, reportDateStr]);
     const row = result.rows[0];
 
     if (!row) {
@@ -3787,10 +3765,11 @@ export const reportsRepository = {
     }
   ): Promise<CashRegisterMovementBreakdownData> {
     try {
-      const params: unknown[] = [options.startDate, options.endDate];
+      const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+      const params: unknown[] = [startUtc, endUtc];
       let paramIndex = 3;
 
-      let whereClause = 'WHERE DATE(m.created_at) BETWEEN $1::date AND $2::date';
+      let whereClause = 'WHERE m.created_at >= $1 AND m.created_at < $2';
       if (options.registerId) {
         whereClause += ` AND s.register_id = $${paramIndex++}`;
         params.push(options.registerId);
@@ -3883,7 +3862,7 @@ export const reportsRepository = {
       const dailyResult = await pool.query(
         `
         SELECT 
-          DATE(m.created_at) as date,
+          (m.created_at AT TIME ZONE '${TZ}')::date as date,
           COALESCE(SUM(CASE WHEN m.movement_type = 'CASH_IN_FLOAT' THEN m.amount ELSE 0 END), 0) as cash_in_float,
           COALESCE(SUM(CASE WHEN m.movement_type = 'CASH_IN_PAYMENT' THEN m.amount ELSE 0 END), 0) as cash_in_payment,
           COALESCE(SUM(CASE WHEN m.movement_type = 'CASH_IN_OTHER' THEN m.amount ELSE 0 END), 0) as cash_in_other,
@@ -3895,8 +3874,8 @@ export const reportsRepository = {
         FROM cash_movements m
         INNER JOIN cash_register_sessions s ON m.session_id = s.id
         ${whereClause}
-        GROUP BY DATE(m.created_at)
-        ORDER BY DATE(m.created_at) DESC
+        GROUP BY (m.created_at AT TIME ZONE '${TZ}')::date
+        ORDER BY (m.created_at AT TIME ZONE '${TZ}')::date DESC
       `,
         params
       );
@@ -3985,10 +3964,11 @@ export const reportsRepository = {
     }
   ): Promise<CashRegisterSessionHistoryData> {
     try {
-      const params: unknown[] = [options.startDate, options.endDate];
+      const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+      const params: unknown[] = [startUtc, endUtc];
       let paramIndex = 3;
 
-      let whereClause = 'WHERE DATE(s.opened_at) BETWEEN $1::date AND $2::date';
+      let whereClause = 'WHERE s.opened_at >= $1 AND s.opened_at < $2';
       if (options.registerId) {
         whereClause += ` AND s.register_id = $${paramIndex++}`;
         params.push(options.registerId);
@@ -4106,8 +4086,8 @@ export const reportsRepository = {
   async getDeliveryNoteReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       customerId?: string;
       status?: string;
     }
@@ -4171,14 +4151,15 @@ export const reportsRepository = {
   async getQuotationReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       customerId?: string;
       status?: string;
       quoteType?: string;
     }
   ): Promise<QuotationReportRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const params: unknown[] = [startUtc, endUtc];
     let filters = '';
 
     if (options.customerId) {
@@ -4215,7 +4196,7 @@ export const reportsRepository = {
       LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
       LEFT JOIN sales s ON s.id = q.converted_to_sale_id
       LEFT JOIN invoices i ON i.\"Id\" = q.converted_to_invoice_id
-      WHERE q.created_at::date BETWEEN DATE($1) AND DATE($2)
+      WHERE q.created_at >= $1 AND q.created_at < $2
         ${filters}
       GROUP BY q.id, q.quote_number, q.customer_name, q.quote_type, q.status,
                q.subtotal, q.discount_amount, q.tax_amount, q.total_amount,
@@ -4249,8 +4230,8 @@ export const reportsRepository = {
   async getManualJournalEntryReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       status?: string;
     }
   ): Promise<ManualJournalEntryReportRow[]> {
@@ -4306,8 +4287,8 @@ export const reportsRepository = {
   async getBankTransactionReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       bankAccountId?: string;
       type?: string;
       isReconciled?: boolean;

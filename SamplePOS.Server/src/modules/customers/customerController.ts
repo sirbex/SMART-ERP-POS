@@ -232,8 +232,8 @@ export const getCustomerStatement = asyncHandler(async (req: Request, res: Respo
 
   const statement = await customerService.getCustomerStatement(
     id,
-    q.start ? new Date(q.start) : undefined,
-    q.end ? new Date(q.end) : undefined,
+    q.start || undefined,
+    q.end || undefined,
     q.page,
     q.limit,
     req.tenantPool || globalPool
@@ -258,8 +258,8 @@ export const exportCustomerStatementCsv = asyncHandler(async (req: Request, res:
   // Fetch a large page to include all entries in range
   const statement = await customerService.getCustomerStatement(
     id,
-    q.start ? new Date(q.start) : undefined,
-    q.end ? new Date(q.end) : undefined,
+    q.start || undefined,
+    q.end || undefined,
     1,
     100000,
     pool
@@ -303,8 +303,8 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
 
   const statement = await customerService.getCustomerStatement(
     id,
-    q.start ? new Date(q.start) : undefined,
-    q.end ? new Date(q.end) : undefined,
+    q.start || undefined,
+    q.end || undefined,
     1,
     100000,
     req.tenantPool || globalPool

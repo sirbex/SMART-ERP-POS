@@ -5,6 +5,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 
 export async function findAllCustomers(
   limit: number = 50,
@@ -441,6 +442,8 @@ export async function countCustomerTransactions(customerId: string, dbPool?: pg.
  */
 export async function getOpeningBalance(customerId: string, start: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<number> {
   const pool = dbPool || globalPool;
+  const startStr = start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10);
+  const { startUtc } = toUtcRange(startStr, startStr, BUSINESS_TIMEZONE);
   // Derive opening balance from invoices (AR ledger) — same source as fn_recalculate_customer_ar_balance
   // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
@@ -458,7 +461,7 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
        SELECT COALESCE(SUM(ip.amount),0) AS amt
        FROM invoice_payments ip
        INNER JOIN invoices i ON i."Id" = ip.invoice_id
-       WHERE i."CustomerId" = $1 AND ip.payment_date::date < $2
+       WHERE i."CustomerId" = $1 AND ip.payment_date < $2
      ),
      credit_notes AS (
        SELECT COALESCE(SUM(i."TotalAmount"),0) AS amt
@@ -470,7 +473,7 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
      )
      SELECT (d.amt - c.amt - cn.amt) AS opening
      FROM debits d, credits c, credit_notes cn`,
-    [customerId, start]
+    [customerId, startUtc]
   );
   return parseFloat(res.rows[0]?.opening ?? 0);
 }
@@ -482,6 +485,9 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
  */
 export async function getStatementEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
   const pool = dbPool || globalPool;
+  const startStr = start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10);
+  const endStr = end instanceof Date ? end.toISOString().slice(0, 10) : String(end).slice(0, 10);
+  const { startUtc, endUtc } = toUtcRange(startStr, endStr, BUSINESS_TIMEZONE);
   // Derive entries from invoices (AR ledger) — same source as fn_recalculate_customer_ar_balance
   // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
   const res = await pool.query(
@@ -497,7 +503,7 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
       WHERE i."CustomerId" = $1
         AND (i.document_type IS NULL OR i.document_type = 'INVOICE')
         AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
+        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" < $3
     )
     UNION ALL
     (
@@ -512,7 +518,7 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
       WHERE i."CustomerId" = $1
         AND i.document_type = 'CREDIT_NOTE'
         AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
+        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" < $3
     )
     UNION ALL
     (
@@ -527,7 +533,7 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
       WHERE i."CustomerId" = $1
         AND i.document_type = 'DEBIT_NOTE'
         AND i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" <= $3
+        AND i."InvoiceDate" >= $2 AND i."InvoiceDate" < $3
     )
     UNION ALL
     (
@@ -540,7 +546,7 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
         ip.amount as credit
       FROM invoice_payments ip
       INNER JOIN invoices i ON i."Id" = ip.invoice_id
-      WHERE i."CustomerId" = $1 AND ip.payment_date::date >= $2 AND ip.payment_date::date <= $3
+      WHERE i."CustomerId" = $1 AND ip.payment_date >= $2 AND ip.payment_date < $3
     )
     UNION ALL
     (
@@ -552,10 +558,10 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
         CASE WHEN sm.amount > 0 THEN sm.amount ELSE 0 END as debit,
         CASE WHEN sm.amount < 0 THEN -sm.amount ELSE 0 END as credit
       FROM customer_balance_adjustments sm
-      WHERE sm.customer_id = $1 AND sm.created_at::date >= $2 AND sm.created_at::date <= $3
+      WHERE sm.customer_id = $1 AND sm.created_at >= $2 AND sm.created_at < $3
     )
     ORDER BY date ASC`,
-    [customerId, start, end]
+    [customerId, startUtc, endUtc]
   );
   return res.rows;
 }
@@ -566,6 +572,9 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
  */
 export async function getDepositEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
   const pool = dbPool || globalPool;
+  const startStr = start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10);
+  const endStr = end instanceof Date ? end.toISOString().slice(0, 10) : String(end).slice(0, 10);
+  const { startUtc, endUtc } = toUtcRange(startStr, endStr, BUSINESS_TIMEZONE);
   const res = await pool.query(
     `(
       SELECT 
@@ -576,7 +585,7 @@ export async function getDepositEntries(customerId: string, start: Date, end: Da
         d.amount as amount,
         d.status
       FROM pos_customer_deposits d
-      WHERE d.customer_id = $1 AND d.created_at::date >= $2 AND d.created_at::date <= $3
+      WHERE d.customer_id = $1 AND d.created_at >= $2 AND d.created_at < $3
     )
     UNION ALL
     (
@@ -590,10 +599,10 @@ export async function getDepositEntries(customerId: string, start: Date, end: Da
       FROM pos_deposit_applications da
       INNER JOIN pos_customer_deposits d ON d.id = da.deposit_id
       INNER JOIN sales s ON s.id = da.sale_id
-      WHERE d.customer_id = $1 AND da.applied_at::date >= $2 AND da.applied_at::date <= $3
+      WHERE d.customer_id = $1 AND da.applied_at >= $2 AND da.applied_at < $3
     )
     ORDER BY date ASC`,
-    [customerId, start, end]
+    [customerId, startUtc, endUtc]
   );
   return res.rows;
 }

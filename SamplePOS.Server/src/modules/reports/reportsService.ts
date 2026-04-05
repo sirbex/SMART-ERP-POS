@@ -115,7 +115,7 @@ export const reportsService = {
   async generateInventoryValuation(
     pool: Pool,
     options: {
-      asOfDate?: Date;
+      asOfDate?: Date | string;
       categoryId?: string;
       valuationMethod?: 'FIFO' | 'AVCO' | 'LIFO';
       format?: 'json' | 'pdf' | 'csv';
@@ -243,8 +243,8 @@ export const reportsService = {
   async generateSalesReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
       customerId?: string;
       format?: 'json' | 'pdf' | 'csv';
@@ -443,8 +443,8 @@ export const reportsService = {
   async generateBestSelling(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       limit: number;
       categoryId?: string;
       format?: 'json' | 'pdf' | 'csv';
@@ -519,8 +519,8 @@ export const reportsService = {
   async generateSupplierCostAnalysis(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       supplierId?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
@@ -585,8 +585,8 @@ export const reportsService = {
   async generateGoodsReceived(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       supplierId?: string;
       productId?: string;
       format?: 'json' | 'pdf' | 'csv';
@@ -651,8 +651,8 @@ export const reportsService = {
   async generatePaymentReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       paymentMethod?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
@@ -717,8 +717,8 @@ export const reportsService = {
   async generateCustomerPayments(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       customerId?: string;
       status?: string;
       format?: 'json' | 'pdf' | 'csv';
@@ -782,8 +782,8 @@ export const reportsService = {
   async generateProfitLoss(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       groupBy: 'day' | 'week' | 'month';
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
@@ -842,8 +842,8 @@ export const reportsService = {
   async generateDeletedItems(
     pool: Pool,
     options: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
@@ -897,8 +897,8 @@ export const reportsService = {
   async generateInventoryAdjustments(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       productId?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
@@ -967,8 +967,8 @@ export const reportsService = {
   async generatePurchaseOrderSummary(
     pool: Pool,
     options: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       status?: string;
       supplierId?: string;
       format?: 'json' | 'pdf' | 'csv';
@@ -1032,8 +1032,8 @@ export const reportsService = {
   async generateStockMovementAnalysis(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       productId?: string;
       movementType?: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'movement_type';
@@ -1093,8 +1093,8 @@ export const reportsService = {
     pool: Pool,
     options: {
       customerId: string;
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
@@ -1150,8 +1150,8 @@ export const reportsService = {
   async generateProfitMarginByProduct(
     pool: Pool,
     options: {
-      startDate?: Date;
-      endDate?: Date;
+      startDate?: string;
+      endDate?: string;
       categoryId?: string;
       minMargin?: number;
       format?: 'json' | 'pdf' | 'csv';
@@ -1211,8 +1211,8 @@ export const reportsService = {
   async generateDailyCashFlow(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       paymentMethod?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
@@ -1389,8 +1389,8 @@ export const reportsService = {
   async generateTopCustomers(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       limit?: number;
       sortBy?: 'REVENUE' | 'ORDERS' | 'PROFIT';
       format?: 'json' | 'pdf' | 'csv';
@@ -1459,7 +1459,7 @@ export const reportsService = {
   async generateCustomerAging(
     pool: Pool,
     options: {
-      asOfDate?: Date;
+      asOfDate?: Date | string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
@@ -1521,7 +1521,7 @@ export const reportsService = {
   async generateStockAging(
     pool: Pool,
     options: {
-      asOfDate?: Date;
+      asOfDate?: Date | string;
       categoryId?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
@@ -1584,8 +1584,8 @@ export const reportsService = {
   async generateWasteDamageReport(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       productId?: string;
       reason?: 'DAMAGE' | 'EXPIRY' | 'THEFT' | 'OTHER';
       format?: 'json' | 'pdf' | 'csv';
@@ -1795,8 +1795,8 @@ export const reportsService = {
   async generateSalesByCategory(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       format?: 'pdf' | 'csv' | 'json';
       userId?: string;
     }
@@ -1847,8 +1847,8 @@ export const reportsService = {
   async generateSalesByPaymentMethod(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       format?: 'pdf' | 'csv' | 'json';
       userId?: string;
     }
@@ -1895,8 +1895,8 @@ export const reportsService = {
   async generateHourlySalesAnalysis(
     pool: Pool,
     options: {
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       format?: 'pdf' | 'csv' | 'json';
       userId?: string;
     }
@@ -1949,10 +1949,10 @@ export const reportsService = {
   async generateSalesComparison(
     pool: Pool,
     options: {
-      currentStartDate: Date;
-      currentEndDate: Date;
-      previousStartDate: Date;
-      previousEndDate: Date;
+      currentStartDate: string;
+      currentEndDate: string;
+      previousStartDate: string;
+      previousEndDate: string;
       groupBy: 'day' | 'week' | 'month';
       format?: 'pdf' | 'csv' | 'json';
       userId?: string;
@@ -2011,8 +2011,8 @@ export const reportsService = {
     pool: Pool,
     options: {
       customerId: string;
-      startDate: Date;
-      endDate: Date;
+      startDate: string;
+      endDate: string;
       format?: 'pdf' | 'csv' | 'json';
       userId?: string;
     }
@@ -2074,7 +2074,7 @@ export const reportsService = {
   async generateBusinessPositionReport(
     pool: Pool,
     options: {
-      reportDate: Date;
+      reportDate: string;
       includeComparisons?: boolean;
       includeForecasts?: boolean;
       format?: 'json' | 'pdf' | 'csv';
@@ -2336,7 +2336,7 @@ export const reportsService = {
 
   // ── Delivery Notes Report ──
   async generateDeliveryNoteReport(pool: Pool, options: {
-    startDate: Date; endDate: Date;
+    startDate: string; endDate: string;
     customerId?: string; status?: string;
     format?: 'json' | 'pdf' | 'csv'; userId?: string;
   }) {
@@ -2387,7 +2387,7 @@ export const reportsService = {
 
   // ── Quotation Report ──
   async generateQuotationReport(pool: Pool, options: {
-    startDate: Date; endDate: Date;
+    startDate: string; endDate: string;
     customerId?: string; status?: string; quoteType?: string;
     format?: 'json' | 'pdf' | 'csv'; userId?: string;
   }) {
@@ -2446,7 +2446,7 @@ export const reportsService = {
 
   // ── Manual Journal Entry Report ──
   async generateManualJournalEntryReport(pool: Pool, options: {
-    startDate: Date; endDate: Date;
+    startDate: string; endDate: string;
     status?: string;
     format?: 'json' | 'pdf' | 'csv'; userId?: string;
   }) {
@@ -2498,7 +2498,7 @@ export const reportsService = {
 
   // ── Bank Transaction Report ──
   async generateBankTransactionReport(pool: Pool, options: {
-    startDate: Date; endDate: Date;
+    startDate: string; endDate: string;
     bankAccountId?: string; type?: string; isReconciled?: boolean;
     format?: 'json' | 'pdf' | 'csv'; userId?: string;
   }) {

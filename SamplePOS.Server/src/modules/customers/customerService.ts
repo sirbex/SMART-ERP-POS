@@ -8,6 +8,7 @@ import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../share
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
 import { ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import { BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 
 /**
  * Get all customers with pagination
@@ -383,8 +384,8 @@ export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool) {
  */
 export async function getCustomerStatement(
   customerId: string,
-  start?: Date,
-  end?: Date,
+  start?: Date | string,
+  end?: Date | string,
   page: number = 1,
   limit: number = 100,
   dbPool?: pg.Pool
@@ -394,29 +395,40 @@ export async function getCustomerStatement(
     throw new Error(`Customer with ID ${customerId} not found`);
   }
 
-  // Default range: last 30 days if not provided
-  const periodEnd = end ? new Date(end) : new Date();
-  const periodStart = start
-    ? new Date(start)
-    : new Date(periodEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+  // Default range: last 30 days in business timezone if not provided
+  // Compute "today" in Africa/Kampala by applying UTC+3 offset
+  const nowUtc = Date.now();
+  const kampalaMs = nowUtc + 3 * 60 * 60 * 1000; // Africa/Kampala = UTC+3 (no DST)
+  const todayStr = new Date(kampalaMs).toISOString().slice(0, 10);
+
+  const periodEndStr = end
+    ? (end instanceof Date ? end.toISOString().slice(0, 10) : String(end).slice(0, 10))
+    : todayStr;
+  const periodStartStr = start
+    ? (start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10))
+    : (() => {
+        const d = new Date(periodEndStr + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() - 30);
+        return d.toISOString().slice(0, 10);
+      })();
 
   // Opening balance prior to period start (invoice ledger only)
-  const openingRaw = await customerRepository.getOpeningBalance(customerId, periodStart, dbPool);
+  const openingRaw = await customerRepository.getOpeningBalance(customerId, periodStartStr as unknown as Date, dbPool);
   let running = new Decimal(openingRaw);
 
   // Get invoice/liability entries (credit sales, payments, adjustments)
   const rawEntries = await customerRepository.getStatementEntries(
     customerId,
-    periodStart,
-    periodEnd,
+    periodStartStr as unknown as Date,
+    periodEndStr as unknown as Date,
     dbPool
   );
 
   // Get deposit activity
   const depositEntries = await customerRepository.getDepositEntries(
     customerId,
-    periodStart,
-    periodEnd,
+    periodStartStr as unknown as Date,
+    periodEndStr as unknown as Date,
     dbPool
   );
 
@@ -493,8 +505,8 @@ export async function getCustomerStatement(
   // Assemble statement object & validate via Zod (defense-in-depth)
   const statement = CustomerStatementSchema.parse({
     customerId,
-    periodStart: periodStart.toISOString(),
-    periodEnd: periodEnd.toISOString(),
+    periodStart: periodStartStr,
+    periodEnd: periodEndStr,
     openingBalance: new Decimal(openingRaw).toNumber(),
     closingBalance,
     entries,

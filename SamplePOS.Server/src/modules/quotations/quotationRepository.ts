@@ -13,6 +13,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 
 // ============================================================================
 // DATABASE ROW INTERFACES (snake_case from database)
@@ -386,14 +387,18 @@ export const quotationRepository = {
       values.push(filters.createdById);
     }
 
-    if (filters.fromDate) {
-      where.push(`created_at::DATE >= $${idx++}`);
-      values.push(filters.fromDate);
-    }
-
-    if (filters.toDate) {
-      where.push(`created_at::DATE <= $${idx++}`);
-      values.push(filters.toDate);
+    if (filters.fromDate || filters.toDate) {
+      const from = filters.fromDate || filters.toDate!;
+      const to = filters.toDate || filters.fromDate!;
+      const { startUtc, endUtc } = toUtcRange(from, to, BUSINESS_TIMEZONE);
+      if (filters.fromDate) {
+        where.push(`created_at >= $${idx++}`);
+        values.push(startUtc);
+      }
+      if (filters.toDate) {
+        where.push(`created_at < $${idx++}`);
+        values.push(endUtc);
+      }
     }
 
     if (filters.searchTerm) {

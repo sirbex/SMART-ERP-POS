@@ -30,14 +30,6 @@ async function getCompanyName(pool: Pool): Promise<string> {
   }
 }
 
-// Utility function to ensure end date includes the full day
-function adjustEndDate(dateString: string): Date {
-  const date = new Date(dateString);
-  // Set time to 23:59:59.999 to include the entire end date
-  date.setHours(23, 59, 59, 999);
-  return date;
-}
-
 // Utility function to format dates in a simplified, human-readable format
 function formatDateTime(date: Date = new Date()): string {
   return date.toLocaleString('en-US', {
@@ -126,11 +118,6 @@ const CashRegisterSessionHistorySchema = CashRegisterDateRangeSchema.extend({
   status: z.enum(['OPEN', 'CLOSED', 'ALL']).optional().default('ALL'),
 });
 
-// Helper to convert ISO datetime string to Date object
-function parseDate(dateString: string | undefined): Date | undefined {
-  return dateString ? new Date(dateString) : undefined;
-}
-
 export const reportsController = {
   /**
    * Get current system settings for report formatting
@@ -164,7 +151,7 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateInventoryValuation(pool, {
-      asOfDate: parseDate(params.as_of_date),
+      asOfDate: params.as_of_date,
       categoryId: params.category_id,
       valuationMethod: params.valuation_method,
       format: params.format,
@@ -187,7 +174,7 @@ export const reportsController = {
       );
       doc.pipe(res);
 
-      const asOfDate = params.as_of_date ? formatDatePDF(new Date(params.as_of_date)) : 'Current';
+      const asOfDate = params.as_of_date ? formatDatePDF(params.as_of_date) : 'Current';
       const method = params.valuation_method || 'FIFO';
 
       pdfGen.addHeader({
@@ -255,8 +242,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateSalesReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       groupBy: params.group_by,
       customerId: params.customer_id,
       format: params.format,
@@ -274,8 +261,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="sales-report-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -543,8 +530,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateBestSelling(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       limit: params.limit || 10,
       categoryId: params.category_id,
       format: params.format,
@@ -562,8 +549,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="best-selling-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -654,8 +641,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateSupplierCostAnalysis(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       supplierId: params.supplier_id,
       format: params.format,
       userId,
@@ -675,8 +662,8 @@ export const reportsController = {
       );
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -763,8 +750,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateGoodsReceived(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       supplierId: params.supplier_id,
       productId: params.product_id,
       format: params.format,
@@ -782,8 +769,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="goods-received-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -851,8 +838,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generatePaymentReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       paymentMethod: params.payment_method,
       format: params.format,
       userId,
@@ -869,8 +856,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="payment-report-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -944,8 +931,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateCustomerPayments(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       customerId: params.customer_id,
       status: params.status,
       format: params.format,
@@ -963,8 +950,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="customer-payments-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -1053,8 +1040,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateProfitLoss(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       groupBy: params.group_by,
       format: params.format,
       userId,
@@ -1071,8 +1058,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="profit-loss-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -1160,8 +1147,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateDeletedItems(pool, {
-      startDate: parseDate(params.start_date),
-      endDate: parseDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -1178,9 +1165,9 @@ export const reportsController = {
       doc.pipe(res);
 
       const startDate = params.start_date
-        ? formatDatePDF(new Date(params.start_date))
+        ? formatDatePDF(params.start_date)
         : 'Beginning';
-      const endDate = params.end_date ? formatDatePDF(new Date(params.end_date)) : 'Today';
+      const endDate = params.end_date ? formatDatePDF(params.end_date) : 'Today';
 
       pdfGen.addHeader({
         companyName,
@@ -1236,8 +1223,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateInventoryAdjustments(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       productId: params.product_id,
       format: params.format,
       userId,
@@ -1257,8 +1244,8 @@ export const reportsController = {
       );
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -1326,8 +1313,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generatePurchaseOrderSummary(pool, {
-      startDate: parseDate(params.start_date),
-      endDate: parseDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       status: params.status,
       supplierId: params.supplier_id,
       format: params.format,
@@ -1346,9 +1333,9 @@ export const reportsController = {
       doc.pipe(res);
 
       const startDate = params.start_date
-        ? formatDatePDF(new Date(params.start_date))
+        ? formatDatePDF(params.start_date)
         : 'Beginning';
-      const endDate = params.end_date ? formatDatePDF(new Date(params.end_date)) : 'Today';
+      const endDate = params.end_date ? formatDatePDF(params.end_date) : 'Today';
 
       pdfGen.addHeader({
         companyName,
@@ -1417,8 +1404,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateStockMovementAnalysis(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       productId: params.product_id,
       movementType: params.movement_type,
       format: params.format,
@@ -1436,8 +1423,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="stock-movements-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -1511,8 +1498,8 @@ export const reportsController = {
 
     const report = await reportsService.generateCustomerAccountStatement(pool, {
       customerId: customerId,
-      startDate: parseDate(params.start_date),
-      endDate: parseDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -1533,10 +1520,10 @@ export const reportsController = {
 
       const customerName = report.data.customer.name || 'Unknown Customer';
       const startDate = params.start_date
-        ? formatDatePDF(new Date(params.start_date as string))
+        ? formatDatePDF(params.start_date)
         : 'Beginning';
       const endDate = params.end_date
-        ? formatDatePDF(new Date(params.end_date as string))
+        ? formatDatePDF(params.end_date)
         : 'Today';
 
       pdfGen.addHeader({
@@ -1620,8 +1607,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateProfitMarginByProduct(pool, {
-      startDate: parseDate(params.start_date),
-      endDate: parseDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       categoryId: params.category_id,
       minMargin: params.min_margin,
       format: params.format,
@@ -1639,8 +1626,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="profit-margin-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = params.start_date ? formatDatePDF(new Date(params.start_date)) : 'All Time';
-      const endDate = params.end_date ? formatDatePDF(new Date(params.end_date)) : 'Present';
+      const startDate = params.start_date ? formatDatePDF(params.start_date) : 'All Time';
+      const endDate = params.end_date ? formatDatePDF(params.end_date) : 'Present';
 
       pdfGen.addHeader({
         companyName,
@@ -1722,8 +1709,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateDailyCashFlow(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -1739,8 +1726,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="daily-cash-flow-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -1921,8 +1908,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateTopCustomers(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       limit: params.limit,
       sortBy: params.sort_by,
       format: params.format,
@@ -1940,8 +1927,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="top-customers-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -2133,7 +2120,7 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateStockAging(pool, {
-      asOfDate: params.as_of_date ? new Date(params.as_of_date) : undefined,
+      asOfDate: params.as_of_date ? params.as_of_date : undefined,
       categoryId: params.category_id,
       format: params.format,
       userId,
@@ -2154,7 +2141,7 @@ export const reportsController = {
         companyName,
         title: 'Stock Aging Report',
         subtitle: params.as_of_date
-          ? `As of ${formatDatePDF(new Date(params.as_of_date))}`
+          ? `As of ${formatDatePDF(params.as_of_date)}`
           : 'Current Stock',
         generatedAt: formatDateTime(),
       });
@@ -2227,8 +2214,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateWasteDamageReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       reason: params.reason,
       format: params.format,
       userId,
@@ -2245,8 +2232,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="waste-damage-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -2622,8 +2609,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateSalesByCategory(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -2640,10 +2627,10 @@ export const reportsController = {
       doc.pipe(res);
 
       const startDate = params.start_date
-        ? formatDatePDF(new Date(params.start_date as string))
+        ? formatDatePDF(params.start_date)
         : 'All Time';
       const endDate = params.end_date
-        ? formatDatePDF(new Date(params.end_date as string))
+        ? formatDatePDF(params.end_date)
         : 'Present';
 
       pdfGen.addHeader({
@@ -2741,8 +2728,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateSalesByPaymentMethod(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -2762,10 +2749,10 @@ export const reportsController = {
       doc.pipe(res);
 
       const startDate = params.start_date
-        ? formatDatePDF(new Date(params.start_date as string))
+        ? formatDatePDF(params.start_date)
         : 'All Time';
       const endDate = params.end_date
-        ? formatDatePDF(new Date(params.end_date as string))
+        ? formatDatePDF(params.end_date)
         : 'Present';
 
       pdfGen.addHeader({
@@ -2846,8 +2833,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateHourlySalesAnalysis(pool, {
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -2863,8 +2850,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="hourly-sales-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -2948,10 +2935,10 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateSalesComparison(pool, {
-      currentStartDate: new Date(params.current_start_date),
-      currentEndDate: new Date(params.current_end_date),
-      previousStartDate: new Date(params.previous_start_date),
-      previousEndDate: new Date(params.previous_end_date),
+      currentStartDate: params.current_start_date,
+      currentEndDate: params.current_end_date,
+      previousStartDate: params.previous_start_date,
+      previousEndDate: params.previous_end_date,
       groupBy: params.group_by,
       format: params.format,
       userId,
@@ -2968,8 +2955,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="sales-comparison-${date}.pdf"`);
       doc.pipe(res);
 
-      const currentStart = formatDatePDF(new Date(params.current_start_date));
-      const currentEnd = formatDatePDF(new Date(params.current_end_date));
+      const currentStart = formatDatePDF(params.current_start_date);
+      const currentEnd = formatDatePDF(params.current_end_date);
 
       pdfGen.addHeader({
         companyName,
@@ -3059,8 +3046,8 @@ export const reportsController = {
 
     const report = await reportsService.generateCustomerPurchaseHistory(pool, {
       customerId: params.customer_id,
-      startDate: new Date(params.start_date),
-      endDate: new Date(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -3076,8 +3063,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="customer-history-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = formatDatePDF(new Date(params.start_date));
-      const endDate = formatDatePDF(new Date(params.end_date));
+      const startDate = formatDatePDF(params.start_date);
+      const endDate = formatDatePDF(params.end_date);
       const customerName =
         Array.isArray(report.data) && report.data.length > 0
           ? report.data[0]?.customerName || params.customer_id
@@ -3163,8 +3150,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const filters: Record<string, string | number | Date | undefined> = {};
-    if (start_date) filters.startDate = new Date(start_date);
-    if (end_date) filters.endDate = adjustEndDate(end_date);
+    if (start_date) filters.startDate = start_date;
+    if (end_date) filters.endDate = end_date;
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
@@ -3234,8 +3221,8 @@ export const reportsController = {
       );
       doc.pipe(res);
 
-      const startDate = start_date ? formatDatePDF(new Date(start_date as string)) : 'All Time';
-      const endDate = end_date ? formatDatePDF(new Date(end_date as string)) : 'Present';
+      const startDate = start_date ? formatDatePDF(start_date as string) : 'All Time';
+      const endDate = end_date ? formatDatePDF(end_date as string) : 'Present';
 
       pdfGen.addHeader({
         companyName,
@@ -3360,8 +3347,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const filters: Record<string, string | number | Date | undefined> = {};
-    if (start_date) filters.startDate = new Date(start_date);
-    if (end_date) filters.endDate = adjustEndDate(end_date);
+    if (start_date) filters.startDate = start_date;
+    if (end_date) filters.endDate = end_date;
     if (product_id) filters.productId = product_id;
 
     // Import salesService
@@ -3524,8 +3511,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const filters: Record<string, string | number | Date | undefined> = {};
-    if (start_date) filters.startDate = new Date(start_date);
-    if (end_date) filters.endDate = adjustEndDate(end_date);
+    if (start_date) filters.startDate = start_date;
+    if (end_date) filters.endDate = end_date;
     if (user_id) filters.userId = user_id;
 
     // Import salesService
@@ -3591,8 +3578,8 @@ export const reportsController = {
       res.setHeader('Content-Disposition', `attachment; filename="sales-by-cashier-${date}.pdf"`);
       doc.pipe(res);
 
-      const startDate = start_date ? formatDatePDF(new Date(start_date as string)) : 'All Time';
-      const endDate = end_date ? formatDatePDF(new Date(end_date as string)) : 'Present';
+      const startDate = start_date ? formatDatePDF(start_date as string) : 'All Time';
+      const endDate = end_date ? formatDatePDF(end_date as string) : 'Present';
 
       pdfGen.addHeader({
         companyName,
@@ -4148,9 +4135,7 @@ export const reportsController = {
    * GET /api/reports/business-position
    */
   async getBusinessPositionReport(req: Request, res: Response, pool: Pool) {
-    const reportDate = req.query.report_date
-      ? new Date(req.query.report_date as string)
-      : new Date();
+    const reportDate = (req.query.report_date as string) || new Date().toISOString().slice(0, 10);
     const includeComparisons = req.query.include_comparisons === 'true';
     const includeForecasts = req.query.include_forecasts === 'true';
     const format = (req.query.format as string) || 'json';
@@ -4170,7 +4155,7 @@ export const reportsController = {
       const pdfGen = new ReportPDFGenerator(companyName);
       const doc = pdfGen.getDocument();
 
-      const date = reportDate.toLocaleDateString('en-CA');
+      const date = reportDate;
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="business-position-${date}.pdf"`);
       doc.pipe(res);
@@ -4297,7 +4282,7 @@ export const reportsController = {
     logger.info('Business position report generated', {
       userId,
       businessHealthScore: report.data.businessHealthScore,
-      reportDate: reportDate.toLocaleDateString('en-CA'),
+      reportDate: reportDate,
     });
 
     res.json({ success: true, data: report });
@@ -4414,8 +4399,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateDeliveryNoteReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       customerId: params.customer_id,
       status: params.status,
       format: params.format,
@@ -4472,8 +4457,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateQuotationReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       customerId: params.customer_id,
       status: params.status,
       quoteType: params.quote_type,
@@ -4531,8 +4516,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateManualJournalEntryReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       status: params.status,
       format: params.format,
       userId,
@@ -4588,8 +4573,8 @@ export const reportsController = {
     const userId = req.user?.id;
 
     const report = await reportsService.generateBankTransactionReport(pool, {
-      startDate: new Date(params.start_date),
-      endDate: adjustEndDate(params.end_date),
+      startDate: params.start_date,
+      endDate: params.end_date,
       bankAccountId: params.bank_account_id,
       type: params.type,
       isReconciled: params.is_reconciled === 'true' ? true : params.is_reconciled === 'false' ? false : undefined,
