@@ -123,7 +123,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  // ── Auto-logout on idle (15 minutes of inactivity) ────────
+  // ── Auto-logout on idle (10 minutes of inactivity) ────────
   const idleLogout = useCallback(() => {
     logout();
     // Signal the login page to show "session expired" banner
@@ -131,7 +131,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [logout]);
 
   useIdleTimeout({
-    timeoutMs: 5 * 60 * 1000, // 5 minutes
+    timeoutMs: 10 * 60 * 1000, // 10 minutes
     onIdle: idleLogout,
     onWarning: () => {
       // Could integrate with a toast/notification system

@@ -171,6 +171,7 @@ export const reportsRepository = {
   /**
    * INVENTORY VALUATION REPORT
    * Calculate current inventory value using specified valuation method
+   * Returns items (paginated), SQL-aggregated summary, and byCategory breakdown
    */
   async getInventoryValuation(
     pool: Pool,
@@ -178,8 +179,14 @@ export const reportsRepository = {
       asOfDate?: Date;
       categoryId?: string;
       valuationMethod?: 'FIFO' | 'AVCO' | 'LIFO';
+      page?: number;
+      limit?: number;
     }
-  ): Promise<InventoryValuationRow[]> {
+  ): Promise<{
+    items: InventoryValuationRow[];
+    summary: { totalItems: number; totalQuantity: number; totalValue: number; totalPotentialRevenue: number; totalPotentialProfit: number };
+    byCategory: Array<{ category: string; productCount: number; quantityOnHand: number; costValue: number; potentialRevenue: number; potentialProfit: number; profitMargin: number }>;
+  }> {
     const asOfDate = options.asOfDate || new Date();
 
     let categoryFilter = '';
@@ -190,28 +197,9 @@ export const reportsRepository = {
       params.push(options.categoryId);
     }
 
-    // Ledger-driven valuation: derive inventory value from cost_layers
-    // (remaining_quantity * unit_cost) per product.
-    // This matches the Inventory Asset GL account (1300) —
-    // cost_layers are created during GR posting alongside the GL entry.
-    // valuationMethod param is accepted for API compatibility but
-    // cost_layers already represent the actual cost structure.
-    const query = `
-      SELECT
-        p.id AS product_id,
-        p.name AS product_name,
-        p.sku,
-        p.category,
-        COALESCE(cl_agg.remaining_qty, 0) AS total_quantity,
-        CASE WHEN COALESCE(cl_agg.remaining_qty, 0) > 0
-          THEN (cl_agg.remaining_value / cl_agg.remaining_qty)
-          ELSE 0
-        END AS unit_cost,
-        COALESCE(pv.selling_price, 0) AS selling_price,
-        cl_agg.remaining_value AS total_value,
-        NOW() AS last_updated
-      FROM products p
-      LEFT JOIN (
+    // ── CTE shared by all three queries ──
+    const baseCTE = `
+      WITH cl_agg AS (
         SELECT
           cl.product_id,
           SUM(cl.remaining_quantity) AS remaining_qty,
@@ -221,48 +209,133 @@ export const reportsRepository = {
           AND cl.received_date <= $1
           AND cl.remaining_quantity > 0
         GROUP BY cl.product_id
-      ) cl_agg ON cl_agg.product_id = p.id
-      LEFT JOIN product_valuation pv ON pv.product_id = p.id
-      WHERE p.is_active = true
-        AND COALESCE(cl_agg.remaining_qty, 0) > 0
-        ${categoryFilter}
-      ORDER BY cl_agg.remaining_value DESC
+      ),
+      valuation AS (
+        SELECT
+          p.id AS product_id,
+          p.name AS product_name,
+          p.sku,
+          p.category,
+          cl_agg.remaining_qty AS total_quantity,
+          CASE WHEN cl_agg.remaining_qty > 0
+            THEN ROUND((cl_agg.remaining_value / cl_agg.remaining_qty)::numeric, 2)
+            ELSE 0
+          END AS unit_cost,
+          COALESCE(pv.selling_price, 0) AS selling_price,
+          ROUND(cl_agg.remaining_value::numeric, 2) AS total_value,
+          ROUND((cl_agg.remaining_qty * COALESCE(pv.selling_price, 0))::numeric, 2) AS potential_revenue,
+          ROUND((cl_agg.remaining_qty * COALESCE(pv.selling_price, 0) - cl_agg.remaining_value)::numeric, 2) AS potential_profit,
+          CASE WHEN COALESCE(pv.selling_price, 0) > 0
+            THEN ROUND(((COALESCE(pv.selling_price, 0) - cl_agg.remaining_value / cl_agg.remaining_qty)
+                  / COALESCE(pv.selling_price, 0) * 100)::numeric, 2)
+            ELSE 0
+          END AS profit_margin,
+          ROUND((COALESCE(pv.selling_price, 0) - CASE WHEN cl_agg.remaining_qty > 0
+            THEN cl_agg.remaining_value / cl_agg.remaining_qty ELSE 0 END)::numeric, 2) AS profit_per_unit,
+          NOW() AS last_updated
+        FROM products p
+        INNER JOIN cl_agg ON cl_agg.product_id = p.id
+        LEFT JOIN product_valuation pv ON pv.product_id = p.id
+        WHERE p.is_active = true
+          AND cl_agg.remaining_qty > 0
+          ${categoryFilter}
+      )`;
+
+    // ── 1) Summary totals (single row) ──
+    const summaryQuery = `
+      ${baseCTE}
+      SELECT
+        COUNT(*)::integer AS total_items,
+        ROUND(COALESCE(SUM(total_quantity), 0)::numeric, 3) AS total_quantity,
+        ROUND(COALESCE(SUM(total_value), 0)::numeric, 2) AS total_value,
+        ROUND(COALESCE(SUM(potential_revenue), 0)::numeric, 2) AS total_potential_revenue,
+        ROUND(COALESCE(SUM(potential_profit), 0)::numeric, 2) AS total_potential_profit
+      FROM valuation
     `;
 
-    const result = await pool.query(query, params);
+    // ── 2) By-category aggregation ──
+    const categoryQuery = `
+      ${baseCTE}
+      SELECT
+        COALESCE(category, 'Uncategorized') AS category,
+        COUNT(*)::integer AS product_count,
+        ROUND(COALESCE(SUM(total_quantity), 0)::numeric, 3) AS quantity_on_hand,
+        ROUND(COALESCE(SUM(total_value), 0)::numeric, 2) AS cost_value,
+        ROUND(COALESCE(SUM(potential_revenue), 0)::numeric, 2) AS potential_revenue,
+        ROUND(COALESCE(SUM(potential_profit), 0)::numeric, 2) AS potential_profit,
+        CASE WHEN COALESCE(SUM(potential_revenue), 0) > 0
+          THEN ROUND((COALESCE(SUM(potential_profit), 0) / SUM(potential_revenue) * 100)::numeric, 2)
+          ELSE 0
+        END AS profit_margin
+      FROM valuation
+      GROUP BY COALESCE(category, 'Uncategorized')
+      ORDER BY cost_value DESC
+    `;
 
-    return result.rows.map((row) => {
-      const qty = new Decimal(row.total_quantity || 0);
-      const totalValue = new Decimal(row.total_value || 0).toDecimalPlaces(2);
-      const cost = new Decimal(row.unit_cost || 0);
-      const sell = new Decimal(row.selling_price || 0);
-      const potentialRevenue = qty.times(sell).toDecimalPlaces(2).toNumber();
-      const profitPerUnit = sell.minus(cost).toDecimalPlaces(2).toNumber();
-      const potentialProfit = new Decimal(potentialRevenue).minus(totalValue).toDecimalPlaces(2).toNumber();
-      const profitMargin = sell.greaterThan(0)
-        ? sell.minus(cost).dividedBy(sell).times(100).toDecimalPlaces(2).toNumber()
-        : 0;
-      return {
-        productId: row.product_id,
-        productName: row.product_name,
-        sku: row.sku,
-        category: row.category,
-        quantityOnHand: qty.toNumber(),
-        unitCost: cost.toDecimalPlaces(2).toNumber(),
-        sellingPrice: sell.toDecimalPlaces(2).toNumber(),
-        totalValue: totalValue.toNumber(),
-        potentialRevenue,
-        profitPerUnit,
-        potentialProfit,
-        profitMargin,
-        lastUpdated: formatDate(row.last_updated),
-      };
-    });
+    // ── 3) Paginated item rows ──
+    const page = options.page ?? 1;
+    const limit = options.limit ?? 500;
+    const offset = (page - 1) * limit;
+    const itemParams = [...params, limit, offset];
+    const limitParamIdx = params.length + 1;
+    const offsetParamIdx = params.length + 2;
+
+    const itemQuery = `
+      ${baseCTE}
+      SELECT * FROM valuation
+      ORDER BY total_value DESC
+      LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
+    `;
+
+    // Run all three in parallel (all read-only, no contention)
+    const [summaryResult, categoryResult, itemResult] = await Promise.all([
+      pool.query(summaryQuery, params),
+      pool.query(categoryQuery, params),
+      pool.query(itemQuery, itemParams),
+    ]);
+
+    const summaryRow = summaryResult.rows[0];
+    const summary = {
+      totalItems: parseInt(summaryRow.total_items) || 0,
+      totalQuantity: new Decimal(summaryRow.total_quantity || 0).toNumber(),
+      totalValue: new Decimal(summaryRow.total_value || 0).toNumber(),
+      totalPotentialRevenue: new Decimal(summaryRow.total_potential_revenue || 0).toNumber(),
+      totalPotentialProfit: new Decimal(summaryRow.total_potential_profit || 0).toNumber(),
+    };
+
+    const byCategory = categoryResult.rows.map((row) => ({
+      category: row.category,
+      productCount: row.product_count,
+      quantityOnHand: new Decimal(row.quantity_on_hand || 0).toNumber(),
+      costValue: new Decimal(row.cost_value || 0).toNumber(),
+      potentialRevenue: new Decimal(row.potential_revenue || 0).toNumber(),
+      potentialProfit: new Decimal(row.potential_profit || 0).toNumber(),
+      profitMargin: new Decimal(row.profit_margin || 0).toNumber(),
+    }));
+
+    const items = itemResult.rows.map((row) => ({
+      productId: row.product_id,
+      productName: row.product_name,
+      sku: row.sku,
+      category: row.category,
+      quantityOnHand: new Decimal(row.total_quantity || 0).toNumber(),
+      unitCost: new Decimal(row.unit_cost || 0).toNumber(),
+      sellingPrice: new Decimal(row.selling_price || 0).toNumber(),
+      totalValue: new Decimal(row.total_value || 0).toNumber(),
+      potentialRevenue: new Decimal(row.potential_revenue || 0).toNumber(),
+      profitPerUnit: new Decimal(row.profit_per_unit || 0).toNumber(),
+      potentialProfit: new Decimal(row.potential_profit || 0).toNumber(),
+      profitMargin: new Decimal(row.profit_margin || 0).toNumber(),
+      lastUpdated: formatDate(row.last_updated),
+    }));
+
+    return { items, summary, byCategory };
   },
 
   /**
    * SALES REPORT
-   * Comprehensive sales analysis with profit calculations
+   * Comprehensive sales analysis with profit calculations.
+   * Returns grouped rows + a single SQL-aggregated summary row.
    */
   async getSalesReport(
     pool: Pool,
@@ -272,16 +345,50 @@ export const reportsRepository = {
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
       customerId?: string;
     }
-  ): Promise<SalesReportRow[]> {
+  ): Promise<{
+    rows: SalesReportRow[];
+    summary: { totalSales: number; totalDiscounts: number; netRevenue: number; totalCost: number; grossProfit: number; profitMargin: number; totalTransactions: number; averageDiscountRate: number };
+  }> {
     const params: unknown[] = [options.startDate, options.endDate];
-    let groupByClause = '';
-    let selectClause = '';
     let customerFilter = '';
 
     if (options.customerId) {
       customerFilter = 'AND s.customer_id = $3';
       params.push(options.customerId);
     }
+
+    // ── SQL summary (single row, no grouping overhead) ──
+    const summaryQuery = `
+      WITH filtered_sales AS (
+        SELECT s.id, s.total_amount, s.discount_amount
+        FROM sales s
+        WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+          AND s.status NOT IN ('VOID', 'REFUNDED')
+          ${customerFilter}
+      ),
+      sale_line_agg AS (
+        SELECT si.sale_id,
+               SUM(si.total_price) AS total_sales,
+               SUM(si.quantity * si.unit_cost) AS total_cost,
+               SUM(si.profit) AS gross_profit
+        FROM sale_items si
+        WHERE si.sale_id IN (SELECT id FROM filtered_sales)
+        GROUP BY si.sale_id
+      )
+      SELECT
+        ROUND(COALESCE(SUM(sla.total_sales), 0)::numeric, 2) AS total_sales,
+        ROUND(COALESCE(SUM(fs.discount_amount), 0)::numeric, 2) AS total_discounts,
+        ROUND((COALESCE(SUM(sla.total_sales), 0) - COALESCE(SUM(fs.discount_amount), 0))::numeric, 2) AS net_revenue,
+        ROUND(COALESCE(SUM(sla.total_cost), 0)::numeric, 2) AS total_cost,
+        ROUND((COALESCE(SUM(sla.total_sales), 0) - COALESCE(SUM(fs.discount_amount), 0) - COALESCE(SUM(sla.total_cost), 0))::numeric, 2) AS gross_profit,
+        COUNT(fs.id)::integer AS total_transactions
+      FROM filtered_sales fs
+      LEFT JOIN sale_line_agg sla ON sla.sale_id = fs.id
+    `;
+
+    // ── Grouped rows (existing logic) ──
+    let groupByClause = '';
+    let selectClause = '';
 
     switch (options.groupBy) {
       case 'day':
@@ -297,7 +404,6 @@ export const reportsRepository = {
         groupByClause = "DATE_TRUNC('month', fs.sale_date)";
         break;
       case 'product':
-        // Handled separately below — groups by product at item level
         selectClause = '';
         groupByClause = '';
         break;
@@ -314,12 +420,10 @@ export const reportsRepository = {
         groupByClause = 'DATE(fs.sale_date)';
     }
 
-    let query: string;
+    let rowQuery: string;
 
     if (options.groupBy === 'product') {
-      // Product groupBy: group sale_items directly by product name.
-      // Sale-level discount can't be meaningfully attributed to individual products.
-      query = `
+      rowQuery = `
         SELECT 
           COALESCE(p.name, si.product_name, 'Custom Item') as period,
           COUNT(DISTINCT s.id) as transaction_count,
@@ -339,9 +443,7 @@ export const reportsRepository = {
         ORDER BY period
       `;
     } else {
-      // All other groupBy modes: use CTEs to avoid inflating sale-header fields
-      // (discount_amount, total_amount) by the number of sale_items per sale.
-      query = `
+      rowQuery = `
         WITH filtered_sales AS (
           SELECT s.id, s.sale_date, s.customer_id, s.payment_method,
                  s.total_amount, s.discount_amount
@@ -377,32 +479,53 @@ export const reportsRepository = {
       `;
     }
 
-    const result = await pool.query(query, params);
+    // Run summary and rows in parallel
+    const [summaryResult, rowResult] = await Promise.all([
+      pool.query(summaryQuery, params),
+      pool.query(rowQuery, params),
+    ]);
 
-    return result.rows.map((row) => {
-      const totalSales = new Decimal(row.total_sales || 0);
-      const totalDiscounts = new Decimal(row.total_discounts || 0);
-      const netRevenue = totalSales.minus(totalDiscounts);
-      const totalCost = new Decimal(row.total_cost || 0);
-      const grossProfit = netRevenue.minus(totalCost);
-      const profitMargin = netRevenue.isZero()
+    const sr = summaryResult.rows[0];
+    const totalSales = new Decimal(sr.total_sales || 0).toDecimalPlaces(2).toNumber();
+    const totalDiscounts = new Decimal(sr.total_discounts || 0).toDecimalPlaces(2).toNumber();
+    const netRevenue = new Decimal(sr.net_revenue || 0).toDecimalPlaces(2).toNumber();
+    const totalCost = new Decimal(sr.total_cost || 0).toDecimalPlaces(2).toNumber();
+    const grossProfit = new Decimal(sr.gross_profit || 0).toDecimalPlaces(2).toNumber();
+    const totalTransactions = parseInt(sr.total_transactions) || 0;
+    const profitMargin = netRevenue === 0 ? 0 :
+      new Decimal(grossProfit).dividedBy(netRevenue).times(100).toDecimalPlaces(2).toNumber();
+    const averageDiscountRate = totalSales === 0 ? 0 :
+      new Decimal(totalDiscounts).dividedBy(totalSales).times(100).toDecimalPlaces(2).toNumber();
+
+    const rows = rowResult.rows.map((row) => {
+      const rowTotalSales = new Decimal(row.total_sales || 0);
+      const rowTotalDiscounts = new Decimal(row.total_discounts || 0);
+      const rowNetRevenue = rowTotalSales.minus(rowTotalDiscounts);
+      const rowTotalCost = new Decimal(row.total_cost || 0);
+      const rowGrossProfit = rowNetRevenue.minus(rowTotalCost);
+      const rowProfitMargin = rowNetRevenue.isZero()
         ? new Decimal(0)
-        : grossProfit.dividedBy(netRevenue).times(100);
+        : rowGrossProfit.dividedBy(rowNetRevenue).times(100);
 
       return {
         period: formatDateOnly(row.period) || String(row.period),
-        totalSales: totalSales.toDecimalPlaces(2).toNumber(),
-        totalDiscounts: totalDiscounts.toDecimalPlaces(2).toNumber(),
-        netRevenue: netRevenue.toDecimalPlaces(2).toNumber(),
-        totalCost: totalCost.toDecimalPlaces(2).toNumber(),
-        grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
-        profitMargin: profitMargin.toDecimalPlaces(2).toNumber(),
+        totalSales: rowTotalSales.toDecimalPlaces(2).toNumber(),
+        totalDiscounts: rowTotalDiscounts.toDecimalPlaces(2).toNumber(),
+        netRevenue: rowNetRevenue.toDecimalPlaces(2).toNumber(),
+        totalCost: rowTotalCost.toDecimalPlaces(2).toNumber(),
+        grossProfit: rowGrossProfit.toDecimalPlaces(2).toNumber(),
+        profitMargin: rowProfitMargin.toDecimalPlaces(2).toNumber(),
         transactionCount: parseInt(row.transaction_count),
         averageTransactionValue: new Decimal(row.average_transaction_value || 0)
           .toDecimalPlaces(2)
           .toNumber(),
       };
     });
+
+    return {
+      rows,
+      summary: { totalSales, totalDiscounts, netRevenue, totalCost, grossProfit, profitMargin, totalTransactions, averageDiscountRate },
+    };
   },
 
   /**
@@ -841,7 +964,18 @@ export const reportsRepository = {
       customerId?: string;
       status?: string;
     }
-  ): Promise<CustomerPaymentsRow[]> {
+  ): Promise<{
+    rows: CustomerPaymentsRow[];
+    summary: {
+      totalCustomers: number;
+      totalInvoiced: number;
+      totalPaid: number;
+      totalOutstanding: number;
+      totalOverdue: number;
+      totalDeposited: number;
+      depositAvailable: number;
+    };
+  }> {
     const params: unknown[] = [options.startDate, options.endDate];
     let filters = '';
 
@@ -902,9 +1036,53 @@ export const reportsRepository = {
       ORDER BY ia.total_outstanding DESC
     `;
 
-    const result = await pool.query(query, params);
+    // Summary query: aggregate totals in SQL instead of JS .reduce()
+    const summaryQuery = `
+      WITH invoice_agg AS (
+        SELECT 
+          i."CustomerId" as customer_id,
+          COUNT(i."Id") as total_invoices,
+          SUM(i."TotalAmount") as total_invoiced,
+          SUM(i."AmountPaid") as total_paid,
+          SUM(i."OutstandingBalance") as total_outstanding,
+          SUM(CASE 
+            WHEN i."DueDate" < CURRENT_DATE AND i."OutstandingBalance" > 0 THEN i."OutstandingBalance" 
+            ELSE 0 
+          END) as overdue_amount
+        FROM invoices i
+        WHERE DATE(i."InvoiceDate") BETWEEN DATE($1) AND DATE($2)
+          ${filters}
+        GROUP BY i."CustomerId"
+      ),
+      deposit_agg AS (
+        SELECT
+          cd.customer_id,
+          SUM(cd.amount) as total_deposited,
+          SUM(cd.remaining_balance) as deposit_available
+        FROM customer_deposits cd
+        WHERE cd.status = 'ACTIVE'
+        GROUP BY cd.customer_id
+      )
+      SELECT
+        COUNT(DISTINCT ia.customer_id) as total_customers,
+        COALESCE(SUM(ia.total_invoiced), 0) as total_invoiced,
+        COALESCE(SUM(ia.total_paid), 0) as total_paid,
+        COALESCE(SUM(ia.total_outstanding), 0) as total_outstanding,
+        COALESCE(SUM(ia.overdue_amount), 0) as total_overdue,
+        COALESCE(SUM(da.total_deposited), 0) as total_deposited,
+        COALESCE(SUM(da.deposit_available), 0) as deposit_available
+      FROM invoice_agg ia
+      LEFT JOIN deposit_agg da ON da.customer_id = ia.customer_id
+    `;
 
-    return result.rows.map((row) => ({
+    const [rowResult, summaryResult] = await Promise.all([
+      pool.query(query, params),
+      pool.query(summaryQuery, params),
+    ]);
+
+    const sRow = summaryResult.rows[0] || {};
+
+    const rows = rowResult.rows.map((row) => ({
       customerId: row.customer_id,
       customerNumber: row.customer_number,
       customerName: row.customer_name,
@@ -917,6 +1095,19 @@ export const reportsRepository = {
         ? new Decimal(row.average_payment_days).toDecimalPlaces(1).toNumber()
         : undefined,
     }));
+
+    return {
+      rows,
+      summary: {
+        totalCustomers: parseInt(sRow.total_customers || 0),
+        totalInvoiced: new Decimal(sRow.total_invoiced || 0).toDecimalPlaces(2).toNumber(),
+        totalPaid: new Decimal(sRow.total_paid || 0).toDecimalPlaces(2).toNumber(),
+        totalOutstanding: new Decimal(sRow.total_outstanding || 0).toDecimalPlaces(2).toNumber(),
+        totalOverdue: new Decimal(sRow.total_overdue || 0).toDecimalPlaces(2).toNumber(),
+        totalDeposited: new Decimal(sRow.total_deposited || 0).toDecimalPlaces(2).toNumber(),
+        depositAvailable: new Decimal(sRow.deposit_available || 0).toDecimalPlaces(2).toNumber(),
+      },
+    };
   },
 
   /**
@@ -930,7 +1121,15 @@ export const reportsRepository = {
       endDate: Date;
       groupBy: 'day' | 'week' | 'month';
     }
-  ): Promise<ProfitLossRow[]> {
+  ): Promise<{
+    rows: ProfitLossRow[];
+    summary: {
+      totalRevenue: number;
+      totalCOGS: number;
+      grossProfit: number;
+      grossProfitMargin: number;
+    };
+  }> {
     let dateGroup = '';
     switch (options.groupBy) {
       case 'day':
@@ -957,24 +1156,51 @@ export const reportsRepository = {
       ORDER BY period
     `;
 
-    const result = await pool.query(query, [options.startDate, options.endDate]);
+    const summaryQuery = `
+      SELECT 
+        COALESCE(SUM(s.subtotal - s.discount_amount), 0) as total_revenue,
+        COALESCE(SUM(s.total_cost), 0) as total_cogs,
+        COALESCE(SUM(s.profit), 0) as gross_profit,
+        CASE WHEN SUM(s.subtotal - s.discount_amount) > 0
+          THEN ROUND((SUM(s.profit) / SUM(s.subtotal - s.discount_amount)) * 100, 2)
+          ELSE 0
+        END as gross_profit_margin
+      FROM sales s
+      WHERE DATE(s.sale_date) BETWEEN DATE($1) AND DATE($2)
+        AND s.status NOT IN ('VOID', 'REFUNDED')
+    `;
 
-    return result.rows.map((row) => {
-      const revenue = new Decimal(row.revenue || 0);
-      const cogs = new Decimal(row.cost_of_goods_sold || 0);
-      const grossProfit = revenue.minus(cogs);
-      const grossProfitMargin = revenue.isZero()
-        ? new Decimal(0)
-        : grossProfit.dividedBy(revenue).times(100);
+    const [result, summaryResult] = await Promise.all([
+      pool.query(query, [options.startDate, options.endDate]),
+      pool.query(summaryQuery, [options.startDate, options.endDate]),
+    ]);
 
-      return {
-        period: formatDateOnly(row.period) || String(row.period),
-        revenue: revenue.toDecimalPlaces(2).toNumber(),
-        costOfGoodsSold: cogs.toDecimalPlaces(2).toNumber(),
-        grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
-        grossProfitMargin: grossProfitMargin.toDecimalPlaces(2).toNumber(),
-      };
-    });
+    const sRow = summaryResult.rows[0] || {};
+
+    return {
+      rows: result.rows.map((row) => {
+        const revenue = new Decimal(row.revenue || 0);
+        const cogs = new Decimal(row.cost_of_goods_sold || 0);
+        const grossProfit = revenue.minus(cogs);
+        const grossProfitMargin = revenue.isZero()
+          ? new Decimal(0)
+          : grossProfit.dividedBy(revenue).times(100);
+
+        return {
+          period: formatDateOnly(row.period) || String(row.period),
+          revenue: revenue.toDecimalPlaces(2).toNumber(),
+          costOfGoodsSold: cogs.toDecimalPlaces(2).toNumber(),
+          grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
+          grossProfitMargin: grossProfitMargin.toDecimalPlaces(2).toNumber(),
+        };
+      }),
+      summary: {
+        totalRevenue: new Decimal(sRow.total_revenue || 0).toDecimalPlaces(2).toNumber(),
+        totalCOGS: new Decimal(sRow.total_cogs || 0).toDecimalPlaces(2).toNumber(),
+        grossProfit: new Decimal(sRow.gross_profit || 0).toDecimalPlaces(2).toNumber(),
+        grossProfitMargin: new Decimal(sRow.gross_profit_margin || 0).toDecimalPlaces(2).toNumber(),
+      },
+    };
   },
 
   /**
@@ -1181,7 +1407,15 @@ export const reportsRepository = {
       movementType?: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'movement_type';
     }
-  ): Promise<StockMovementAnalysisRow[]> {
+  ): Promise<{
+    rows: StockMovementAnalysisRow[];
+    summary: {
+      totalTransactions: number;
+      totalIn: number;
+      totalOut: number;
+      netMovement: number;
+    };
+  }> {
     const params: unknown[] = [options.startDate, options.endDate];
     const filters: string[] = ['sm.created_at BETWEEN $1 AND $2'];
 
@@ -1240,16 +1474,40 @@ export const reportsRepository = {
       ORDER BY ${groupByClause}
     `;
 
-    const result = await pool.query(query, params);
+    // Summary query: aggregate totals in SQL
+    const summaryQuery = `
+      SELECT
+        COUNT(sm.id) as transaction_count,
+        COALESCE(SUM(CASE WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE') THEN sm.quantity ELSE 0 END), 0) as total_in,
+        COALESCE(SUM(CASE WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY', 'TRANSFER_OUT') THEN sm.quantity ELSE 0 END), 0) as total_out,
+        COALESCE(SUM(CASE WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE') THEN sm.quantity ELSE -sm.quantity END), 0) as net_movement
+      FROM stock_movements sm
+      WHERE ${whereClause}
+    `;
 
-    return result.rows.map((row) => ({
-      ...row,
-      transactionCount: parseInt(row.transaction_count),
-      totalIn: new Decimal(row.total_in || 0).toDecimalPlaces(3).toNumber(),
-      totalOut: new Decimal(row.total_out || 0).toDecimalPlaces(3).toNumber(),
-      netMovement: new Decimal(row.net_movement || 0).toDecimalPlaces(3).toNumber(),
-      period: formatDateOnly(row.period),
-    }));
+    const [result, summaryResult] = await Promise.all([
+      pool.query(query, params),
+      pool.query(summaryQuery, params),
+    ]);
+
+    const sRow = summaryResult.rows[0] || {};
+
+    return {
+      rows: result.rows.map((row) => ({
+        ...row,
+        transactionCount: parseInt(row.transaction_count),
+        totalIn: new Decimal(row.total_in || 0).toDecimalPlaces(3).toNumber(),
+        totalOut: new Decimal(row.total_out || 0).toDecimalPlaces(3).toNumber(),
+        netMovement: new Decimal(row.net_movement || 0).toDecimalPlaces(3).toNumber(),
+        period: formatDateOnly(row.period),
+      })),
+      summary: {
+        totalTransactions: parseInt(sRow.transaction_count || 0),
+        totalIn: new Decimal(sRow.total_in || 0).toDecimalPlaces(3).toNumber(),
+        totalOut: new Decimal(sRow.total_out || 0).toDecimalPlaces(3).toNumber(),
+        netMovement: new Decimal(sRow.net_movement || 0).toDecimalPlaces(3).toNumber(),
+      },
+    };
   },
 
   /**
@@ -1325,7 +1583,24 @@ export const reportsRepository = {
       ORDER BY s.sale_date DESC
     `;
 
-    const transactionsResult = await pool.query(transactionsQuery, params);
+    // Summary query: aggregate transaction totals in SQL
+    const summaryQuery = `
+      SELECT
+        COUNT(s.id) as total_transactions,
+        COALESCE(SUM(s.total_amount), 0) as total_sales,
+        COALESCE(SUM(COALESCE(i."AmountPaid", s.amount_paid)), 0) as total_paid,
+        COALESCE(SUM(COALESCE(i."OutstandingBalance", s.total_amount - s.amount_paid)), 0) as total_outstanding
+      FROM sales s
+      LEFT JOIN invoices i ON i."SaleId" = s.id
+      WHERE ${whereClause}
+    `;
+
+    const [transactionsResult, summaryResult] = await Promise.all([
+      pool.query(transactionsQuery, params),
+      pool.query(summaryQuery, params),
+    ]);
+
+    const sRow = summaryResult.rows[0] || {};
 
     return {
       customer: {
@@ -1348,6 +1623,12 @@ export const reportsRepository = {
         paymentStatus: row.payment_status,
         items: row.items,
       })),
+      transactionSummary: {
+        totalTransactions: parseInt(sRow.total_transactions || 0),
+        totalSales: new Decimal(sRow.total_sales || 0).toDecimalPlaces(2).toNumber(),
+        totalPaid: new Decimal(sRow.total_paid || 0).toDecimalPlaces(2).toNumber(),
+        totalOutstanding: new Decimal(sRow.total_outstanding || 0).toDecimalPlaces(2).toNumber(),
+      },
     };
   },
 
@@ -1363,7 +1644,16 @@ export const reportsRepository = {
       categoryId?: string;
       minMarginPercent?: number;
     }
-  ): Promise<ProfitMarginByProductRow[]> {
+  ): Promise<{
+    rows: ProfitMarginByProductRow[];
+    summary: {
+      totalProducts: number;
+      totalRevenue: number;
+      totalCost: number;
+      totalProfit: number;
+      averageMarginPercent: number;
+    };
+  }> {
     const params: unknown[] = [];
     const filters: string[] = [];
 
@@ -1413,7 +1703,54 @@ export const reportsRepository = {
 
     const result = await pool.query(query, params);
 
-    return result.rows.map((row) => ({
+    // Build summary from a wrapping query over the same data
+    const summaryParams: unknown[] = [];
+    const summaryFilters: string[] = [];
+    if (options.startDate && options.endDate) {
+      summaryParams.push(options.startDate, options.endDate);
+      summaryFilters.push(`s.sale_date BETWEEN $${summaryParams.length - 1} AND $${summaryParams.length}`);
+    }
+    if (options.categoryId) {
+      summaryParams.push(options.categoryId);
+      summaryFilters.push(`p.category = $${summaryParams.length}`);
+    }
+    const summaryWhere = summaryFilters.length > 0 ? `WHERE ${summaryFilters.join(' AND ')}` : '';
+
+    let summaryHaving = 'HAVING SUM(si.quantity) > 0';
+    if (options.minMarginPercent !== undefined) {
+      summaryParams.push(options.minMarginPercent);
+      summaryHaving += ` AND ((SUM(si.profit) / NULLIF(SUM(si.total_price), 0)) * 100) >= $${summaryParams.length}`;
+    }
+
+    const summaryQuery = `
+      SELECT
+        COUNT(*) as total_products,
+        COALESCE(SUM(total_revenue), 0) as total_revenue,
+        COALESCE(SUM(total_cost), 0) as total_cost,
+        COALESCE(SUM(total_profit), 0) as total_profit,
+        COALESCE(AVG(margin_pct), 0) as avg_margin
+      FROM (
+        SELECT
+          SUM(si.total_price) as total_revenue,
+          SUM(si.unit_cost * si.quantity) as total_cost,
+          SUM(si.profit) as total_profit,
+          CASE WHEN SUM(si.total_price) > 0
+            THEN ((SUM(si.profit) / SUM(si.total_price)) * 100)
+            ELSE 0
+          END as margin_pct
+        FROM products p
+        LEFT JOIN sale_items si ON si.product_id = p.id
+        LEFT JOIN sales s ON s.id = si.sale_id
+        ${summaryWhere}
+        GROUP BY p.id
+        ${summaryHaving}
+      ) sub
+    `;
+
+    const summaryResult = await pool.query(summaryQuery, summaryParams);
+    const sRow = summaryResult.rows[0] || {};
+
+    const rows = result.rows.map((row) => ({
       productId: row.product_id,
       productName: row.product_name,
       sku: row.sku,
@@ -1427,6 +1764,17 @@ export const reportsRepository = {
         .toDecimalPlaces(2)
         .toNumber(),
     }));
+
+    return {
+      rows,
+      summary: {
+        totalProducts: parseInt(sRow.total_products || 0),
+        totalRevenue: new Decimal(sRow.total_revenue || 0).toDecimalPlaces(2).toNumber(),
+        totalCost: new Decimal(sRow.total_cost || 0).toDecimalPlaces(2).toNumber(),
+        totalProfit: new Decimal(sRow.total_profit || 0).toDecimalPlaces(2).toNumber(),
+        averageMarginPercent: new Decimal(sRow.avg_margin || 0).toDecimalPlaces(2).toNumber(),
+      },
+    };
   },
 
   /**
@@ -1442,7 +1790,24 @@ export const reportsRepository = {
       paymentMethod?: string;
       includeDebCollections?: boolean;
     }
-  ): Promise<DailyCashFlowRow[]> {
+  ): Promise<{
+    rows: DailyCashFlowRow[];
+    summary: {
+      totalDays: number;
+      salesRevenue: number;
+      salesTransactionCount: number;
+      totalSalesValue: number;
+      grossProfit: number;
+      overallProfitMargin: number;
+      debtCollections: number;
+      collectionsTransactionCount: number;
+      depositReceipts: number;
+      depositsTransactionCount: number;
+      totalCashIn: number;
+      totalTransactions: number;
+      creditExtended: number;
+    };
+  }> {
     // Convert dates to YYYY-MM-DD strings to avoid timezone issues
     const startDateStr =
       options.startDate instanceof Date
@@ -1539,19 +1904,104 @@ export const reportsRepository = {
         ORDER BY transaction_date DESC, revenue_type, payment_method
       `;
 
+      // Summary query: aggregate all totals by revenue_type in SQL
+      const summaryQuery = `
+        WITH sales_summary AS (
+          SELECT
+            COUNT(s.id) as txn_count,
+            SUM(COALESCE(s.amount_paid, 0)) as cash_amount,
+            SUM(COALESCE(s.total_amount, 0)) as total_sales,
+            SUM(COALESCE(s.profit, 0)) as gross_profit,
+            SUM(COALESCE(s.total_amount, 0) - COALESCE(s.amount_paid, 0)) as credit_created,
+            COUNT(DISTINCT DATE(s.sale_date)) as sale_days
+          FROM sales s
+          WHERE DATE(s.sale_date) BETWEEN $1::date AND $2::date
+            AND s.status NOT IN ('VOID', 'REFUNDED')
+            AND s.payment_method IS NOT NULL
+            ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
+        ),
+        collections_summary AS (
+          SELECT
+            COUNT(ip.id) as txn_count,
+            SUM(COALESCE(ip.amount, 0)) as cash_amount,
+            COUNT(DISTINCT DATE(ip.payment_date)) as coll_days
+          FROM invoice_payments ip
+          INNER JOIN invoices i ON ip.invoice_id = i."Id"
+          WHERE DATE(ip.payment_date) BETWEEN $1::date AND $2::date
+            AND ip.payment_method IS NOT NULL
+            ${options.paymentMethod ? 'AND ip.payment_method = $3' : ''}
+        ),
+        deposit_summary AS (
+          SELECT
+            COUNT(cd.id) as txn_count,
+            SUM(COALESCE(cd.amount, 0)) as cash_amount,
+            COUNT(DISTINCT DATE(cd.created_at)) as dep_days
+          FROM customer_deposits cd
+          WHERE DATE(cd.created_at) BETWEEN $1::date AND $2::date
+            AND cd.status = 'ACTIVE'
+        )
+        SELECT
+          ss.txn_count as sales_txn_count,
+          ss.cash_amount as sales_revenue,
+          ss.total_sales,
+          ss.gross_profit,
+          ss.credit_created,
+          ss.sale_days,
+          cs.txn_count as collections_txn_count,
+          cs.cash_amount as debt_collections,
+          cs.coll_days,
+          ds.txn_count as deposits_txn_count,
+          ds.cash_amount as deposit_receipts,
+          ds.dep_days
+        FROM sales_summary ss, collections_summary cs, deposit_summary ds
+      `;
+
       const params = [startDateStr, endDateStr];
       if (options.paymentMethod) {
         params.push(options.paymentMethod);
       }
 
-      const result = await pool.query(query, params);
+      const [result, summaryResult] = await Promise.all([
+        pool.query(query, params),
+        pool.query(summaryQuery, params),
+      ]);
+
+      const sRow = summaryResult.rows[0] || {};
+      const salesRevenue = new Decimal(sRow.sales_revenue || 0);
+      const debtCollections = new Decimal(sRow.debt_collections || 0);
+      const depositReceipts = new Decimal(sRow.deposit_receipts || 0);
+      const totalCashIn = salesRevenue.plus(debtCollections).plus(depositReceipts);
+      const totalSalesValue = new Decimal(sRow.total_sales || 0);
+      const grossProfit = new Decimal(sRow.gross_profit || 0);
+
+      const emptyResult = {
+        rows: [] as DailyCashFlowRow[],
+        summary: {
+          totalDays: 0,
+          salesRevenue: 0,
+          salesTransactionCount: 0,
+          totalSalesValue: 0,
+          grossProfit: 0,
+          overallProfitMargin: 0,
+          debtCollections: 0,
+          collectionsTransactionCount: 0,
+          depositReceipts: 0,
+          depositsTransactionCount: 0,
+          totalCashIn: 0,
+          totalTransactions: 0,
+          creditExtended: 0,
+        },
+      };
 
       // Handle empty results gracefully
       if (!result.rows || result.rows.length === 0) {
-        return [];
+        return emptyResult;
       }
 
-      return result.rows.map((row) => ({
+      // Count distinct days across all rows
+      const totalDays = new Set(result.rows.map((r) => r.transaction_date)).size;
+
+      const rows = result.rows.map((row) => ({
         transactionDate: row.transaction_date,
         paymentMethod: row.payment_method,
         revenueType: row.revenue_type,
@@ -1575,10 +2025,50 @@ export const reportsRepository = {
             : 0,
         cashFlowImpact: new Decimal(row.cash_amount || 0).toDecimalPlaces(2).toNumber(),
       }));
+
+      return {
+        rows,
+        summary: {
+          totalDays,
+          salesRevenue: salesRevenue.toDecimalPlaces(2).toNumber(),
+          salesTransactionCount: parseInt(sRow.sales_txn_count || 0),
+          totalSalesValue: totalSalesValue.toDecimalPlaces(2).toNumber(),
+          grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
+          overallProfitMargin: totalSalesValue.isZero()
+            ? 0
+            : grossProfit.div(totalSalesValue).mul(100).toDecimalPlaces(2).toNumber(),
+          debtCollections: debtCollections.toDecimalPlaces(2).toNumber(),
+          collectionsTransactionCount: parseInt(sRow.collections_txn_count || 0),
+          depositReceipts: depositReceipts.toDecimalPlaces(2).toNumber(),
+          depositsTransactionCount: parseInt(sRow.deposits_txn_count || 0),
+          totalCashIn: totalCashIn.toDecimalPlaces(2).toNumber(),
+          totalTransactions:
+            parseInt(sRow.sales_txn_count || 0) +
+            parseInt(sRow.collections_txn_count || 0) +
+            parseInt(sRow.deposits_txn_count || 0),
+          creditExtended: new Decimal(sRow.credit_created || 0).toDecimalPlaces(2).toNumber(),
+        },
+      };
     } catch (error) {
       console.error('Error in getDailyCashFlow:', error);
-      // Return empty array on error to prevent frontend crash
-      return [];
+      return {
+        rows: [],
+        summary: {
+          totalDays: 0,
+          salesRevenue: 0,
+          salesTransactionCount: 0,
+          totalSalesValue: 0,
+          grossProfit: 0,
+          overallProfitMargin: 0,
+          debtCollections: 0,
+          collectionsTransactionCount: 0,
+          depositReceipts: 0,
+          depositsTransactionCount: 0,
+          totalCashIn: 0,
+          totalTransactions: 0,
+          creditExtended: 0,
+        },
+      };
     }
   },
 
@@ -1764,7 +2254,19 @@ export const reportsRepository = {
     options: {
       asOfDate?: Date;
     }
-  ): Promise<CustomerAgingRow[]> {
+  ): Promise<{
+    rows: CustomerAgingRow[];
+    summary: {
+      totalCustomers: number;
+      totalOutstanding: number;
+      current: number;
+      days30: number;
+      days60: number;
+      days90: number;
+      over90: number;
+      overdueAmount: number;
+    };
+  }> {
     const asOfDate = options.asOfDate || new Date();
     const asOfDateStr = asOfDate instanceof Date ? asOfDate.toLocaleDateString('en-CA') : asOfDate;
 
@@ -1810,10 +2312,40 @@ export const reportsRepository = {
       ORDER BY total_outstanding DESC
     `;
 
-    const result = await pool.query(query, [asOfDateStr]);
+    const [result, summaryResult] = await Promise.all([
+      pool.query(query, [asOfDateStr]),
+      pool.query(`
+        WITH customer_invoices AS (
+          SELECT 
+            c.id as customer_id,
+            i."OutstandingBalance" as outstanding_balance,
+            EXTRACT(DAY FROM ($1::date - i."DueDate")) as days_overdue
+          FROM customers c
+          INNER JOIN invoices i ON i."CustomerId" = c.id
+          WHERE i."OutstandingBalance" > 0
+            AND i."Status" != 'PAID'
+        )
+        SELECT
+          COUNT(DISTINCT customer_id) as total_customers,
+          COALESCE(SUM(outstanding_balance), 0) as total_outstanding,
+          COALESCE(SUM(CASE WHEN days_overdue <= 0 THEN outstanding_balance ELSE 0 END), 0) as current_amount,
+          COALESCE(SUM(CASE WHEN days_overdue > 0 AND days_overdue <= 30 THEN outstanding_balance ELSE 0 END), 0) as days_1_30,
+          COALESCE(SUM(CASE WHEN days_overdue > 30 AND days_overdue <= 60 THEN outstanding_balance ELSE 0 END), 0) as days_31_60,
+          COALESCE(SUM(CASE WHEN days_overdue > 60 AND days_overdue <= 90 THEN outstanding_balance ELSE 0 END), 0) as days_61_90,
+          COALESCE(SUM(CASE WHEN days_overdue > 90 THEN outstanding_balance ELSE 0 END), 0) as days_over_90
+        FROM customer_invoices
+      `, [asOfDateStr]),
+    ]);
+
+    const sRow = summaryResult.rows[0] || {};
+    const sCurrent = new Decimal(sRow.current_amount || 0).toDecimalPlaces(2).toNumber();
+    const sDays30 = new Decimal(sRow.days_1_30 || 0).toDecimalPlaces(2).toNumber();
+    const sDays60 = new Decimal(sRow.days_31_60 || 0).toDecimalPlaces(2).toNumber();
+    const sDays90 = new Decimal(sRow.days_61_90 || 0).toDecimalPlaces(2).toNumber();
+    const sOver90 = new Decimal(sRow.days_over_90 || 0).toDecimalPlaces(2).toNumber();
 
     // Map to field names expected by frontend CustomerAgingReport component
-    return result.rows.map((row) => {
+    const rows = result.rows.map((row) => {
       const current = new Decimal(row.current_amount || 0).toDecimalPlaces(2).toNumber();
       const days30 = new Decimal(row.days_1_30 || 0).toDecimalPlaces(2).toNumber();
       const days60 = new Decimal(row.days_31_60 || 0).toDecimalPlaces(2).toNumber();
@@ -1844,6 +2376,20 @@ export const reportsRepository = {
         maxDaysOverdue: parseInt(row.max_days_overdue || 0),
       };
     });
+
+    return {
+      rows,
+      summary: {
+        totalCustomers: parseInt(sRow.total_customers || 0),
+        totalOutstanding: new Decimal(sRow.total_outstanding || 0).toDecimalPlaces(2).toNumber(),
+        current: sCurrent,
+        days30: sDays30,
+        days60: sDays60,
+        days90: sDays90,
+        over90: sOver90,
+        overdueAmount: sDays30 + sDays60 + sDays90 + sOver90,
+      },
+    };
   },
 
   /**

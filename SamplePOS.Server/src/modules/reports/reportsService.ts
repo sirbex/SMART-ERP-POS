@@ -120,6 +120,8 @@ export const reportsService = {
       valuationMethod?: 'FIFO' | 'AVCO' | 'LIFO';
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
+      page?: number;
+      limit?: number;
     }
   ) {
     const startTime = Date.now();
@@ -127,29 +129,16 @@ export const reportsService = {
     // Get system settings for report formatting
     const systemContext = await getSystemContext(pool);
 
-    const data = await reportsRepository.getInventoryValuation(pool, {
-      asOfDate: options.asOfDate,
-      categoryId: options.categoryId,
-      valuationMethod: options.valuationMethod,
-    });
-
-    // Calculate summary
-    const totalValue = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalValue || 0),
-      new Decimal(0)
-    );
-    const totalQuantity = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.quantityOnHand || 0),
-      new Decimal(0)
-    );
-    const totalPotentialRevenue = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.potentialRevenue || 0),
-      new Decimal(0)
-    );
-    const totalPotentialProfit = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.potentialProfit || 0),
-      new Decimal(0)
-    );
+    // SQL returns pre-aggregated summary, byCategory, and paginated items —
+    // no JS .reduce() or Map grouping needed.
+    const { items: data, summary: sqlSummary, byCategory } =
+      await reportsRepository.getInventoryValuation(pool, {
+        asOfDate: options.asOfDate,
+        categoryId: options.categoryId,
+        valuationMethod: options.valuationMethod,
+        page: options.page,
+        limit: options.limit,
+      });
 
     const executionTime = Date.now() - startTime;
 
@@ -163,53 +152,18 @@ export const reportsService = {
         valuationMethod: options.valuationMethod,
       },
       generatedById: options.userId || null,
-      recordCount: data.length,
+      recordCount: sqlSummary.totalItems,
       fileFormat: options.format || 'json',
       executionTimeMs: executionTime,
     });
 
-    // Category-level summary (cost_layers driven valuation + profitability)
-    const categoryMap = new Map<string, {
-      category: string;
-      quantityOnHand: Decimal;
-      costValue: Decimal;
-      potentialRevenue: Decimal;
-      potentialProfit: Decimal;
-      productCount: number;
-    }>();
-    for (const item of data) {
-      const cat = item.category || 'Uncategorized';
-      const existing = categoryMap.get(cat);
-      if (existing) {
-        existing.quantityOnHand = existing.quantityOnHand.plus(item.quantityOnHand || 0);
-        existing.costValue = existing.costValue.plus(item.totalValue || 0);
-        existing.potentialRevenue = existing.potentialRevenue.plus(item.potentialRevenue || 0);
-        existing.potentialProfit = existing.potentialProfit.plus(item.potentialProfit || 0);
-        existing.productCount += 1;
-      } else {
-        categoryMap.set(cat, {
-          category: cat,
-          quantityOnHand: new Decimal(item.quantityOnHand || 0),
-          costValue: new Decimal(item.totalValue || 0),
-          potentialRevenue: new Decimal(item.potentialRevenue || 0),
-          potentialProfit: new Decimal(item.potentialProfit || 0),
-          productCount: 1,
-        });
-      }
-    }
-    const byCategory = Array.from(categoryMap.values())
-      .map((c) => ({
-        category: c.category,
-        productCount: c.productCount,
-        quantityOnHand: c.quantityOnHand.toDecimalPlaces(3).toNumber(),
-        costValue: c.costValue.toDecimalPlaces(2).toNumber(),
-        potentialRevenue: c.potentialRevenue.toDecimalPlaces(2).toNumber(),
-        potentialProfit: c.potentialProfit.toDecimalPlaces(2).toNumber(),
-        profitMargin: c.potentialRevenue.greaterThan(0)
-          ? c.potentialProfit.dividedBy(c.potentialRevenue).times(100).toDecimalPlaces(2).toNumber()
-          : 0,
-      }))
-      .sort((a, b) => b.costValue - a.costValue);
+    const overallMargin = sqlSummary.totalPotentialRevenue > 0
+      ? new Decimal(sqlSummary.totalPotentialProfit)
+          .dividedBy(sqlSummary.totalPotentialRevenue)
+          .times(100)
+          .toDecimalPlaces(2)
+          .toNumber()
+      : 0;
 
     return {
       reportType: 'INVENTORY_VALUATION' as const,
@@ -228,33 +182,24 @@ export const reportsService = {
       data,
       byCategory,
       summary: {
-        totalItems: data.length,
-        totalValue: totalValue.toDecimalPlaces(2).toNumber(),
-        totalValueFormatted: formatCurrency(
-          totalValue.toDecimalPlaces(2).toNumber(),
-          systemContext.currencySymbol
-        ),
-        totalQuantity: totalQuantity.toDecimalPlaces(3).toNumber(),
-        totalPotentialRevenue: totalPotentialRevenue.toDecimalPlaces(2).toNumber(),
+        totalItems: sqlSummary.totalItems,
+        totalValue: sqlSummary.totalValue,
+        totalValueFormatted: formatCurrency(sqlSummary.totalValue, systemContext.currencySymbol),
+        totalQuantity: sqlSummary.totalQuantity,
+        totalPotentialRevenue: sqlSummary.totalPotentialRevenue,
         totalPotentialRevenueFormatted: formatCurrency(
-          totalPotentialRevenue.toDecimalPlaces(2).toNumber(),
+          sqlSummary.totalPotentialRevenue,
           systemContext.currencySymbol
         ),
-        totalPotentialProfit: totalPotentialProfit.toDecimalPlaces(2).toNumber(),
+        totalPotentialProfit: sqlSummary.totalPotentialProfit,
         totalPotentialProfitFormatted: formatCurrency(
-          totalPotentialProfit.toDecimalPlaces(2).toNumber(),
+          sqlSummary.totalPotentialProfit,
           systemContext.currencySymbol
         ),
-        overallMargin: totalPotentialRevenue.greaterThan(0)
-          ? totalPotentialProfit
-            .dividedBy(totalPotentialRevenue)
-            .times(100)
-            .toDecimalPlaces(2)
-            .toNumber()
-          : 0,
+        overallMargin,
         valuationMethod: options.valuationMethod || 'FIFO',
       },
-      recordCount: data.length,
+      recordCount: sqlSummary.totalItems,
       executionTimeMs: executionTime,
     };
   },
@@ -311,36 +256,14 @@ export const reportsService = {
     // Get system settings for report formatting
     const systemContext = await getSystemContext(pool);
 
-    const data = await reportsRepository.getSalesReport(pool, {
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getSalesReport(pool, {
       startDate: options.startDate,
       endDate: options.endDate,
       groupBy: options.groupBy,
       customerId: options.customerId,
     });
 
-    // Calculate summary
-    const totalSales = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalSales),
-      new Decimal(0)
-    );
-    const totalDiscounts = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalDiscounts || 0),
-      new Decimal(0)
-    );
-    const netRevenue = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.netRevenue),
-      new Decimal(0)
-    );
-    const totalCost = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalCost),
-      new Decimal(0)
-    );
-    const grossProfit = netRevenue.minus(totalCost);
-    const totalTransactions = data.reduce((sum, item) => sum + item.transactionCount, 0);
-    const averageDiscountRate = totalSales.isZero()
-      ? new Decimal(0)
-      : totalDiscounts.dividedBy(totalSales).times(100);
-
+    // Summary already computed in SQL — no JS .reduce() needed
     const executionTime = Date.now() - startTime;
 
     await reportsRepository.logReportRun(pool, {
@@ -371,28 +294,17 @@ export const reportsService = {
       parameters: options,
       data,
       summary: {
-        totalSales: totalSales.toDecimalPlaces(2).toNumber(),
-        totalSalesFormatted: formatCurrency(
-          totalSales.toDecimalPlaces(2).toNumber(),
-          systemContext.currencySymbol
-        ),
-        totalDiscounts: totalDiscounts.toDecimalPlaces(2).toNumber(),
-        netRevenue: netRevenue.toDecimalPlaces(2).toNumber(),
-        netRevenueFormatted: formatCurrency(
-          netRevenue.toDecimalPlaces(2).toNumber(),
-          systemContext.currencySymbol
-        ),
-        totalCost: totalCost.toDecimalPlaces(2).toNumber(),
-        grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
-        grossProfitFormatted: formatCurrency(
-          grossProfit.toDecimalPlaces(2).toNumber(),
-          systemContext.currencySymbol
-        ),
-        profitMargin: netRevenue.isZero()
-          ? 0
-          : grossProfit.dividedBy(netRevenue).times(100).toDecimalPlaces(2).toNumber(),
-        averageDiscountRate: averageDiscountRate.toDecimalPlaces(2).toNumber(),
-        totalTransactions,
+        totalSales: sqlSummary.totalSales,
+        totalSalesFormatted: formatCurrency(sqlSummary.totalSales, systemContext.currencySymbol),
+        totalDiscounts: sqlSummary.totalDiscounts,
+        netRevenue: sqlSummary.netRevenue,
+        netRevenueFormatted: formatCurrency(sqlSummary.netRevenue, systemContext.currencySymbol),
+        totalCost: sqlSummary.totalCost,
+        grossProfit: sqlSummary.grossProfit,
+        grossProfitFormatted: formatCurrency(sqlSummary.grossProfit, systemContext.currencySymbol),
+        profitMargin: sqlSummary.profitMargin,
+        averageDiscountRate: sqlSummary.averageDiscountRate,
+        totalTransactions: sqlSummary.totalTransactions,
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -815,38 +727,12 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getCustomerPaymentsReport(pool, {
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getCustomerPaymentsReport(pool, {
       startDate: options.startDate,
       endDate: options.endDate,
       customerId: options.customerId,
       status: options.status,
     });
-
-    // Calculate summary
-    const totalInvoiced = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalInvoiced),
-      new Decimal(0)
-    );
-    const totalPaid = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalPaid),
-      new Decimal(0)
-    );
-    const totalOutstanding = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalOutstanding),
-      new Decimal(0)
-    );
-    const totalOverdue = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.overdueAmount),
-      new Decimal(0)
-    );
-    const totalDeposited = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.totalDeposited || 0),
-      new Decimal(0)
-    );
-    const totalDepositAvailable = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.depositAvailable || 0),
-      new Decimal(0)
-    );
 
     const executionTime = Date.now() - startTime;
 
@@ -878,12 +764,12 @@ export const reportsService = {
       data,
       summary: {
         totalCustomers: data.length,
-        totalInvoiced: totalInvoiced.toDecimalPlaces(2).toNumber(),
-        totalPaid: totalPaid.toDecimalPlaces(2).toNumber(),
-        totalOutstanding: totalOutstanding.toDecimalPlaces(2).toNumber(),
-        totalOverdue: totalOverdue.toDecimalPlaces(2).toNumber(),
-        totalDeposited: totalDeposited.toDecimalPlaces(2).toNumber(),
-        depositAvailable: totalDepositAvailable.toDecimalPlaces(2).toNumber(),
+        totalInvoiced: sqlSummary.totalInvoiced,
+        totalPaid: sqlSummary.totalPaid,
+        totalOutstanding: sqlSummary.totalOutstanding,
+        totalOverdue: sqlSummary.totalOverdue,
+        totalDeposited: sqlSummary.totalDeposited,
+        depositAvailable: sqlSummary.depositAvailable,
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -905,22 +791,11 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getProfitLossReport(pool, {
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getProfitLossReport(pool, {
       startDate: options.startDate,
       endDate: options.endDate,
       groupBy: options.groupBy,
     });
-
-    // Calculate summary
-    const totalRevenue = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.revenue),
-      new Decimal(0)
-    );
-    const totalCOGS = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.costOfGoodsSold),
-      new Decimal(0)
-    );
-    const totalGrossProfit = totalRevenue.minus(totalCOGS);
 
     const executionTime = Date.now() - startTime;
 
@@ -951,12 +826,10 @@ export const reportsService = {
       parameters: options,
       data,
       summary: {
-        totalRevenue: totalRevenue.toDecimalPlaces(2).toNumber(),
-        totalCOGS: totalCOGS.toDecimalPlaces(2).toNumber(),
-        grossProfit: totalGrossProfit.toDecimalPlaces(2).toNumber(),
-        grossProfitMargin: totalRevenue.isZero()
-          ? 0
-          : totalGrossProfit.dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber(),
+        totalRevenue: sqlSummary.totalRevenue,
+        totalCOGS: sqlSummary.totalCOGS,
+        grossProfit: sqlSummary.grossProfit,
+        grossProfitMargin: sqlSummary.grossProfitMargin,
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -1170,22 +1043,13 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getStockMovementAnalysis(pool, options);
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getStockMovementAnalysis(pool, options);
 
     const summary = {
-      totalTransactions: data.reduce((sum, item) => sum + item.transactionCount, 0),
-      totalIn: data
-        .reduce((sum, item) => new Decimal(sum).plus(item.totalIn), new Decimal(0))
-        .toDecimalPlaces(3)
-        .toNumber(),
-      totalOut: data
-        .reduce((sum, item) => new Decimal(sum).plus(item.totalOut), new Decimal(0))
-        .toDecimalPlaces(3)
-        .toNumber(),
-      netMovement: data
-        .reduce((sum, item) => new Decimal(sum).plus(item.netMovement), new Decimal(0))
-        .toDecimalPlaces(3)
-        .toNumber(),
+      totalTransactions: sqlSummary.totalTransactions,
+      totalIn: sqlSummary.totalIn,
+      totalOut: sqlSummary.totalOut,
+      netMovement: sqlSummary.netMovement,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1240,19 +1104,10 @@ export const reportsService = {
     const data = await reportsRepository.getCustomerAccountStatement(pool, options);
 
     const summary = {
-      totalTransactions: data.transactions.length,
-      totalSales: data.transactions
-        .reduce((sum: Decimal, t) => new Decimal(sum).plus(t.totalAmount), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      totalPaid: data.transactions
-        .reduce((sum: Decimal, t) => new Decimal(sum).plus(t.amountPaid), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      totalOutstanding: data.transactions
-        .reduce((sum: Decimal, t) => new Decimal(sum).plus(t.balanceDue), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
+      totalTransactions: data.transactionSummary.totalTransactions,
+      totalSales: data.transactionSummary.totalSales,
+      totalPaid: data.transactionSummary.totalPaid,
+      totalOutstanding: data.transactionSummary.totalOutstanding,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1305,30 +1160,14 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getProfitMarginByProduct(pool, options);
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getProfitMarginByProduct(pool, options);
 
     const summary = {
       totalProducts: data.length,
-      totalRevenue: data
-        .reduce((sum, p) => new Decimal(sum).plus(p.totalRevenue), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      totalCost: data
-        .reduce((sum, p) => new Decimal(sum).plus(p.totalCost), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      totalProfit: data
-        .reduce((sum, p) => new Decimal(sum).plus(p.totalProfit), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      averageMarginPercent:
-        data.length > 0
-          ? data
-            .reduce((sum, p) => sum.plus(p.profitMarginPercent), new Decimal(0))
-            .dividedBy(data.length)
-            .toDecimalPlaces(2)
-            .toNumber()
-          : 0,
+      totalRevenue: sqlSummary.totalRevenue,
+      totalCost: sqlSummary.totalCost,
+      totalProfit: sqlSummary.totalProfit,
+      averageMarginPercent: sqlSummary.averageMarginPercent,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1381,102 +1220,65 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getDailyCashFlow(pool, {
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getDailyCashFlow(pool, {
       ...options,
       includeDebCollections: true,
     });
 
-    // Separate sales revenue from debt collections and deposit receipts for advanced analysis
-    const salesRevenue = data.filter((d) => d.revenueType === 'SALES_REVENUE');
-    const debtCollections = data.filter((d) => d.revenueType === 'DEBT_COLLECTION');
-    const depositReceipts = data.filter((d) => d.revenueType === 'DEPOSIT_RECEIPT');
-
-    // Calculate metrics with bank-grade precision
-    const salesRevenueTotal = salesRevenue.reduce(
-      (sum, d) => new Decimal(sum).plus(d.cashAmount),
-      new Decimal(0)
-    );
-    const debtCollectionsTotal = debtCollections.reduce(
-      (sum, d) => new Decimal(sum).plus(d.cashAmount),
-      new Decimal(0)
-    );
-    const depositReceiptsTotal = depositReceipts.reduce(
-      (sum, d) => new Decimal(sum).plus(d.cashAmount),
-      new Decimal(0)
-    );
-    const totalCashFlow = salesRevenueTotal.plus(debtCollectionsTotal).plus(depositReceiptsTotal);
-    const totalSalesValue = salesRevenue.reduce(
-      (sum, d) => new Decimal(sum).plus(d.totalSales),
-      new Decimal(0)
-    );
-    const totalProfit = salesRevenue.reduce(
-      (sum, d) => new Decimal(sum).plus(d.grossProfit),
-      new Decimal(0)
-    );
-    const totalCreditExtended = salesRevenue.reduce(
-      (sum, d) => new Decimal(sum).plus(d.creditCreated),
-      new Decimal(0)
-    );
-
     // Flat summary structure to match frontend expectations
     const summary = {
-      totalDays: [...new Set(data.map((d) => d.transactionDate))].length,
+      totalDays: sqlSummary.totalDays,
 
       // Sales Revenue Metrics (flattened for frontend)
-      salesRevenue: salesRevenueTotal.toDecimalPlaces(2).toNumber(),
-      salesTransactionCount: salesRevenue.reduce((sum, d) => sum + d.transactionCount, 0),
-      totalSalesValue: totalSalesValue.toDecimalPlaces(2).toNumber(),
-      grossProfit: totalProfit.toDecimalPlaces(2).toNumber(),
-      overallProfitMargin: totalSalesValue.isZero()
-        ? 0
-        : totalProfit.div(totalSalesValue).mul(100).toDecimalPlaces(2).toNumber(),
+      salesRevenue: sqlSummary.salesRevenue,
+      salesTransactionCount: sqlSummary.salesTransactionCount,
+      totalSalesValue: sqlSummary.totalSalesValue,
+      grossProfit: sqlSummary.grossProfit,
+      overallProfitMargin: sqlSummary.overallProfitMargin,
 
       // Debt Collections Metrics (flattened for frontend)
-      debtCollections: debtCollectionsTotal.toDecimalPlaces(2).toNumber(),
-      collectionsTransactionCount: debtCollections.reduce((sum, d) => sum + d.transactionCount, 0),
+      debtCollections: sqlSummary.debtCollections,
+      collectionsTransactionCount: sqlSummary.collectionsTransactionCount,
 
       // Customer Deposit Receipts (advance payments received)
-      depositReceipts: depositReceiptsTotal.toDecimalPlaces(2).toNumber(),
-      depositsTransactionCount: depositReceipts.reduce((sum, d) => sum + d.transactionCount, 0),
+      depositReceipts: sqlSummary.depositReceipts,
+      depositsTransactionCount: sqlSummary.depositsTransactionCount,
 
       // Combined Metrics
-      totalCashIn: totalCashFlow.toDecimalPlaces(2).toNumber(),
-      totalTransactions: data.reduce((sum, d) => sum + d.transactionCount, 0),
+      totalCashIn: sqlSummary.totalCashIn,
+      totalTransactions: sqlSummary.totalTransactions,
 
       // Revenue Composition (completely flattened for frontend)
-      salesPercent: totalCashFlow.isZero()
+      salesPercent: sqlSummary.totalCashIn === 0
         ? 0
-        : salesRevenueTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
-      collectionsPercent: totalCashFlow.isZero()
+        : new Decimal(sqlSummary.salesRevenue).div(sqlSummary.totalCashIn).mul(100).toDecimalPlaces(1).toNumber(),
+      collectionsPercent: sqlSummary.totalCashIn === 0
         ? 0
-        : debtCollectionsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
-      depositsPercent: totalCashFlow.isZero()
+        : new Decimal(sqlSummary.debtCollections).div(sqlSummary.totalCashIn).mul(100).toDecimalPlaces(1).toNumber(),
+      depositsPercent: sqlSummary.totalCashIn === 0
         ? 0
-        : depositReceiptsTotal.div(totalCashFlow).mul(100).toDecimalPlaces(1).toNumber(),
-      salesAmount: salesRevenueTotal.toDecimalPlaces(2).toNumber(),
-      collectionsAmount: debtCollectionsTotal.toDecimalPlaces(2).toNumber(),
-      depositsAmount: depositReceiptsTotal.toDecimalPlaces(2).toNumber(),
+        : new Decimal(sqlSummary.depositReceipts).div(sqlSummary.totalCashIn).mul(100).toDecimalPlaces(1).toNumber(),
+      salesAmount: sqlSummary.salesRevenue,
+      collectionsAmount: sqlSummary.debtCollections,
+      depositsAmount: sqlSummary.depositReceipts,
 
       // Working Capital Impact
-      creditExtended: totalCreditExtended.toDecimalPlaces(2).toNumber(),
+      creditExtended: sqlSummary.creditExtended,
 
       // Business Intelligence Insights
       businessInsights: [
-        ...(salesRevenueTotal.greaterThan(debtCollectionsTotal)
+        ...(sqlSummary.salesRevenue > sqlSummary.debtCollections
           ? ['Strong new business growth - sales exceed collections']
           : []),
-        ...(debtCollectionsTotal.greaterThan(salesRevenueTotal)
+        ...(sqlSummary.debtCollections > sqlSummary.salesRevenue
           ? ['Focus on debt recovery - collections exceed new sales']
           : []),
-        ...(totalProfit
-          .div(totalSalesValue.isZero() ? new Decimal(1) : totalSalesValue)
-          .mul(100)
-          .greaterThan(20)
+        ...(sqlSummary.overallProfitMargin > 20
           ? ['Healthy profit margins (>20%)']
           : []),
-        ...(data.length > 0 && totalCashFlow.greaterThan(0) ? ['Positive overall cash flow'] : []),
-        ...(depositReceiptsTotal.greaterThan(0)
-          ? [`Customer deposits received: ${depositReceiptsTotal.toDecimalPlaces(2).toNumber()}`]
+        ...(data.length > 0 && sqlSummary.totalCashIn > 0 ? ['Positive overall cash flow'] : []),
+        ...(sqlSummary.depositReceipts > 0
+          ? [`Customer deposits received: ${sqlSummary.depositReceipts}`]
           : []),
       ],
     };
@@ -1664,40 +1466,19 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getCustomerAging(pool, {
+    const { rows: data, summary: sqlSummary } = await reportsRepository.getCustomerAging(pool, {
       asOfDate: options.asOfDate,
     });
 
     const summary = {
       totalCustomers: data.length,
-      totalOutstanding: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.totalOutstanding), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      current: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.current), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      days30: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.days30), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      days60: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.days60), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      days90: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.days90), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      over90: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.over90), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
-      overdueAmount: data
-        .reduce((sum, c) => new Decimal(sum).plus(c.overdueAmount), new Decimal(0))
-        .toDecimalPlaces(2)
-        .toNumber(),
+      totalOutstanding: sqlSummary.totalOutstanding,
+      current: sqlSummary.current,
+      days30: sqlSummary.days30,
+      days60: sqlSummary.days60,
+      days90: sqlSummary.days90,
+      over90: sqlSummary.over90,
+      overdueAmount: sqlSummary.overdueAmount,
     };
 
     const executionTime = Date.now() - startTime;

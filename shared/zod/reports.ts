@@ -312,6 +312,8 @@ export const InventoryValuationParamsSchema = z.object({
   category_id: z.string().optional(),
   valuation_method: z.enum(['FIFO', 'AVCO', 'LIFO']).default('FIFO'),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(1000).default(500),
 });
 
 export const SalesReportParamsSchema = z.object({

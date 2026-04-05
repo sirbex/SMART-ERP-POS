@@ -169,6 +169,8 @@ export const reportsController = {
       valuationMethod: params.valuation_method,
       format: params.format,
       userId,
+      page: params.page,
+      limit: params.limit,
     });
 
     // PDF export

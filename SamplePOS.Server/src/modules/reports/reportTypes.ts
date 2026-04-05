@@ -109,6 +109,12 @@ export interface CustomerStatementTransaction {
 export interface CustomerAccountStatementData {
     customer: CustomerStatementCustomer;
     transactions: CustomerStatementTransaction[];
+    transactionSummary: {
+        totalTransactions: number;
+        totalSales: number;
+        totalPaid: number;
+        totalOutstanding: number;
+    };
 }
 
 // ── Daily Cash Flow ──
