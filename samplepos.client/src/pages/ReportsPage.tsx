@@ -763,6 +763,16 @@ interface ReportDataCustomer {
   currentBalance?: number;
 }
 
+interface ReportDataCategoryRow {
+  category: string;
+  productCount: number;
+  quantityOnHand: number;
+  costValue: number;
+  potentialRevenue: number;
+  potentialProfit: number;
+  profitMargin: number;
+}
+
 interface ReportData {
   reportName?: string;
   reportType?: string;
@@ -773,6 +783,7 @@ interface ReportData {
   data: Record<string, unknown>[];
   customer?: ReportDataCustomer;
   transactions?: Record<string, unknown>[];
+  byCategory?: ReportDataCategoryRow[];
   [key: string]: unknown;
 }
 
@@ -1691,6 +1702,89 @@ export default function ReportsPage() {
               </div>
             </div>
           )
+        )}
+
+        {/* Inventory Valuation - Category Breakdown */}
+        {reportData.reportType === 'INVENTORY_VALUATION' && reportData.byCategory && reportData.byCategory.length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-base sm:text-lg font-semibold text-white">📦 Valuation by Category</h4>
+              <span className="text-teal-100 text-xs sm:text-sm">{reportData.byCategory.length} categories</span>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="block sm:hidden p-4 space-y-4">
+              {reportData.byCategory.map((cat, idx) => (
+                <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="font-semibold text-gray-900 text-sm">{cat.category || 'Uncategorized'}</div>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-teal-100 text-teal-800">
+                      {cat.productCount} products
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Qty on Hand</div>
+                      <div className="text-sm font-bold text-gray-900">{cat.quantityOnHand.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Cost Value</div>
+                      <div className="text-sm font-bold text-orange-600">{formatCurrency(cat.costValue)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Revenue</div>
+                      <div className="text-sm font-bold text-green-600">{formatCurrency(cat.potentialRevenue)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Margin</div>
+                      <div className={`text-sm font-bold ${cat.profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {cat.profitMargin.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full min-w-full">
+                <thead className="bg-gray-100 border-b-2 border-gray-300">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Category</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Products</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Qty on Hand</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Cost Value</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Potential Revenue</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Potential Profit</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Margin</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {reportData.byCategory.map((cat, idx) => (
+                    <tr key={idx} className="hover:bg-blue-50 transition-colors">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-900">{cat.category || 'Uncategorized'}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-blue-600 font-semibold">{cat.productCount}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-gray-900 font-semibold">{cat.quantityOnHand.toLocaleString()}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-orange-600 font-semibold">{formatCurrency(cat.costValue)}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-green-600 font-semibold">{formatCurrency(cat.potentialRevenue)}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-green-700 font-semibold">{formatCurrency(cat.potentialProfit)}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${cat.profitMargin >= 20
+                          ? 'bg-green-100 text-green-800'
+                          : cat.profitMargin >= 10
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-red-100 text-red-800'
+                          }`}>
+                          {cat.profitMargin.toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         {/* Customer Account Statement - Special Layout */}
