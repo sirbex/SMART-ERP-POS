@@ -1388,4 +1388,282 @@ export const salesRepository = {
     );
     return result.rows;
   },
+
+  // ============================================================
+  // SAP GLT0-Equivalent: Sales Daily Summary (Rollup Table)
+  // ============================================================
+
+  /**
+   * Atomically increment the daily summary row for a new COMPLETED sale.
+   * Must be called inside the sale transaction (using the same PoolClient).
+   */
+  async incrementDailySummary(
+    client: PoolClient,
+    saleDate: string,
+    paymentMethod: string,
+    totalAmount: string | number,
+    totalCost: string | number,
+    discountAmount: string | number,
+    isCredit: boolean,
+    isPartialPayment: boolean
+  ): Promise<void> {
+    const profit = new Decimal(totalAmount).minus(new Decimal(totalCost || 0));
+    await client.query(
+      `INSERT INTO sales_daily_summary (
+          sale_date, payment_method,
+          transaction_count, total_amount, total_cost, total_profit, total_discounts,
+          credit_count, partial_payment_count, updated_at
+       ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (sale_date, payment_method) DO UPDATE SET
+          transaction_count     = sales_daily_summary.transaction_count + 1,
+          total_amount          = sales_daily_summary.total_amount + EXCLUDED.total_amount,
+          total_cost            = sales_daily_summary.total_cost + EXCLUDED.total_cost,
+          total_profit          = sales_daily_summary.total_profit + EXCLUDED.total_profit,
+          total_discounts       = sales_daily_summary.total_discounts + EXCLUDED.total_discounts,
+          credit_count          = sales_daily_summary.credit_count + EXCLUDED.credit_count,
+          partial_payment_count = sales_daily_summary.partial_payment_count + EXCLUDED.partial_payment_count,
+          updated_at            = NOW()`,
+      [
+        saleDate,
+        paymentMethod,
+        new Decimal(totalAmount).toFixed(2),
+        new Decimal(totalCost || 0).toFixed(2),
+        profit.toFixed(2),
+        new Decimal(discountAmount || 0).toFixed(2),
+        isCredit ? 1 : 0,
+        isPartialPayment ? 1 : 0,
+      ]
+    );
+  },
+
+  /**
+   * Atomically decrement the daily summary row when a sale is voided.
+   * Must be called inside the void transaction (using the same PoolClient).
+   */
+  async decrementDailySummary(
+    client: PoolClient,
+    saleDate: string,
+    paymentMethod: string,
+    totalAmount: string | number,
+    totalCost: string | number,
+    discountAmount: string | number,
+    isCredit: boolean,
+    isPartialPayment: boolean
+  ): Promise<void> {
+    const profit = new Decimal(totalAmount).minus(new Decimal(totalCost || 0));
+    await client.query(
+      `UPDATE sales_daily_summary SET
+          transaction_count     = GREATEST(transaction_count - 1, 0),
+          total_amount          = total_amount - $3,
+          total_cost            = total_cost - $4,
+          total_profit          = total_profit - $5,
+          total_discounts       = total_discounts - $6,
+          credit_count          = GREATEST(credit_count - $7, 0),
+          partial_payment_count = GREATEST(partial_payment_count - $8, 0),
+          updated_at            = NOW()
+       WHERE sale_date = $1 AND payment_method = $2`,
+      [
+        saleDate,
+        paymentMethod,
+        new Decimal(totalAmount).toFixed(2),
+        new Decimal(totalCost || 0).toFixed(2),
+        profit.toFixed(2),
+        new Decimal(discountAmount || 0).toFixed(2),
+        isCredit ? 1 : 0,
+        isPartialPayment ? 1 : 0,
+      ]
+    );
+  },
+
+  /**
+   * Read aggregated summary from the rollup table (SAP GLT0-style).
+   * Replaces the full-table scan on `sales` for dashboard KPIs.
+   */
+  async getSalesSummaryFromRollup(
+    pool: Pool,
+    filters?: {
+      startDate?: string;
+      endDate?: string;
+      cashierId?: string;
+    }
+  ): Promise<Record<string, unknown>> {
+    // If cashierId filter is present, fall back to raw table scan
+    // because the rollup table doesn't track per-cashier data
+    if (filters?.cashierId) {
+      return this.getSalesSummary(pool, filters);
+    }
+
+    const whereClauses: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (filters?.startDate) {
+      whereClauses.push(`sale_date >= $${paramIndex++}::date`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`sale_date <= $${paramIndex++}::date`);
+      values.push(filters.endDate);
+    }
+
+    const whereClause = whereClauses.length > 0
+      ? 'WHERE ' + whereClauses.join(' AND ')
+      : '';
+
+    const summaryResult = await pool.query(
+      `SELECT
+        COALESCE(SUM(transaction_count), 0)     AS total_sales,
+        COALESCE(SUM(total_amount), 0)           AS total_amount,
+        COALESCE(SUM(total_cost), 0)             AS total_cost,
+        COALESCE(SUM(total_profit), 0)           AS total_profit,
+        COALESCE(SUM(total_discounts), 0)        AS total_discounts,
+        COALESCE(SUM(credit_count), 0)           AS credit_count,
+        COALESCE(SUM(partial_payment_count), 0)  AS partial_count
+       FROM sales_daily_summary
+       ${whereClause}`,
+      values
+    );
+
+    const paymentMethodResult = await pool.query(
+      `SELECT
+        payment_method,
+        SUM(transaction_count)::INTEGER AS count,
+        COALESCE(SUM(total_amount), 0)  AS total_amount
+       FROM sales_daily_summary
+       ${whereClause}
+       GROUP BY payment_method
+       ORDER BY total_amount DESC`,
+      values
+    );
+
+    return {
+      totalSales: parseInt(summaryResult.rows[0].total_sales),
+      totalAmount: parseFloat(summaryResult.rows[0].total_amount),
+      totalCost: parseFloat(summaryResult.rows[0].total_cost),
+      totalProfit: parseFloat(summaryResult.rows[0].total_profit),
+      totalDiscounts: parseFloat(summaryResult.rows[0].total_discounts),
+      creditSalesCount: parseInt(summaryResult.rows[0].credit_count),
+      partialPaymentCount: parseInt(summaryResult.rows[0].partial_count),
+      byPaymentMethod: paymentMethodResult.rows.map((row: Record<string, unknown>) => ({
+        paymentMethod: row.payment_method,
+        count: parseInt(String(row.count)),
+        totalAmount: parseFloat(String(row.total_amount)),
+      })),
+    };
+  },
+
+  /**
+   * Reconciliation: Compare rollup table totals against raw sales table.
+   * Returns drift per (sale_date, payment_method) where values differ.
+   */
+  async reconcileDailySummary(
+    pool: Pool,
+    startDate?: string,
+    endDate?: string
+  ): Promise<{ drifts: Record<string, unknown>[]; isClean: boolean }> {
+    const whereClauses: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
+      values.push(startDate);
+    }
+    if (endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}::date`);
+      values.push(endDate);
+    }
+
+    const saleWhere = whereClauses.length > 0
+      ? 'AND ' + whereClauses.join(' AND ')
+      : '';
+
+    // Build equivalent WHERE for rollup table (uses different alias)
+    const rollupWhereClauses = whereClauses.map(c => c.replace(/s\.sale_date/g, 'r.sale_date'));
+    const rollupWhere = rollupWhereClauses.length > 0
+      ? 'AND ' + rollupWhereClauses.join(' AND ')
+      : '';
+
+    const result = await pool.query(
+      `WITH actual AS (
+          SELECT
+            sale_date,
+            payment_method,
+            COUNT(*)::INTEGER AS transaction_count,
+            COALESCE(SUM(total_amount), 0) AS total_amount,
+            COALESCE(SUM(total_cost), 0) AS total_cost,
+            COALESCE(SUM(discount_amount), 0) AS total_discounts
+          FROM sales s
+          WHERE status = 'COMPLETED' ${saleWhere}
+          GROUP BY sale_date, payment_method
+       ),
+       rollup AS (
+          SELECT sale_date, payment_method, transaction_count,
+                 total_amount, total_cost, total_discounts
+          FROM sales_daily_summary r
+          WHERE 1=1 ${rollupWhere}
+       )
+       SELECT
+          COALESCE(a.sale_date, r.sale_date) AS sale_date,
+          COALESCE(a.payment_method, r.payment_method) AS payment_method,
+          a.transaction_count AS actual_count,
+          r.transaction_count AS rollup_count,
+          a.total_amount AS actual_amount,
+          r.total_amount AS rollup_amount
+       FROM actual a
+       FULL OUTER JOIN rollup r
+         ON a.sale_date = r.sale_date AND a.payment_method = r.payment_method
+       WHERE a.transaction_count IS DISTINCT FROM r.transaction_count
+          OR ABS(COALESCE(a.total_amount,0) - COALESCE(r.total_amount,0)) > 0.01
+       ORDER BY COALESCE(a.sale_date, r.sale_date) DESC
+       LIMIT 100`,
+      values
+    );
+
+    return {
+      drifts: result.rows,
+      isClean: result.rows.length === 0,
+    };
+  },
+
+  /**
+   * Full rebuild of the rollup table from raw sales data.
+   * Use to heal drift or after bulk data operations.
+   */
+  async rebuildDailySummary(pool: Pool): Promise<number> {
+    const result = await pool.query(`
+      INSERT INTO sales_daily_summary (
+          sale_date, payment_method,
+          transaction_count, total_amount, total_cost, total_profit, total_discounts,
+          credit_count, partial_payment_count, updated_at
+      )
+      SELECT
+          sale_date,
+          payment_method,
+          COUNT(*)::INTEGER,
+          COALESCE(SUM(total_amount), 0),
+          COALESCE(SUM(total_cost), 0),
+          COALESCE(SUM(total_amount - COALESCE(total_cost, 0)), 0),
+          COALESCE(SUM(discount_amount), 0),
+          COUNT(*) FILTER (WHERE payment_method = 'CREDIT')::INTEGER,
+          COUNT(*) FILTER (WHERE payment_method = 'CREDIT'
+              AND amount_paid > 0
+              AND amount_paid < total_amount)::INTEGER,
+          NOW()
+      FROM sales
+      WHERE status = 'COMPLETED'
+      GROUP BY sale_date, payment_method
+      ON CONFLICT (sale_date, payment_method) DO UPDATE SET
+          transaction_count     = EXCLUDED.transaction_count,
+          total_amount          = EXCLUDED.total_amount,
+          total_cost            = EXCLUDED.total_cost,
+          total_profit          = EXCLUDED.total_profit,
+          total_discounts       = EXCLUDED.total_discounts,
+          credit_count          = EXCLUDED.credit_count,
+          partial_payment_count = EXCLUDED.partial_payment_count,
+          updated_at            = NOW()
+    `);
+    return result.rowCount ?? 0;
+  },
 };

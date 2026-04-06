@@ -599,6 +599,31 @@ export const salesController = {
       data: refunds.map((r) => normalizeResponse(r)),
     });
   },
+
+  /**
+   * Reconcile daily summary rollup table against raw sales data.
+   * GET /sales/summary/reconcile
+   */
+  async reconcileSummary(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const result = await salesService.reconcileDailySummary(pool, startDate, endDate);
+    res.json({ success: true, data: result });
+  },
+
+  /**
+   * Rebuild daily summary rollup table from raw sales data.
+   * POST /sales/summary/rebuild
+   */
+  async rebuildSummary(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const rowCount = await salesService.rebuildDailySummary(pool);
+    res.json({
+      success: true,
+      data: { rowsUpserted: rowCount },
+      message: 'Daily summary rollup rebuilt from raw sales data',
+    });
+  },
 };
 
 // Routes
@@ -615,6 +640,21 @@ salesRoutes.post(
 // List and view sales - all authenticated users
 salesRoutes.get('/', authenticate, asyncHandler(salesController.listSales));
 salesRoutes.get('/summary', authenticate, asyncHandler(salesController.getSalesSummary));
+
+// Daily summary rollup admin endpoints (SAP GLT0-equivalent)
+salesRoutes.get(
+  '/summary/reconcile',
+  authenticate,
+  requirePermission('reports.view'),
+  asyncHandler(salesController.reconcileSummary)
+);
+salesRoutes.post(
+  '/summary/rebuild',
+  authenticate,
+  requirePermission('settings.manage'),
+  asyncHandler(salesController.rebuildSummary)
+);
+
 salesRoutes.get('/:id', authenticate, asyncHandler(salesController.getSaleById));
 
 // Sales reports - all authenticated users

@@ -1503,6 +1503,36 @@ export const salesService = {
         }
       }
 
+      // ============================================================
+      // SAP GLT0-EQUIVALENT: Atomically update daily summary rollup
+      // Must happen INSIDE the transaction so totals stay in sync
+      // ============================================================
+      try {
+        const summaryDate = sale.saleDate || new Date().toLocaleDateString('en-CA');
+        const isCredit = sale.paymentMethod === 'CREDIT';
+        // pg returns NUMERIC as strings — must convert for numeric comparison
+        const paidNum = parseFloat(String(sale.amountPaid ?? 0));
+        const totalNum = parseFloat(String(sale.totalAmount));
+        const isPartial = isCredit && paidNum > 0 && paidNum < totalNum;
+        await salesRepository.incrementDailySummary(
+          client,
+          summaryDate,
+          sale.paymentMethod,
+          sale.totalAmount,
+          sale.totalCost || 0,
+          sale.discountAmount || 0,
+          isCredit,
+          isPartial
+        );
+      } catch (summaryError: unknown) {
+        // Non-blocking: summary drift can be healed by reconciliation
+        logger.warn('Daily summary rollup update failed — will be healed by reconciliation', {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+        });
+      }
+
       await client.query('COMMIT');
 
       // NOTE: Audit logging is now handled in the controller layer
@@ -1755,7 +1785,27 @@ export const salesService = {
       cashierId?: string;
     }
   ): Promise<Record<string, unknown>> {
-    return salesRepository.getSalesSummary(pool, filters);
+    // SAP GLT0-equivalent: read from pre-aggregated rollup table
+    // Falls back to raw table scan if cashierId filter is present
+    return salesRepository.getSalesSummaryFromRollup(pool, filters);
+  },
+
+  /**
+   * Reconcile daily summary rollup vs raw sales table.
+   */
+  async reconcileDailySummary(
+    pool: Pool,
+    startDate?: string,
+    endDate?: string
+  ): Promise<{ drifts: Record<string, unknown>[]; isClean: boolean }> {
+    return salesRepository.reconcileDailySummary(pool, startDate, endDate);
+  },
+
+  /**
+   * Full rebuild of the daily summary rollup from raw sales data.
+   */
+  async rebuildDailySummary(pool: Pool): Promise<number> {
+    return salesRepository.rebuildDailySummary(pool);
   },
 
   /**
@@ -2197,6 +2247,36 @@ export const salesService = {
           error: glError instanceof Error ? glError.message : String(glError),
         });
         // Allow void to proceed even if GL reversal fails (can be reconciled later)
+      }
+
+      // ============================================================
+      // SAP GLT0-EQUIVALENT: Atomically decrement daily summary rollup
+      // Must happen INSIDE the transaction so totals stay in sync
+      // ============================================================
+      try {
+        const voidSaleDate = sale.sale_date instanceof Date
+          ? sale.sale_date.toISOString().slice(0, 10)
+          : String(sale.sale_date).slice(0, 10);
+        const isCredit = sale.payment_method === 'CREDIT';
+        const amountPaid = parseFloat(sale.amount_paid || 0);
+        const saleTotal = parseFloat(sale.total_amount || 0);
+        const isPartial = isCredit && amountPaid > 0 && amountPaid < saleTotal;
+        await salesRepository.decrementDailySummary(
+          client,
+          voidSaleDate,
+          sale.payment_method,
+          sale.total_amount || 0,
+          sale.total_cost || 0,
+          sale.discount_amount || 0,
+          isCredit,
+          isPartial
+        );
+      } catch (summaryError: unknown) {
+        logger.warn('Daily summary rollup decrement failed — will be healed by reconciliation', {
+          saleId,
+          saleNumber: sale.sale_number,
+          error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+        });
       }
 
       await client.query('COMMIT');
@@ -2652,6 +2732,34 @@ export const salesService = {
           saleId,
           saleNumber: sale.sale_number,
         });
+
+        // SAP GLT0: Sale status changes from COMPLETED → REFUNDED,
+        // so it no longer counts in COMPLETED summaries — decrement rollup
+        try {
+          const refundSaleDate = sale.sale_date instanceof Date
+            ? sale.sale_date.toISOString().slice(0, 10)
+            : String(sale.sale_date).slice(0, 10);
+          const isCredit = sale.payment_method === 'CREDIT';
+          const amtPaid = parseFloat(sale.amount_paid || 0);
+          const saleTotalAmt = parseFloat(sale.total_amount || 0);
+          const isPartial = isCredit && amtPaid > 0 && amtPaid < saleTotalAmt;
+          await salesRepository.decrementDailySummary(
+            client,
+            refundSaleDate,
+            sale.payment_method,
+            sale.total_amount || 0,
+            sale.total_cost || 0,
+            sale.discount_amount || 0,
+            isCredit,
+            isPartial
+          );
+        } catch (summaryError: unknown) {
+          logger.warn('Daily summary rollup decrement failed on full refund — will be healed by reconciliation', {
+            saleId,
+            saleNumber: sale.sale_number,
+            error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+          });
+        }
       }
 
       await client.query('COMMIT');
