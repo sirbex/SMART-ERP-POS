@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool as globalPool } from '../db/pool.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../utils/dateRange.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,13 +66,24 @@ export interface SummaryTotalsRow {
 
 function dateClause(paramStart: number): string {
   return `
-    AND ($${paramStart}::date IS NULL OR le."EntryDate" >= $${paramStart})
-    AND ($${paramStart + 1}::date IS NULL OR le."EntryDate" <= $${paramStart + 1})
+    AND ($${paramStart}::timestamptz IS NULL OR le."EntryDate" >= $${paramStart}::timestamptz)
+    AND ($${paramStart + 1}::timestamptz IS NULL OR le."EntryDate" < $${paramStart + 1}::timestamptz)
   `;
 }
 
+/** Convert user-facing YYYY-MM-DD dates to UTC boundaries for TIMESTAMPTZ columns. */
 function dateParams(f: BusinessReportFilters): (string | null)[] {
-  return [f.startDate || null, f.endDate || null];
+  if (!f.startDate && !f.endDate) return [null, null];
+  if (f.startDate && f.endDate) {
+    const { startUtc, endUtc } = toUtcRange(f.startDate, f.endDate, BUSINESS_TIMEZONE);
+    return [startUtc, endUtc];
+  }
+  if (f.startDate) {
+    const { startUtc } = toUtcRange(f.startDate, f.startDate, BUSINESS_TIMEZONE);
+    return [startUtc, null];
+  }
+  const { endUtc } = toUtcRange(f.endDate!, f.endDate!, BUSINESS_TIMEZONE);
+  return [null, endUtc];
 }
 
 // ---------------------------------------------------------------------------
@@ -174,8 +186,8 @@ export async function getRevenueByCategory(
       JOIN sale_items si ON si.sale_id = s.id
       LEFT JOIN products p ON p.id = si.product_id
       WHERE s.status = 'COMPLETED'
-        AND ($1::date IS NULL OR s.sale_date >= $1)
-        AND ($2::date IS NULL OR s.sale_date <= $2)
+        AND ($1::timestamptz IS NULL OR s.sale_date >= $1::timestamptz)
+        AND ($2::timestamptz IS NULL OR s.sale_date < $2::timestamptz)
       GROUP BY s.sale_number, category_name
     ),
     allocated AS (
