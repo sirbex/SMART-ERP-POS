@@ -3676,6 +3676,134 @@ export const reportsController = {
   },
 
   /**
+   * Void Sales Report
+   * GET /api/reports/void-sales
+   */
+  async getVoidSalesReport(req: Request, res: Response, pool: Pool) {
+    const params = z.object({
+      start_date: z.string().min(1),
+      end_date: z.string().min(1),
+      format: z.string().optional(),
+    }).parse(req.query);
+
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateVoidSalesReport(pool, {
+      startDate: params.start_date,
+      endDate: params.end_date,
+      format: params.format as 'json' | 'pdf' | 'csv' | undefined,
+      userId,
+    });
+
+    // PDF export
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = new Date().toLocaleDateString('en-CA');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="void-sales-${date}.pdf"`);
+      doc.pipe(res);
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Void Sales Report',
+        subtitle: `${formatDatePDF(params.start_date)} - ${formatDatePDF(params.end_date)}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total Voided', value: String(report.summary.voidedSaleCount), color: PDFColors.danger },
+        { label: 'Voided Amount', value: formatCurrencyPDF(report.summary.totalVoidedAmount), color: PDFColors.warning },
+        { label: 'Lost Profit', value: formatCurrencyPDF(report.summary.totalLostProfit), color: PDFColors.danger },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Sale #', key: 'saleNumber', width: 0.14 },
+        { header: 'Date', key: 'saleDate', width: 0.1 },
+        { header: 'Amount', key: 'totalAmount', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'Profit Lost', key: 'profit', width: 0.11, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'Reason', key: 'voidReason', width: 0.2 },
+        { header: 'Voided By', key: 'voidedBy', width: 0.15 },
+        { header: 'Voided At', key: 'voidedAt', width: 0.18 },
+      ];
+
+      pdfGen.addTable(columns, report.data);
+      pdfGen.end();
+      return;
+    }
+
+    logger.info('Void sales report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  /**
+   * Refund Report
+   * GET /api/reports/refunds
+   */
+  async getRefundReport(req: Request, res: Response, pool: Pool) {
+    const params = z.object({
+      start_date: z.string().min(1),
+      end_date: z.string().min(1),
+      format: z.string().optional(),
+    }).parse(req.query);
+
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateRefundReport(pool, {
+      startDate: params.start_date,
+      endDate: params.end_date,
+      format: params.format as 'json' | 'pdf' | 'csv' | undefined,
+      userId,
+    });
+
+    // PDF export
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = new Date().toLocaleDateString('en-CA');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="refund-report-${date}.pdf"`);
+      doc.pipe(res);
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Refund Report',
+        subtitle: `${formatDatePDF(params.start_date)} - ${formatDatePDF(params.end_date)}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total Refunds', value: String(report.summary.refundCount), color: PDFColors.danger },
+        { label: 'Refund Amount', value: formatCurrencyPDF(report.summary.totalRefundAmount), color: PDFColors.warning },
+        { label: 'Full Refunds', value: String(report.summary.fullRefundCount), color: PDFColors.info },
+        { label: 'Partial Refunds', value: String(report.summary.partialRefundCount), color: PDFColors.secondary },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Refund #', key: 'refundNumber', width: 0.14 },
+        { header: 'Sale #', key: 'saleNumber', width: 0.12 },
+        { header: 'Date', key: 'refundDate', width: 0.1 },
+        { header: 'Amount', key: 'totalAmount', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'Reason', key: 'reason', width: 0.18 },
+        { header: 'Type', key: 'refundType', width: 0.1 },
+        { header: 'Created By', key: 'createdBy', width: 0.12 },
+        { header: 'Customer', key: 'customerName', width: 0.12 },
+      ];
+
+      pdfGen.addTable(columns, report.data);
+      pdfGen.end();
+      return;
+    }
+
+    logger.info('Refund report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  /**
    * Unified Report Generation Dispatcher
    * POST /api/reports/generate
    * Routes to appropriate report controller based on reportType
@@ -4055,6 +4183,23 @@ export const reportsController = {
           format: params.format,
         };
         return await reportsController.getBankTransactionReport(modifiedReq, res, pool);
+
+      // ── Void & Refund Reports ──────────────────────────────────
+      case 'VOID_SALES_REPORT':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          format: params.format,
+        };
+        return await reportsController.getVoidSalesReport(modifiedReq, res, pool);
+
+      case 'REFUND_REPORT':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          format: params.format,
+        };
+        return await reportsController.getRefundReport(modifiedReq, res, pool);
 
       // ── Credit / Debit Note Reports ──────────────────────────────
       case 'SALES_RETURNS_ALLOWANCES':

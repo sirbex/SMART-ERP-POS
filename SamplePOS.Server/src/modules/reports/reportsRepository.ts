@@ -45,6 +45,8 @@ import type {
   QuotationReportRow,
   ManualJournalEntryReportRow,
   BankTransactionReportRow,
+  VoidSalesReportRow,
+  RefundReportRow,
 } from './reportTypes.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
@@ -4349,5 +4351,260 @@ export const reportsRepository = {
       isReconciled: row.is_reconciled,
       createdAt: formatDate(row.created_at),
     }));
+  },
+
+  // ── Void Sales Report ──
+  async getVoidSalesReport(
+    pool: Pool,
+    options: {
+      startDate: string;
+      endDate: string;
+    }
+  ): Promise<{
+    rows: VoidSalesReportRow[];
+    summary: {
+      voidedSaleCount: number;
+      totalVoidedAmount: number;
+      totalVoidedCost: number;
+      totalLostProfit: number;
+    };
+    byReason: Array<{ reason: string; count: number; totalAmount: number }>;
+  }> {
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+
+    // Main query: all voided sales with user names + GL reversal amounts
+    const rowQuery = `
+      SELECT
+        s.sale_number,
+        s.sale_date,
+        s.total_amount,
+        s.total_cost,
+        s.profit,
+        s.void_reason,
+        s.voided_at,
+        vu.name AS voided_by,
+        au.name AS void_approved_by,
+        COALESCE(c.name, 'Walk-in') AS customer_name,
+        s.payment_method,
+        COALESCE(si_counts.item_count, 0)::integer AS item_count,
+        gl_rev.reversal_amount AS gl_reversal_amount
+      FROM sales s
+      LEFT JOIN users vu ON vu.id = s.voided_by_id
+      LEFT JOIN users au ON au.id = s.void_approved_by_id
+      LEFT JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::integer AS item_count
+        FROM sale_items si WHERE si.sale_id = s.id
+      ) si_counts ON true
+      LEFT JOIN LATERAL (
+        SELECT SUM(le."DebitAmount") AS reversal_amount
+        FROM ledger_transactions lt
+        JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+        WHERE lt."ReferenceType" = 'REVERSAL'
+          AND lt."ReferenceId" = s.id::text
+      ) gl_rev ON true
+      WHERE s.status = 'VOID'
+        AND s.voided_at IS NOT NULL
+        AND s.voided_at >= $1 AND s.voided_at < $2
+      ORDER BY s.voided_at DESC
+    `;
+
+    // Summary query
+    const summaryQuery = `
+      SELECT
+        COUNT(*)::integer AS total_voided_sales,
+        COALESCE(SUM(s.total_amount), 0)::numeric AS total_voided_amount,
+        COALESCE(SUM(s.total_cost), 0)::numeric AS total_voided_cost,
+        COALESCE(SUM(s.profit), 0)::numeric AS total_lost_profit
+      FROM sales s
+      WHERE s.status = 'VOID'
+        AND s.voided_at IS NOT NULL
+        AND s.voided_at >= $1 AND s.voided_at < $2
+    `;
+
+    // By-reason breakdown
+    const reasonQuery = `
+      SELECT
+        COALESCE(s.void_reason, 'No reason specified') AS reason,
+        COUNT(*)::integer AS count,
+        COALESCE(SUM(s.total_amount), 0)::numeric AS total_amount
+      FROM sales s
+      WHERE s.status = 'VOID'
+        AND s.voided_at IS NOT NULL
+        AND s.voided_at >= $1 AND s.voided_at < $2
+      GROUP BY COALESCE(s.void_reason, 'No reason specified')
+      ORDER BY total_amount DESC
+    `;
+
+    const [rowResult, summaryResult, reasonResult] = await Promise.all([
+      pool.query(rowQuery, [startUtc, endUtc]),
+      pool.query(summaryQuery, [startUtc, endUtc]),
+      pool.query(reasonQuery, [startUtc, endUtc]),
+    ]);
+
+    const sr = summaryResult.rows[0];
+
+    return {
+      rows: rowResult.rows.map((row) => ({
+        saleNumber: row.sale_number,
+        saleDate: formatDateOnly(row.sale_date),
+        totalAmount: new Decimal(row.total_amount || 0).toDecimalPlaces(2).toNumber(),
+        totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
+        profit: new Decimal(row.profit || 0).toDecimalPlaces(2).toNumber(),
+        voidReason: row.void_reason,
+        voidedAt: formatDate(row.voided_at),
+        voidedBy: row.voided_by,
+        voidApprovedBy: row.void_approved_by,
+        customerName: row.customer_name,
+        paymentMethod: row.payment_method,
+        itemCount: row.item_count,
+        glReversalAmount: row.gl_reversal_amount
+          ? new Decimal(row.gl_reversal_amount).toDecimalPlaces(2).toNumber()
+          : null,
+      })),
+      summary: {
+        voidedSaleCount: parseInt(sr.total_voided_sales) || 0,
+        totalVoidedAmount: new Decimal(sr.total_voided_amount || 0).toDecimalPlaces(2).toNumber(),
+        totalVoidedCost: new Decimal(sr.total_voided_cost || 0).toDecimalPlaces(2).toNumber(),
+        totalLostProfit: new Decimal(sr.total_lost_profit || 0).toDecimalPlaces(2).toNumber(),
+      },
+      byReason: reasonResult.rows.map((r) => ({
+          reason: r.reason,
+          count: r.count,
+          totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
+        })),
+    };
+  },
+
+  // ── Refund Report ──
+  async getRefundReport(
+    pool: Pool,
+    options: {
+      startDate: string;
+      endDate: string;
+    }
+  ): Promise<{
+    rows: RefundReportRow[];
+    summary: {
+      refundCount: number;
+      totalRefundAmount: number;
+      totalRefundCost: number;
+      fullRefundCount: number;
+      partialRefundCount: number;
+    };
+    topRefundedProducts: Array<{ productName: string; timesRefunded: number; totalQty: number; totalAmount: number }>;
+  }> {
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+
+    // Main query: all refunds with sale info, user names, GL amounts
+    const rowQuery = `
+      SELECT
+        sr.refund_number,
+        s.sale_number,
+        sr.refund_date,
+        sr.reason,
+        sr.total_amount,
+        sr.total_cost,
+        sr.status,
+        COALESCE(ri_counts.item_count, 0)::integer AS item_count,
+        CASE WHEN s.status = 'REFUNDED' THEN 'Full' ELSE 'Partial' END AS refund_type,
+        cu.name AS created_by,
+        au.name AS approved_by,
+        COALESCE(c.name, 'Walk-in') AS customer_name,
+        gl_ref.gl_amount,
+        sr.created_at
+      FROM sale_refunds sr
+      JOIN sales s ON s.id = sr.sale_id
+      LEFT JOIN users cu ON cu.id = sr.created_by_id
+      LEFT JOIN users au ON au.id = sr.approved_by_id
+      LEFT JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::integer AS item_count
+        FROM sale_refund_items ri WHERE ri.refund_id = sr.id
+      ) ri_counts ON true
+      LEFT JOIN LATERAL (
+        SELECT SUM(le."DebitAmount") AS gl_amount
+        FROM ledger_transactions lt
+        JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+        WHERE lt."ReferenceType" = 'SALE_REFUND'
+          AND lt."ReferenceId" = sr.id::text
+      ) gl_ref ON true
+      WHERE sr.created_at >= $1 AND sr.created_at < $2
+        AND sr.status = 'COMPLETED'
+      ORDER BY sr.created_at DESC
+    `;
+
+    // Summary query
+    const summaryQuery = `
+      SELECT
+        COUNT(*)::integer AS total_refunds,
+        COALESCE(SUM(sr.total_amount), 0)::numeric AS total_refund_amount,
+        COALESCE(SUM(sr.total_cost), 0)::numeric AS total_refund_cost,
+        COUNT(*) FILTER (WHERE s.status = 'REFUNDED')::integer AS full_refund_count,
+        COUNT(*) FILTER (WHERE s.status != 'REFUNDED')::integer AS partial_refund_count
+      FROM sale_refunds sr
+      JOIN sales s ON s.id = sr.sale_id
+      WHERE sr.created_at >= $1 AND sr.created_at < $2
+        AND sr.status = 'COMPLETED'
+    `;
+
+    // Top refunded products
+    const topProductsQuery = `
+      SELECT
+        COALESCE(p.name, 'Unknown Product') AS product_name,
+        COUNT(DISTINCT sr.id)::integer AS times_refunded,
+        SUM(ri.quantity)::numeric AS total_qty,
+        SUM(ri.line_total)::numeric AS total_amount
+      FROM sale_refund_items ri
+      JOIN sale_refunds sr ON sr.id = ri.refund_id
+      LEFT JOIN products p ON p.id = ri.product_id
+      WHERE sr.created_at >= $1 AND sr.created_at < $2
+        AND sr.status = 'COMPLETED'
+      GROUP BY COALESCE(p.name, 'Unknown Product')
+      ORDER BY total_amount DESC
+      LIMIT 10
+    `;
+
+    const [rowResult, summaryResult, topProductsResult] = await Promise.all([
+      pool.query(rowQuery, [startUtc, endUtc]),
+      pool.query(summaryQuery, [startUtc, endUtc]),
+      pool.query(topProductsQuery, [startUtc, endUtc]),
+    ]);
+
+    const sr = summaryResult.rows[0];
+
+    return {
+      rows: rowResult.rows.map((row) => ({
+        refundNumber: row.refund_number,
+        saleNumber: row.sale_number,
+        refundDate: formatDateOnly(row.refund_date),
+        reason: row.reason,
+        totalAmount: new Decimal(row.total_amount || 0).toDecimalPlaces(2).toNumber(),
+        totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
+        status: row.status,
+        itemCount: row.item_count,
+        refundType: row.refund_type,
+        createdBy: row.created_by,
+        approvedBy: row.approved_by,
+        customerName: row.customer_name,
+        glTransactionAmount: row.gl_amount
+          ? new Decimal(row.gl_amount).toDecimalPlaces(2).toNumber()
+          : null,
+        createdAt: formatDate(row.created_at),
+      })),
+      summary: {
+        refundCount: parseInt(sr.total_refunds) || 0,
+        totalRefundAmount: new Decimal(sr.total_refund_amount || 0).toDecimalPlaces(2).toNumber(),
+        totalRefundCost: new Decimal(sr.total_refund_cost || 0).toDecimalPlaces(2).toNumber(),
+        fullRefundCount: parseInt(sr.full_refund_count) || 0,
+        partialRefundCount: parseInt(sr.partial_refund_count) || 0,
+      },
+      topRefundedProducts: topProductsResult.rows.map((r) => ({
+          productName: r.product_name,
+          timesRefunded: r.times_refunded,
+          totalQty: new Decimal(r.total_qty || 0).toDecimalPlaces(2).toNumber(),
+          totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
+        })),
+    };
   },
 };

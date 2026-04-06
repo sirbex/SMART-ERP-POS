@@ -2551,4 +2551,126 @@ export const reportsService = {
       executionTimeMs: executionTime,
     };
   },
+
+  // ── Void Sales Report ──
+  async generateVoidSalesReport(
+    pool: Pool,
+    options: {
+      startDate: string;
+      endDate: string;
+      format?: 'json' | 'pdf' | 'csv';
+      userId?: string;
+    }
+  ) {
+    const startTime = Date.now();
+    const systemContext = await getSystemContext(pool);
+
+    const { rows: data, summary, byReason } = await reportsRepository.getVoidSalesReport(pool, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+    });
+
+    const executionTime = Date.now() - startTime;
+
+    await reportsRepository.logReportRun(pool, {
+      reportType: 'VOID_SALES_REPORT',
+      reportName: 'Void Sales Report',
+      parameters: options,
+      generatedById: options.userId || null,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      recordCount: data.length,
+      fileFormat: options.format || 'json',
+      executionTimeMs: executionTime,
+    });
+
+    return {
+      reportType: 'VOID_SALES_REPORT' as const,
+      reportName: 'Void Sales Report',
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
+      systemSettings: systemContext,
+      parameters: options,
+      data,
+      byReason,
+      summary: {
+        voidedSaleCount: summary.voidedSaleCount,
+        totalVoidedAmount: summary.totalVoidedAmount,
+        totalVoidedAmountFormatted: formatCurrency(summary.totalVoidedAmount, systemContext.currencySymbol),
+        totalVoidedCost: summary.totalVoidedCost,
+        totalLostProfit: summary.totalLostProfit,
+        totalLostProfitFormatted: formatCurrency(summary.totalLostProfit, systemContext.currencySymbol),
+      },
+      recordCount: data.length,
+      executionTimeMs: executionTime,
+    };
+  },
+
+  // ── Refund Report ──
+  async generateRefundReport(
+    pool: Pool,
+    options: {
+      startDate: string;
+      endDate: string;
+      format?: 'json' | 'pdf' | 'csv';
+      userId?: string;
+    }
+  ) {
+    const startTime = Date.now();
+    const systemContext = await getSystemContext(pool);
+
+    const { rows: data, summary, topRefundedProducts } = await reportsRepository.getRefundReport(pool, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+    });
+
+    const executionTime = Date.now() - startTime;
+
+    await reportsRepository.logReportRun(pool, {
+      reportType: 'REFUND_REPORT',
+      reportName: 'Refund Report',
+      parameters: options,
+      generatedById: options.userId || null,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      recordCount: data.length,
+      fileFormat: options.format || 'json',
+      executionTimeMs: executionTime,
+    });
+
+    return {
+      reportType: 'REFUND_REPORT' as const,
+      reportName: 'Refund Report',
+      generatedAt: new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
+      systemSettings: systemContext,
+      parameters: options,
+      data,
+      topRefundedProducts,
+      summary: {
+        refundCount: summary.refundCount,
+        totalRefundAmount: summary.totalRefundAmount,
+        totalRefundAmountFormatted: formatCurrency(summary.totalRefundAmount, systemContext.currencySymbol),
+        totalRefundCost: summary.totalRefundCost,
+        fullRefundCount: summary.fullRefundCount,
+        partialRefundCount: summary.partialRefundCount,
+      },
+      recordCount: data.length,
+      executionTimeMs: executionTime,
+    };
+  },
 };

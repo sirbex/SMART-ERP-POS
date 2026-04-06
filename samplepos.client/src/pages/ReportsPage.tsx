@@ -343,7 +343,9 @@ type ReportType =
   | 'NOTE_REGISTER'
   | 'TAX_REVERSAL'
   | 'SUPPLIER_STATEMENT'
-  | 'SUPPLIER_AGING';
+  | 'SUPPLIER_AGING'
+  | 'VOID_SALES_REPORT'
+  | 'REFUND_REPORT';
 
 interface ReportOption {
   value: ReportType;
@@ -735,6 +737,24 @@ const REPORT_OPTIONS: ReportOption[] = [
     category: 'Supplier',
     icon: '⏳',
   },
+  {
+    value: 'VOID_SALES_REPORT',
+    label: 'Void Sales Report',
+    description: 'All voided/cancelled sales with reason analysis, GL reversal amounts, and operator tracking (SAP-style)',
+    requiresDateRange: true,
+    supportsFilters: [],
+    category: 'Sales',
+    icon: '🚫',
+  },
+  {
+    value: 'REFUND_REPORT',
+    label: 'Refund / Returns Report',
+    description: 'Credit memo register with full/partial refund breakdown, top refunded products, and GL posting details (SAP/Odoo-style)',
+    requiresDateRange: true,
+    supportsFilters: [],
+    category: 'Sales',
+    icon: '↩️',
+  },
 ];
 
 // Dynamic report data interface - covers all report types
@@ -1008,6 +1028,8 @@ export default function ReportsPage() {
         'TAX_REVERSAL': 'tax-reversal',
         'SUPPLIER_STATEMENT': 'supplier-statement',
         'SUPPLIER_AGING': 'supplier-aging',
+        'VOID_SALES_REPORT': 'void-sales',
+        'REFUND_REPORT': 'refunds',
       };
 
       const endpoint = reportEndpointMap[selectedReport];
@@ -1827,6 +1849,68 @@ export default function ReportsPage() {
                           {cat.profitMargin.toFixed(1)}%
                         </span>
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Void Sales Report - Breakdown by Reason */}
+        {reportData.reportType === 'VOID_SALES_REPORT' && reportData.byReason && reportData.byReason.length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-red-500 to-red-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-base sm:text-lg font-semibold text-white">📋 Void Reasons Breakdown</h4>
+              <span className="text-red-100 text-xs sm:text-sm">{reportData.byReason.length} reasons</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-full">
+                <thead className="bg-gray-100 border-b-2 border-gray-300">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Reason</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Count</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Total Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(reportData.byReason as Array<{ reason: string; count: number; totalAmount: number }>).map((item, idx: number) => (
+                    <tr key={idx} className="hover:bg-red-50 transition-colors">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-900">{item.reason}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-blue-600 font-semibold">{item.count}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-red-600 font-semibold">{formatCurrency(item.totalAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Refund Report - Top Refunded Products */}
+        {reportData.reportType === 'REFUND_REPORT' && reportData.topRefundedProducts && reportData.topRefundedProducts.length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-base sm:text-lg font-semibold text-white">🔝 Top Refunded Products</h4>
+              <span className="text-amber-100 text-xs sm:text-sm">{reportData.topRefundedProducts.length} products</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-full">
+                <thead className="bg-gray-100 border-b-2 border-gray-300">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Product</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Times Refunded</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Total Qty</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Total Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(reportData.topRefundedProducts as Array<{ productName: string; timesRefunded: number; totalQty: number; totalAmount: number }>).map((item, idx: number) => (
+                    <tr key={idx} className="hover:bg-amber-50 transition-colors">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-900">{item.productName}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-blue-600 font-semibold">{item.timesRefunded}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-gray-900 font-semibold">{item.totalQty}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-red-600 font-semibold">{formatCurrency(item.totalAmount)}</td>
                     </tr>
                   ))}
                 </tbody>

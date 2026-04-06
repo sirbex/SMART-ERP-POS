@@ -643,6 +643,41 @@ export interface CustomerPurchaseHistoryRow {
     customerName?: string;
 }
 
+// ── Void Sales Report ──
+export interface VoidSalesReportRow {
+    saleNumber: string;
+    saleDate: string | null;
+    totalAmount: number;
+    totalCost: number;
+    profit: number;
+    voidReason: string | null;
+    voidedAt: string | null;
+    voidedBy: string | null;
+    voidApprovedBy: string | null;
+    customerName: string | null;
+    paymentMethod: string;
+    itemCount: number;
+    glReversalAmount: number | null;
+}
+
+// ── Refund Report ──
+export interface RefundReportRow {
+    refundNumber: string;
+    saleNumber: string;
+    refundDate: string | null;
+    reason: string | null;
+    totalAmount: number;
+    totalCost: number;
+    status: string;
+    itemCount: number;
+    refundType: string;
+    createdBy: string | null;
+    approvedBy: string | null;
+    customerName: string | null;
+    glTransactionAmount: number | null;
+    createdAt: string | null;
+}
+
 // ── Delivery Notes Report ──
 export interface DeliveryNoteReportRow {
     deliveryNoteId: string;

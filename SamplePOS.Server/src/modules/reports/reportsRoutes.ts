@@ -110,6 +110,18 @@ export function createReportsRouter(pool: Pool) {
     asyncHandler(async (req, res) => reportsController.getDeletedItems(req, res, p(req)))
   );
 
+  // Void & Refund Reports
+  router.get(
+    '/void-sales',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getVoidSalesReport(req, res, p(req)))
+  );
+  router.get(
+    '/refunds',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getRefundReport(req, res, p(req)))
+  );
+
   // Enhanced Reports
   router.get(
     '/purchase-order-summary',
