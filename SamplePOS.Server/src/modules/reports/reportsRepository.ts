@@ -4470,10 +4470,10 @@ export const reportsRepository = {
         totalLostProfit: new Decimal(sr.total_lost_profit || 0).toDecimalPlaces(2).toNumber(),
       },
       byReason: reasonResult.rows.map((r) => ({
-          reason: r.reason,
-          count: r.count,
-          totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
-        })),
+        reason: r.reason,
+        count: r.count,
+        totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
+      })),
     };
   },
 
@@ -4674,11 +4674,11 @@ export const reportsRepository = {
         linesWithoutStockReturn: (parseInt(ss.total_lines) || 0) - (parseInt(ss.lines_with_return) || 0),
       },
       topRefundedProducts: topProductsResult.rows.map((r) => ({
-          productName: r.product_name,
-          timesRefunded: r.times_refunded,
-          totalQty: new Decimal(r.total_qty || 0).toDecimalPlaces(2).toNumber(),
-          totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
-        })),
+        productName: r.product_name,
+        timesRefunded: r.times_refunded,
+        totalQty: new Decimal(r.total_qty || 0).toDecimalPlaces(2).toNumber(),
+        totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
+      })),
     };
   },
 };

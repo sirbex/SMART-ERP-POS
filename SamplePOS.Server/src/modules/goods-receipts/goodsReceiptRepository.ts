@@ -188,7 +188,7 @@ export const goodsReceiptRepository = {
   async getGRById(
     pool: Pool | PoolClient,
     id: string
-  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] } | null> {
+  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[]; productUomsMap?: Record<string, Array<{ id: string; uomId: string; uomName: string; uomSymbol: string | null; conversionFactor: string; barcode: string | null; isDefault: boolean; priceOverride: string | null; costOverride: string | null }>> } | null> {
     const grResult = await pool.query(
       `SELECT 
          gr.id,
@@ -251,9 +251,55 @@ export const goodsReceiptRepository = {
       [id]
     );
 
+    // Batch-fetch all product UoMs for every product in this GR (eliminates N+1)
+    const productIds = [...new Set(itemsResult.rows.map((r: { productId: string }) => r.productId))];
+    let productUomsMap: Record<string, Array<{
+      id: string; uomId: string; uomName: string; uomSymbol: string | null;
+      conversionFactor: string; barcode: string | null; isDefault: boolean;
+      priceOverride: string | null; costOverride: string | null;
+    }>> = {};
+
+    if (productIds.length > 0) {
+      const uomsResult = await pool.query(
+        `SELECT
+           pu.id,
+           pu.product_id AS "productId",
+           pu.uom_id AS "uomId",
+           u.name AS "uomName",
+           u.symbol AS "uomSymbol",
+           pu.conversion_factor::text AS "conversionFactor",
+           pu.barcode,
+           pu.is_default AS "isDefault",
+           pu.price_override::text AS "priceOverride",
+           pu.cost_override::text AS "costOverride"
+         FROM product_uoms pu
+         JOIN uoms u ON u.id = pu.uom_id
+         WHERE pu.product_id = ANY($1)
+         ORDER BY pu.is_default DESC, u.name`,
+        [productIds]
+      );
+
+      for (const row of uomsResult.rows) {
+        const pid = row.productId;
+        if (!productUomsMap[pid]) productUomsMap[pid] = [];
+        productUomsMap[pid].push({
+          id: row.id,
+          uomId: row.uomId,
+          uomName: row.uomName,
+          uomSymbol: row.uomSymbol,
+          conversionFactor: row.conversionFactor,
+          barcode: row.barcode,
+          isDefault: row.isDefault,
+          priceOverride: row.priceOverride,
+          costOverride: row.costOverride,
+        });
+      }
+    }
+
     return {
       gr: grResult.rows[0],
       items: itemsResult.rows,
+      productUomsMap,
     };
   },
 

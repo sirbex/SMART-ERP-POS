@@ -805,7 +805,7 @@ export const goodsReceiptService = {
   async getGRById(
     pool: Pool,
     id: string
-  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
+  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[]; productUomsMap?: Record<string, unknown[]> }> {
     const result = await goodsReceiptRepository.getGRById(pool, id);
     if (!result) throw new Error(`Goods receipt ${id} not found`);
     return result;

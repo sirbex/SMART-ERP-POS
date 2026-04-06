@@ -25,7 +25,6 @@ import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
-import { useProductWithUoms, findUom, getDefaultUom } from '../../hooks/useProductWithUoms';
 import { inventoryKeys } from '../../hooks/useInventory';
 // DatePicker removed — GR uses native date input for keyboard-driven receiving
 
@@ -175,9 +174,22 @@ interface GRItemUpdatePayload {
   isBonus?: boolean;
 }
 
+interface ProductUomEntry {
+  id: string;
+  uomId: string;
+  uomName: string;
+  uomSymbol: string | null;
+  conversionFactor: string;
+  barcode: string | null;
+  isDefault: boolean;
+  priceOverride: string | null;
+  costOverride: string | null;
+}
+
 interface GRDetailData {
   gr?: GRRow;
   items?: GRItemRow[];
+  productUomsMap?: Record<string, ProductUomEntry[]>;
 }
 
 export default function GoodsReceiptsPage() {
@@ -466,6 +478,7 @@ export default function GoodsReceiptsPage() {
   const detailsQuery = useGoodsReceipt(selectedGR?.id || '');
   const grDetail = detailsQuery.data?.data?.data as GRDetailData | undefined;
   const items = useMemo(() => grDetail?.items || [], [grDetail]);
+  const productUomsMap = grDetail?.productUomsMap || {};
 
   // Determine if GR is linked to a PO (strict discipline applies)
   const isFromPO = !!(selectedGR?.purchaseOrderId || selectedGR?.purchase_order_id);
@@ -1189,6 +1202,7 @@ export default function GoodsReceiptsPage() {
                             isFromPO={isFromPO}
                             itemIndex={idx}
                             totalItems={items.length}
+                            bundledUoms={productUomsMap[it.productId || it.product_id || ''] || []}
                           />
                         ))
                       )}
@@ -1760,6 +1774,7 @@ function GRItemRow({
   isFromPO,
   itemIndex,
   totalItems,
+  bundledUoms,
 }: {
   item: GRItemRow;
   baseline: 'PO' | 'PRODUCT';
@@ -1776,6 +1791,7 @@ function GRItemRow({
   isFromPO: boolean;
   itemIndex: number;
   totalItems: number;
+  bundledUoms: ProductUomEntry[];
 }) {
   const es = editState || {};
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
@@ -1790,14 +1806,12 @@ function GRItemRow({
   const poBase = Number(item.po_unit_price ?? item.poUnitPrice ?? 0);
   const prodBase = Number(item.product_cost_price ?? item.productCostPrice ?? 0);
   const base = baseline === 'PO' ? poBase : prodBase;
-  const productId = item.productId || item.product_id;
 
-  // Fetch product with pre-computed UoM details from server
-  const { data: productWithUoms, isLoading: uomsLoading } = useProductWithUoms(productId);
-  const uomList = productWithUoms?.uoms || [];
-  const defaultUom = getDefaultUom(productWithUoms);
+  // Use bundled UoM data from GR detail response (no per-item fetch)
+  const uomList = bundledUoms;
+  const defaultUom = uomList.find(u => u.isDefault) || uomList[0];
   const selectedUomId = es.selectedUomId || defaultUom?.id;
-  const selectedUom = findUom(productWithUoms, selectedUomId || '');
+  const selectedUom = uomList.find(u => u.id === selectedUomId || u.uomId === selectedUomId);
   const factor = selectedUom ? new Decimal(selectedUom.conversionFactor).toNumber() : 1;
 
   const displayedOrdered = new Decimal(ordered || 0).div(factor).toNumber();
@@ -1864,9 +1878,7 @@ function GRItemRow({
       </td>
       {/* UoM */}
       <td className="px-4 py-2 text-sm">
-        {uomsLoading ? (
-          <span className="text-gray-400">…</span>
-        ) : uomList.length === 0 ? (
+        {uomList.length === 0 ? (
           <span className="text-gray-400">—</span>
         ) : (
           <select
