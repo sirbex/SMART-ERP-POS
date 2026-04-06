@@ -101,6 +101,10 @@ interface SalesSummary {
   total_sales?: string;
   totalDiscounts?: string;
   total_discounts?: string;
+  creditSalesCount?: number;
+  credit_sales_count?: number;
+  partialPaymentCount?: number;
+  partial_payment_count?: number;
   byPaymentMethod?: Record<string, string | undefined>[];
   by_payment_method?: Record<string, string | undefined>[];
 }
@@ -415,6 +419,8 @@ export default function SalesPage() {
         avgSale: 0,
         profitMargin: 0,
         paymentMethods: [] as NormalizedPaymentMethod[],
+        creditSalesCount: 0,
+        partialPaymentCount: 0,
       };
     }
 
@@ -437,6 +443,10 @@ export default function SalesPage() {
       }))
       : [];
 
+    // Credit sales count from server-side summary (not limited by pagination)
+    const creditSalesCount = Number(summaryObj.creditSalesCount || summaryObj.credit_sales_count || 0);
+    const partialPaymentCount = Number(summaryObj.partialPaymentCount || summaryObj.partial_payment_count || 0);
+
     return {
       totalSales,
       totalProfit,
@@ -445,6 +455,8 @@ export default function SalesPage() {
       avgSale,
       profitMargin,
       paymentMethods,
+      creditSalesCount,
+      partialPaymentCount,
     };
   }, [summary]);
 
@@ -769,8 +781,8 @@ export default function SalesPage() {
             </div>
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg shadow p-6 text-white">
               <div className="text-sm font-medium opacity-90">Credit Sales</div>
-              <div className="text-3xl font-bold mt-2">{creditSales.length}</div>
-              <div className="text-sm mt-2 opacity-75">{partialPayments.length} partial</div>
+              <div className="text-3xl font-bold mt-2">{kpis.creditSalesCount}</div>
+              <div className="text-sm mt-2 opacity-75">{kpis.partialPaymentCount} partial</div>
             </div>
             <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-lg shadow p-6 text-white">
               <div className="text-sm font-medium opacity-90">Total Discounts</div>
@@ -799,14 +811,14 @@ export default function SalesPage() {
                 >
                   <span>{tab.icon}</span>
                   <span>{tab.label}</span>
-                  {tab.id === 'invoices' && creditSales.length > 0 && (
+                  {tab.id === 'invoices' && kpis.creditSalesCount > 0 && (
                     <span className="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                      {creditSales.length}
+                      {kpis.creditSalesCount}
                     </span>
                   )}
-                  {tab.id === 'payments' && partialPayments.length > 0 && (
+                  {tab.id === 'payments' && kpis.partialPaymentCount > 0 && (
                     <span className="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                      {partialPayments.length}
+                      {kpis.partialPaymentCount}
                     </span>
                   )}
                 </button>

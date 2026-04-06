@@ -642,12 +642,24 @@ export const salesRepository = {
       values
     );
 
+    // Get credit sales + partial payment counts (server-side, not limited by pagination)
+    const creditResult = await pool.query(
+      `SELECT 
+        COUNT(*) as credit_count,
+        COUNT(*) FILTER (WHERE amount_paid > 0 AND amount_paid < total_amount) as partial_count
+       FROM sales
+       WHERE ${whereClause} AND payment_method = 'CREDIT'`,
+      values
+    );
+
     return {
       totalSales: parseInt(summaryResult.rows[0].total_sales),
       totalAmount: parseFloat(summaryResult.rows[0].total_amount),
       totalCost: parseFloat(summaryResult.rows[0].total_cost),
       totalProfit: parseFloat(summaryResult.rows[0].total_profit),
       totalDiscounts: parseFloat(summaryResult.rows[0].total_discounts),
+      creditSalesCount: parseInt(creditResult.rows[0].credit_count),
+      partialPaymentCount: parseInt(creditResult.rows[0].partial_count),
       byPaymentMethod: paymentMethodResult.rows.map((row) => ({
         paymentMethod: row.payment_method,
         count: parseInt(row.count),
