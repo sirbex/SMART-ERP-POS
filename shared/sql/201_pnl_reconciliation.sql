@@ -516,6 +516,7 @@ DECLARE
     v_inventory_value NUMERIC(18,6) := 0;
     v_batch_value NUMERIC(18,6) := 0;
     v_difference NUMERIC(18,6);
+    v_threshold NUMERIC(18,6);
 BEGIN
     -- Get GL Inventory balance (Account 1300)
     SELECT COALESCE(SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0)
@@ -526,16 +527,23 @@ BEGIN
     WHERE a."AccountCode" = '1300'
       AND lt."TransactionDate"::DATE <= p_as_of_date;
     
-    -- Get inventory value from product_inventory × product_valuation
-    -- (authoritative after migration 410 split products → child tables)
-    -- ROUND per-line to match GL posting precision (Money.lineTotal rounds each line
-    -- to currency decimal places — 0 for UGX). SAP/Odoo principle: subledger
-    -- line-level rounding must mirror GL line-level rounding.
-    SELECT COALESCE(SUM(ROUND(pi.quantity_on_hand * COALESCE(pv.cost_price, 0), 0)), 0)
+    -- Get inventory value using batch-level costing per product.
+    -- Accurate for FIFO/FEFO where batches carry different costs.
+    -- Falls back to product-level (qty × cost_price) for products without batches.
+    SELECT COALESCE(SUM(ROUND(
+        COALESCE(bv.batch_value, pi.quantity_on_hand * COALESCE(pv.cost_price, 0)),
+        0
+    )), 0)
     INTO v_inventory_value
     FROM products p
     JOIN product_inventory pi ON pi.product_id = p.id
     JOIN product_valuation pv ON pv.product_id = p.id
+    LEFT JOIN (
+        SELECT product_id, SUM(remaining_quantity * cost_price) AS batch_value
+        FROM inventory_batches
+        WHERE remaining_quantity > 0
+        GROUP BY product_id
+    ) bv ON bv.product_id = p.id
     WHERE pi.quantity_on_hand > 0;
     
     -- Get inventory value from batches (more accurate if using FEFO)
@@ -546,6 +554,11 @@ BEGIN
     WHERE remaining_quantity > 0;
     
     v_difference := v_gl_balance - GREATEST(v_inventory_value, v_batch_value);
+    
+    -- Materiality threshold: max(5000, 0.01% of GL balance).
+    -- UGX is an integer currency — per-line rounding on multi-line GRs
+    -- inevitably produces small GL-vs-subledger noise that is not actionable.
+    v_threshold := GREATEST(5000, ABS(v_gl_balance) * 0.0001);
     
     -- Return reconciliation report
     RETURN QUERY SELECT 
@@ -558,11 +571,11 @@ BEGIN
     
     RETURN QUERY SELECT 
         'PRODUCT_VALUATION'::TEXT,
-        'Sum of (quantity_on_hand × cost_price) from products table'::TEXT,
+        'Inventory value from batch-level costing per product'::TEXT,
         v_inventory_value,
         v_gl_balance - v_inventory_value,
         CASE 
-            WHEN ABS(v_gl_balance - v_inventory_value) < 0.01 THEN 'MATCHED'
+            WHEN ABS(v_gl_balance - v_inventory_value) <= v_threshold THEN 'MATCHED'
             ELSE 'DISCREPANCY'
         END::TEXT,
         NULL::JSONB;
@@ -573,7 +586,7 @@ BEGIN
         v_batch_value,
         v_gl_balance - v_batch_value,
         CASE 
-            WHEN ABS(v_gl_balance - v_batch_value) < 0.01 THEN 'MATCHED'
+            WHEN ABS(v_gl_balance - v_batch_value) <= v_threshold THEN 'MATCHED'
             ELSE 'DISCREPANCY'
         END::TEXT,
         NULL::JSONB;

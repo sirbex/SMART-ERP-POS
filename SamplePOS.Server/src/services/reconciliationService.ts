@@ -209,7 +209,11 @@ export class ReconciliationService {
             // Use batch valuation as primary subledger (more accurate for FEFO)
             const subledgerBalance = batchValue > 0 ? batchValue : productValue;
             const difference = new Decimal(glBalance).minus(subledgerBalance).toNumber();
-            const hasDiscrepancy = Math.abs(difference) > 0.01;
+            // Materiality threshold: max(5000, 0.01% of GL balance).
+            // UGX is an integer currency — per-line rounding on multi-line GRs
+            // inevitably produces small GL-vs-subledger noise that is not actionable.
+            const materialityThreshold = Math.max(5000, Math.abs(glBalance) * 0.0001);
+            const hasDiscrepancy = Math.abs(difference) > materialityThreshold;
 
             const recommendations: string[] = [];
             if (hasDiscrepancy) {
