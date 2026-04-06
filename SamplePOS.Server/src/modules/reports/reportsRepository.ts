@@ -4401,7 +4401,7 @@ export const reportsRepository = {
         FROM ledger_transactions lt
         JOIN ledger_entries le ON le."TransactionId" = lt."Id"
         WHERE lt."ReferenceType" = 'REVERSAL'
-          AND lt."ReferenceId" = s.id::text
+          AND lt."ReferenceId" = s.id
       ) gl_rev ON true
       WHERE s.status = 'VOID'
         AND s.voided_at IS NOT NULL
@@ -4527,7 +4527,7 @@ export const reportsRepository = {
         FROM ledger_transactions lt
         JOIN ledger_entries le ON le."TransactionId" = lt."Id"
         WHERE lt."ReferenceType" = 'SALE_REFUND'
-          AND lt."ReferenceId" = sr.id::text
+          AND lt."ReferenceId" = sr.id
       ) gl_ref ON true
       WHERE sr.created_at >= $1 AND sr.created_at < $2
         AND sr.status = 'COMPLETED'
