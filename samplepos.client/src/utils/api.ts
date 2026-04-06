@@ -419,6 +419,8 @@ export const api = {
     finalize: (id: string) => apiClient.post<ApiResponse>(`goods-receipts/${id}/finalize`),
     updateItem: (grId: string, itemId: string, data: UpdateGoodsReceiptItemInput) =>
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`, data),
+    batchUpdateItems: (grId: string, items: Array<{ itemId: string; receivedQuantity?: number; unitCost?: number; batchNumber?: string | null; isBonus?: boolean; expiryDate?: string | null }>) =>
+      apiClient.put<ApiResponse>(`goods-receipts/${grId}/items`, { items }),
     hydrateFromPO: (id: string) =>
       apiClient.post<ApiResponse>(`goods-receipts/${id}/hydrate-from-po`),
   },

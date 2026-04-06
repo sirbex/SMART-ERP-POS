@@ -76,6 +76,17 @@ const UpdateGRItemSchema = z
     message: 'At least one field must be provided to update',
   });
 
+const BatchUpdateGRItemsSchema = z.object({
+  items: z.array(z.object({
+    itemId: z.string().uuid(),
+    receivedQuantity: z.number().nonnegative().optional(),
+    unitCost: z.number().nonnegative().optional(),
+    batchNumber: z.string().nullable().optional(),
+    isBonus: z.boolean().optional(),
+    expiryDate: z.string().nullable().optional(),
+  })).min(1, 'At least one item must be provided'),
+});
+
 const UuidParamSchema = z.object({
   id: z.string().uuid(),
 });
@@ -340,6 +351,17 @@ export const goodsReceiptController = {
 
     res.json({ success: true, data: updated, message: 'Goods receipt item updated' });
   },
+
+  /**
+   * Batch update multiple GR items in a single transaction (DRAFT only)
+   */
+  async batchUpdateGRItems(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id: grId } = UuidParamSchema.parse(req.params);
+    const { items } = BatchUpdateGRItemsSchema.parse(req.body);
+    const results = await goodsReceiptService.batchUpdateGRItems(pool, grId, items);
+    res.json({ success: true, data: results, message: `${results.length} item(s) updated` });
+  },
 };
 
 // Routes
@@ -367,6 +389,12 @@ goodsReceiptRoutes.put(
   authenticate,
   requirePermission('purchasing.update'),
   asyncHandler(goodsReceiptController.updateGRItem)
+);
+goodsReceiptRoutes.put(
+  '/:id/items',
+  authenticate,
+  requirePermission('purchasing.update'),
+  asyncHandler(goodsReceiptController.batchUpdateGRItems)
 );
 goodsReceiptRoutes.post(
   '/:id/hydrate-from-po',

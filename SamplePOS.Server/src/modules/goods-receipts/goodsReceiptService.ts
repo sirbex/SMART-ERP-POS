@@ -896,6 +896,100 @@ export const goodsReceiptService = {
     });
   },
 
+  /**
+   * Batch update multiple GR items in a single transaction (DRAFT only).
+   * Replaces N parallel PUT requests with one.
+   */
+  async batchUpdateGRItems(
+    pool: Pool,
+    grId: string,
+    items: Array<{
+      itemId: string;
+      receivedQuantity?: number;
+      unitCost?: number;
+      batchNumber?: string | null;
+      isBonus?: boolean;
+      expiryDate?: string | null;
+    }>
+  ): Promise<GoodsReceiptItem[]> {
+    return UnitOfWork.run(pool, async (client) => {
+      // Verify GR exists and is DRAFT (one query for the whole batch)
+      const grResult = await goodsReceiptRepository.getGRById(client, grId);
+      if (!grResult) throw new Error(`Goods receipt ${grId} not found`);
+      const { gr, items: existingItems } = grResult;
+
+      if (gr.status !== 'DRAFT')
+        throw new Error('Cannot update items of a finalized goods receipt');
+
+      // Build lookup for existing items
+      const itemMap = new Map(existingItems.map((it: GoodsReceiptItem) => [it.id, it]));
+
+      // Batch-fetch product valuations for cost normalization
+      const productIds = [...new Set(existingItems.map((it: GoodsReceiptItem) => it.productId))];
+      const valuationRes = await client.query(
+        'SELECT product_id, cost_price FROM product_valuation WHERE product_id = ANY($1)',
+        [productIds]
+      );
+      const valuationMap = new Map(
+        valuationRes.rows.map((r: { product_id: string; cost_price: string }) => [r.product_id, r.cost_price])
+      );
+
+      const results: GoodsReceiptItem[] = [];
+
+      for (const update of items) {
+        const existing = itemMap.get(update.itemId);
+        if (!existing) throw new Error(`Goods receipt item ${update.itemId} not found in GR ${grId}`);
+
+        // Validate receivedQuantity
+        if (update.receivedQuantity !== undefined) {
+          InventoryBusinessRules.validatePositiveQuantity(update.receivedQuantity, 'goods receipt item');
+          const orderedQty = Money.parseDb(existing.orderedQuantity).toNumber();
+          if (gr.purchaseOrderId && orderedQty > 0) {
+            PurchaseOrderBusinessRules.validateReceivedQuantity(orderedQty, update.receivedQuantity, false);
+          }
+        }
+
+        // Cost normalization
+        let normalizedUnitCost = update.unitCost;
+        if (update.unitCost !== undefined) {
+          PurchaseOrderBusinessRules.validateUnitCost(update.unitCost);
+          const baseCostStr = valuationMap.get(existing.productId);
+          if (baseCostStr) {
+            const baseCostDec = Money.parseDb(baseCostStr);
+            const unitCostDec = new Decimal(update.unitCost);
+            if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
+              const ratio = unitCostDec.dividedBy(baseCostDec);
+              const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+              const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
+              if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
+                normalizedUnitCost = Money.toNumber(unitCostDec.dividedBy(rounded));
+              }
+            }
+          }
+        }
+
+        if (update.expiryDate) {
+          InventoryBusinessRules.validateExpiryDate(update.expiryDate, false);
+        }
+
+        const data: UpdateGRItemData = {};
+        if (update.receivedQuantity !== undefined) data.receivedQuantity = update.receivedQuantity;
+        if (normalizedUnitCost !== undefined) data.unitCost = normalizedUnitCost;
+        if (update.batchNumber !== undefined) data.batchNumber = update.batchNumber ?? undefined;
+        if (update.expiryDate !== undefined) data.expiryDate = update.expiryDate ?? undefined;
+        if (update.isBonus !== undefined) data.isBonus = update.isBonus;
+
+        // Only update if there's something to change
+        if (Object.keys(data).length > 0) {
+          const updated = await goodsReceiptRepository.updateGRItem(client, update.itemId, data);
+          results.push(updated);
+        }
+      }
+
+      return results;
+    });
+  },
+
   /** Hydrate a DRAFT GR's items from its Purchase Order (for GRs created without items) */
   async hydrateFromPO(
     pool: Pool,

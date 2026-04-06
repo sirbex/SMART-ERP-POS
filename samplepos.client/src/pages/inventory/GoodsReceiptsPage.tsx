@@ -7,7 +7,6 @@ import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
   useGoodsReceipt,
-  useUpdateGRItem,
   useCreateGoodsReceipt,
 } from '../../hooks/useGoodsReceipts';
 import {
@@ -166,13 +165,7 @@ interface EditItemState {
   receivedLooseQty?: number;
 }
 
-interface GRItemUpdatePayload {
-  receivedQuantity?: number;
-  unitCost?: number;
-  batchNumber?: string | null;
-  expiryDate?: string | null;
-  isBonus?: boolean;
-}
+
 
 interface ProductUomEntry {
   id: string;
@@ -458,7 +451,6 @@ export default function GoodsReceiptsPage() {
     // Save
     doc.save(`GoodsReceipt_${grNumber}.pdf`);
   };
-  const updateItemMutation = useUpdateGRItem();
   const createGRMutation = useCreateGoodsReceipt();
   const { user } = useAuth();
   const { config } = useTenant();
@@ -587,57 +579,53 @@ export default function GoodsReceiptsPage() {
     }
 
     try {
-      // Auto-save all pending edits before finalizing
-      const savePromises = items.map(async (item: GRItemRow) => {
+      // Collect all pending edits into a single batch payload
+      const batchItems: Array<{ itemId: string; receivedQuantity?: number; unitCost?: number; batchNumber?: string | null; isBonus?: boolean; expiryDate?: string | null }> = [];
+
+      for (const item of items as GRItemRow[]) {
         const itemId = item.id;
         const edits = editItems[itemId];
+        if (!edits) continue;
 
-        if (edits) {
-          // Check if there are any changes
-          const hasChanges =
-            (edits.batchNumber !== undefined &&
-              edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
-            (edits.expiryDate !== undefined &&
-              edits.expiryDate !==
-              (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
-            (edits.receivedQuantity !== undefined &&
-              edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
-            (edits.unitCost !== undefined &&
-              edits.unitCost !== (item.unitCost || item.unit_cost)) ||
-            (edits.isBonus !== undefined && edits.isBonus !== !!(item.isBonus ?? item.is_bonus));
+        const hasChanges =
+          (edits.batchNumber !== undefined &&
+            edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
+          (edits.expiryDate !== undefined &&
+            edits.expiryDate !==
+            (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
+          (edits.receivedQuantity !== undefined &&
+            edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
+          (edits.unitCost !== undefined &&
+            edits.unitCost !== (item.unitCost || item.unit_cost)) ||
+          (edits.isBonus !== undefined && edits.isBonus !== !!(item.isBonus ?? item.is_bonus));
 
-          if (hasChanges) {
-            const payload: GRItemUpdatePayload = {};
-            if (edits.receivedQuantity !== undefined)
-              payload.receivedQuantity = Number(edits.receivedQuantity);
-            if (edits.unitCost !== undefined) payload.unitCost = Number(edits.unitCost);
-            if (edits.batchNumber !== undefined) payload.batchNumber = edits.batchNumber || null;
-            if (edits.expiryDate !== undefined)
-              payload.expiryDate = edits.expiryDate
-                ? new Date(edits.expiryDate).toISOString()
-                : null;
-            if (edits.isBonus !== undefined) payload.isBonus = !!edits.isBonus;
-
-            await updateItemMutation.mutateAsync({ grId: id, itemId, data: payload });
-          }
+        if (hasChanges) {
+          const entry: typeof batchItems[number] = { itemId };
+          if (edits.receivedQuantity !== undefined)
+            entry.receivedQuantity = Number(edits.receivedQuantity);
+          if (edits.unitCost !== undefined) entry.unitCost = Number(edits.unitCost);
+          if (edits.batchNumber !== undefined) entry.batchNumber = edits.batchNumber || null;
+          if (edits.expiryDate !== undefined)
+            entry.expiryDate = edits.expiryDate
+              ? new Date(edits.expiryDate).toISOString()
+              : null;
+          if (edits.isBonus !== undefined) entry.isBonus = !!edits.isBonus;
+          batchItems.push(entry);
         }
-      });
+      }
 
-      await Promise.all(savePromises);
+      // Single batch request instead of N parallel PUTs
+      if (batchItems.length > 0) {
+        await api.goodsReceipts.batchUpdateItems(id, batchItems);
+      }
 
       // Refresh GR details after saving
       await detailsQuery.refetch();
 
       const response = await finalizeMutation.mutateAsync(id);
 
-      // Invalidate stock levels to refresh On Hand badges
+      // Invalidate stock levels once (not per-item)
       queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevels() });
-      items.forEach((it: GRItemRow) => {
-        const productId = it.productId || it.product_id;
-        if (productId) {
-          queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevelByProduct(productId) });
-        }
-      });
 
       // Check for cost alerts (suppress alerts that are likely pure UoM conversions)
       const alerts = (response.data.alerts as CostAlert[]) || [];

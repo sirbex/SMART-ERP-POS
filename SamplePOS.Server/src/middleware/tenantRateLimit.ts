@@ -11,12 +11,12 @@ import logger from '../utils/logger.js';
 
 // ── Plan-based rate limits (requests per minute) ──────────
 const PLAN_RATE_LIMITS: Record<TenantPlan, number> = {
-    FREE: 60,
-    STARTER: 200,
-    PROFESSIONAL: 600,
-    ENTERPRISE: 2000,
+    FREE: 200,
+    STARTER: 400,
+    PROFESSIONAL: 1000,
+    ENTERPRISE: 3000,
 };
-const DEFAULT_LIMIT = 60;
+const DEFAULT_LIMIT = 200;
 const WINDOW_MS = 60_000; // 1 minute sliding window
 
 interface TenantBucket {
