@@ -733,6 +733,41 @@ export const goodsReceiptService = {
       }
 
       // ============================================================
+      // SYNC products.cost_price from product_valuation
+      // SAP/Odoo pattern: GR receipt updates the product master cost
+      // FIFO/STANDARD → last_cost, AVCO → average_cost
+      // ============================================================
+      const costLayerProductIds = [...new Set(costLayerData.map((d) => d.productId))];
+      if (costLayerProductIds.length > 0) {
+        try {
+          await client.query(
+            `UPDATE products p
+             SET cost_price = CASE
+               WHEN pv.costing_method = 'AVCO' THEN pv.average_cost
+               ELSE pv.last_cost
+             END,
+             updated_at = CURRENT_TIMESTAMP
+             FROM product_valuation pv
+             WHERE pv.product_id = p.id
+               AND p.id = ANY($1)
+               AND pv.last_cost > 0`,
+            [costLayerProductIds]
+          );
+          logger.info('Synced products.cost_price from valuation', {
+            grId: id,
+            productCount: costLayerProductIds.length,
+          });
+        } catch (syncErr: unknown) {
+          const errMsg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+          logger.error('Failed to sync products.cost_price from valuation', {
+            grId: id,
+            error: errMsg,
+          });
+          warnings.push(`Product cost sync failed: ${errMsg}`);
+        }
+      }
+
+      // ============================================================
       // SUPPLIER BALANCE: Recalculate from source (Odoo compute pattern)
       // Replaces trg_sync_supplier_on_gr_complete / trg_sync_supplier_balance_on_gr
       // ============================================================
