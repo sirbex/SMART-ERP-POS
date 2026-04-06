@@ -340,6 +340,12 @@ export const api = {
     }) => apiClient.get<ApiResponse>('sales/reports/summary-by-date', { params }),
     byCashier: (params?: { startDate?: string; endDate?: string }) =>
       apiClient.get<ApiResponse>('sales/reports/by-cashier', { params }),
+    voidSale: (id: string, data: { reason: string; approvedById?: string }) =>
+      apiClient.post<ApiResponse>(`sales/${id}/void`, data),
+    refundSale: (id: string, data: { items: { saleItemId: string; quantity: number }[]; reason: string; approvedById?: string; refundDate?: string }) =>
+      apiClient.post<ApiResponse>(`sales/${id}/refund`, data),
+    getRefunds: (id: string) =>
+      apiClient.get<ApiResponse>(`sales/${id}/refunds`),
   },
 
   // Invoices

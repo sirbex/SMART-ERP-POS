@@ -159,10 +159,10 @@ export const reportsService = {
 
     const overallMargin = sqlSummary.totalPotentialRevenue > 0
       ? new Decimal(sqlSummary.totalPotentialProfit)
-          .dividedBy(sqlSummary.totalPotentialRevenue)
-          .times(100)
-          .toDecimalPlaces(2)
-          .toNumber()
+        .dividedBy(sqlSummary.totalPotentialRevenue)
+        .times(100)
+        .toDecimalPlaces(2)
+        .toNumber()
       : 0;
 
     return {

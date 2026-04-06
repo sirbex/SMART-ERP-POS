@@ -55,6 +55,78 @@ export interface VoidSaleItemRecord {
   sku: string;
 }
 
+export interface RefundableSaleItemRecord {
+  id: string;
+  saleId: string;
+  productId: string | null;
+  batchId: string | null;
+  quantity: string;
+  refundedQty: string;
+  remainingQty: string;
+  unitPrice: string;
+  unitCost: string;
+  totalPrice: string;
+  discountAmount: string;
+  profit: string;
+  uomId: string | null;
+  productType: string;
+  itemType: string;
+  productName: string;
+  sku: string | null;
+}
+
+export interface RefundRecord {
+  id: string;
+  refundNumber: string;
+  saleId: string;
+  refundDate: string;
+  reason: string;
+  totalAmount: string;
+  totalCost: string;
+  status: string;
+  glTransactionId: string | null;
+  createdById: string;
+  approvedById: string | null;
+  createdAt: string;
+}
+
+export interface RefundItemRecord {
+  id: string;
+  refundId: string;
+  saleItemId: string;
+  productId: string | null;
+  batchId: string | null;
+  quantity: string;
+  unitPrice: string;
+  unitCost: string;
+  lineTotal: string;
+  costTotal: string;
+  productName: string;
+  sku: string | null;
+}
+
+export interface CreateRefundData {
+  saleId: string;
+  refundDate?: string;
+  reason: string;
+  totalAmount: string;
+  totalCost: string;
+  createdById: string;
+  approvedById?: string;
+}
+
+export interface CreateRefundItemData {
+  refundId: string;
+  saleItemId: string;
+  productId: string | null;
+  batchId: string | null;
+  quantity: string;
+  unitPrice: string;
+  unitCost: string;
+  lineTotal: string;
+  costTotal: string;
+}
+
 export interface CreateSaleData {
   customerId: string | null;
   subtotal?: number; // Subtotal before discount/tax
@@ -1019,5 +1091,289 @@ export const salesRepository = {
 
     const role = result.rows[0].role;
     return role === 'ADMIN' || role === 'MANAGER';
+  },
+
+  // ============================================================
+  // REFUND OPERATIONS
+  // ============================================================
+
+  /**
+   * Get sale items with refundable quantities for a given sale.
+   * Returns items where (quantity - refunded_qty) > 0.
+   */
+  async getSaleItemsForRefund(
+    pool: Pool | PoolClient,
+    saleId: string
+  ): Promise<RefundableSaleItemRecord[]> {
+    const result = await pool.query(
+      `SELECT
+        si.id,
+        si.sale_id AS "saleId",
+        si.product_id AS "productId",
+        si.batch_id AS "batchId",
+        si.quantity,
+        si.refunded_qty AS "refundedQty",
+        (si.quantity - si.refunded_qty) AS "remainingQty",
+        si.unit_price AS "unitPrice",
+        si.unit_cost AS "unitCost",
+        si.total_price AS "totalPrice",
+        si.discount_amount AS "discountAmount",
+        si.profit,
+        si.uom_id AS "uomId",
+        si.product_type AS "productType",
+        si.item_type AS "itemType",
+        COALESCE(p.name, si.product_name) AS "productName",
+        p.sku
+       FROM sale_items si
+       LEFT JOIN products p ON si.product_id = p.id
+       WHERE si.sale_id = $1
+       ORDER BY si.created_at`,
+      [saleId]
+    );
+
+    return result.rows;
+  },
+
+  /**
+   * Generate next refund number (REF-YYYY-NNNN format).
+   * Must be called inside a transaction for advisory lock safety.
+   */
+  async generateRefundNumber(pool: Pool | PoolClient): Promise<string> {
+    const year = new Date().getFullYear();
+    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('refund_number_seq'))`);
+    const result = await pool.query(
+      `SELECT refund_number FROM sale_refunds
+       WHERE refund_number LIKE $1
+       ORDER BY refund_number DESC
+       LIMIT 1`,
+      [`REF-${year}-%`]
+    );
+
+    if (result.rows.length === 0) {
+      return `REF-${year}-0001`;
+    }
+
+    const lastNumber = result.rows[0].refund_number;
+    const sequence = parseInt(lastNumber.split('-')[2]) + 1;
+    return `REF-${year}-${sequence.toString().padStart(4, '0')}`;
+  },
+
+  /**
+   * Create a refund document header.
+   */
+  async createRefund(
+    pool: Pool | PoolClient,
+    data: CreateRefundData
+  ): Promise<RefundRecord> {
+    const refundNumber = await this.generateRefundNumber(pool);
+    const result = await pool.query(
+      `INSERT INTO sale_refunds (
+        refund_number, sale_id, refund_date, reason,
+        total_amount, total_cost, status,
+        created_by_id, approved_by_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'COMPLETED', $7, $8)
+      RETURNING
+        id,
+        refund_number AS "refundNumber",
+        sale_id AS "saleId",
+        refund_date AS "refundDate",
+        reason,
+        total_amount AS "totalAmount",
+        total_cost AS "totalCost",
+        status,
+        gl_transaction_id AS "glTransactionId",
+        created_by_id AS "createdById",
+        approved_by_id AS "approvedById",
+        created_at AS "createdAt"`,
+      [
+        refundNumber,
+        data.saleId,
+        data.refundDate || new Date().toLocaleDateString('en-CA'),
+        data.reason,
+        data.totalAmount,
+        data.totalCost,
+        data.createdById,
+        data.approvedById || null,
+      ]
+    );
+    return result.rows[0];
+  },
+
+  /**
+   * Create refund line items.
+   */
+  async addRefundItems(
+    pool: Pool | PoolClient,
+    items: CreateRefundItemData[]
+  ): Promise<RefundItemRecord[]> {
+    if (items.length === 0) return [];
+
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+
+    items.forEach((item, index) => {
+      const offset = index * 9;
+      placeholders.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
+      );
+      values.push(
+        item.refundId,
+        item.saleItemId,
+        item.productId || null,
+        item.batchId || null,
+        item.quantity,
+        item.unitPrice,
+        item.unitCost,
+        item.lineTotal,
+        item.costTotal,
+      );
+    });
+
+    const result = await pool.query(
+      `INSERT INTO sale_refund_items (
+        refund_id, sale_item_id, product_id, batch_id,
+        quantity, unit_price, unit_cost, line_total, cost_total
+      ) VALUES ${placeholders.join(', ')}
+      RETURNING
+        id,
+        refund_id AS "refundId",
+        sale_item_id AS "saleItemId",
+        product_id AS "productId",
+        batch_id AS "batchId",
+        quantity,
+        unit_price AS "unitPrice",
+        unit_cost AS "unitCost",
+        line_total AS "lineTotal",
+        cost_total AS "costTotal"`,
+      values
+    );
+
+    return result.rows;
+  },
+
+  /**
+   * Increment refunded_qty on a sale_item (within a transaction).
+   */
+  async incrementRefundedQty(
+    pool: Pool | PoolClient,
+    saleItemId: string,
+    qty: number
+  ): Promise<void> {
+    const result = await pool.query(
+      `UPDATE sale_items
+       SET refunded_qty = refunded_qty + $1
+       WHERE id = $2
+         AND refunded_qty + $1 <= quantity
+       RETURNING id`,
+      [qty, saleItemId]
+    );
+    if (result.rows.length === 0) {
+      throw new BusinessError(
+        'Refund quantity exceeds remaining refundable quantity',
+        'ERR_REFUND_002',
+        { saleItemId, requestedQty: qty }
+      );
+    }
+  },
+
+  /**
+   * Check if ALL items on a sale are fully refunded.
+   * Returns true if every sale_item has refunded_qty = quantity.
+   */
+  async isSaleFullyRefunded(pool: Pool | PoolClient, saleId: string): Promise<boolean> {
+    const result = await pool.query(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE refunded_qty >= quantity) AS fully_refunded
+       FROM sale_items
+       WHERE sale_id = $1`,
+      [saleId]
+    );
+    const row = result.rows[0];
+    return parseInt(row.total) > 0 && parseInt(row.total) === parseInt(row.fully_refunded);
+  },
+
+  /**
+   * Mark a sale as REFUNDED (only when all items fully refunded).
+   */
+  async markSaleRefunded(pool: Pool | PoolClient, saleId: string): Promise<void> {
+    await pool.query(
+      `UPDATE sales SET status = 'REFUNDED' WHERE id = $1 AND status = 'COMPLETED'`,
+      [saleId]
+    );
+  },
+
+  /**
+   * Update refund's gl_transaction_id after GL posting.
+   */
+  async updateRefundGlTransaction(
+    pool: Pool | PoolClient,
+    refundId: string,
+    glTransactionId: string
+  ): Promise<void> {
+    // Direct update on new row still in COMPLETED status within same TX
+    await pool.query(
+      `UPDATE sale_refunds SET gl_transaction_id = $1 WHERE id = $2`,
+      [glTransactionId, refundId]
+    );
+  },
+
+  /**
+   * Get refunds for a sale.
+   */
+  async getRefundsBySaleId(
+    pool: Pool | PoolClient,
+    saleId: string
+  ): Promise<RefundRecord[]> {
+    const result = await pool.query(
+      `SELECT
+        id,
+        refund_number AS "refundNumber",
+        sale_id AS "saleId",
+        refund_date AS "refundDate",
+        reason,
+        total_amount AS "totalAmount",
+        total_cost AS "totalCost",
+        status,
+        gl_transaction_id AS "glTransactionId",
+        created_by_id AS "createdById",
+        approved_by_id AS "approvedById",
+        created_at AS "createdAt"
+       FROM sale_refunds
+       WHERE sale_id = $1
+       ORDER BY created_at DESC`,
+      [saleId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Get refund items for a refund.
+   */
+  async getRefundItems(
+    pool: Pool | PoolClient,
+    refundId: string
+  ): Promise<RefundItemRecord[]> {
+    const result = await pool.query(
+      `SELECT
+        ri.id,
+        ri.refund_id AS "refundId",
+        ri.sale_item_id AS "saleItemId",
+        ri.product_id AS "productId",
+        ri.batch_id AS "batchId",
+        ri.quantity,
+        ri.unit_price AS "unitPrice",
+        ri.unit_cost AS "unitCost",
+        ri.line_total AS "lineTotal",
+        ri.cost_total AS "costTotal",
+        COALESCE(p.name, si.product_name) AS "productName",
+        p.sku
+       FROM sale_refund_items ri
+       LEFT JOIN products p ON ri.product_id = p.id
+       LEFT JOIN sale_items si ON ri.sale_item_id = si.id
+       WHERE ri.refund_id = $1
+       ORDER BY ri.created_at`,
+      [refundId]
+    );
+    return result.rows;
   },
 };

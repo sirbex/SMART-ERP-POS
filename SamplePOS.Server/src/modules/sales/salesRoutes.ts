@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
-import { salesService, CreateSaleInput } from './salesService.js';
+import { salesService, CreateSaleInput, RefundSaleInput } from './salesService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { normalizeResponse, normalizePaginatedResponse } from '../../utils/caseConverter.js';
@@ -76,6 +76,16 @@ const VoidSaleBodySchema = z.object({
   reason: z.string().min(1).trim(),
   approvedById: z.string().uuid().optional(),
   amountThreshold: z.number().positive().optional(),
+});
+
+const RefundSaleBodySchema = z.object({
+  items: z.array(z.object({
+    saleItemId: z.string().uuid(),
+    quantity: z.number().positive(),
+  })).min(1, 'At least one item is required for refund'),
+  reason: z.string().min(1).trim(),
+  approvedById: z.string().uuid().optional(),
+  refundDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD format').optional(),
 });
 
 export const salesController = {
@@ -513,6 +523,82 @@ export const salesController = {
       });
     }
   },
+
+  /**
+   * Refund a sale (partial or full)
+   * POST /sales/:id/refund
+   * Body: { items: [{ saleItemId, quantity }], reason, approvedById?, refundDate? }
+   */
+  async refundSale(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const body = RefundSaleBodySchema.parse(req.body);
+    const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
+
+    const input: RefundSaleInput = {
+      items: body.items,
+      reason: body.reason,
+      approvedById: body.approvedById,
+      refundDate: body.refundDate,
+    };
+
+    const result = await salesService.refundSale(pool, id, userId, input);
+
+    // Audit trail
+    try {
+      const auditContext = req.auditContext || {
+        userId,
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      const { logSaleRefunded } = await import('../audit/auditService.js');
+      await logSaleRefunded(
+        pool,
+        id,
+        '', // sale number derived from refund
+        result.refund.refundNumber,
+        body.reason,
+        {
+          refundId: result.refund.id,
+          refundNumber: result.refund.refundNumber,
+          totalAmount: result.refund.totalAmount,
+          totalCost: result.refund.totalCost,
+          itemsRestored: result.itemsRestored,
+          isFullRefund: result.isFullRefund,
+        },
+        auditContext
+      );
+    } catch (auditError: unknown) {
+      // Audit failure should not fail the refund
+      console.error('Audit logging failed for refund:', auditError);
+    }
+
+    res.status(201).json({
+      success: true,
+      data: normalizeResponse(result),
+      message: `Refund ${result.refund.refundNumber} created successfully${result.isFullRefund ? ' (sale fully refunded)' : ''}`,
+    });
+  },
+
+  /**
+   * Get refunds for a sale
+   * GET /sales/:id/refunds
+   */
+  async getRefundsBySaleId(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+
+    const { salesRepository } = await import('./salesRepository.js');
+    const refunds = await salesRepository.getRefundsBySaleId(pool, id);
+
+    res.json({
+      success: true,
+      data: refunds.map((r) => normalizeResponse(r)),
+    });
+  },
 };
 
 // Routes
@@ -559,4 +645,19 @@ salesRoutes.post(
   authenticate,
   requirePermission('sales.void'),
   asyncHandler(salesController.voidSale)
+);
+
+// Refund sale - requires sales.refund permission (with audit trail)
+salesRoutes.post(
+  '/:id/refund',
+  authenticate,
+  requirePermission('sales.refund'),
+  asyncHandler(salesController.refundSale)
+);
+
+// Get refunds for a sale - all authenticated users
+salesRoutes.get(
+  '/:id/refunds',
+  authenticate,
+  asyncHandler(salesController.getRefundsBySaleId)
 );

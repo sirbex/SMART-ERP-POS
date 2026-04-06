@@ -23,6 +23,7 @@ export type PermissionAction =
   | 'post'
   | 'approve'
   | 'void'
+  | 'refund'
   | 'export'
   | 'import'
   | 'reconcile'

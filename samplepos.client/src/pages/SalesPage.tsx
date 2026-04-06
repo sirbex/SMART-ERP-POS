@@ -9,6 +9,9 @@ import { DatePicker } from '../components/ui/date-picker';
 import { printReceipt } from '../lib/print';
 import type { ReceiptData } from '../lib/print';
 import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
+import { VoidSaleModal } from '../components/sales/VoidSaleModal';
+import { RefundSaleModal } from '../components/sales/RefundSaleModal';
+import { useBackendPermission } from '../hooks/useBackendPermission';
 
 // ── Local type definitions ──────────────────────────────────────────────
 
@@ -139,6 +142,7 @@ interface PartialPaymentsViewProps {
 interface SaleDetailModalProps {
   sale: SaleRow;
   onClose: () => void;
+  onSaleUpdated?: () => void;
 }
 
 type TabType = 'overview' | 'by-customer' | 'by-user' | 'invoices' | 'payments' | 'all-sales';
@@ -301,7 +305,7 @@ export default function SalesPage() {
   };
 
   // Fetch sales data (send dates without timezone conversion)
-  const { data: salesData, isLoading: salesLoading } = useSales(currentPage, limit, {
+  const { data: salesData, isLoading: salesLoading, refetch: refetchSales } = useSales(currentPage, limit, {
     startDate: startDate ? startDate : undefined,
     endDate: endDate ? endDate : undefined,
     cashierId: isCashier ? user?.id : undefined,
@@ -1003,7 +1007,11 @@ export default function SalesPage() {
 
         {/* Sale Detail Modal */}
         {selectedSale && (
-          <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} />
+          <SaleDetailModal
+            sale={selectedSale}
+            onClose={() => setSelectedSale(null)}
+            onSaleUpdated={() => { refetchSales(); }}
+          />
         )}
       </div>
     </Layout>
@@ -1544,10 +1552,14 @@ function PartialPaymentsView({ sales, onSelectSale }: PartialPaymentsViewProps) 
 }
 
 // Sale Detail Modal Component with improved accessibility and design
-function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
+function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps) {
+  const canVoidSale = useBackendPermission('sales.void');
+  const canRefundSale = useBackendPermission('sales.refund');
   const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Handle escape key and focus trap
@@ -1707,32 +1719,44 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
                 <div className="text-xl font-bold text-purple-900">{items.length}</div>
               </div>
               <div
-                className={`rounded-lg p-4 border ${sale.status === 'COMPLETED'
+                className={`rounded-lg p-4 border ${(saleDetails?.status || sale.status) === 'COMPLETED'
                   ? 'bg-green-50 border-green-100'
-                  : sale.status === 'PENDING'
+                  : (saleDetails?.status || sale.status) === 'PENDING'
                     ? 'bg-yellow-50 border-yellow-100'
-                    : 'bg-red-50 border-red-100'
+                    : (saleDetails?.status || sale.status) === 'VOID'
+                      ? 'bg-gray-50 border-gray-200'
+                      : (saleDetails?.status || sale.status) === 'REFUNDED'
+                        ? 'bg-amber-50 border-amber-100'
+                        : 'bg-red-50 border-red-100'
                   }`}
               >
                 <div
-                  className={`text-sm font-medium ${sale.status === 'COMPLETED'
+                  className={`text-sm font-medium ${(saleDetails?.status || sale.status) === 'COMPLETED'
                     ? 'text-green-600'
-                    : sale.status === 'PENDING'
+                    : (saleDetails?.status || sale.status) === 'PENDING'
                       ? 'text-yellow-600'
-                      : 'text-red-600'
+                      : (saleDetails?.status || sale.status) === 'VOID'
+                        ? 'text-gray-500'
+                        : (saleDetails?.status || sale.status) === 'REFUNDED'
+                          ? 'text-amber-600'
+                          : 'text-red-600'
                     }`}
                 >
                   Status
                 </div>
                 <div
-                  className={`text-xl font-bold ${sale.status === 'COMPLETED'
+                  className={`text-xl font-bold ${(saleDetails?.status || sale.status) === 'COMPLETED'
                     ? 'text-green-900'
-                    : sale.status === 'PENDING'
+                    : (saleDetails?.status || sale.status) === 'PENDING'
                       ? 'text-yellow-900'
-                      : 'text-red-900'
+                      : (saleDetails?.status || sale.status) === 'VOID'
+                        ? 'text-gray-700'
+                        : (saleDetails?.status || sale.status) === 'REFUNDED'
+                          ? 'text-amber-900'
+                          : 'text-red-900'
                     }`}
                 >
-                  {sale.status}
+                  {saleDetails?.status || sale.status}
                 </div>
               </div>
             </div>
@@ -2053,77 +2077,140 @@ function SaleDetailModal({ sale, onClose }: SaleDetailModalProps) {
           </div>
 
           {/* Footer */}
-          <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex flex-col-reverse sm:flex-row justify-end gap-3 flex-shrink-0">
-            <DocumentFlowButton entityType="SALE" entityId={sale.id} size="sm" />
-            <button
-              onClick={onClose}
-              className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700 font-medium"
-            >
-              Close
-            </button>
-            <button
-              onClick={() => {
-                const s = saleDetails ?? sale;
-                // Compute effective discount from sale-level or item-level
-                const saleDisc = Number(s.discountAmount || 0);
-                const itemDiscTotal =
-                  saleDisc > 0
-                    ? 0
-                    : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
-                      return (
-                        sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
-                      );
-                    }, 0);
-                const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
+          <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex flex-col-reverse sm:flex-row justify-between gap-3 flex-shrink-0">
+            {/* Left side: Void & Refund actions */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              {/* Void button — only for COMPLETED sales, requires sales.void permission */}
+              {(saleDetails?.status || sale.status) === 'COMPLETED' &&
+                canVoidSale && (
+                  <button
+                    onClick={() => setShowVoidModal(true)}
+                    className="w-full sm:w-auto px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                    Void Sale
+                  </button>
+                )}
+              {/* Refund button — for COMPLETED sales, requires sales.refund permission */}
+              {(saleDetails?.status || sale.status) === 'COMPLETED' &&
+                canRefundSale && (
+                  <button
+                    onClick={() => setShowRefundModal(true)}
+                    className="w-full sm:w-auto px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                    </svg>
+                    Refund
+                  </button>
+                )}
+            </div>
+            {/* Right side: Document flow, Close, Print */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <DocumentFlowButton entityType="SALE" entityId={sale.id} size="sm" />
+              <button
+                onClick={onClose}
+                className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700 font-medium"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const s = saleDetails ?? sale;
+                  // Compute effective discount from sale-level or item-level
+                  const saleDisc = Number(s.discountAmount || 0);
+                  const itemDiscTotal =
+                    saleDisc > 0
+                      ? 0
+                      : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
+                        return (
+                          sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
+                        );
+                      }, 0);
+                  const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
 
-                const receiptData: ReceiptData = {
-                  saleNumber: s.saleNumber,
-                  saleDate: s.saleDate || s.createdAt,
-                  totalAmount: s.totalAmount,
-                  subtotal:
-                    effectiveDisc > 0
-                      ? new Decimal(s.totalAmount || 0).plus(effectiveDisc).toNumber()
-                      : s.subtotal,
-                  discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
-                  taxAmount: s.taxAmount,
-                  cashierName: s.cashierName || s.soldByName,
-                  customerName: s.customerName || 'Walk-in Customer',
-                  paymentMethod: s.paymentMethod,
-                  amountPaid: s.amountPaid || s.paymentReceived,
-                  changeAmount: s.changeAmount,
-                  items: s.items?.map((item) => ({
-                    name: item.productName || item.product_name || 'Unknown',
-                    quantity: Number(item.quantity || item.qty || 0),
-                    unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
-                    subtotal: Number(
-                      item.totalPrice || item.total_price || item.subtotal || item.totalAmount || 0
-                    ),
-                    discountAmount:
-                      parseFloat(String(item.discountAmount || item.discount_amount || 0)) ||
-                      undefined,
-                  })),
-                  payments: s.paymentLines?.map((pl) => ({
-                    method: pl.paymentMethod || pl.payment_method || 'CASH',
-                    amount: Number(pl.amount),
-                    reference: pl.reference,
-                  })),
-                };
-                printReceipt(receiptData).catch((err) => console.error('Print failed:', err));
-              }}
-              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Print Receipt
-            </button>
+                  const receiptData: ReceiptData = {
+                    saleNumber: s.saleNumber,
+                    saleDate: s.saleDate || s.createdAt,
+                    totalAmount: s.totalAmount,
+                    subtotal:
+                      effectiveDisc > 0
+                        ? new Decimal(s.totalAmount || 0).plus(effectiveDisc).toNumber()
+                        : s.subtotal,
+                    discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
+                    taxAmount: s.taxAmount,
+                    cashierName: s.cashierName || s.soldByName,
+                    customerName: s.customerName || 'Walk-in Customer',
+                    paymentMethod: s.paymentMethod,
+                    amountPaid: s.amountPaid || s.paymentReceived,
+                    changeAmount: s.changeAmount,
+                    items: s.items?.map((item) => ({
+                      name: item.productName || item.product_name || 'Unknown',
+                      quantity: Number(item.quantity || item.qty || 0),
+                      unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
+                      subtotal: Number(
+                        item.totalPrice || item.total_price || item.subtotal || item.totalAmount || 0
+                      ),
+                      discountAmount:
+                        parseFloat(String(item.discountAmount || item.discount_amount || 0)) ||
+                        undefined,
+                    })),
+                    payments: s.paymentLines?.map((pl) => ({
+                      method: pl.paymentMethod || pl.payment_method || 'CASH',
+                      amount: Number(pl.amount),
+                      reference: pl.reference,
+                    })),
+                  };
+                  printReceipt(receiptData).catch((err) => console.error('Print failed:', err));
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                Print Receipt
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Void Sale Modal */}
+      {showVoidModal && (
+        <VoidSaleModal
+          saleId={sale.id}
+          saleNumber={sale.saleNumber || `Sale #${sale.id.slice(0, 8)}`}
+          totalAmount={sale.totalAmount}
+          onClose={() => setShowVoidModal(false)}
+          onSuccess={() => {
+            setShowVoidModal(false);
+            onSaleUpdated?.();
+            onClose();
+          }}
+        />
+      )}
+
+      {/* Refund Sale Modal */}
+      {showRefundModal && saleDetails && (
+        <RefundSaleModal
+          saleId={sale.id}
+          saleNumber={sale.saleNumber || `Sale #${sale.id.slice(0, 8)}`}
+          totalAmount={sale.totalAmount}
+          items={saleDetails.items || []}
+          onClose={() => setShowRefundModal(false)}
+          onSuccess={() => {
+            setShowRefundModal(false);
+            onSaleUpdated?.();
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }

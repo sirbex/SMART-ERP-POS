@@ -1147,6 +1147,165 @@ export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool): Pr
 }
 
 // =============================================================================
+// SALE REFUND (PARTIAL/FULL REVERSAL) JOURNAL ENTRIES
+// =============================================================================
+
+export interface SaleRefundData {
+  refundId: string;
+  refundNumber: string;
+  saleId: string;
+  saleNumber: string;
+  refundDate: string;
+  reason: string;
+  totalAmount: number;  // Revenue to reverse
+  totalCost: number;    // COGS to reverse
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
+  customerId?: string;
+}
+
+/**
+ * Record a sale refund in the general ledger.
+ *
+ * For a FULL refund this uses AccountingCore.reverseTransaction() (same as void).
+ * For a PARTIAL refund we create a new journal entry with proportional amounts:
+ *   DR Revenue (4000)            refundAmount  (reverse revenue)
+ *   CR Cash / AR (1010/1200)     refundAmount  (pay back customer)
+ *   DR Inventory (1300)          costAmount    (restore inventory asset)
+ *   CR COGS (5000)               costAmount    (reverse cost of goods)
+ *
+ * @returns The GL transaction ID if created, undefined if no GL entry was needed
+ */
+export async function recordSaleRefundToGL(
+  data: SaleRefundData,
+  pool?: pg.Pool
+): Promise<string | undefined> {
+  try {
+    const dbPool = pool || globalPool;
+
+    // Find ALL non-reversed SALE transactions for this sale
+    const existing = await dbPool.query(
+      `SELECT "Id" FROM ledger_transactions
+       WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE
+       LIMIT 1`,
+      [data.saleId]
+    );
+
+    if (existing.rows.length === 0) {
+      logger.warn('No GL transaction found for refunded sale — creating standalone refund entry', {
+        saleId: data.saleId,
+        saleNumber: data.saleNumber,
+        refundNumber: data.refundNumber,
+      });
+      // Fall through to create a standalone refund entry below
+    }
+
+    // Determine credit account (where money goes back to customer)
+    let creditAccountCode: string;
+    switch (data.paymentMethod) {
+      case 'CREDIT':
+        creditAccountCode = AccountCodes.ACCOUNTS_RECEIVABLE; // 1200
+        break;
+      case 'CARD':
+        creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS || '1040';
+        break;
+      default:
+        creditAccountCode = AccountCodes.CASH; // 1010
+    }
+
+    // Build journal entries for the refund
+    const entries: Array<{
+      accountCode: string;
+      debitAmount: number;
+      creditAmount: number;
+      description: string;
+    }> = [];
+
+    // 1. DR Revenue — reverse the revenue
+    if (data.totalAmount > 0) {
+      entries.push({
+        accountCode: AccountCodes.SALES_REVENUE, // 4000
+        debitAmount: data.totalAmount,
+        creditAmount: 0,
+        description: `Refund ${data.refundNumber}: Revenue reversal for ${data.saleNumber}`,
+      });
+
+      // 2. CR Cash/AR — pay back customer
+      entries.push({
+        accountCode: creditAccountCode,
+        debitAmount: 0,
+        creditAmount: data.totalAmount,
+        description: `Refund ${data.refundNumber}: ${data.paymentMethod} refund for ${data.saleNumber}`,
+      });
+    }
+
+    // 3. DR Inventory — restore inventory asset
+    if (data.totalCost > 0) {
+      entries.push({
+        accountCode: AccountCodes.INVENTORY, // 1300
+        debitAmount: data.totalCost,
+        creditAmount: 0,
+        description: `Refund ${data.refundNumber}: Inventory restored for ${data.saleNumber}`,
+      });
+
+      // 4. CR COGS — reverse cost of goods sold
+      entries.push({
+        accountCode: AccountCodes.COGS, // 5000
+        debitAmount: 0,
+        creditAmount: data.totalCost,
+        description: `Refund ${data.refundNumber}: COGS reversal for ${data.saleNumber}`,
+      });
+    }
+
+    if (entries.length === 0) {
+      logger.warn('No GL entries to create for refund (zero amounts)', {
+        refundId: data.refundId,
+        refundNumber: data.refundNumber,
+      });
+      return undefined;
+    }
+
+    // Post via AccountingCore for proper double-entry validation
+    const journalResult = await AccountingCore.createJournalEntry({
+      entryDate: data.refundDate,
+      description: `REFUND: ${data.refundNumber} for Sale ${data.saleNumber} — ${data.reason}`,
+      referenceType: 'SALE_REFUND',
+      referenceId: data.refundId,
+      referenceNumber: data.refundNumber,
+      lines: entries.map((e) => ({
+        accountCode: e.accountCode,
+        debitAmount: e.debitAmount,
+        creditAmount: e.creditAmount,
+        description: e.description,
+      })),
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `SALE_REFUND-${data.refundId}`,
+    }, pool);
+
+    logger.info('Recorded sale refund to GL', {
+      refundId: data.refundId,
+      refundNumber: data.refundNumber,
+      saleId: data.saleId,
+      saleNumber: data.saleNumber,
+      transactionId: journalResult.transactionId,
+      totalAmount: data.totalAmount,
+      totalCost: data.totalCost,
+    });
+
+    return journalResult.transactionId;
+  } catch (error: unknown) {
+    if (error instanceof AccountingError && error.code === 'DUPLICATE_IDEMPOTENCY_KEY') {
+      logger.info('Sale refund GL already posted (idempotent)', { refundId: data.refundId });
+      return undefined;
+    }
+    logger.error('Failed to record sale refund to GL', { error, data });
+    throw new Error(
+      `GL posting failed for refund ${data.refundNumber}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+// =============================================================================
 // CUSTOMER DEPOSIT JOURNAL ENTRIES
 // =============================================================================
 

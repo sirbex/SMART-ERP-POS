@@ -5,6 +5,10 @@ import {
   CreateSaleItemData,
   SaleRecord,
   SaleItemRecord,
+  CreateRefundData,
+  CreateRefundItemData,
+  RefundRecord,
+  RefundItemRecord,
 } from './salesRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import { BankingService } from '../../services/bankingService.js';
@@ -19,7 +23,7 @@ import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/bus
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
-import type { SaleData } from '../../services/glEntryService.js';
+import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
   batchFetchProductUoms,
@@ -59,6 +63,18 @@ export interface CreateSaleInput {
   cashRegisterSessionId?: string; // Link to cash register session for drawer tracking
   idempotencyKey?: string; // Offline sync idempotency key
   offlineId?: string; // Offline sale identifier
+}
+
+export interface RefundItemInput {
+  saleItemId: string;   // UUID of the sale_item to refund
+  quantity: number;     // How many units to refund (must be <= remaining refundable qty)
+}
+
+export interface RefundSaleInput {
+  items: RefundItemInput[];
+  reason: string;
+  approvedById?: string;
+  refundDate?: string; // YYYY-MM-DD, defaults to today
 }
 
 export const salesService = {
@@ -2195,6 +2211,458 @@ export const salesService = {
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('Failed to void sale', {
+        saleId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // ============================================================
+  // REFUND SALE (PARTIAL OR FULL)
+  // ============================================================
+
+  /**
+   * Create a refund against a COMPLETED sale.
+   *
+   * Supports partial refunds (specific items/quantities) and full refunds.
+   * Each refund creates an immutable sale_refunds document with line items.
+   *
+   * Business Rules:
+   * - Only COMPLETED sales can be refunded (ERR_REFUND_001)
+   * - Each item's refund qty must not exceed (quantity - refunded_qty) (ERR_REFUND_002)
+   * - Inventory is restored to the original batch (or newest active)
+   * - Cost layers are restored at original unit_cost (FIFO-accurate)
+   * - GL entries are created: DR Revenue / CR Cash, DR Inventory / CR COGS
+   * - When ALL items on the sale are fully refunded, sale status → REFUNDED
+   * - Refund documents are immutable once created
+   *
+   * @param pool - Database connection pool
+   * @param saleId - UUID of the sale to refund
+   * @param refundedById - UUID of the user creating the refund
+   * @param input - Refund items, reason, optional approval
+   * @returns Refund document with items and restored inventory count
+   */
+  async refundSale(
+    pool: Pool,
+    saleId: string,
+    refundedById: string,
+    input: RefundSaleInput
+  ): Promise<{
+    refund: RefundRecord;
+    refundItems: RefundItemRecord[];
+    itemsRestored: number;
+    isFullRefund: boolean;
+  }> {
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Maintenance mode guard
+      await checkMaintenanceMode(client);
+
+      // Suppress the inventory_batches trigger (refund code creates proper movements)
+      await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
+
+      // ── 1. Load & validate the sale ──────────────────────────────
+
+      const saleResult = await client.query(
+        `SELECT * FROM sales WHERE id = $1`,
+        [saleId]
+      );
+
+      if (saleResult.rows.length === 0) {
+        throw new NotFoundError('Sale');
+      }
+
+      const sale = saleResult.rows[0];
+
+      if (sale.status !== 'COMPLETED') {
+        throw new BusinessError(
+          `Cannot refund sale with status ${sale.status}. Only COMPLETED sales can be refunded.`,
+          'ERR_REFUND_001',
+          { saleId, currentStatus: sale.status, requiredStatus: 'COMPLETED' }
+        );
+      }
+
+      // Validate reason
+      if (!input.reason || input.reason.trim().length === 0) {
+        throw new BusinessError('Refund reason is required', 'ERR_REFUND_003', { saleId });
+      }
+
+      // Validate at least one item
+      if (!input.items || input.items.length === 0) {
+        throw new BusinessError(
+          'At least one item must be specified for refund',
+          'ERR_REFUND_004',
+          { saleId }
+        );
+      }
+
+      // If approval provided, verify approver is manager
+      if (input.approvedById) {
+        const isManager = await salesRepository.isManager(client, input.approvedById);
+        if (!isManager) {
+          throw new BusinessError('Approver must have MANAGER or ADMIN role', 'ERR_REFUND_005', {
+            approvedById: input.approvedById,
+          });
+        }
+      }
+
+      // ── 2. Load sale items & validate refund quantities ──────────
+
+      const saleItems = await salesRepository.getSaleItemsForRefund(client, saleId);
+
+      // Build lookup map by sale_item_id
+      const saleItemMap = new Map(saleItems.map((si) => [si.id, si]));
+
+      let refundTotalAmount = new Decimal(0);
+      let refundTotalCost = new Decimal(0);
+
+      // Validated list of items to process
+      const validatedItems: Array<{
+        saleItem: typeof saleItems[0];
+        refundQty: Decimal;
+        lineTotal: Decimal;
+        costTotal: Decimal;
+      }> = [];
+
+      for (const refundItem of input.items) {
+        const saleItem = saleItemMap.get(refundItem.saleItemId);
+        if (!saleItem) {
+          throw new BusinessError(
+            `Sale item ${refundItem.saleItemId} not found on sale ${sale.sale_number}`,
+            'ERR_REFUND_006',
+            { saleItemId: refundItem.saleItemId, saleId }
+          );
+        }
+
+        const remainingQty = new Decimal(saleItem.remainingQty);
+        const refundQty = new Decimal(refundItem.quantity);
+
+        if (refundQty.lessThanOrEqualTo(0)) {
+          throw new BusinessError(
+            'Refund quantity must be positive',
+            'ERR_REFUND_007',
+            { saleItemId: refundItem.saleItemId, quantity: refundItem.quantity }
+          );
+        }
+
+        if (refundQty.greaterThan(remainingQty)) {
+          throw new BusinessError(
+            `Refund quantity ${refundQty} exceeds remaining refundable quantity ${remainingQty} for item "${saleItem.productName}"`,
+            'ERR_REFUND_002',
+            {
+              saleItemId: refundItem.saleItemId,
+              productName: saleItem.productName,
+              requested: refundQty.toNumber(),
+              remaining: remainingQty.toNumber(),
+              originalQty: new Decimal(saleItem.quantity).toNumber(),
+              alreadyRefunded: new Decimal(saleItem.refundedQty).toNumber(),
+            }
+          );
+        }
+
+        // Calculate refund amounts using ORIGINAL unit_price and unit_cost
+        const unitPrice = new Decimal(saleItem.unitPrice);
+        const unitCost = new Decimal(saleItem.unitCost);
+        const lineTotal = Money.round(refundQty.times(unitPrice), 2);
+        const costTotal = Money.round(refundQty.times(unitCost), 2);
+
+        refundTotalAmount = refundTotalAmount.plus(lineTotal);
+        refundTotalCost = refundTotalCost.plus(costTotal);
+
+        validatedItems.push({ saleItem, refundQty, lineTotal, costTotal });
+      }
+
+      // ── 3. Create refund document ───────────────────────────────
+
+      const refundData: CreateRefundData = {
+        saleId,
+        refundDate: input.refundDate || new Date().toLocaleDateString('en-CA'),
+        reason: input.reason.trim(),
+        totalAmount: refundTotalAmount.toFixed(2),
+        totalCost: refundTotalCost.toFixed(2),
+        createdById: refundedById,
+        approvedById: input.approvedById,
+      };
+
+      const refund = await salesRepository.createRefund(client, refundData);
+
+      logger.info('Refund document created', {
+        refundId: refund.id,
+        refundNumber: refund.refundNumber,
+        saleId,
+        saleNumber: sale.sale_number,
+        totalAmount: refundTotalAmount.toFixed(2),
+        totalCost: refundTotalCost.toFixed(2),
+        itemCount: validatedItems.length,
+      });
+
+      // ── 4. Create refund line items & update refunded_qty ───────
+
+      const refundItemsData: CreateRefundItemData[] = validatedItems.map(
+        ({ saleItem, refundQty, lineTotal, costTotal }) => ({
+          refundId: refund.id,
+          saleItemId: saleItem.id,
+          productId: saleItem.productId,
+          batchId: saleItem.batchId,
+          quantity: refundQty.toFixed(4),
+          unitPrice: saleItem.unitPrice,
+          unitCost: saleItem.unitCost,
+          lineTotal: lineTotal.toFixed(2),
+          costTotal: costTotal.toFixed(2),
+        })
+      );
+
+      const refundItems = await salesRepository.addRefundItems(client, refundItemsData);
+
+      // Increment refunded_qty on each sale_item
+      for (const { saleItem, refundQty } of validatedItems) {
+        await salesRepository.incrementRefundedQty(client, saleItem.id, refundQty.toNumber());
+      }
+
+      // ── 5. Restore inventory for each refunded item ─────────────
+
+      for (const { saleItem, refundQty } of validatedItems) {
+        const productId = saleItem.productId;
+        const batchId = saleItem.batchId;
+        const quantity = refundQty.toNumber();
+        const unitCost = parseFloat(saleItem.unitCost);
+
+        // Skip custom items (no inventory)
+        if (!productId || saleItem.itemType === 'custom') {
+          logger.info('Skipping inventory restoration for custom/null product', {
+            saleItemId: saleItem.id,
+          });
+          continue;
+        }
+
+        // 5a. Restore cost layer (FIFO-accurate at original unit_cost)
+        try {
+          await client.query(
+            `INSERT INTO cost_layers (product_id, quantity, remaining_quantity, unit_cost, batch_number, created_at)
+             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+            [productId, quantity, quantity, unitCost, `REFUND-${refund.refundNumber}`]
+          );
+        } catch (error: unknown) {
+          logger.error('Failed to restore cost layer for refund', {
+            productId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        // 5b. Restore inventory batch
+        if (batchId) {
+          await client.query(
+            `UPDATE inventory_batches
+             SET remaining_quantity = remaining_quantity + $1,
+                 status = CASE
+                   WHEN remaining_quantity + $1 > 0 THEN 'ACTIVE'::batch_status
+                   ELSE status
+                 END,
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [quantity, batchId]
+          );
+        } else {
+          // No specific batch — restore to newest active batch
+          const batchResult = await client.query(
+            `SELECT id FROM inventory_batches
+             WHERE product_id = $1 AND status = 'ACTIVE'
+             ORDER BY received_date DESC, created_at DESC
+             LIMIT 1`,
+            [productId]
+          );
+
+          if (batchResult.rows.length > 0) {
+            await client.query(
+              `UPDATE inventory_batches
+               SET remaining_quantity = remaining_quantity + $1, updated_at = NOW()
+               WHERE id = $2`,
+              [quantity, batchResult.rows[0].id]
+            );
+          } else {
+            // Create new batch with REFUND reference
+            await client.query(
+              `INSERT INTO inventory_batches (
+                product_id, batch_number, quantity, remaining_quantity,
+                cost_price, received_date, status, notes
+              ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)`,
+              [
+                productId,
+                `REFUND-RESTORE-${refund.refundNumber}`,
+                quantity,
+                quantity,
+                unitCost,
+                `Restored from refund ${refund.refundNumber} on sale ${sale.sale_number}`,
+              ]
+            );
+          }
+        }
+
+        // 5c. Sync product_inventory and products.quantity_on_hand
+        await client.query(
+          `WITH new_qty AS (
+             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
+             FROM inventory_batches
+             WHERE product_id = $1 AND status = 'ACTIVE'
+           ), upd_pi AS (
+             UPDATE product_inventory
+             SET quantity_on_hand = (SELECT qty FROM new_qty),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE product_id = $1
+           )
+           UPDATE products
+           SET quantity_on_hand = (SELECT qty FROM new_qty),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [productId]
+        );
+
+        // 5d. Record stock movement (RETURN type)
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
+        const movNumRes = await client.query(
+          `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
+           LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
+           AS movement_number
+           FROM stock_movements
+           WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
+        );
+        const movementNumber =
+          movNumRes.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+
+        await client.query(
+          `INSERT INTO stock_movements (
+            movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
+            reference_type, reference_id, notes, created_by_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            movementNumber,
+            productId,
+            batchId || null,
+            'RETURN',
+            quantity,
+            unitCost,
+            'REFUND',
+            refund.id,
+            `Refund ${refund.refundNumber} for sale ${sale.sale_number}: ${input.reason}`,
+            refundedById,
+          ]
+        );
+      }
+
+      // ── 6. Handle customer balance (credit sale refund) ─────────
+
+      if (sale.customer_id && sale.payment_method === 'CREDIT') {
+        // Reduce customer balance if credit sale is being refunded
+        const oldBal = await client.query(
+          'SELECT balance, name FROM customers WHERE id = $1',
+          [sale.customer_id]
+        );
+
+        if (oldBal.rows[0]) {
+          const ob = parseFloat(oldBal.rows[0].balance ?? 0);
+          const refundAmt = refundTotalAmount.toNumber();
+
+          await client.query(
+            'UPDATE customers SET balance = balance - $1 WHERE id = $2',
+            [refundAmt, sale.customer_id]
+          );
+
+          // Audit trail
+          await client.query(
+            `INSERT INTO customer_balance_audit
+             (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              sale.customer_id,
+              oldBal.rows[0].name,
+              ob,
+              ob - refundAmt,
+              -refundAmt,
+              'SALE_REFUND',
+            ]
+          );
+
+          // Sync AR account balance
+          await client.query(`
+            UPDATE accounts SET "CurrentBalance" = COALESCE(
+              (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
+            ), "UpdatedAt" = NOW()
+            WHERE "AccountCode" = '1200'
+          `);
+        }
+      }
+
+      // ── 7. GL Posting: Refund journal entry ─────────────────────
+
+      try {
+        const glRefundData: SaleRefundData = {
+          refundId: refund.id,
+          refundNumber: refund.refundNumber,
+          saleId,
+          saleNumber: sale.sale_number,
+          refundDate: input.refundDate || new Date().toLocaleDateString('en-CA'),
+          reason: input.reason,
+          totalAmount: refundTotalAmount.toNumber(),
+          totalCost: refundTotalCost.toNumber(),
+          paymentMethod: sale.payment_method,
+          customerId: sale.customer_id || undefined,
+        };
+
+        const glTransactionId = await glEntryService.recordSaleRefundToGL(glRefundData, pool);
+
+        // Link GL transaction to refund document
+        if (glTransactionId) {
+          await salesRepository.updateRefundGlTransaction(client, refund.id, glTransactionId);
+        }
+      } catch (glError: unknown) {
+        logger.error('GL posting failed for refund — refund will still proceed', {
+          refundId: refund.id,
+          refundNumber: refund.refundNumber,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+        // Allow refund to proceed even if GL fails (can be reconciled later)
+      }
+
+      // ── 8. Check if sale is now fully refunded ──────────────────
+
+      const isFullRefund = await salesRepository.isSaleFullyRefunded(client, saleId);
+
+      if (isFullRefund) {
+        await salesRepository.markSaleRefunded(client, saleId);
+        logger.info('Sale fully refunded — status changed to REFUNDED', {
+          saleId,
+          saleNumber: sale.sale_number,
+        });
+      }
+
+      await client.query('COMMIT');
+
+      logger.info('Sale refund completed successfully', {
+        refundId: refund.id,
+        refundNumber: refund.refundNumber,
+        saleId,
+        saleNumber: sale.sale_number,
+        totalAmount: refundTotalAmount.toFixed(2),
+        totalCost: refundTotalCost.toFixed(2),
+        itemsRestored: validatedItems.length,
+        isFullRefund,
+      });
+
+      return {
+        refund,
+        refundItems,
+        itemsRestored: validatedItems.length,
+        isFullRefund,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error('Failed to refund sale', {
         saleId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });

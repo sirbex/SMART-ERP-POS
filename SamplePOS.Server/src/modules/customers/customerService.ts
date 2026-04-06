@@ -407,10 +407,10 @@ export async function getCustomerStatement(
   const periodStartStr = start
     ? (start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10))
     : (() => {
-        const d = new Date(periodEndStr + 'T00:00:00Z');
-        d.setUTCDate(d.getUTCDate() - 30);
-        return d.toISOString().slice(0, 10);
-      })();
+      const d = new Date(periodEndStr + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 30);
+      return d.toISOString().slice(0, 10);
+    })();
 
   // Opening balance prior to period start (invoice ledger only)
   const openingRaw = await customerRepository.getOpeningBalance(customerId, periodStartStr as unknown as Date, dbPool);

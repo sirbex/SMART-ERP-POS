@@ -16,6 +16,7 @@ export enum Permission {
     EDIT_SALES = 'EDIT_SALES',
     DELETE_SALES = 'DELETE_SALES',
     VOID_SALES = 'VOID_SALES',
+    REFUND_SALES = 'REFUND_SALES',
 
     // Inventory
     VIEW_INVENTORY = 'VIEW_INVENTORY',
@@ -87,6 +88,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         Permission.EDIT_SALES,
         Permission.DELETE_SALES,
         Permission.VOID_SALES,
+        Permission.REFUND_SALES,
 
         // Inventory
         Permission.VIEW_INVENTORY,

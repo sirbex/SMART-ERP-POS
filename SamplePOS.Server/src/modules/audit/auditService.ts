@@ -171,6 +171,37 @@ export async function logSaleVoided(
 }
 
 /**
+ * Log sale refund (partial or full)
+ */
+export async function logSaleRefunded(
+  pool: Pool,
+  saleId: string,
+  saleNumber: string,
+  refundNumber: string,
+  reason: string,
+  refundData: Record<string, unknown>,
+  context: AuditContext
+): Promise<AuditLog | null> {
+  return await logAction(
+    pool,
+    {
+      entityType: 'SALE',
+      entityId: saleId,
+      entityNumber: saleNumber,
+      action: 'REFUND',
+      actionDetails: `Sale ${saleNumber} refunded via ${refundNumber}. Reason: ${reason}`,
+      oldValues: { saleNumber, status: 'COMPLETED' },
+      newValues: { ...refundData, refundNumber, reason },
+      severity: 'WARNING',
+      category: 'FINANCIAL',
+      tags: ['sale', 'refund', 'correction'],
+      notes: reason,
+    },
+    context
+  );
+}
+
+/**
  * Log sale update/modification
  */
 export async function logSaleUpdated(
