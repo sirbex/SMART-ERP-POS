@@ -84,34 +84,32 @@ export default function ReconciliationPage() {
     const [selectedAccount, setSelectedAccount] = useState<AccountType | null>(null);
     const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
 
-    // Queries - staleTime: 0 ensures fresh data on every mount
+    // Queries
     const { data: summaryData, isLoading: summaryLoading, refetch: refetchSummary } = useQuery({
         queryKey: ['reconciliation-summary', asOfDate],
         queryFn: () => fetchReconciliationSummary(asOfDate),
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 30_000,
     });
 
     const { data: accountData, isLoading: accountLoading, refetch: refetchAccount } = useQuery({
         queryKey: ['reconciliation-account', selectedAccount, asOfDate],
         queryFn: () => selectedAccount ? fetchAccountReconciliation(selectedAccount, asOfDate) : null,
         enabled: !!selectedAccount,
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 30_000,
     });
 
     const { data: arDiscrepancies, refetch: refetchArDiscrepancies } = useQuery({
         queryKey: ['discrepancies-1200', asOfDate],
         queryFn: () => fetchDiscrepancyDetails('1200', asOfDate),
         enabled: expandedAccounts.has('1200'),
-        staleTime: 0
+        staleTime: 30_000,
     });
 
     const { data: apDiscrepancies, refetch: refetchApDiscrepancies } = useQuery({
         queryKey: ['discrepancies-2100', asOfDate],
         queryFn: () => fetchDiscrepancyDetails('2100', asOfDate),
         enabled: expandedAccounts.has('2100'),
-        staleTime: 0
+        staleTime: 30_000,
     });
 
     // Accounts for resolving account codes → UUIDs for pre-fill

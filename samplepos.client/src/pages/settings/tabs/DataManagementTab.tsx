@@ -146,7 +146,7 @@ export default function DataManagementTab() {
     const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery({
         queryKey: ['systemStats'],
         queryFn: fetchStats,
-        refetchInterval: 30000, // Refresh every 30 seconds
+        staleTime: 60_000,
     });
 
     const { data: backups, isLoading: backupsLoading, refetch: refetchBackups } = useQuery({

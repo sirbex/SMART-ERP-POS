@@ -50,7 +50,7 @@ export function useRole(roleId: string | null) {
     queryKey: rbacQueryKeys.role(roleId || ''),
     queryFn: () => rbacApi.getRoleById(roleId!),
     enabled: !!roleId,
-    staleTime: 0, // Always refetch to get fresh permissions
+    staleTime: 60_000,
   });
 }
 

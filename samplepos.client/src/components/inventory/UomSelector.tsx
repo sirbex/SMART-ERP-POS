@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef } from 'react';
-import { useProductWithUoms } from '../../hooks/useProductWithUoms';
+import { useProductWithUoms, type ProductUomDetail } from '../../hooks/useProductWithUoms';
 import { computeUnitCost } from '../../utils/uom';
 
 interface UomSelectorProps {
@@ -27,6 +27,8 @@ interface UomSelectorProps {
     uomName: string;
   }) => void;
   className?: string;
+  /** Pre-fetched UoMs — when provided, skips the per-product API call */
+  prefetchedUoms?: ProductUomDetail[];
 }
 
 export function UomSelector({
@@ -36,9 +38,13 @@ export function UomSelector({
   disabled = false,
   onChange,
   className = '',
+  prefetchedUoms,
 }: UomSelectorProps) {
-  const { data: productWithUoms } = useProductWithUoms(productId);
-  const uoms = useMemo(() => productWithUoms?.uoms || [], [productWithUoms]);
+  const { data: productWithUoms } = useProductWithUoms(prefetchedUoms ? undefined : productId);
+  const uoms = useMemo(
+    () => prefetchedUoms || productWithUoms?.uoms || [],
+    [prefetchedUoms, productWithUoms],
+  );
 
   // Track whether we've already synced cost for the current selectedUomId
   const syncedUomRef = useRef<string | null>(null);

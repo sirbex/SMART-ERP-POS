@@ -471,10 +471,9 @@ export default function POSPage() {
     }
   }, []);
 
-  // Fetch held orders count periodically
+  // Fetch held orders count on mount and after relevant actions (no polling)
   useEffect(() => {
     const fetchHeldOrdersCount = async () => {
-      // Only fetch if user is authenticated with a valid token
       if (activeUser?.id && activeUser?.token) {
         try {
           const response = await api.hold.list();
@@ -484,23 +483,16 @@ export default function POSPage() {
             setHeldOrdersCount(count);
           }
         } catch (error) {
-          // Silently fail - not critical
           console.error('Failed to fetch held orders count:', error);
         }
       } else {
-        // No user logged in, reset count
         setHeldOrdersCount(0);
       }
     };
 
-    // Only start fetching if user has token
     if (activeUser?.token) {
       fetchHeldOrdersCount();
-      // Refresh count every 30 seconds
-      const interval = setInterval(fetchHeldOrdersCount, 30000);
-      return () => clearInterval(interval);
     } else {
-      // Reset count if no user
       setHeldOrdersCount(0);
     }
   }, [activeUser?.id, activeUser?.token, storageVersion]);

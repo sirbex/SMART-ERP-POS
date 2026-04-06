@@ -564,17 +564,17 @@ export default function ProductsPage() {
         const createdProduct = createResponse.data as { id: string } | undefined;
         productId = createdProduct?.id || '';
 
-        // Save product UoMs for new product
+        // Save product UoMs for new product (one at a time to avoid pool exhaustion)
         if (productUoms.length > 0 && productId) {
-          await Promise.all(productUoms.map(uom =>
-            api.products.addProductUom(productId, {
+          for (const uom of productUoms) {
+            await api.products.addProductUom(productId, {
               uomId: uom.uomId,
               conversionFactor: parseFloat(uom.conversionFactor),
               isDefault: uom.isDefault,
               overrideCost: uom.costOverride ? parseFloat(uom.costOverride) : undefined,
               overridePrice: uom.priceOverride ? parseFloat(uom.priceOverride) : undefined,
-            })
-          ));
+            });
+          }
           // Invalidate product detail to refresh UoM data
           queryClient.invalidateQueries({ queryKey: productKeys.detail(productId) });
         }
@@ -593,25 +593,24 @@ export default function ProductsPage() {
         setSuccessMessage('Product updated successfully!');
         setTimeout(() => setSuccessMessage(''), 3000);
 
-        // Handle UoM changes in background (non-blocking)
+        // Handle UoM changes in background (non-blocking, serialized to avoid pool exhaustion)
         try {
           const existingUoms = await api.products.getProductUoms(productId);
           const existingUomIds = existingUoms.data.success && existingUoms.data.data
             ? (existingUoms.data.data as ProductUomRow[]).map((u: ProductUomRow) => u.id)
             : [];
 
-          // Delete removed UoMs
+          // Delete removed UoMs (one at a time)
           const currentUomIds = productUoms.filter(u => u.id && u.id.trim() !== '').map(u => u.id);
           const toDelete = existingUomIds.filter((id: string) => id && !currentUomIds.includes(id));
-          await Promise.all(toDelete.map((id: string) =>
-            api.products.deleteProductUom(productId, id)
-          ));
+          for (const id of toDelete) {
+            await api.products.deleteProductUom(productId, id);
+          }
 
-          // Update existing and add new UoMs - filter out entries with empty uomId
+          // Update existing and add new UoMs (one at a time) - filter out entries with empty uomId
           const validUoms = productUoms.filter(uom => uom.uomId && uom.uomId.trim() !== '');
-          await Promise.all(validUoms.map(async (uom) => {
+          for (const uom of validUoms) {
             if (uom.id && uom.id.trim() !== '') {
-              // For updates, only send the fields the API expects (not uomId)
               const updateData = {
                 conversionFactor: parseFloat(uom.conversionFactor),
                 isDefault: uom.isDefault,
@@ -620,7 +619,6 @@ export default function ProductsPage() {
               };
               await api.products.updateProductUom(productId, uom.id, updateData);
             } else {
-              // For new UoMs, include uomId
               const addData = {
                 uomId: uom.uomId,
                 conversionFactor: parseFloat(uom.conversionFactor),
@@ -630,7 +628,7 @@ export default function ProductsPage() {
               };
               await api.products.addProductUom(productId, addData);
             }
-          }));
+          }
         } catch (uomError) {
           const uomErrorMsg = getErrorMessage(uomError);
           console.error('Failed to update UoMs:', uomErrorMsg);

@@ -461,8 +461,7 @@ export function useBankAccounts(includeInactive = false) {
     return useQuery({
         queryKey: ['bankAccounts', { includeInactive }],
         queryFn: () => bankingApi.getAccounts(includeInactive),
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 60_000,
     });
 }
 
@@ -471,8 +470,7 @@ export function useBankAccount(id: string | null) {
         queryKey: ['bankAccount', id],
         queryFn: () => bankingApi.getAccount(id!),
         enabled: !!id,
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 60_000,
     });
 }
 
@@ -502,8 +500,7 @@ export function useBankTransactions(params: Parameters<typeof bankingApi.getTran
     return useQuery({
         queryKey: ['bankTransactions', params],
         queryFn: () => bankingApi.getTransactions(params),
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 60_000,
     });
 }
 
@@ -546,8 +543,7 @@ export function useBankCategories() {
     return useQuery({
         queryKey: ['bankCategories'],
         queryFn: bankingApi.getCategories,
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 5 * 60_000,
     });
 }
 
@@ -556,8 +552,7 @@ export function useBankTemplates() {
     return useQuery({
         queryKey: ['bankTemplates'],
         queryFn: bankingApi.getTemplates,
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 5 * 60_000,
     });
 }
 
@@ -587,8 +582,7 @@ export function useStatementLines(statementId: string | null, status?: string) {
         queryKey: ['statementLines', statementId, status],
         queryFn: () => bankingApi.getStatementLines(statementId!, status),
         enabled: !!statementId,
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 30_000,
     });
 }
 
@@ -632,8 +626,7 @@ export function useBankAlerts(status = 'NEW') {
     return useQuery({
         queryKey: ['bankAlerts', status],
         queryFn: () => bankingApi.getAlerts(status),
-        staleTime: 0,
-        refetchOnMount: 'always'
+        staleTime: 60_000,
     });
 }
 

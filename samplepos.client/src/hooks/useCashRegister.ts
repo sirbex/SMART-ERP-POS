@@ -138,8 +138,8 @@ export function useCurrentSession() {
             return session;
         },
         // Don't poll the server when offline — use cached data
-        refetchInterval: isOnline ? 30000 : false,
-        staleTime: 10000,
+        refetchInterval: isOnline ? 120_000 : false,
+        staleTime: 60_000,
         // Seed from localStorage so offline starts with last-known session
         initialData: getCachedSession,
         // Keep stale data visible while a background refetch is in-flight
