@@ -1589,7 +1589,7 @@ export const salesRepository = {
       `WITH actual AS (
           SELECT
             sale_date,
-            payment_method,
+            payment_method::text AS payment_method,
             COUNT(*)::INTEGER AS transaction_count,
             COALESCE(SUM(total_amount), 0) AS total_amount,
             COALESCE(SUM(total_cost), 0) AS total_cost,
