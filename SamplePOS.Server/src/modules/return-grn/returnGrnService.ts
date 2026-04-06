@@ -3,15 +3,16 @@
  * 
  * Business logic for creating and posting Return Goods Receipt Notes.
  * 
- * POSTING LOGIC (SAP/Odoo compliant):
+ * POSTING LOGIC (SAP LUW — atomic inventory + GL):
  * - Validates return qty ≤ (received qty − previously returned qty)
  * - Creates SUPPLIER_RETURN stock movements (decreases stock)
  * - Reduces batch remaining_quantity
  * - Recalculates product_inventory.quantity_on_hand
- * - NO GL entries — accounting is handled by Supplier Credit Note
+ * - Posts GL: DR Accounts Payable (2100) / CR Inventory (1300) — inside same transaction
  */
 
 import type { Pool } from 'pg';
+import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
     returnGrnRepository,
@@ -19,6 +20,7 @@ import {
     type ReturnGrnLine,
 } from './returnGrnRepository.js';
 import * as stockMovementRepository from '../stock-movements/stockMovementRepository.js';
+import * as glEntryService from '../../services/glEntryService.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
@@ -138,7 +140,9 @@ export const returnGrnService = {
      * - Creates SUPPLIER_RETURN stock movement
      * - Recalculates product_inventory.quantity_on_hand
      * 
-     * NO GL entries — accounting handled by Supplier Credit Note.
+     * GL entries (SAP pattern — atomic with inventory changes):
+     *   DR Accounts Payable (2100) — reduce what we owe
+     *   CR Inventory (1300) — reduce inventory value
      */
     async post(
         pool: Pool,
@@ -237,11 +241,47 @@ export const returnGrnService = {
             const posted = await returnGrnRepository.post(client, rgrnId);
             if (!posted) throw new Error('Failed to post Return GRN');
 
-            logger.info('Return GRN posted — stock decreased, no GL entries', {
+            // 5. GL posting — INSIDE transaction (SAP LUW: atomic with inventory)
+            //    DR Accounts Payable (2100) / CR Inventory (1300)
+            const returnTotal = lines.reduce((sum, line) => {
+                return sum.plus(new Decimal(String(line.baseQuantity)).times(new Decimal(String(line.unitCost || 0))));
+            }, new Decimal(0));
+            const returnTotalNum = Money.toNumber(returnTotal);
+
+            if (returnTotalNum > 0) {
+                // Look up supplier name for GL description
+                const grResult = await client.query(
+                    `SELECT g.supplier_id, s."CompanyName" AS supplier_name, g.gr_number
+                     FROM goods_receipts g
+                     LEFT JOIN suppliers s ON s."Id" = g.supplier_id
+                     WHERE g.id = $1`,
+                    [rgrn.grnId]
+                );
+                const supplierName = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
+                const supplierId = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
+                const originalGrNumber = grResult.rows[0]?.gr_number;
+
+                await glEntryService.recordReturnGrnToGL(
+                    {
+                        returnGrnId: rgrnId,
+                        returnGrnNumber: posted.returnGrnNumber || rgrnId,
+                        returnDate: new Date().toLocaleDateString('en-CA'),
+                        totalAmount: returnTotalNum,
+                        supplierId,
+                        supplierName,
+                        originalGrNumber,
+                    },
+                    undefined, // pool — not needed when txClient is provided
+                    client,    // atomic: GL commits/rolls back with inventory
+                );
+            }
+
+            logger.info('Return GRN posted — stock decreased, GL posted atomically', {
                 rgrnId: posted.id,
                 rgrnNumber: posted.returnGrnNumber,
                 grnId: posted.grnId,
                 lineCount: lines.length,
+                glAmount: returnTotalNum,
             });
 
             return posted;

@@ -688,7 +688,11 @@ export interface GoodsReceiptData {
  *   DR Inventory (1300)        totalAmount
  *   CR Accounts Payable (2100) totalAmount
  */
-export async function recordGoodsReceiptToGL(gr: GoodsReceiptData, pool?: pg.Pool): Promise<void> {
+export async function recordGoodsReceiptToGL(
+  gr: GoodsReceiptData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
   try {
     // Use AccountingCore for audit-safe, idempotent journal entry creation
     await AccountingCore.createJournalEntry({
@@ -717,7 +721,7 @@ export async function recordGoodsReceiptToGL(gr: GoodsReceiptData, pool?: pg.Poo
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `GOODS_RECEIPT-${gr.grId}`
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded goods receipt to GL', {
       grId: gr.grId,
@@ -728,6 +732,73 @@ export async function recordGoodsReceiptToGL(gr: GoodsReceiptData, pool?: pg.Poo
     logger.error('Failed to record goods receipt to GL', { error, gr });
     // CRITICAL: GL failure MUST throw to prevent GR without inventory/AP entries
     throw new Error(`GL posting failed for goods receipt ${gr.grNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// RETURN GRN (SUPPLIER RETURN) JOURNAL ENTRIES
+// =============================================================================
+// SAP pattern: Goods return to supplier reverses the original GR posting.
+// DR Accounts Payable (2100) — reduce what we owe (we returned the goods)
+// CR Inventory (1300) — reduce inventory value (goods left the warehouse)
+//
+// This is the inverse of recordGoodsReceiptToGL(). Without this entry,
+// inventory_batches would decrease but GL account 1300 would remain
+// unchanged — a guaranteed GL-vs-subledger discrepancy.
+// =============================================================================
+
+export interface ReturnGrnGLData {
+  returnGrnId: string;
+  returnGrnNumber: string;
+  returnDate: string;
+  totalAmount: number;
+  supplierId: string;
+  supplierName: string;
+  originalGrNumber?: string;
+}
+
+export async function recordReturnGrnToGL(
+  data: ReturnGrnGLData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
+  try {
+    await AccountingCore.createJournalEntry({
+      entryDate: data.returnDate,
+      description: `Return to Supplier: ${data.returnGrnNumber} (${data.supplierName})${data.originalGrNumber ? ` — orig GR ${data.originalGrNumber}` : ''}`,
+      referenceType: 'RETURN_GRN',
+      referenceId: data.returnGrnId,
+      referenceNumber: data.returnGrnNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+          description: `Reduce payable — returned goods: ${data.returnGrnNumber}`,
+          debitAmount: data.totalAmount,
+          creditAmount: 0,
+          entityType: 'supplier',
+          entityId: data.supplierId,
+        },
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory returned to supplier: ${data.returnGrnNumber}`,
+          debitAmount: 0,
+          creditAmount: data.totalAmount,
+          entityType: 'supplier',
+          entityId: data.supplierId,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `RETURN_GRN-${data.returnGrnId}`,
+    }, pool, txClient);
+
+    logger.info('Recorded return GRN to GL', {
+      returnGrnId: data.returnGrnId,
+      returnGrnNumber: data.returnGrnNumber,
+      amount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record return GRN to GL', { error, data });
+    throw new Error(`GL posting failed for return GRN ${data.returnGrnNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

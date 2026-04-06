@@ -364,7 +364,15 @@ export class AccountingCore {
      */
     static async createJournalEntry(
         request: JournalEntryRequest,
-        dbPool?: pg.Pool
+        dbPool?: pg.Pool,
+        /**
+         * Optional transactional PoolClient. When provided, the journal entry
+         * is created inside the CALLER's transaction (SAP LUW pattern) —
+         * inventory changes and GL posting commit or rollback atomically.
+         * When omitted, the method opens its own UnitOfWork transaction
+         * (backward-compatible default).
+         */
+        txClient?: pg.PoolClient,
     ): Promise<JournalEntryResult> {
         // 1. Validate double-entry BEFORE touching database
         const validation = this.validateDoubleEntry(request.lines);
@@ -384,8 +392,9 @@ export class AccountingCore {
 
         const pool = dbPool || globalPool;
 
-        try {
-            return await UnitOfWork.run(pool, async (client) => {
+        // If caller provided a transactional client, execute directly (atomic with caller).
+        // Otherwise, start our own UnitOfWork transaction (backward compatible).
+        const doWork = async (client: pg.PoolClient): Promise<JournalEntryResult> => {
                 // 3. Check idempotency - return existing if already processed
                 const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
                 if (idempotencyCheck.exists) {
@@ -545,7 +554,15 @@ export class AccountingCore {
                     totalDebits: validation.totalDebits,
                     totalCredits: validation.totalCredits,
                 };
-            });
+        };
+
+        try {
+            if (txClient) {
+                // Atomic with caller's transaction (SAP LUW pattern)
+                return await doWork(txClient);
+            }
+            // Backward-compatible: own transaction
+            return await UnitOfWork.run(pool, doWork);
         } catch (error) {
             logger.error('Failed to create journal entry', {
                 error,

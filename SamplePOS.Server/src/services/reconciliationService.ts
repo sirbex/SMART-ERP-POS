@@ -11,6 +11,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
+import { checkInventoryIntegrity, type IntegrityIssue } from './inventoryIntegrityService.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -39,6 +40,10 @@ export interface ReconciliationReport {
     status: 'RECONCILED' | 'DISCREPANCY';
     items: ReconciliationItem[];
     recommendations: string[];
+    /** SAP-style integrity diagnostics: operations that caused the gap */
+    integrityIssues?: IntegrityIssue[];
+    /** Human-readable summary of integrity check */
+    integritySummary?: string;
 }
 
 export interface FullReconciliationSummary {
@@ -215,6 +220,45 @@ export class ReconciliationService {
             const materialityThreshold = Math.max(5000, Math.abs(glBalance) * 0.0001);
             const hasDiscrepancy = Math.abs(difference) > materialityThreshold;
 
+            // Run integrity diagnostics (SAP Material Ledger Document Check)
+            let integrityIssues: IntegrityIssue[] | undefined;
+            let integritySummary: string | undefined;
+            try {
+                const integrity = await checkInventoryIntegrity(this.pool);
+                if (integrity.issues.length > 0) {
+                    integrityIssues = integrity.issues;
+                    integritySummary = integrity.summary;
+                }
+                // If integrity found critical issues, override status to DISCREPANCY
+                const criticalCount = integrity.issues.filter(i => i.severity === 'CRITICAL').length;
+                if (criticalCount > 0 && !hasDiscrepancy) {
+                    // Force discrepancy flag when orphan operations detected
+                    return {
+                        accountName: 'Inventory',
+                        accountCode: '1300',
+                        asOfDate: date,
+                        generatedAt: new Date().toISOString(),
+                        glBalance,
+                        subledgerBalance,
+                        difference,
+                        status: 'DISCREPANCY' as const,
+                        items,
+                        recommendations: [
+                            `${criticalCount} operation(s) moved inventory without GL posting`,
+                            ...integrity.issues
+                                .filter(i => i.severity === 'CRITICAL')
+                                .map(i => `${i.referenceType} ${i.referenceNumber || i.referenceId}: ${i.description}`),
+                        ],
+                        integrityIssues,
+                        integritySummary,
+                    };
+                }
+            } catch (integrityError: unknown) {
+                logger.warn('Integrity check failed (non-fatal)', {
+                    error: integrityError instanceof Error ? integrityError.message : String(integrityError),
+                });
+            }
+
             const recommendations: string[] = [];
             if (hasDiscrepancy) {
                 recommendations.push('Review inventory adjustments and stock movements');
@@ -234,6 +278,8 @@ export class ReconciliationService {
                 status: hasDiscrepancy ? 'DISCREPANCY' : 'RECONCILED',
                 items,
                 recommendations,
+                integrityIssues,
+                integritySummary,
             };
         } catch (error: unknown) {
             logger.error('Inventory reconciliation failed', { asOfDate: date, error });

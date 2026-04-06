@@ -775,56 +775,40 @@ export const goodsReceiptService = {
         await recalcSupplierBalance(client, supplierId);
       }
 
-      return { alerts, warnings };
-    });
-
-    // ============================================================
-    // GL POSTING: Application-layer double-entry (replaces database trigger)
-    // Post goods receipt: DR Inventory (1300), CR Accounts Payable (2100)
-    // Runs AFTER transaction commits to use finalized data.
-    // ============================================================
-    // Reload completed GR outside transaction
-    const finalized = await goodsReceiptRepository.getGRById(pool, id);
-    if (!finalized) throw new Error(`Goods receipt ${id} not found after finalization`);
-
-    // Calculate total value from finalized items (exclude bonus items)
-    const grTotalValue = finalized.items.reduce((sum: Decimal, item: GoodsReceiptItem) => {
-      if (item.isBonus) return sum;
-      const qty = new Decimal(String(item.receivedQuantity ?? 0));
-      const cost = new Decimal(String(item.unitCost ?? 0));
-      return sum.plus(qty.times(cost));
-    }, new Decimal(0));
-    const grTotalNum = Money.toNumber(grTotalValue);
-
-    if (grTotalNum > 0) {
-      try {
-        // Get supplier name for GL description
-        const supplierRes = await pool.query(
+      // ============================================================
+      // GL POSTING — INSIDE transaction (SAP LUW pattern)
+      // DR Inventory (1300), CR Accounts Payable (2100)
+      // Atomic: if GL fails, entire GR + inventory rollback together.
+      // ============================================================
+      if (totalAmount > 0 && supplierId) {
+        const supplierRes = await client.query(
           'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
-          [finalized.gr.supplierId]
+          [supplierId]
         );
         const supplierName = supplierRes.rows[0]?.CompanyName || 'Unknown Supplier';
 
         await glEntryService.recordGoodsReceiptToGL(
           {
             grId: id,
-            grNumber: finalized.gr.grNumber || id,
-            grDate: finalized.gr.receivedDate || new Date().toLocaleDateString('en-CA'),
-            totalAmount: grTotalNum,
-            supplierId: finalized.gr.supplierId || '',
+            grNumber: grNumber || id,
+            grDate: gr.receivedDate || new Date().toLocaleDateString('en-CA'),
+            totalAmount,
+            supplierId,
             supplierName,
-            poNumber: finalized.gr.purchaseOrderId || undefined,
+            poNumber: gr.purchaseOrderId || undefined,
           },
-          pool
+          undefined, // pool — not needed when txClient is provided
+          client,    // atomic: GL commits/rolls back with inventory
         );
-      } catch (glError: unknown) {
-        logger.error('GL posting failed for goods receipt — will propagate error', {
-          grId: id,
-          error: glError instanceof Error ? glError.message : String(glError),
-        });
-        throw glError;
       }
-    }
+
+      return { alerts, warnings };
+    });
+
+    // Reload completed GR for response
+    const finalized = await goodsReceiptRepository.getGRById(pool, id);
+    if (!finalized) throw new Error(`Goods receipt ${id} not found after finalization`);
+
     return {
       gr: finalized.gr,
       items: finalized.items,
