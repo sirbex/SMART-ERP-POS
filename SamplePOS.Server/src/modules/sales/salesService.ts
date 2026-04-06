@@ -23,6 +23,7 @@ import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/bus
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
+import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -1894,6 +1895,12 @@ export const salesService = {
         );
       }
 
+      // Fiscal period guard — cannot void sales in closed periods
+      const saleDate = sale.sale_date instanceof Date
+        ? sale.sale_date.toISOString().slice(0, 10)
+        : String(sale.sale_date).slice(0, 10);
+      await checkAccountingPeriodOpen(client, saleDate);
+
       // Validate void reason
       if (!voidReason || voidReason.trim().length === 0) {
         throw new BusinessError('Void reason is required', 'ERR_SALE_009', { saleId });
@@ -2287,6 +2294,12 @@ export const salesService = {
           { saleId, currentStatus: sale.status, requiredStatus: 'COMPLETED' }
         );
       }
+
+      // Fiscal period guard — cannot refund sales in closed periods
+      const saleDate = sale.sale_date instanceof Date
+        ? sale.sale_date.toISOString().slice(0, 10)
+        : String(sale.sale_date).slice(0, 10);
+      await checkAccountingPeriodOpen(client, saleDate);
 
       // Validate reason
       if (!input.reason || input.reason.trim().length === 0) {
