@@ -1887,6 +1887,54 @@ export default function ReportsPage() {
           </div>
         )}
 
+        {/* Refund Report - Line-Level Detail (ERP Audit Grade) */}
+        {reportData.reportType === 'REFUND_REPORT' && reportData.lineItems && (reportData.lineItems as Array<{ refundNumber: string; saleNumber: string; productName: string; sku: string | null; originalSoldQty: number; refundedQty: number; remainingQty: number; unitSellingPrice: number; unitCOGS: number; lineRevenueReversed: number; lineCOGSReversed: number; profitImpact: number; returnedToStock: boolean; batchNumber: string | null }>).length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-base sm:text-lg font-semibold text-white">📋 Line-Level Refund Detail</h4>
+              <span className="text-purple-100 text-xs sm:text-sm">{(reportData.lineItems as Array<Record<string, unknown>>).length} lines</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px]">
+                <thead className="bg-gray-100 border-b-2 border-gray-300">
+                  <tr>
+                    <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Refund #</th>
+                    <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Product</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Sold Qty</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Refunded</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Remaining</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Unit Price</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Unit COGS</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Rev. Reversed</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">COGS Reversed</th>
+                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Profit Impact</th>
+                    <th className="px-2 sm:px-3 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Stock Return</th>
+                    <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Batch</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(reportData.lineItems as Array<{ refundNumber: string; saleNumber: string; productName: string; sku: string | null; originalSoldQty: number; refundedQty: number; remainingQty: number; unitSellingPrice: number; unitCOGS: number; lineRevenueReversed: number; lineCOGSReversed: number; profitImpact: number; returnedToStock: boolean; batchNumber: string | null }>).map((line, idx: number) => (
+                    <tr key={idx} className="hover:bg-purple-50 transition-colors">
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs font-medium text-blue-700">{line.refundNumber}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs font-semibold text-gray-900">{line.productName}{line.sku ? ` (${line.sku})` : ''}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-700">{line.originalSoldQty}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-red-600 font-semibold">{line.refundedQty}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-700">{line.remainingQty}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-900">{formatCurrency(line.unitSellingPrice)}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-600">{formatCurrency(line.unitCOGS)}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-red-600 font-semibold">{formatCurrency(line.lineRevenueReversed)}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-orange-600">{formatCurrency(line.lineCOGSReversed)}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right font-bold text-red-700">{formatCurrency(line.profitImpact)}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-center">{line.returnedToStock ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}</td>
+                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-gray-600">{line.batchNumber || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Refund Report - Top Refunded Products */}
         {reportData.reportType === 'REFUND_REPORT' && reportData.topRefundedProducts && reportData.topRefundedProducts.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">

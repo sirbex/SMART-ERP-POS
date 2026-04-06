@@ -46,7 +46,8 @@ import type {
   ManualJournalEntryReportRow,
   BankTransactionReportRow,
   VoidSalesReportRow,
-  RefundReportRow,
+  RefundReportHeader,
+  RefundReportLine,
 } from './reportTypes.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
@@ -4484,71 +4485,125 @@ export const reportsRepository = {
       endDate: string;
     }
   ): Promise<{
-    rows: RefundReportRow[];
+    headers: RefundReportHeader[];
+    lines: RefundReportLine[];
     summary: {
       refundCount: number;
-      totalRefundAmount: number;
-      totalRefundCost: number;
+      totalRevenueReversal: number;
+      totalCOGSReversal: number;
+      netProfitImpact: number;
       fullRefundCount: number;
       partialRefundCount: number;
+      linesWithStockReturn: number;
+      linesWithoutStockReturn: number;
     };
     topRefundedProducts: Array<{ productName: string; timesRefunded: number; totalQty: number; totalAmount: number }>;
   }> {
     const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
 
-    // Main query: all refunds with sale info, user names, GL amounts
-    const rowQuery = `
+    // ── 1. Header query: one row per refund document ──
+    // Uses GL TransactionNumber as the accounting document reference (not debit sum).
+    const headerQuery = `
       SELECT
         sr.refund_number,
         s.sale_number,
+        COALESCE(c.name, 'Walk-in') AS customer_name,
         sr.refund_date,
         sr.reason,
-        sr.total_amount,
-        sr.total_cost,
-        sr.status,
-        COALESCE(ri_counts.item_count, 0)::integer AS item_count,
         CASE WHEN s.status = 'REFUNDED' THEN 'Full' ELSE 'Partial' END AS refund_type,
         cu.full_name AS created_by,
         au.full_name AS approved_by,
-        COALESCE(c.name, 'Walk-in') AS customer_name,
-        gl_ref.gl_amount,
-        sr.created_at
+        lt."TransactionNumber" AS accounting_doc_number,
+        sr.total_amount AS total_revenue_reversal,
+        sr.total_cost  AS total_cogs_reversal
       FROM sale_refunds sr
       JOIN sales s ON s.id = sr.sale_id
       LEFT JOIN users cu ON cu.id = sr.created_by_id
       LEFT JOIN users au ON au.id = sr.approved_by_id
       LEFT JOIN customers c ON c.id = s.customer_id
-      LEFT JOIN LATERAL (
-        SELECT COUNT(*)::integer AS item_count
-        FROM sale_refund_items ri WHERE ri.refund_id = sr.id
-      ) ri_counts ON true
-      LEFT JOIN LATERAL (
-        SELECT SUM(le."DebitAmount") AS gl_amount
-        FROM ledger_transactions lt
-        JOIN ledger_entries le ON le."TransactionId" = lt."Id"
-        WHERE lt."ReferenceType" = 'SALE_REFUND'
-          AND lt."ReferenceId" = sr.id
-      ) gl_ref ON true
+      LEFT JOIN ledger_transactions lt
+        ON lt."ReferenceType" = 'SALE_REFUND' AND lt."ReferenceId" = sr.id
       WHERE sr.created_at >= $1 AND sr.created_at < $2
         AND sr.status = 'COMPLETED'
       ORDER BY sr.created_at DESC
     `;
 
-    // Summary query
+    // ── 2. Line-level query: one row per refunded product line ──
+    // Joins back to sale_items for original sold qty and remaining,
+    // checks stock_movements for return-to-stock proof,
+    // joins inventory_batches for batch number.
+    const lineQuery = `
+      SELECT
+        sr.refund_number,
+        s.sale_number,
+        COALESCE(p.name, 'Unknown Product') AS product_name,
+        p.sku,
+        si.quantity::numeric          AS original_sold_qty,
+        ri.quantity::numeric          AS refunded_qty,
+        (si.quantity - si.refunded_qty)::numeric AS remaining_qty,
+        ri.unit_price::numeric        AS unit_selling_price,
+        ri.unit_cost::numeric         AS unit_cogs,
+        ri.line_total::numeric        AS line_revenue_reversed,
+        ri.cost_total::numeric        AS line_cogs_reversed,
+        (ri.line_total - ri.cost_total)::numeric AS profit_impact,
+        CASE WHEN sm.id IS NOT NULL THEN true ELSE false END AS returned_to_stock,
+        ib.batch_number
+      FROM sale_refund_items ri
+      JOIN sale_refunds sr ON sr.id = ri.refund_id
+      JOIN sales s ON s.id = sr.sale_id
+      JOIN sale_items si ON si.id = ri.sale_item_id
+      LEFT JOIN products p ON p.id = ri.product_id
+      LEFT JOIN inventory_batches ib ON ib.id = ri.batch_id
+      LEFT JOIN LATERAL (
+        SELECT sm2.id
+        FROM stock_movements sm2
+        WHERE sm2.reference_type = 'REFUND'
+          AND sm2.reference_id = sr.id
+          AND sm2.product_id = ri.product_id
+          AND sm2.movement_type = 'RETURN'
+        LIMIT 1
+      ) sm ON true
+      WHERE sr.created_at >= $1 AND sr.created_at < $2
+        AND sr.status = 'COMPLETED'
+      ORDER BY sr.created_at DESC, ri.created_at
+    `;
+
+    // ── 3. Summary query ──
     const summaryQuery = `
       SELECT
-        COUNT(*)::integer AS total_refunds,
-        COALESCE(SUM(sr.total_amount), 0)::numeric AS total_refund_amount,
-        COALESCE(SUM(sr.total_cost), 0)::numeric AS total_refund_cost,
-        COUNT(*) FILTER (WHERE s.status = 'REFUNDED')::integer AS full_refund_count,
-        COUNT(*) FILTER (WHERE s.status != 'REFUNDED')::integer AS partial_refund_count
+        COUNT(DISTINCT sr.id)::integer AS refund_count,
+        COALESCE(SUM(sr.total_amount), 0)::numeric AS total_revenue_reversal,
+        COALESCE(SUM(sr.total_cost), 0)::numeric AS total_cogs_reversal,
+        COALESCE(SUM(sr.total_amount - sr.total_cost), 0)::numeric AS net_profit_impact,
+        COUNT(DISTINCT sr.id) FILTER (WHERE s.status = 'REFUNDED')::integer AS full_refund_count,
+        COUNT(DISTINCT sr.id) FILTER (WHERE s.status != 'REFUNDED')::integer AS partial_refund_count
       FROM sale_refunds sr
       JOIN sales s ON s.id = sr.sale_id
       WHERE sr.created_at >= $1 AND sr.created_at < $2
         AND sr.status = 'COMPLETED'
     `;
 
-    // Top refunded products
+    // ── 4. Stock return stats (line-level) ──
+    const stockStatsQuery = `
+      SELECT
+        COUNT(*)::integer AS total_lines,
+        COUNT(*) FILTER (WHERE sm.id IS NOT NULL)::integer AS lines_with_return
+      FROM sale_refund_items ri
+      JOIN sale_refunds sr ON sr.id = ri.refund_id
+      LEFT JOIN LATERAL (
+        SELECT sm2.id
+        FROM stock_movements sm2
+        WHERE sm2.reference_type = 'REFUND'
+          AND sm2.reference_id = sr.id
+          AND sm2.product_id = ri.product_id
+          AND sm2.movement_type = 'RETURN'
+        LIMIT 1
+      ) sm ON true
+      WHERE sr.created_at >= $1 AND sr.created_at < $2
+        AND sr.status = 'COMPLETED'
+    `;
+
+    // ── 5. Top refunded products ──
     const topProductsQuery = `
       SELECT
         COALESCE(p.name, 'Unknown Product') AS product_name,
@@ -4565,39 +4620,58 @@ export const reportsRepository = {
       LIMIT 10
     `;
 
-    const [rowResult, summaryResult, topProductsResult] = await Promise.all([
-      pool.query(rowQuery, [startUtc, endUtc]),
+    const [headerResult, lineResult, summaryResult, stockStatsResult, topProductsResult] = await Promise.all([
+      pool.query(headerQuery, [startUtc, endUtc]),
+      pool.query(lineQuery, [startUtc, endUtc]),
       pool.query(summaryQuery, [startUtc, endUtc]),
+      pool.query(stockStatsQuery, [startUtc, endUtc]),
       pool.query(topProductsQuery, [startUtc, endUtc]),
     ]);
 
     const sr = summaryResult.rows[0];
+    const ss = stockStatsResult.rows[0];
 
     return {
-      rows: rowResult.rows.map((row) => ({
+      headers: headerResult.rows.map((row) => ({
         refundNumber: row.refund_number,
         saleNumber: row.sale_number,
+        customerName: row.customer_name,
         refundDate: formatDateOnly(row.refund_date),
         reason: row.reason,
-        totalAmount: new Decimal(row.total_amount || 0).toDecimalPlaces(2).toNumber(),
-        totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
-        status: row.status,
-        itemCount: row.item_count,
         refundType: row.refund_type,
         createdBy: row.created_by,
         approvedBy: row.approved_by,
-        customerName: row.customer_name,
-        glTransactionAmount: row.gl_amount
-          ? new Decimal(row.gl_amount).toDecimalPlaces(2).toNumber()
-          : null,
-        createdAt: formatDate(row.created_at),
+        accountingDocNumber: row.accounting_doc_number || null,
+        totalRevenueReversal: new Decimal(row.total_revenue_reversal || 0).toDecimalPlaces(2).toNumber(),
+        totalCOGSReversal: new Decimal(row.total_cogs_reversal || 0).toDecimalPlaces(2).toNumber(),
+        netProfitImpact: new Decimal(row.total_revenue_reversal || 0)
+          .minus(row.total_cogs_reversal || 0).toDecimalPlaces(2).toNumber(),
+      })),
+      lines: lineResult.rows.map((row) => ({
+        refundNumber: row.refund_number,
+        saleNumber: row.sale_number,
+        productName: row.product_name,
+        sku: row.sku || null,
+        originalSoldQty: new Decimal(row.original_sold_qty || 0).toDecimalPlaces(4).toNumber(),
+        refundedQty: new Decimal(row.refunded_qty || 0).toDecimalPlaces(4).toNumber(),
+        remainingQty: new Decimal(row.remaining_qty || 0).toDecimalPlaces(4).toNumber(),
+        unitSellingPrice: new Decimal(row.unit_selling_price || 0).toDecimalPlaces(2).toNumber(),
+        unitCOGS: new Decimal(row.unit_cogs || 0).toDecimalPlaces(2).toNumber(),
+        lineRevenueReversed: new Decimal(row.line_revenue_reversed || 0).toDecimalPlaces(2).toNumber(),
+        lineCOGSReversed: new Decimal(row.line_cogs_reversed || 0).toDecimalPlaces(2).toNumber(),
+        profitImpact: new Decimal(row.profit_impact || 0).toDecimalPlaces(2).toNumber(),
+        returnedToStock: row.returned_to_stock === true,
+        batchNumber: row.batch_number || null,
       })),
       summary: {
-        refundCount: parseInt(sr.total_refunds) || 0,
-        totalRefundAmount: new Decimal(sr.total_refund_amount || 0).toDecimalPlaces(2).toNumber(),
-        totalRefundCost: new Decimal(sr.total_refund_cost || 0).toDecimalPlaces(2).toNumber(),
+        refundCount: parseInt(sr.refund_count) || 0,
+        totalRevenueReversal: new Decimal(sr.total_revenue_reversal || 0).toDecimalPlaces(2).toNumber(),
+        totalCOGSReversal: new Decimal(sr.total_cogs_reversal || 0).toDecimalPlaces(2).toNumber(),
+        netProfitImpact: new Decimal(sr.net_profit_impact || 0).toDecimalPlaces(2).toNumber(),
         fullRefundCount: parseInt(sr.full_refund_count) || 0,
         partialRefundCount: parseInt(sr.partial_refund_count) || 0,
+        linesWithStockReturn: parseInt(ss.lines_with_return) || 0,
+        linesWithoutStockReturn: (parseInt(ss.total_lines) || 0) - (parseInt(ss.lines_with_return) || 0),
       },
       topRefundedProducts: topProductsResult.rows.map((r) => ({
           productName: r.product_name,

@@ -660,23 +660,44 @@ export interface VoidSalesReportRow {
     glReversalAmount: number | null;
 }
 
-// ── Refund Report ──
-export interface RefundReportRow {
+// ── Refund Report (ERP Audit-Grade, SAP/Odoo-aligned) ──
+
+/** Header row: one per refund document */
+export interface RefundReportHeader {
     refundNumber: string;
     saleNumber: string;
+    customerName: string | null;
     refundDate: string | null;
     reason: string | null;
-    totalAmount: number;
-    totalCost: number;
-    status: string;
-    itemCount: number;
-    refundType: string;
+    refundType: string; // 'Full' | 'Partial'
     createdBy: string | null;
     approvedBy: string | null;
-    customerName: string | null;
-    glTransactionAmount: number | null;
-    createdAt: string | null;
+    accountingDocNumber: string | null; // GL TransactionNumber (FI-style)
+    totalRevenueReversal: number;       // sum of line revenue returned
+    totalCOGSReversal: number;          // sum of line COGS reversed
+    netProfitImpact: number;            // revenue - COGS = profit lost
 }
+
+/** Line row: one per refunded product line within a refund */
+export interface RefundReportLine {
+    refundNumber: string;
+    saleNumber: string;
+    productName: string;
+    sku: string | null;
+    originalSoldQty: number;
+    refundedQty: number;
+    remainingQty: number;
+    unitSellingPrice: number;           // price at time of sale
+    unitCOGS: number;                   // cost at time of sale
+    lineRevenueReversed: number;        // refundedQty × unitSellingPrice
+    lineCOGSReversed: number;           // refundedQty × unitCOGS
+    profitImpact: number;               // revenue - COGS for this line
+    returnedToStock: boolean;           // stock movement exists?
+    batchNumber: string | null;         // which batch was restored
+}
+
+/** Legacy alias kept for backward compat with generateReport switch */
+export type RefundReportRow = RefundReportHeader;
 
 // ── Delivery Notes Report ──
 export interface DeliveryNoteReportRow {

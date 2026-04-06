@@ -2626,7 +2626,7 @@ export const reportsService = {
     const startTime = Date.now();
     const systemContext = await getSystemContext(pool);
 
-    const { rows: data, summary, topRefundedProducts } = await reportsRepository.getRefundReport(pool, {
+    const { headers, lines, summary, topRefundedProducts } = await reportsRepository.getRefundReport(pool, {
       startDate: options.startDate,
       endDate: options.endDate,
     });
@@ -2640,7 +2640,7 @@ export const reportsService = {
       generatedById: options.userId || null,
       startDate: options.startDate,
       endDate: options.endDate,
-      recordCount: data.length,
+      recordCount: headers.length,
       fileFormat: options.format || 'json',
       executionTimeMs: executionTime,
     });
@@ -2659,17 +2659,23 @@ export const reportsService = {
       }),
       systemSettings: systemContext,
       parameters: options,
-      data,
+      data: headers,
+      lineItems: lines,
       topRefundedProducts,
       summary: {
         refundCount: summary.refundCount,
-        totalRefundAmount: summary.totalRefundAmount,
-        totalRefundAmountFormatted: formatCurrency(summary.totalRefundAmount, systemContext.currencySymbol),
-        totalRefundCost: summary.totalRefundCost,
+        totalRevenueReversal: summary.totalRevenueReversal,
+        totalRevenueReversalFormatted: formatCurrency(summary.totalRevenueReversal, systemContext.currencySymbol),
+        totalCOGSReversal: summary.totalCOGSReversal,
+        totalCOGSReversalFormatted: formatCurrency(summary.totalCOGSReversal, systemContext.currencySymbol),
+        netProfitImpact: summary.netProfitImpact,
+        netProfitImpactFormatted: formatCurrency(summary.netProfitImpact, systemContext.currencySymbol),
         fullRefundCount: summary.fullRefundCount,
         partialRefundCount: summary.partialRefundCount,
+        linesWithStockReturn: summary.linesWithStockReturn,
+        linesWithoutStockReturn: summary.linesWithoutStockReturn,
       },
-      recordCount: data.length,
+      recordCount: headers.length,
       executionTimeMs: executionTime,
     };
   },

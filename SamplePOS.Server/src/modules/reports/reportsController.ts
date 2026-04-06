@@ -3778,23 +3778,49 @@ export const reportsController = {
 
       pdfGen.addSummaryCards([
         { label: 'Total Refunds', value: String(report.summary.refundCount), color: PDFColors.danger },
-        { label: 'Refund Amount', value: formatCurrencyPDF(report.summary.totalRefundAmount), color: PDFColors.warning },
-        { label: 'Full Refunds', value: String(report.summary.fullRefundCount), color: PDFColors.info },
-        { label: 'Partial Refunds', value: String(report.summary.partialRefundCount), color: PDFColors.secondary },
+        { label: 'Revenue Reversed', value: formatCurrencyPDF(report.summary.totalRevenueReversal), color: PDFColors.warning },
+        { label: 'COGS Reversed', value: formatCurrencyPDF(report.summary.totalCOGSReversal), color: PDFColors.info },
+        { label: 'Profit Impact', value: formatCurrencyPDF(report.summary.netProfitImpact), color: PDFColors.danger },
+        { label: 'Full / Partial', value: `${report.summary.fullRefundCount} / ${report.summary.partialRefundCount}`, color: PDFColors.secondary },
+        { label: 'Stock Returned', value: `${report.summary.linesWithStockReturn} lines`, color: PDFColors.success },
       ]);
 
-      const columns: PDFTableColumn[] = [
-        { header: 'Refund #', key: 'refundNumber', width: 0.14 },
-        { header: 'Sale #', key: 'saleNumber', width: 0.12 },
-        { header: 'Date', key: 'refundDate', width: 0.1 },
-        { header: 'Amount', key: 'totalAmount', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v) },
-        { header: 'Reason', key: 'reason', width: 0.18 },
-        { header: 'Type', key: 'refundType', width: 0.1 },
-        { header: 'Created By', key: 'createdBy', width: 0.12 },
+      // Header-level table (one row per refund document)
+      const headerColumns: PDFTableColumn[] = [
+        { header: 'Refund #', key: 'refundNumber', width: 0.12 },
+        { header: 'Sale #', key: 'saleNumber', width: 0.1 },
+        { header: 'Date', key: 'refundDate', width: 0.09 },
         { header: 'Customer', key: 'customerName', width: 0.12 },
+        { header: 'Revenue Rev.', key: 'totalRevenueReversal', width: 0.11, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'COGS Rev.', key: 'totalCOGSReversal', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'Profit Impact', key: 'netProfitImpact', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v) },
+        { header: 'Type', key: 'refundType', width: 0.08 },
+        { header: 'GL Doc #', key: 'accountingDocNumber', width: 0.1 },
+        { header: 'Reason', key: 'reason', width: 0.08 },
       ];
 
-      pdfGen.addTable(columns, report.data);
+      pdfGen.addTable(headerColumns, report.data);
+
+      // Line-level detail table (one row per product line per refund)
+      if (report.lineItems.length > 0) {
+        pdfGen.addSectionHeading('Line-Level Detail');
+
+        const lineColumns: PDFTableColumn[] = [
+          { header: 'Refund #', key: 'refundNumber', width: 0.1 },
+          { header: 'Product', key: 'productName', width: 0.14 },
+          { header: 'Sold', key: 'originalSoldQty', width: 0.06, align: 'right' },
+          { header: 'Refunded', key: 'refundedQty', width: 0.07, align: 'right' },
+          { header: 'Remain', key: 'remainingQty', width: 0.06, align: 'right' },
+          { header: 'Unit Price', key: 'unitSellingPrice', width: 0.09, align: 'right', format: (v) => formatCurrencyPDF(v) },
+          { header: 'Unit COGS', key: 'unitCOGS', width: 0.09, align: 'right', format: (v) => formatCurrencyPDF(v) },
+          { header: 'Rev. Reversed', key: 'lineRevenueReversed', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v) },
+          { header: 'Profit Impact', key: 'profitImpact', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v) },
+          { header: 'Stock', key: 'returnedToStock', width: 0.06, format: (v) => v ? 'Yes' : 'No' },
+          { header: 'Batch', key: 'batchNumber', width: 0.13 },
+        ];
+
+        pdfGen.addTable(lineColumns, report.lineItems);
+      }
       pdfGen.end();
       return;
     }
