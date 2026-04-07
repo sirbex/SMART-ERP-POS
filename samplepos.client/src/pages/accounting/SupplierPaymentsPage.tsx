@@ -984,25 +984,25 @@ const SupplierPaymentsPage: React.FC = () => {
 
                 <div className="flex gap-2">
                     {canCreateBill && (
-                    <Dialog open={isBillModalOpen} onOpenChange={setIsBillModalOpen}>
-                        <DialogTrigger asChild>
-                            <Button variant="outline" className="flex items-center gap-2">
-                                <FileText className="h-4 w-4" />
-                                Record Bill
-                            </Button>
-                        </DialogTrigger>
-                    </Dialog>
+                        <Dialog open={isBillModalOpen} onOpenChange={setIsBillModalOpen}>
+                            <DialogTrigger asChild>
+                                <Button variant="outline" className="flex items-center gap-2">
+                                    <FileText className="h-4 w-4" />
+                                    Record Bill
+                                </Button>
+                            </DialogTrigger>
+                        </Dialog>
                     )}
 
                     {canCreatePayment && (
-                    <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-                        <DialogTrigger asChild>
-                            <Button className="flex items-center gap-2">
-                                <Plus className="h-4 w-4" />
-                                Make Payment
-                            </Button>
-                        </DialogTrigger>
-                    </Dialog>
+                        <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
+                            <DialogTrigger asChild>
+                                <Button className="flex items-center gap-2">
+                                    <Plus className="h-4 w-4" />
+                                    Make Payment
+                                </Button>
+                            </DialogTrigger>
+                        </Dialog>
                     )}
                 </div>
             </div>
@@ -1214,19 +1214,19 @@ const SupplierPaymentsPage: React.FC = () => {
                                             <div className="flex items-center gap-2 ml-4">
                                                 {safeParseFloat(payment.unallocatedAmount) > 0 ? (
                                                     canCreatePayment ? (
-                                                    <Button
-                                                        variant="default"
-                                                        size="sm"
-                                                        onClick={() => openAllocationModal(payment)}
-                                                        className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white"
-                                                    >
-                                                        <ArrowUpRight className="h-4 w-4" />
-                                                        Allocate
-                                                    </Button>
+                                                        <Button
+                                                            variant="default"
+                                                            size="sm"
+                                                            onClick={() => openAllocationModal(payment)}
+                                                            className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+                                                        >
+                                                            <ArrowUpRight className="h-4 w-4" />
+                                                            Allocate
+                                                        </Button>
                                                     ) : (
-                                                    <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
-                                                        Unallocated
-                                                    </Badge>
+                                                        <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
+                                                            Unallocated
+                                                        </Badge>
                                                     )
                                                 ) : (
                                                     <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
@@ -1297,29 +1297,29 @@ const SupplierPaymentsPage: React.FC = () => {
                                             <div className="flex items-center gap-2 ml-4">
                                                 {safeParseFloat(bill.outstandingBalance) > 0 ? (
                                                     canCreatePayment ? (
-                                                    <Button
-                                                        variant="default"
-                                                        size="sm"
-                                                        onClick={() => {
-                                                            // Pre-fill payment form with this bill's supplier and outstanding amount
-                                                            setPaymentFormData(prev => ({
-                                                                ...prev,
-                                                                supplierId: bill.supplierId,
-                                                                amount: safeParseFloat(bill.outstandingBalance).toString(),
-                                                                notes: `Payment for ${bill.invoiceNumber}`
-                                                            }));
-                                                            loadSupplierOutstanding(bill.supplierId);
-                                                            setIsPaymentModalOpen(true);
-                                                        }}
-                                                        className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white"
-                                                    >
-                                                        <DollarSign className="h-4 w-4" />
-                                                        Pay Now
-                                                    </Button>
+                                                        <Button
+                                                            variant="default"
+                                                            size="sm"
+                                                            onClick={() => {
+                                                                // Pre-fill payment form with this bill's supplier and outstanding amount
+                                                                setPaymentFormData(prev => ({
+                                                                    ...prev,
+                                                                    supplierId: bill.supplierId,
+                                                                    amount: safeParseFloat(bill.outstandingBalance).toString(),
+                                                                    notes: `Payment for ${bill.invoiceNumber}`
+                                                                }));
+                                                                loadSupplierOutstanding(bill.supplierId);
+                                                                setIsPaymentModalOpen(true);
+                                                            }}
+                                                            className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white"
+                                                        >
+                                                            <DollarSign className="h-4 w-4" />
+                                                            Pay Now
+                                                        </Button>
                                                     ) : (
-                                                    <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
-                                                        Outstanding
-                                                    </Badge>
+                                                        <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
+                                                            Outstanding
+                                                        </Badge>
                                                     )
                                                 ) : (
                                                     <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">

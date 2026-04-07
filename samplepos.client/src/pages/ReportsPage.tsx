@@ -2357,11 +2357,10 @@ export default function ReportsPage() {
                       <span className="font-bold text-indigo-600 text-sm">{payment.paymentNumber}</span>
                       <p className="text-xs text-gray-500 mt-1">{formatDisplayDate(payment.paymentDate)}</p>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                      payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>{payment.status}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                        payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                      }`}>{payment.status}</span>
                   </div>
                   <p className="text-sm font-medium text-gray-900 mb-2">{payment.supplierName}</p>
                   <div className="grid grid-cols-2 gap-3">
@@ -2421,11 +2420,10 @@ export default function ReportsPage() {
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right font-bold text-green-600">{formatCurrency(payment.amount || 0)}</td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">{payment.paymentMethod}</td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                          payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>{payment.status}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                            payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-gray-100 text-gray-800'
+                          }`}>{payment.status}</span>
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-600">{payment.reference || '-'}</td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">

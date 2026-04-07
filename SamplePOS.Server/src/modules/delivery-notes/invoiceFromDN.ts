@@ -10,6 +10,7 @@ import { deliveryNoteRepository } from './deliveryNoteRepository.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
 import { recordDeliveryNoteInvoiceToGL } from '../../services/glEntryService.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 import Decimal from 'decimal.js';
 
 /**
@@ -129,6 +130,9 @@ export async function invoiceFromDeliveryNote(
       ), "UpdatedAt" = NOW()
       WHERE "AccountCode" = '1200'
     `);
+
+    // Document flow: Delivery Note → Invoice
+    await documentFlowService.linkDocuments(client, 'DELIVERY_NOTE', deliveryNoteId, 'INVOICE', freshInvoice.id, 'CREATED_FROM');
 
     return freshInvoice;
   });

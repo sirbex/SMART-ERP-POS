@@ -26,7 +26,7 @@ function lazyWithRetry(factory: () => Promise<{ default: React.ComponentType }>)
         sessionStorage.setItem('chunk_reload', '1');
         window.location.reload();
         // Return a never-resolving promise so React doesn't render the error
-        return new Promise(() => {});
+        return new Promise(() => { });
       }
       // Already reloaded once — let ErrorBoundary handle it
       sessionStorage.removeItem('chunk_reload');
