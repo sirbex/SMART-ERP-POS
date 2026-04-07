@@ -1,16 +1,15 @@
 /**
  * Hook to check if the current user has a specific backend permission.
  *
- * Fetches effective permissions from the backend RBAC system (GET /rbac/me/permissions).
- * Falls back to the legacy hardcoded role-permission mapping only while loading or
- * if the RBAC endpoint is unavailable.
+ * Uses the session-embedded permissions from AuthContext (SAP/Odoo pattern).
+ * Falls back to the legacy hardcoded role-permission mapping only if
+ * the session permissions are empty (not yet loaded).
  *
  * Usage:
  *   const canVoid = useBackendPermission('sales.void');
  *   const canRefund = useBackendPermission('sales.refund');
  */
 
-import { useMyPermissions } from './useRbac';
 import { useAuth } from './useAuth';
 import { hasPermission, Permission } from '../utils/rolePermissions';
 import type { UserRole } from '../types';
@@ -47,16 +46,15 @@ const BACKEND_TO_LEGACY: Record<string, Permission> = {
  * Returns `true | false` – never undefined.
  *
  * Priority:
- *  1. If RBAC data is loaded → check `permissionKey` in effective permissions
- *  2. If RBAC is loading / errored → fall back to legacy role-based check
+ *  1. If session permissions loaded → check `permissionKey` in Set
+ *  2. If session permissions empty → fall back to legacy role-based check
  */
 export function useBackendPermission(permissionKey: string): boolean {
-    const { user } = useAuth();
-    const { data: permissions, isLoading, isError } = useMyPermissions();
+    const { user, permissions } = useAuth();
 
-    // RBAC data available — use it as the source of truth
-    if (!isLoading && !isError && permissions && Array.isArray(permissions)) {
-        return permissions.some((p) => p.permissionKey === permissionKey);
+    // Session-embedded permissions available — use as source of truth
+    if (permissions.size > 0) {
+        return permissions.has(permissionKey);
     }
 
     // Fallback: map to legacy enum and check against hardcoded role mapping
