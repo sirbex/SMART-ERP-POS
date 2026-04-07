@@ -174,6 +174,8 @@ export const goodsReceiptRepository = {
         batch_number as "batchNumber",
         expiry_date as "expiryDate",
         cost_price as "unitCost",
+        uom_id as "uomId",
+        is_bonus as "isBonus",
         created_at as "createdAt",
         version`,
       values
@@ -243,8 +245,8 @@ export const goodsReceiptRepository = {
        JOIN products p ON gri.product_id = p.id
        LEFT JOIN product_valuation pv ON pv.product_id = p.id
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
-       LEFT JOIN uoms u ON u.id = poi.uom_id
-       LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = poi.uom_id
+       LEFT JOIN uoms u ON u.id = COALESCE(gri.uom_id, poi.uom_id)
+       LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = COALESCE(gri.uom_id, poi.uom_id)
        LEFT JOIN product_uoms def_pu ON def_pu.product_id = gri.product_id AND def_pu.is_default = true
        LEFT JOIN uoms def_u ON def_u.id = def_pu.uom_id
        WHERE gri.goods_receipt_id = $1

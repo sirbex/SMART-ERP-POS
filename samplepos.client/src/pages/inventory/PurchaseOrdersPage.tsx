@@ -136,6 +136,10 @@ interface POItemRow {
   uom_id?: string;
   uomName?: string;
   uom_name?: string;
+  conversion_factor?: number | string;
+  conversionFactor?: number | string;
+  product_cost_price?: number | string;
+  productCostPrice?: number | string;
   notes?: string;
 }
 
@@ -758,15 +762,25 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     if (!po.items || po.items.length === 0) return [];
     return po.items.map((item: POItemRow) => {
       const cost = String(item.unit_price || item.unitCost || 0);
+      const factor = Number(item.conversion_factor || item.conversionFactor || 1);
+      // SAP pattern: derive base cost from product_cost_price (from product_valuation),
+      // or fall back to dividing the displayed cost by the conversion factor.
+      const productBaseCost = Number(item.product_cost_price || item.productCostPrice || 0);
+      const derivedBaseCost = productBaseCost > 0
+        ? String(productBaseCost)
+        : factor > 1
+          ? new Decimal(cost).dividedBy(factor).toFixed(2)
+          : cost;
       return {
         id: item.id || `existing-${Math.random()}`,
         productId: item.product_id || item.productId || '',
         productName: item.product_name || item.productName || '',
         quantity: String(item.ordered_quantity || item.quantity || 0),
         unitCost: cost,
-        baseCost: cost, // Will be recalculated when UOM data loads via UomSelector
+        baseCost: derivedBaseCost,
         selectedUomId: item.uom_id || item.uomId || null,
         selectedUomName: item.uom_name || item.uomName || undefined,
+        conversionFactor: String(factor),
         quantityOnHand: undefined,
         reorderLevel: undefined,
         reorderQuantity: undefined,
