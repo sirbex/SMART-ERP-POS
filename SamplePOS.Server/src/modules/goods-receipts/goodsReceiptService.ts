@@ -18,7 +18,7 @@ import * as pricingService from '../../services/pricingService.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
-import { batchFetchProducts, type ProductBatchRow } from '../../db/batchFetch.js';
+import { batchFetchProducts } from '../../db/batchFetch.js';
 import logger from '../../utils/logger.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
@@ -103,6 +103,7 @@ export const goodsReceiptService = {
         unitCost: number;
         batchNumber?: string | null;
         expiryDate?: string | null;
+        uomId?: string | null;
       }>;
     }
   ): Promise<CreateGRResult> {
@@ -179,26 +180,8 @@ export const goodsReceiptService = {
           productId: it.productId,
         });
 
-        // Server-side normalization: ensure unitCost is base unit cost
-        // Uses pre-fetched product data instead of per-item query
-        // All arithmetic via Decimal to avoid floating-point precision loss (Tally/SAP pattern)
+        // Fetch product data for cost variance checks
         const productData = grProductsMap.get(it.productId);
-        if (productData) {
-          const baseCostDec = Money.parseDb(productData.cost_price);
-          const unitCostDec = new Decimal(unitCost);
-          if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
-            const ratio = unitCostDec.dividedBy(baseCostDec);
-            const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-            const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
-            if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
-              const normalizedCost = unitCostDec.dividedBy(rounded);
-              logger.info(
-                `Normalizing unit cost for ${it.productName}: ${unitCost} → ${Money.toNumber(normalizedCost)} (factor: ${rounded})`
-              );
-              unitCost = Money.toNumber(normalizedCost);
-            }
-          }
-        }
 
         // BR-INV-002: Validate positive quantity
         InventoryBusinessRules.validatePositiveQuantity(
@@ -286,6 +269,7 @@ export const goodsReceiptService = {
           unitCost,
           batchNumber: it.batchNumber ?? null,
           expiryDate: expiry,
+          uomId: it.uomId || null,
         });
       }
 
@@ -872,33 +856,9 @@ export const goodsReceiptService = {
         }
       }
 
-      // Server-side normalization for unitCost
-      let normalizedUnitCost = data.unitCost;
+      // Validate unitCost 
       if (data.unitCost !== undefined) {
         PurchaseOrderBusinessRules.validateUnitCost(data.unitCost);
-
-        // Check if unitCost is a UoM multiple of product base cost
-        const productId = item.productId;
-        const productRes = await client.query(
-          'SELECT cost_price FROM product_valuation WHERE product_id = $1',
-          [productId]
-        );
-        if (productRes.rows.length > 0) {
-          const baseCostDec = Money.parseDb(productRes.rows[0].cost_price);
-          const unitCostDec = new Decimal(data.unitCost);
-          if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
-            const ratio = unitCostDec.dividedBy(baseCostDec);
-            const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-            const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
-            if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
-              const normalizedCost = unitCostDec.dividedBy(rounded);
-              logger.info(
-                `Normalizing unit cost for item ${itemId}: ${data.unitCost} → ${Money.toNumber(normalizedCost)} (factor: ${rounded})`
-              );
-              normalizedUnitCost = Money.toNumber(normalizedCost);
-            }
-          }
-        }
       }
 
       if (data.expiryDate) {
@@ -906,9 +866,6 @@ export const goodsReceiptService = {
       }
 
       const updateData = { ...data };
-      if (normalizedUnitCost !== undefined) {
-        updateData.unitCost = normalizedUnitCost;
-      }
 
       const updated = await goodsReceiptRepository.updateGRItem(client, itemId, updateData);
       return updated;
@@ -943,16 +900,6 @@ export const goodsReceiptService = {
       // Build lookup for existing items
       const itemMap = new Map(existingItems.map((it: GoodsReceiptItem) => [it.id, it]));
 
-      // Batch-fetch product valuations for cost normalization
-      const productIds = [...new Set(existingItems.map((it: GoodsReceiptItem) => it.productId))];
-      const valuationRes = await client.query(
-        'SELECT product_id, cost_price FROM product_valuation WHERE product_id = ANY($1)',
-        [productIds]
-      );
-      const valuationMap = new Map(
-        valuationRes.rows.map((r: { product_id: string; cost_price: string }) => [r.product_id, r.cost_price])
-      );
-
       const results: GoodsReceiptItem[] = [];
 
       for (const update of items) {
@@ -968,23 +915,9 @@ export const goodsReceiptService = {
           }
         }
 
-        // Cost normalization
-        let normalizedUnitCost = update.unitCost;
+        // Cost validation
         if (update.unitCost !== undefined) {
           PurchaseOrderBusinessRules.validateUnitCost(update.unitCost);
-          const baseCostStr = valuationMap.get(existing.productId);
-          if (baseCostStr) {
-            const baseCostDec = Money.parseDb(baseCostStr);
-            const unitCostDec = new Decimal(update.unitCost);
-            if (baseCostDec.greaterThan(0) && unitCostDec.greaterThan(0)) {
-              const ratio = unitCostDec.dividedBy(baseCostDec);
-              const rounded = ratio.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-              const isIntegerish = ratio.minus(rounded).abs().lessThan('1e-6');
-              if (isIntegerish && rounded.gte(2) && rounded.lte(200)) {
-                normalizedUnitCost = Money.toNumber(unitCostDec.dividedBy(rounded));
-              }
-            }
-          }
         }
 
         if (update.expiryDate) {
@@ -993,7 +926,7 @@ export const goodsReceiptService = {
 
         const data: UpdateGRItemData = {};
         if (update.receivedQuantity !== undefined) data.receivedQuantity = update.receivedQuantity;
-        if (normalizedUnitCost !== undefined) data.unitCost = normalizedUnitCost;
+        if (update.unitCost !== undefined) data.unitCost = update.unitCost;
         if (update.batchNumber !== undefined) data.batchNumber = update.batchNumber ?? undefined;
         if (update.expiryDate !== undefined) data.expiryDate = update.expiryDate ?? undefined;
         if (update.isBonus !== undefined) data.isBonus = update.isBonus;
@@ -1121,6 +1054,7 @@ export const goodsReceiptService = {
         quantity?: number;
         unit_price?: number;
         unitCost?: number;
+        uom_id?: string | null;
       }
 
       const toInsert: CreateGRItemData[] = ((poDetail.items || []) as POItemRow[]).map((poi) => ({
@@ -1133,6 +1067,7 @@ export const goodsReceiptService = {
         unitCost: Money.parseDb(poi.unit_price ?? poi.unitCost).toNumber(),
         batchNumber: null,
         expiryDate: null,
+        uomId: poi.uom_id || null, // SAP: inherit UOM from PO item
       }));
 
       if (toInsert.length === 0) {

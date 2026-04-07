@@ -95,26 +95,6 @@ export const purchaseOrderService = {
         // BR-INV-002: Validate positive quantity
         InventoryBusinessRules.validatePositiveQuantity(item.quantity, 'PO item');
 
-        // Server-side normalization: ensure unitCost is base unit cost
-        // If it looks like a UoM multiple of product base cost, normalize it
-        const productRes = await client.query('SELECT cost_price FROM product_valuation WHERE product_id = $1', [
-          item.productId,
-        ]);
-        if (productRes.rows.length > 0) {
-          const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
-          if (baseCost > 0 && item.unitCost > 0) {
-            const ratio = item.unitCost / baseCost;
-            const rounded = Math.round(ratio);
-            const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
-            if (isIntegerish && rounded >= 2 && rounded <= 200) {
-              logger.info(
-                `Normalizing unit cost for ${item.productName}: ${item.unitCost} → ${item.unitCost / rounded} (factor: ${rounded})`
-              );
-              item.unitCost = item.unitCost / rounded;
-            }
-          }
-        }
-
         // BR-PO-003: Validate non-negative unit cost (using Decimal for precision)
         const unitCostDecimal = new Decimal(item.unitCost);
         PurchaseOrderBusinessRules.validateUnitCost(Money.toNumber(unitCostDecimal));
@@ -249,26 +229,6 @@ export const purchaseOrderService = {
         // Validate each item
         for (const item of input.items) {
           InventoryBusinessRules.validatePositiveQuantity(item.quantity, 'PO item');
-
-          // Cost normalization (same as createPO)
-          const productRes = await client.query(
-            'SELECT cost_price FROM product_valuation WHERE product_id = $1',
-            [item.productId]
-          );
-          if (productRes.rows.length > 0) {
-            const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
-            if (baseCost > 0 && item.unitCost > 0) {
-              const ratio = item.unitCost / baseCost;
-              const rounded = Math.round(ratio);
-              const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
-              if (isIntegerish && rounded >= 2 && rounded <= 200) {
-                logger.info(
-                  `Normalizing unit cost for ${item.productName}: ${item.unitCost} → ${item.unitCost / rounded} (factor: ${rounded})`
-                );
-                item.unitCost = item.unitCost / rounded;
-              }
-            }
-          }
 
           const unitCostDecimal = new Decimal(item.unitCost);
           PurchaseOrderBusinessRules.validateUnitCost(Money.toNumber(unitCostDecimal));

@@ -37,6 +37,7 @@ import {
   PURCHASE_ORDER_RULES,
 } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
+import { UomSelector } from '../../components/inventory/UomSelector';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -58,8 +59,11 @@ interface POLineItem {
   productName: string;
   quantity: string;
   unitCost: string;
-  // Optional selected UoM tracking (for display and future conversions)
+  baseCost: string; // Base unit cost — needed for UOM cost recalculation
+  // SAP ME21N pattern: selected ordering UoM
   selectedUomId?: string | null;
+  selectedUomName?: string;
+  conversionFactor?: string;
   // Procurement intelligence (from search result)
   quantityOnHand?: number;
   reorderLevel?: number;
@@ -128,16 +132,19 @@ interface POItemRow {
   totalPrice?: number | string;
   total_price?: number | string;
   totalCost?: number | string;
+  uomId?: string;
+  uom_id?: string;
   uomName?: string;
   uom_name?: string;
   notes?: string;
 }
 
-// Spreadsheet-style Line Item Row with Tab/Enter navigation
+// Spreadsheet-style Line Item Row with Tab/Enter navigation (SAP ME21N pattern)
 function LineItemRow({
   item,
   index,
   onUpdate,
+  onUomChange,
   onRemove,
   disabled,
   onQtyRef,
@@ -147,6 +154,7 @@ function LineItemRow({
   item: POLineItem;
   index: number;
   onUpdate: (id: string, field: keyof POLineItem, value: string) => void;
+  onUomChange: (id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => void;
   onRemove: (id: string) => void;
   disabled: boolean;
   onQtyRef: (el: HTMLInputElement | null) => void;
@@ -189,6 +197,10 @@ function LineItemRow({
     }
   };
 
+  // SAP pattern: show base unit equivalent below the UOM selector
+  const factor = parseFloat(item.conversionFactor || '1');
+  const showConversion = factor > 1;
+
   return (
     <tr className={needsReorder ? 'bg-red-50' : ''}>
       <td className="px-3 py-2 text-sm text-gray-900">
@@ -223,6 +235,26 @@ function LineItemRow({
           disabled={disabled}
         />
       </td>
+      {/* SAP ME21N: Order Unit selector */}
+      <td className="px-2 py-2">
+        <div className="flex flex-col gap-0.5">
+          <UomSelector
+            productId={item.productId}
+            baseCost={item.baseCost || item.unitCost}
+            selectedUomId={item.selectedUomId}
+            disabled={disabled}
+            onChange={({ uomId, newCost, conversionFactor: cf, uomName }) => {
+              onUomChange(item.id, uomId, newCost, cf, uomName);
+            }}
+            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          {showConversion && (
+            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+              = {new Decimal(item.quantity || 0).times(factor).toFixed(0)} base
+            </span>
+          )}
+        </div>
+      </td>
       <td className="px-2 py-2">
         <input
           ref={(el) => { localCostRef.current = el; onCostRef(el); }}
@@ -237,6 +269,11 @@ function LineItemRow({
           placeholder="0.00"
           disabled={disabled}
         />
+        {showConversion && (
+          <div className="text-[10px] text-gray-400 mt-0.5 text-right">
+            {formatCurrency(new Decimal(item.unitCost || 0).div(factor).toNumber())}/pc
+          </div>
+        )}
       </td>
       <td className="px-2 py-2 text-right text-sm font-medium text-gray-900 whitespace-nowrap">
         {formatCurrency(lineTotal.toNumber())}
@@ -286,6 +323,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
         productName: item.productName,
         quantity: String(item.suggestedQty || 1),
         unitCost: item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00',
+        baseCost: item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00',
         selectedUomId: null,
         quantityOnHand: item.currentStock,
         reorderLevel: item.reorderPoint,
@@ -371,6 +409,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
       productName: product.name,
       quantity: suggestedQty,
       unitCost: initialCost,
+      baseCost: initialCost, // Base unit cost for UOM recalculation
       selectedUomId: product.purchaseUomId || null,
       quantityOnHand: product.quantityOnHand,
       reorderLevel: product.reorderLevel,
@@ -396,6 +435,17 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     setLineItems((prevItems) =>
       prevItems.map((item) =>
         item.id === id ? { ...item, [field]: value } : item
+      )
+    );
+  }, []);
+
+  // SAP ME21N: UOM change updates cost and tracks conversion factor
+  const handleUomChange = useCallback((id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => {
+    setLineItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, selectedUomId: uomId, unitCost: newCost, conversionFactor: factor, selectedUomName: uomName }
+          : item
       )
     );
   }, []);
@@ -601,6 +651,9 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
                       <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">
                         Qty
                       </th>
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-32">
+                        Order UoM
+                      </th>
                       <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
                         Unit Cost
                       </th>
@@ -618,6 +671,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
                         item={item}
                         index={idx}
                         onUpdate={updateLineItem}
+                        onUomChange={handleUomChange}
                         onRemove={removeLineItem}
                         disabled={isSubmitting}
                         onQtyRef={(el) => { if (el) qtyRefs.current.set(idx, el); else qtyRefs.current.delete(idx); }}
@@ -702,18 +756,23 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
   const [notes, setNotes] = useState(po.notes || '');
   const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
     if (!po.items || po.items.length === 0) return [];
-    return po.items.map((item: POItemRow) => ({
-      id: item.id || `existing-${Math.random()}`,
-      productId: item.product_id || item.productId || '',
-      productName: item.product_name || item.productName || '',
-      quantity: String(item.ordered_quantity || item.quantity || 0),
-      unitCost: String(item.unit_price || item.unitCost || 0),
-      selectedUomId: null,
-      quantityOnHand: undefined,
-      reorderLevel: undefined,
-      reorderQuantity: undefined,
-      costSource: '',
-    }));
+    return po.items.map((item: POItemRow) => {
+      const cost = String(item.unit_price || item.unitCost || 0);
+      return {
+        id: item.id || `existing-${Math.random()}`,
+        productId: item.product_id || item.productId || '',
+        productName: item.product_name || item.productName || '',
+        quantity: String(item.ordered_quantity || item.quantity || 0),
+        unitCost: cost,
+        baseCost: cost, // Will be recalculated when UOM data loads via UomSelector
+        selectedUomId: item.uom_id || item.uomId || null,
+        selectedUomName: item.uom_name || item.uomName || undefined,
+        quantityOnHand: undefined,
+        reorderLevel: undefined,
+        reorderQuantity: undefined,
+        costSource: '',
+      };
+    });
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -779,6 +838,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       productName: product.name,
       quantity: suggestedQty,
       unitCost: initialCost,
+      baseCost: initialCost,
       selectedUomId: product.purchaseUomId || null,
       quantityOnHand: product.quantityOnHand,
       reorderLevel: product.reorderLevel,
@@ -796,6 +856,17 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
 
   const updateLineItem = useCallback((id: string, field: keyof POLineItem, value: string) => {
     setLineItems((prev) => prev.map((item) => item.id === id ? { ...item, [field]: value } : item));
+  }, []);
+
+  // SAP ME22N: UOM change updates cost and tracks conversion factor
+  const handleUomChange = useCallback((id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => {
+    setLineItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, selectedUomId: uomId, unitCost: newCost, conversionFactor: factor, selectedUomName: uomName }
+          : item
+      )
+    );
   }, []);
 
   const removeLineItem = useCallback((id: string) => {
@@ -925,6 +996,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
                       <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">Qty</th>
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-32">Order UoM</th>
                       <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Unit Cost</th>
                       <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Line Total</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12"></th>
@@ -933,6 +1005,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
                   <tbody className="bg-white divide-y divide-gray-100">
                     {lineItems.map((item, idx) => (
                       <LineItemRow key={item.id} item={item} index={idx} onUpdate={updateLineItem}
+                        onUomChange={handleUomChange}
                         onRemove={removeLineItem} disabled={isSubmitting}
                         onQtyRef={(el) => { if (el) qtyRefs.current.set(idx, el); else qtyRefs.current.delete(idx); }}
                         onCostRef={(el) => { if (el) costRefs.current.set(idx, el); else costRefs.current.delete(idx); }}

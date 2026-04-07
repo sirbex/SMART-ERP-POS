@@ -152,6 +152,8 @@ interface POItemData {
   unitCost?: number | string;
   product_cost_price?: number | string;
   productCostPrice?: number | string;
+  uom_id?: string | null;
+  uomId?: string | null;
 }
 
 interface POData {
@@ -778,27 +780,17 @@ export default function GoodsReceiptsPage() {
         notes: null,
         receivedBy: user.id,
         items: poData.items.map((it: POItemData) => {
-          // Normalize unit cost to base units if PO unit_price looks like a UoM multiple
           const rawUnit = Number(it.unit_price ?? it.unitCost ?? 0);
-          const baseCost = Number(it.product_cost_price ?? it.productCostPrice ?? 0);
-          let normalizedUnit = rawUnit;
-          if (isFinite(rawUnit) && rawUnit > 0 && isFinite(baseCost) && baseCost > 0) {
-            const ratio = rawUnit / baseCost;
-            const rounded = Math.round(ratio);
-            const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
-            if (isIntegerish && rounded >= 2 && rounded <= 200) {
-              normalizedUnit = rawUnit / rounded;
-            }
-          }
           return {
             poItemId: it.id,
             productId: it.product_id || it.productId || '',
             productName: it.product_name || it.productName,
             orderedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
             receivedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
-            unitCost: normalizedUnit,
+            unitCost: rawUnit,
             batchNumber: null,
             expiryDate: null,
+            uomId: it.uom_id || it.uomId || null,
           };
         }),
       };

@@ -60,6 +60,7 @@ export interface CreateGRItemData {
   unitCost: number;
   batchNumber: string | null;
   expiryDate: string | null;
+  uomId?: string | null; // SAP pattern: inherited from PO item
 }
 
 export interface UpdateGRItemData {
@@ -155,7 +156,7 @@ export const goodsReceiptRepository = {
         item.batchNumber || null,
         item.expiryDate || null,
         item.unitCost,
-        null,  // uom_id - set to NULL for now (can be added later if needed)
+        item.uomId || null,  // SAP pattern: inherited from PO item
         item.poItemId || null  // po_item_id - link to purchase order item
       );
     });
