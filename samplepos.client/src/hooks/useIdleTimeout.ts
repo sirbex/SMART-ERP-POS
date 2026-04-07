@@ -20,6 +20,8 @@ const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
     'touchstart',
     'scroll',
     'click',
+    'wheel',        // trackpad / mouse-wheel scroll (bubbles, unlike scroll)
+    'pointerdown',  // covers stylus / pen input not caught by mouse/touch
 ];
 
 /** Default idle threshold in milliseconds (15 minutes) */
@@ -79,6 +81,9 @@ export function useIdleTimeout({
     useEffect(() => {
         if (!enabled) return;
 
+        // Track when the tab was last hidden so we can detect long absences
+        let hiddenAt: number | null = null;
+
         // Start timers initially
         resetTimers();
 
@@ -89,10 +94,19 @@ export function useIdleTimeout({
             window.addEventListener(event, handleActivity, { passive: true });
         }
 
-        // Also listen to visibility changes — reset when user returns to tab
+        // Visibility change: if user was away longer than timeout, logout immediately
         const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                resetTimers();
+            if (document.visibilityState === 'hidden') {
+                hiddenAt = Date.now();
+            } else if (document.visibilityState === 'visible') {
+                if (hiddenAt && Date.now() - hiddenAt >= timeoutMs) {
+                    // Tab was hidden longer than idle threshold → fire immediately
+                    onIdleRef.current();
+                } else {
+                    // Tab was hidden briefly → reset (user came back quickly)
+                    resetTimers();
+                }
+                hiddenAt = null;
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -107,5 +121,5 @@ export function useIdleTimeout({
             }
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [enabled, resetTimers]);
+    }, [enabled, resetTimers, timeoutMs]);
 }
