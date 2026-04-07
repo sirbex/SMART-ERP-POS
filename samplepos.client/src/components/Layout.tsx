@@ -21,7 +21,7 @@ interface NavItem {
 export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout } = useAuth();
-  const { data: rbacPermissions } = useMyPermissions();
+  const { data: rbacPermissions, isLoading: rbacLoading } = useMyPermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -67,11 +67,14 @@ export default function Layout({ children }: LayoutProps) {
       // Legacy role: ADMIN sees everything, MANAGER sees non-admin items
       if (user?.role === 'ADMIN') return true;
       if (isAdminOrManager && !adminNavItems.includes(item)) return true;
+      // While RBAC permissions are loading, show all non-admin items
+      // to prevent flash of empty sidebar
+      if (rbacLoading && !adminNavItems.includes(item)) return true;
       // RBAC check: any required permission present
       if (item.permissions.some(p => userPermKeys.has(p))) return true;
       return false;
     });
-  }, [user?.role, userPermKeys, isAdminOrManager]);
+  }, [user?.role, userPermKeys, isAdminOrManager, rbacLoading]);
 
   const handleLogout = () => {
     logout();

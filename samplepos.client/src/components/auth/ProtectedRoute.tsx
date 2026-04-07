@@ -29,7 +29,7 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
     const { isAuthenticated, user } = useAuth();
     const location = useLocation();
-    const { data: rbacPermissions } = useMyPermissions();
+    const { data: rbacPermissions, isLoading: rbacLoading } = useMyPermissions();
 
     // Not authenticated - redirect to login
     if (!isAuthenticated || !user) {
@@ -48,6 +48,20 @@ export function ProtectedRoute({
             : requiredRoles.every(role => user.role === role))
         : false;
 
+    // If legacy role matches, grant access immediately (no need to wait for RBAC)
+    if (hasRequiredRole) {
+        return <>{children}</>;
+    }
+
+    // RBAC permissions still loading — show spinner instead of premature redirect
+    if (rbacLoading && requiredPermissions && requiredPermissions.length > 0) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-gray-50">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+            </div>
+        );
+    }
+
     // Check RBAC permissions (from /rbac/me/permissions which includes legacy fallback)
     let hasRbacPermission = false;
     if (requiredPermissions && requiredPermissions.length > 0 && rbacPermissions) {
@@ -55,8 +69,8 @@ export function ProtectedRoute({
         hasRbacPermission = requiredPermissions.some(key => userPermKeys.has(key));
     }
 
-    // Grant access if EITHER check passes
-    if (hasRequiredRole || hasRbacPermission) {
+    // Grant access if RBAC permission matches
+    if (hasRbacPermission) {
         return <>{children}</>;
     }
 
@@ -86,20 +100,24 @@ export function ProtectedRoute({
 
 /**
  * Hook to check if user can access a feature (checks both legacy roles AND RBAC permissions)
+ * Returns { canAccess: boolean, isLoading: boolean } to prevent premature denial
  */
-export function useCanAccess(requiredRoles?: UserRole[], requiredPermissions?: string[], requireAnyRole: boolean = true): boolean {
+export function useCanAccess(requiredRoles?: UserRole[], requiredPermissions?: string[], requireAnyRole: boolean = true): { canAccess: boolean; isLoading: boolean } {
     const { isAuthenticated, user } = useAuth();
-    const { data: rbacPermissions } = useMyPermissions();
+    const { data: rbacPermissions, isLoading: rbacLoading } = useMyPermissions();
 
-    if (!isAuthenticated || !user) return false;
+    if (!isAuthenticated || !user) return { canAccess: false, isLoading: false };
 
     // No requirements — always accessible
-    if ((!requiredRoles || requiredRoles.length === 0) && (!requiredPermissions || requiredPermissions.length === 0)) return true;
+    if ((!requiredRoles || requiredRoles.length === 0) && (!requiredPermissions || requiredPermissions.length === 0)) return { canAccess: true, isLoading: false };
 
     // Legacy role check
     const hasRole = requiredRoles && requiredRoles.length > 0
         ? (requireAnyRole ? requiredRoles.includes(user.role) : requiredRoles.every(r => user.role === r))
         : false;
+
+    // If legacy role matches, immediately accessible
+    if (hasRole) return { canAccess: true, isLoading: false };
 
     // RBAC permission check
     let hasPerm = false;
@@ -108,7 +126,10 @@ export function useCanAccess(requiredRoles?: UserRole[], requiredPermissions?: s
         hasPerm = requiredPermissions.some(k => keys.has(k));
     }
 
-    return hasRole || hasPerm;
+    // If RBAC still loading and we haven't matched via legacy, report loading
+    if (rbacLoading && !hasPerm) return { canAccess: false, isLoading: true };
+
+    return { canAccess: hasPerm, isLoading: false };
 }
 
 /**
@@ -127,7 +148,7 @@ export function RoleGate({
     requireAnyRole?: boolean;
     fallback?: React.ReactNode;
 }) {
-    const canAccess = useCanAccess(requiredRoles, requiredPermissions, requireAnyRole);
+    const { canAccess } = useCanAccess(requiredRoles, requiredPermissions, requireAnyRole);
 
     if (!canAccess) {
         return <>{fallback}</>;
