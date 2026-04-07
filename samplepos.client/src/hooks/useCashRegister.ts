@@ -104,6 +104,12 @@ export function useUpdateRegister() {
 
 // Key for caching session in localStorage (offline resilience)
 const SESSION_CACHE_KEY = 'cash_register_session';
+const SESSION_POLICY_KEY = 'pos_session_policy';
+
+interface SessionWithPolicy {
+    session: CashRegisterSession | null;
+    posSessionPolicy: string;
+}
 
 function getCachedSession(): CashRegisterSession | null {
     try {
@@ -114,37 +120,54 @@ function getCachedSession(): CashRegisterSession | null {
     }
 }
 
+function getCachedSessionWithPolicy(): SessionWithPolicy {
+    return {
+        session: getCachedSession(),
+        posSessionPolicy: localStorage.getItem(SESSION_POLICY_KEY) || 'DISABLED',
+    };
+}
+
 /**
- * Get current user's open session.
+ * Get current user's open session + POS session policy (single API call).
  * Caches to localStorage so the POS stays usable when offline
  * (avoids the "Cash Register Required" overlay on network blips).
  */
 export function useCurrentSession() {
     const { isOnline } = useOfflineContext();
 
-    return useQuery({
+    const query = useQuery<SessionWithPolicy>({
         queryKey: QUERY_KEYS.currentSession,
-        queryFn: async () => {
-            const response = await api.get<{ success: boolean; data: CashRegisterSession | null }>(
-                '/cash-registers/sessions/current'
-            );
+        queryFn: async (): Promise<SessionWithPolicy> => {
+            const response = await api.get<{
+                success: boolean;
+                data: CashRegisterSession | null;
+                posSessionPolicy?: string;
+            }>('/cash-registers/sessions/current');
             const session = response.data.data;
+            const posSessionPolicy = response.data.posSessionPolicy || 'DISABLED';
             // Persist for offline use
             if (session) {
                 localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(session));
             } else {
                 localStorage.removeItem(SESSION_CACHE_KEY);
             }
-            return session;
+            localStorage.setItem(SESSION_POLICY_KEY, posSessionPolicy);
+            return { session, posSessionPolicy };
         },
         // Don't poll the server when offline — use cached data
         refetchInterval: isOnline ? 120_000 : false,
         staleTime: 60_000,
-        // Seed from localStorage so offline starts with last-known session
-        initialData: getCachedSession,
-        // Keep stale data visible while a background refetch is in-flight
-        placeholderData: (prev: CashRegisterSession | null | undefined) => prev ?? getCachedSession(),
+        // Seed from localStorage so offline starts with last-known state
+        initialData: getCachedSessionWithPolicy,
+        placeholderData: (prev) => prev ?? getCachedSessionWithPolicy(),
     });
+
+    // Expose session as `data` for backward compatibility + policy separately
+    return {
+        ...query,
+        data: query.data?.session ?? null,
+        posSessionPolicy: query.data?.posSessionPolicy ?? 'DISABLED',
+    };
 }
 
 /**

@@ -40,7 +40,6 @@ import { ServiceBadge } from '../../components/pos/ServiceBadge';
 import AddServiceItemDialog from '../../components/pos/AddServiceItemDialog';
 import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/cash-register';
 import { useCurrentSession } from '../../hooks/useCashRegister';
-import { useQuery } from '@tanstack/react-query';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
 import quotationApi from '../../api/quotations';
 import type {
@@ -254,20 +253,9 @@ export default function POSPage() {
     'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT'
   >('CASH');
 
-  // Cash register session for drawer tracking
-  const { data: currentSession, isLoading: isLoadingSession, isError: isSessionError } = useCurrentSession();
-
-  // Fetch POS session policy from system settings
-  const { data: posSessionPolicy } = useQuery<string>({
-    queryKey: ['systemSettings', 'posSessionPolicy'],
-    queryFn: async (): Promise<string> => {
-      const res = await api.get('/system-settings');
-      const settings = res.data?.data as Record<string, unknown> | undefined;
-      return (settings?.posSessionPolicy as string) || 'DISABLED';
-    },
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-  });
-  const sessionEnforced = posSessionPolicy !== undefined && posSessionPolicy !== 'DISABLED';
+  // Cash register session + policy (single API call, no dual queries)
+  const { data: currentSession, posSessionPolicy, isLoading: isLoadingSession, isError: isSessionError } = useCurrentSession();
+  const sessionEnforced = posSessionPolicy !== 'DISABLED';
 
   // State for showing open register dialog when required
   const [showOpenRegisterDialog, setShowOpenRegisterDialog] = useState(false);
@@ -2492,6 +2480,20 @@ export default function POSPage() {
           userMessage += `💰 Invalid Payment Amount\n\n${errorMsg}\n\n💡 Enter a valid positive payment amount.`;
         } else if (errorCode === 'ERR_PAYMENT_003') {
           userMessage += `💰 Overpayment Not Allowed\n\n${errorMsg}\n\n💡 For credit sales, payment cannot exceed the total. Reduce the payment amount.`;
+        } else if (errorCode?.startsWith('ERR_SESSION_')) {
+          // Session enforcement errors — prompt cashier to open/reopen register
+          userMessage += `🖥️ Cash Register Session Issue\n\n${errorMsg}\n\n`;
+          if (errorCode === 'ERR_SESSION_001') {
+            userMessage += `💡 You need to open a cash register session before making sales.`;
+          } else if (errorCode === 'ERR_SESSION_002') {
+            userMessage += `💡 Your session has expired or is invalid. Please close and reopen your register.`;
+          } else if (errorCode === 'ERR_SESSION_003') {
+            userMessage += `💡 Your register session was closed. Please open a new session to continue.`;
+          } else if (errorCode === 'ERR_SESSION_004') {
+            userMessage += `💡 This register is assigned to another cashier. Open your own session on an available register.`;
+          }
+          // Auto-trigger open register dialog so the user can fix it immediately
+          setShowOpenRegisterDialog(true);
         } else if (errorCode?.startsWith('ERR_SALE_') || errorCode?.startsWith('ERR_PAYMENT_')) {
           userMessage += `⚠️ Sale Error [${errorCode}]\n\n${errorMsg}`;
         } else if (

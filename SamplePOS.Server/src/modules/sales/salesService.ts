@@ -14,7 +14,7 @@ import * as costLayerService from '../../services/costLayerService.js';
 import { BankingService } from '../../services/bankingService.js';
 import { jobQueue } from '../../services/jobQueue.js';
 import { incrementMetric } from '../../routes/health.js';
-import { cashRegisterService } from '../cash-register/index.js';
+import { cashRegisterService, cashRegisterRepository } from '../cash-register/index.js';
 import { ValidationError, BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
@@ -24,7 +24,6 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
-import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -181,11 +180,15 @@ export const salesService = {
       await checkMaintenanceMode(client);
 
       // ========== POS SESSION ENFORCEMENT ==========
-      // Check session policy from system settings and validate session if required
+      // Reads policy via the SAME transactional client to avoid race conditions.
+      // Uses cashRegisterRepository.getSessionById (single source of truth).
       let validatedSessionId: string | null = null;
       try {
-        const settings = await systemSettingsService.getSettings(pool);
-        const policy = settings.posSessionPolicy || 'DISABLED';
+        // Read policy inside the transaction (same client) for serialisation safety
+        const policyRow = await client.query(
+          `SELECT pos_session_policy FROM system_settings LIMIT 1`
+        );
+        const policy = (policyRow.rows[0]?.pos_session_policy as string) || 'DISABLED';
 
         if (policy !== 'DISABLED') {
           if (!input.cashRegisterSessionId) {
@@ -196,13 +199,13 @@ export const salesService = {
             );
           }
 
-          // Validate the session exists and is OPEN
-          const sessionCheck = await client.query(
-            `SELECT id, status, user_id, register_id FROM cash_register_sessions WHERE id = $1`,
-            [input.cashRegisterSessionId]
+          // Validate session via the canonical repository method (reuses client = same TX)
+          const session = await cashRegisterRepository.getSessionById(
+            client,
+            input.cashRegisterSessionId
           );
 
-          if (sessionCheck.rows.length === 0) {
+          if (!session) {
             throw new BusinessError(
               'Invalid cash register session. The session does not exist.',
               'ERR_SESSION_002',
@@ -210,7 +213,6 @@ export const salesService = {
             );
           }
 
-          const session = sessionCheck.rows[0];
           if (session.status !== 'OPEN') {
             throw new BusinessError(
               `Cash register session is ${session.status}. Only OPEN sessions can process sales.`,
@@ -220,18 +222,21 @@ export const salesService = {
           }
 
           // Policy-specific validation
-          if (policy === 'PER_CASHIER_SESSION' && session.user_id !== input.soldBy) {
-            throw new BusinessError(
-              'This session belongs to a different cashier. Per-cashier policy requires your own session.',
-              'ERR_SESSION_004',
-              { sessionUserId: session.user_id, currentUserId: input.soldBy }
-            );
+          if (policy === 'PER_CASHIER_SESSION') {
+            if (session.userId !== input.soldBy) {
+              throw new BusinessError(
+                'This session belongs to a different cashier. Per-cashier policy requires your own session.',
+                'ERR_SESSION_004',
+                { sessionUserId: session.userId, currentUserId: input.soldBy, registerId: session.registerId }
+              );
+            }
           }
 
           validatedSessionId = input.cashRegisterSessionId;
           logger.info('POS session validated for sale', {
             sessionId: validatedSessionId,
             policy,
+            registerId: session.registerId,
             userId: input.soldBy,
           });
         } else if (input.cashRegisterSessionId) {

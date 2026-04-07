@@ -279,7 +279,7 @@ router.put(
 
 /**
  * GET /api/cash-registers/sessions/current
- * Get current user's open session
+ * Get current user's open session + active session policy
  */
 router.get(
     '/sessions/current',
@@ -289,9 +289,16 @@ router.get(
         const user = req.user as { id: string };
         const session = await cashRegisterService.getUserOpenSession(user.id, pool);
 
+        // Include session policy so the POS page needs only one request
+        const policyRow = await pool.query(
+            `SELECT pos_session_policy FROM system_settings LIMIT 1`
+        );
+        const posSessionPolicy = (policyRow.rows[0]?.pos_session_policy as string) || 'DISABLED';
+
         res.json({
             success: true,
             data: session, // null if no open session
+            posSessionPolicy,
         });
     })
 );
