@@ -515,6 +515,26 @@ export interface SupplierPaymentStatusRow {
     paymentTerms: string | null;
 }
 
+export interface SupplierPaymentDetailRow {
+    paymentNumber: string;
+    supplierName: string;
+    paymentDate: string;
+    amount: number;
+    paymentMethod: string;
+    status: string;
+    reference: string | null;
+    allocatedAmount: number;
+    unallocatedAmount: number;
+    notes: string | null;
+    allocations: SupplierPaymentAllocationRow[];
+}
+
+export interface SupplierPaymentAllocationRow {
+    invoiceNumber: string;
+    amountAllocated: number;
+    allocationDate: string;
+}
+
 // ── Customer Aging ──
 export interface CustomerAgingRow {
     customerId: string;

@@ -566,6 +566,8 @@ export const SupplierPaymentStatusItemSchema = z.object({
 export const SupplierPaymentStatusParamsSchema = z.object({
   supplier_id: z.string().uuid().optional(),
   status: z.enum(['PENDING', 'PAID', 'PARTIAL']).optional(),
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });
 

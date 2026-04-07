@@ -575,3 +575,43 @@ export const exportExpenses = asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="expenses_${new Date().toLocaleDateString('en-CA')}.csv"`);
   res.send(csv);
 });
+
+/**
+ * Enterprise Detailed Expense List with approval, GL account, payment tracking
+ * GET /api/expenses/reports/detailed-list
+ */
+export const getExpenseDetailedList = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
+  const { start_date, end_date, status, category_id } = req.query;
+
+  const report = await expenseService.getExpenseDetailedList({
+    startDate: start_date as string,
+    endDate: end_date as string,
+    status: status as string,
+    categoryId: category_id as string,
+  }, pool);
+
+  res.json({
+    success: true,
+    data: report,
+  });
+});
+
+/**
+ * Enterprise Approval Pipeline — expenses by approval stage with workflow metrics
+ * GET /api/expenses/reports/approval-pipeline
+ */
+export const getExpenseApprovalPipeline = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
+  const { start_date, end_date } = req.query;
+
+  const report = await expenseService.getExpenseApprovalPipeline({
+    startDate: start_date as string,
+    endDate: end_date as string,
+  }, pool);
+
+  res.json({
+    success: true,
+    data: report,
+  });
+});

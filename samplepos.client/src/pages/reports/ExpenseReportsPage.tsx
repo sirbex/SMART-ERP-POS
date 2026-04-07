@@ -91,7 +91,7 @@ interface DateRange {
 }
 
 
-type ExpenseReportType = 'SUMMARY' | 'BY_CATEGORY' | 'BY_VENDOR' | 'TRENDS' | 'BY_PAYMENT_METHOD';
+type ExpenseReportType = 'SUMMARY' | 'BY_CATEGORY' | 'BY_VENDOR' | 'TRENDS' | 'BY_PAYMENT_METHOD' | 'DETAILED_LIST' | 'APPROVAL_PIPELINE';
 
 interface ReportOption {
     value: ExpenseReportType;
@@ -130,6 +130,18 @@ const EXPENSE_REPORT_OPTIONS: ReportOption[] = [
         label: 'By Payment Method',
         description: 'Payment method distribution',
         icon: '💳'
+    },
+    {
+        value: 'DETAILED_LIST',
+        label: 'Detailed List',
+        description: 'Individual expenses with approval, GL account & payment tracking',
+        icon: '📋'
+    },
+    {
+        value: 'APPROVAL_PIPELINE',
+        label: 'Approval Pipeline',
+        description: 'Expense workflow stages with approval metrics',
+        icon: '✅'
     }
 ];
 
@@ -195,7 +207,9 @@ const ExpenseReportsPage: React.FC = () => {
                 'BY_CATEGORY': '/api/expenses/reports/by-category',
                 'BY_VENDOR': '/api/expenses/reports/by-vendor',
                 'TRENDS': '/api/expenses/reports/trends',
-                'BY_PAYMENT_METHOD': '/api/expenses/reports/by-payment-method'
+                'BY_PAYMENT_METHOD': '/api/expenses/reports/by-payment-method',
+                'DETAILED_LIST': '/api/expenses/reports/detailed-list',
+                'APPROVAL_PIPELINE': '/api/expenses/reports/approval-pipeline'
             };
 
             const url = `${endpointMap[selectedReport]}?${params.toString()}`;
@@ -276,7 +290,9 @@ const ExpenseReportsPage: React.FC = () => {
                 'BY_CATEGORY': '/api/expenses/reports/by-category',
                 'BY_VENDOR': '/api/expenses/reports/by-vendor',
                 'TRENDS': '/api/expenses/reports/trends',
-                'BY_PAYMENT_METHOD': '/api/expenses/reports/by-payment-method'
+                'BY_PAYMENT_METHOD': '/api/expenses/reports/by-payment-method',
+                'DETAILED_LIST': '/api/expenses/reports/detailed-list',
+                'APPROVAL_PIPELINE': '/api/expenses/reports/approval-pipeline'
             };
 
             const url = `${endpointMap[selectedReport]}?${params.toString()}`;
@@ -377,7 +393,7 @@ const ExpenseReportsPage: React.FC = () => {
                 {/* Report Type Selection */}
                 <div className="bg-white rounded-lg border shadow-sm p-6">
                     <h2 className="text-lg font-semibold mb-4">Report Type</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {EXPENSE_REPORT_OPTIONS.map((option) => (
                             <button
                                 key={option.value}

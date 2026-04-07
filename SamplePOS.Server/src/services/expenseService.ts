@@ -761,3 +761,33 @@ export const deleteExpenseCategory = async (id: string, userId: string, pool?: P
     throw error;
   }
 };
+
+/**
+ * Enterprise Detailed Expense List with approval, GL account, payment tracking
+ */
+export const getExpenseDetailedList = async (
+  filters: { startDate?: string; endDate?: string; status?: string; categoryId?: string },
+  pool?: Pool
+) => {
+  try {
+    return await expenseRepository.getExpenseDetailedList(filters, pool || globalPool);
+  } catch (error) {
+    logger.error('Error in expenseService getExpenseDetailedList', { error, filters });
+    throw new Error(`Failed to get detailed expense list: ${(error as Error).message}`);
+  }
+};
+
+/**
+ * Enterprise Approval Pipeline — expenses by approval stage with workflow metrics
+ */
+export const getExpenseApprovalPipeline = async (
+  filters: { startDate?: string; endDate?: string },
+  pool?: Pool
+) => {
+  try {
+    return await expenseRepository.getExpenseApprovalPipeline(filters, pool || globalPool);
+  } catch (error) {
+    logger.error('Error in expenseService getExpenseApprovalPipeline', { error, filters });
+    throw new Error(`Failed to get expense approval pipeline: ${(error as Error).message}`);
+  }
+};

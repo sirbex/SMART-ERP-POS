@@ -523,8 +523,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SUPPLIER_PAYMENT_STATUS',
     label: 'Supplier Payment Status',
-    description: 'Outstanding supplier payment tracking',
-    requiresDateRange: false,
+    description: 'Outstanding supplier payment tracking with payment details',
+    requiresDateRange: true,
     supportsFilters: ['supplier', 'status'],
     category: 'Supplier',
     icon: '💸',
@@ -793,6 +793,20 @@ interface ReportDataCategoryRow {
   profitMargin: number;
 }
 
+interface SupplierPaymentRecord {
+  paymentNumber: string;
+  supplierName: string;
+  paymentDate: string;
+  amount: number;
+  paymentMethod: string;
+  status: string;
+  reference?: string;
+  allocatedAmount: number;
+  unallocatedAmount: number;
+  notes?: string;
+  allocations: { invoiceNumber: string; amountAllocated: number; allocationDate: string }[];
+}
+
 interface ReportData {
   reportName?: string;
   reportType?: string;
@@ -804,6 +818,7 @@ interface ReportData {
   customer?: ReportDataCustomer;
   transactions?: Record<string, unknown>[];
   byCategory?: ReportDataCategoryRow[];
+  payments?: SupplierPaymentRecord[];
   [key: string]: unknown;
 }
 
@@ -968,8 +983,8 @@ export default function ReportsPage() {
         params.movementType = movementType;
       } else if (selectedReport === 'WASTE_DAMAGE_REPORT' && reason) {
         params.reason = reason;
-      } else if (selectedReport === 'SUPPLIER_PAYMENT_STATUS' && status) {
-        params.status = status;
+      } else if (selectedReport === 'SUPPLIER_PAYMENT_STATUS') {
+        if (status) params.status = status;
       } else if (selectedReport === 'SALES_COMPARISON') {
         // Sales Comparison requires 4 dates: current period and previous period
         params.currentStartDate = startDate;
@@ -2323,6 +2338,116 @@ export default function ReportsPage() {
               )}
             </div>
           )
+        )}
+
+        {/* Supplier Payment Records Detail */}
+        {reportData.reportType === 'SUPPLIER_PAYMENT_STATUS' && reportData.payments && reportData.payments.length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-base sm:text-lg font-semibold text-white">💳 Individual Payment Records</h4>
+              <span className="text-orange-100 text-xs sm:text-sm">{reportData.payments.length} payments</span>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="block sm:hidden p-4 space-y-4">
+              {reportData.payments.map((payment, idx) => (
+                <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <span className="font-bold text-indigo-600 text-sm">{payment.paymentNumber}</span>
+                      <p className="text-xs text-gray-500 mt-1">{formatDisplayDate(payment.paymentDate)}</p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                      payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>{payment.status}</span>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900 mb-2">{payment.supplierName}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Amount</div>
+                      <div className="text-sm font-bold text-green-600">{formatCurrency(payment.amount || 0)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Method</div>
+                      <div className="text-sm font-semibold text-gray-900">{payment.paymentMethod}</div>
+                    </div>
+                    {payment.reference && (
+                      <div className="col-span-2">
+                        <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Reference</div>
+                        <div className="text-sm text-gray-700">{payment.reference}</div>
+                      </div>
+                    )}
+                  </div>
+                  {payment.allocations && payment.allocations.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">Allocations</div>
+                      {payment.allocations.map((alloc, aIdx) => (
+                        <div key={aIdx} className="flex justify-between text-xs text-gray-600">
+                          <span>{alloc.invoiceNumber}</span>
+                          <span className="font-medium">{formatCurrency(alloc.amountAllocated || 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full min-w-full">
+                <thead className="bg-gray-100 border-b-2 border-gray-300">
+                  <tr>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Payment #</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Supplier</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Amount</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Method</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Reference</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Allocations</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {reportData.payments.map((payment, idx) => (
+                    <tr key={idx} className="hover:bg-blue-50 transition-colors">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                        <span className="font-bold text-indigo-600">{payment.paymentNumber}</span>
+                      </td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-gray-900">{payment.supplierName}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-600">{formatDisplayDate(payment.paymentDate)}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right font-bold text-green-600">{formatCurrency(payment.amount || 0)}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">{payment.paymentMethod}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                          payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                          payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>{payment.status}</span>
+                      </td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-600">{payment.reference || '-'}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                        {payment.allocations && payment.allocations.length > 0 ? (
+                          <div className="space-y-1">
+                            {payment.allocations.map((alloc, aIdx) => (
+                              <div key={aIdx} className="flex justify-between gap-2 text-xs">
+                                <span className="text-blue-600">{alloc.invoiceNumber}</span>
+                                <span className="font-medium text-gray-700">{formatCurrency(alloc.amountAllocated || 0)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         {/* Export Buttons - Enhanced */}

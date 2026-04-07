@@ -1812,6 +1812,8 @@ export const reportsController = {
     const report = await reportsService.generateSupplierPaymentStatus(pool, {
       supplierId: params.supplier_id,
       status: params.status,
+      startDate: params.start_date,
+      endDate: params.end_date,
       format: params.format,
       userId,
     });
@@ -1887,6 +1889,30 @@ export const reportsController = {
       ];
 
       pdfGen.addTable(columns, report.data);
+
+      // Add individual payment records section
+      if (report.payments && report.payments.length > 0) {
+        pdfGen.addSectionHeading('Individual Payment Records');
+
+        const paymentColumns: PDFTableColumn[] = [
+          { header: 'Payment #', key: 'paymentNumber', width: 0.15 },
+          { header: 'Supplier', key: 'supplierName', width: 0.25 },
+          { header: 'Date', key: 'paymentDate', width: 0.12 },
+          {
+            header: 'Amount',
+            key: 'amount',
+            width: 0.16,
+            align: 'right',
+            format: (v) => formatCurrencyPDF(v),
+          },
+          { header: 'Method', key: 'paymentMethod', width: 0.12 },
+          { header: 'Status', key: 'status', width: 0.1 },
+          { header: 'Ref', key: 'reference', width: 0.1 },
+        ];
+
+        pdfGen.addTable(paymentColumns, report.payments);
+      }
+
       pdfGen.end();
       return;
     }
@@ -4021,6 +4047,8 @@ export const reportsController = {
         queryParams = {
           supplier_id: params.supplierId,
           status: params.status,
+          start_date: params.startDate,
+          end_date: params.endDate,
           format: params.format,
         };
         return await reportsController.getSupplierPaymentStatus(modifiedReq, res, pool);

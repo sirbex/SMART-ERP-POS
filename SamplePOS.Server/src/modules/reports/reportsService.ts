@@ -1325,13 +1325,24 @@ export const reportsService = {
     options: {
       supplierId?: string;
       status?: 'PAID' | 'PARTIAL' | 'PENDING';
+      startDate?: string;
+      endDate?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getSupplierPaymentStatus(pool, options);
+    // Fetch both supplier-level GL summary and individual payment records in parallel
+    const [data, payments] = await Promise.all([
+      reportsRepository.getSupplierPaymentStatus(pool, options),
+      reportsRepository.getSupplierPaymentDetails(pool, {
+        supplierId: options.supplierId,
+        status: options.status === 'PAID' ? 'COMPLETED' : options.status,
+        startDate: options.startDate,
+        endDate: options.endDate,
+      }),
+    ]);
 
     const summary = {
       totalSuppliers: data.length,
@@ -1347,6 +1358,11 @@ export const reportsService = {
         .reduce((sum, s) => new Decimal(sum).plus(s.outstandingBalance), new Decimal(0))
         .toDecimalPlaces(2)
         .toNumber(),
+      totalPayments: payments.length,
+      totalPaymentAmount: payments
+        .reduce((sum, p) => new Decimal(sum).plus(p.amount), new Decimal(0))
+        .toDecimalPlaces(2)
+        .toNumber(),
     };
 
     const executionTime = Date.now() - startTime;
@@ -1356,8 +1372,8 @@ export const reportsService = {
       reportName: 'Supplier Payment Status Report',
       parameters: options,
       generatedById: options.userId || null,
-      startDate: null,
-      endDate: null,
+      startDate: options.startDate || null,
+      endDate: options.endDate || null,
       recordCount: data.length,
       fileFormat: options.format || 'json',
       executionTimeMs: executionTime,
@@ -1377,6 +1393,7 @@ export const reportsService = {
       }),
       parameters: options,
       data,
+      payments,
       summary,
       recordCount: data.length,
       executionTimeMs: executionTime,

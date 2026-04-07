@@ -45,6 +45,18 @@ router.get('/reports/by-payment-method', requirePermission('expenses.read'), exp
 router.get('/reports/export', requirePermission('expenses.export'), expenseController.exportExpenses);
 
 /**
+ * @route GET /api/expenses/reports/detailed-list
+ * @desc Enterprise detailed expense list with approval, GL account, payment tracking
+ */
+router.get('/reports/detailed-list', requirePermission('expenses.read'), expenseController.getExpenseDetailedList);
+
+/**
+ * @route GET /api/expenses/reports/approval-pipeline
+ * @desc Enterprise approval pipeline — expenses by approval stage with workflow metrics
+ */
+router.get('/reports/approval-pipeline', requirePermission('expenses.read'), expenseController.getExpenseApprovalPipeline);
+
+/**
  * @route GET /api/expenses
  * @desc Get paginated list of expenses with filtering
  */

@@ -1001,3 +1001,166 @@ export const getExpenseCountByCategory = async (categoryId: string, dbPool?: pg.
     throw error;
   }
 };
+
+/**
+ * Enterprise Detailed Expense List with approval, GL account, and payment tracking
+ */
+export const getExpenseDetailedList = async (
+  filters: { startDate?: string; endDate?: string; status?: string; categoryId?: string },
+  dbPool?: pg.Pool | pg.PoolClient
+) => {
+  const pool = dbPool || globalPool;
+  try {
+    const params: unknown[] = [];
+    const conditions: string[] = [];
+
+    if (filters.startDate) {
+      params.push(filters.startDate);
+      conditions.push(`e.expense_date >= $${params.length}::date`);
+    }
+    if (filters.endDate) {
+      params.push(filters.endDate);
+      conditions.push(`e.expense_date <= $${params.length}::date`);
+    }
+    if (filters.status) {
+      params.push(filters.status);
+      conditions.push(`e.status = $${params.length}`);
+    }
+    if (filters.categoryId) {
+      params.push(filters.categoryId);
+      conditions.push(`e.category_id = $${params.length}::uuid`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const query = `
+      SELECT 
+        e.expense_number,
+        e.title,
+        e.amount::numeric(10,2) as amount,
+        e.expense_date::date as expense_date,
+        COALESCE(c.name, 'Uncategorized') as category_name,
+        COALESCE(c.code, '') as category_code,
+        COALESCE(a."AccountCode", '') as gl_account_code,
+        COALESCE(a."AccountName", '') as gl_account_name,
+        e.status,
+        e.payment_status,
+        e.payment_method,
+        COALESCE(NULLIF(TRIM(e.vendor), ''), 'N/A') as vendor,
+        e.receipt_number,
+        e.reference_number,
+        COALESCE(uc.full_name, 'System') as created_by,
+        COALESCE(ua.full_name, '') as approved_by,
+        e.approved_at,
+        COALESCE(ur.full_name, '') as rejected_by,
+        e.rejected_at,
+        e.rejection_reason,
+        COALESCE(up.full_name, '') as paid_by,
+        e.paid_at,
+        CASE
+          WHEN e.status = 'PENDING_APPROVAL' THEN
+            EXTRACT(DAY FROM NOW() - e.created_at)::integer
+          ELSE NULL
+        END as days_pending,
+        e.notes,
+        e.created_at
+      FROM expenses e
+      LEFT JOIN expense_categories c ON e.category_id = c.id
+      LEFT JOIN accounts a ON e.account_id = a."Id"
+      LEFT JOIN users uc ON e.created_by = uc.id
+      LEFT JOIN users ua ON e.approved_by = ua.id
+      LEFT JOIN users ur ON e.rejected_by = ur.id
+      LEFT JOIN users up ON e.paid_by = up.id
+      ${whereClause}
+      ORDER BY e.expense_date DESC, e.created_at DESC
+    `;
+
+    const result = await pool.query(query, params);
+
+    return result.rows.map(row => ({
+      expenseNumber: row.expense_number,
+      title: row.title,
+      amount: parseFloat(row.amount || '0'),
+      expenseDate: row.expense_date,
+      categoryName: row.category_name,
+      categoryCode: row.category_code,
+      glAccountCode: row.gl_account_code,
+      glAccountName: row.gl_account_name,
+      status: row.status,
+      paymentStatus: row.payment_status,
+      paymentMethod: row.payment_method || 'N/A',
+      vendor: row.vendor,
+      receiptNumber: row.receipt_number || '',
+      referenceNumber: row.reference_number || '',
+      createdBy: row.created_by,
+      approvedBy: row.approved_by || '',
+      approvedAt: row.approved_at ? row.approved_at.toISOString().split('T')[0] : '',
+      rejectedBy: row.rejected_by || '',
+      rejectedAt: row.rejected_at ? row.rejected_at.toISOString().split('T')[0] : '',
+      rejectionReason: row.rejection_reason || '',
+      paidBy: row.paid_by || '',
+      paidAt: row.paid_at ? row.paid_at.toISOString().split('T')[0] : '',
+      daysPending: row.days_pending,
+      notes: row.notes || '',
+    }));
+  } catch (error) {
+    logger.error('Error in expenseRepository getExpenseDetailedList', { error, filters });
+    throw error;
+  }
+};
+
+/**
+ * Enterprise Approval Pipeline — expenses grouped by approval status with workflow metrics
+ */
+export const getExpenseApprovalPipeline = async (
+  filters: { startDate?: string; endDate?: string },
+  dbPool?: pg.Pool | pg.PoolClient
+) => {
+  const pool = dbPool || globalPool;
+  try {
+    const query = `
+      SELECT 
+        e.status,
+        COUNT(e.id)::integer as expense_count,
+        COALESCE(SUM(e.amount), 0)::numeric(10,2) as total_amount,
+        COALESCE(AVG(e.amount), 0)::numeric(10,2) as average_amount,
+        COALESCE(MIN(e.amount), 0)::numeric(10,2) as min_amount,
+        COALESCE(MAX(e.amount), 0)::numeric(10,2) as max_amount,
+        CASE 
+          WHEN e.status = 'PENDING_APPROVAL' THEN
+            COALESCE(AVG(EXTRACT(DAY FROM NOW() - e.created_at)), 0)::numeric(10,1)
+          WHEN e.status IN ('APPROVED', 'PAID') THEN
+            COALESCE(AVG(EXTRACT(DAY FROM e.approved_at - e.created_at)), 0)::numeric(10,1)
+          ELSE NULL
+        END as avg_days_in_status
+      FROM expenses e
+      WHERE ($1::date IS NULL OR e.expense_date >= $1)
+        AND ($2::date IS NULL OR e.expense_date <= $2)
+      GROUP BY e.status
+      ORDER BY 
+        CASE e.status
+          WHEN 'DRAFT' THEN 1
+          WHEN 'PENDING_APPROVAL' THEN 2
+          WHEN 'APPROVED' THEN 3
+          WHEN 'REJECTED' THEN 4
+          WHEN 'PAID' THEN 5
+          WHEN 'CANCELLED' THEN 6
+        END
+    `;
+
+    const result = await pool.query(query, [filters.startDate || null, filters.endDate || null]);
+
+    return result.rows.map(row => ({
+      status: row.status,
+      expenseCount: parseInt(row.expense_count, 10),
+      totalAmount: parseFloat(row.total_amount || '0'),
+      averageAmount: parseFloat(row.average_amount || '0'),
+      minAmount: parseFloat(row.min_amount || '0'),
+      maxAmount: parseFloat(row.max_amount || '0'),
+      avgDaysInStatus: row.avg_days_in_status ? parseFloat(row.avg_days_in_status) : null,
+    }));
+  } catch (error) {
+    logger.error('Error in expenseRepository getExpenseApprovalPipeline', { error, filters });
+    throw error;
+  }
+};

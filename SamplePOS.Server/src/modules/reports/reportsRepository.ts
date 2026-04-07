@@ -31,6 +31,8 @@ import type {
   DeletedItemRow,
   ProfitMarginByProductRow,
   SupplierPaymentStatusRow,
+  SupplierPaymentDetailRow,
+  SupplierPaymentAllocationRow,
   CustomerAgingRow,
   WasteDamageRow,
   ReorderRecommendationRow,
@@ -2199,6 +2201,111 @@ export const reportsRepository = {
       outstandingBalance: new Decimal(row.outstanding_balance || 0).toDecimalPlaces(2).toNumber(),
       lastOrderDate: formatDate(row.last_order_date),
       paymentTerms: row.payment_terms,
+    }));
+  },
+
+  /**
+   * SUPPLIER PAYMENT DETAILS
+   * Individual payment records from supplier_payments table with allocations
+   */
+  async getSupplierPaymentDetails(
+    pool: Pool,
+    options: {
+      supplierId?: string;
+      status?: string;
+      startDate?: string;
+      endDate?: string;
+    }
+  ): Promise<SupplierPaymentDetailRow[]> {
+    const params: unknown[] = [];
+    const filters: string[] = ['sp.deleted_at IS NULL'];
+
+    if (options.supplierId) {
+      params.push(options.supplierId);
+      filters.push(`sp."SupplierId" = $${params.length}`);
+    }
+
+    if (options.status) {
+      params.push(options.status);
+      filters.push(`sp."Status" = $${params.length}`);
+    }
+
+    if (options.startDate) {
+      params.push(options.startDate);
+      filters.push(`sp."PaymentDate"::date >= $${params.length}::date`);
+    }
+
+    if (options.endDate) {
+      params.push(options.endDate);
+      filters.push(`sp."PaymentDate"::date <= $${params.length}::date`);
+    }
+
+    const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const query = `
+      SELECT 
+        sp."Id" as payment_id,
+        sp."PaymentNumber" as payment_number,
+        s."CompanyName" as supplier_name,
+        sp."PaymentDate"::date as payment_date,
+        sp."Amount" as amount,
+        sp."PaymentMethod" as payment_method,
+        sp."Status" as status,
+        sp."Reference" as reference,
+        COALESCE(sp."AllocatedAmount", sp.allocated_amount, 0) as allocated_amount,
+        COALESCE(sp."UnallocatedAmount", 0) as unallocated_amount,
+        sp."Notes" as notes,
+        sp."CreatedAt" as created_at
+      FROM supplier_payments sp
+      JOIN suppliers s ON s."Id" = sp."SupplierId"
+      ${whereClause}
+      ORDER BY sp."PaymentDate" DESC, sp."PaymentNumber" DESC
+    `;
+
+    const result = await pool.query(query, params);
+
+    // Fetch allocations for all payments in one query
+    const paymentIds = result.rows.map((r) => r.payment_id);
+    let allocationsMap: Record<string, SupplierPaymentAllocationRow[]> = {};
+
+    if (paymentIds.length > 0) {
+      const allocQuery = `
+        SELECT 
+          spa."PaymentId" as payment_id,
+          si."SupplierInvoiceNumber" as invoice_number,
+          spa."AmountAllocated" as amount_allocated,
+          spa."AllocationDate"::date as allocation_date
+        FROM supplier_payment_allocations spa
+        JOIN supplier_invoices si ON si."Id" = spa."SupplierInvoiceId"
+        WHERE spa."PaymentId" = ANY($1::uuid[])
+          AND spa.deleted_at IS NULL
+        ORDER BY spa."AllocationDate" DESC
+      `;
+      const allocResult = await pool.query(allocQuery, [paymentIds]);
+      allocationsMap = allocResult.rows.reduce((acc: Record<string, SupplierPaymentAllocationRow[]>, row) => {
+        const pid = row.payment_id;
+        if (!acc[pid]) acc[pid] = [];
+        acc[pid].push({
+          invoiceNumber: row.invoice_number,
+          amountAllocated: new Decimal(row.amount_allocated || 0).toDecimalPlaces(2).toNumber(),
+          allocationDate: formatDate(row.allocation_date) || '',
+        });
+        return acc;
+      }, {});
+    }
+
+    return result.rows.map((row) => ({
+      paymentNumber: row.payment_number,
+      supplierName: row.supplier_name,
+      paymentDate: formatDate(row.payment_date) || '',
+      amount: new Decimal(row.amount || 0).toDecimalPlaces(2).toNumber(),
+      paymentMethod: row.payment_method || 'N/A',
+      status: row.status || 'N/A',
+      reference: row.reference,
+      allocatedAmount: new Decimal(row.allocated_amount || 0).toDecimalPlaces(2).toNumber(),
+      unallocatedAmount: new Decimal(row.unallocated_amount || 0).toDecimalPlaces(2).toNumber(),
+      notes: row.notes,
+      allocations: allocationsMap[row.payment_id] || [],
     }));
   },
 
