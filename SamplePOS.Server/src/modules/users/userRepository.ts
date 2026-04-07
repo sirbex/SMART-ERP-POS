@@ -18,16 +18,21 @@ export async function findAllUsers(dbPool?: DbClient): Promise<User[]> {
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
-      id,
-      user_number as "userNumber",
-      email,
-      full_name as "fullName",
-      role,
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt"
-    FROM users 
-    ORDER BY created_at DESC`
+      u.id,
+      u.user_number as "userNumber",
+      u.email,
+      u.full_name as "fullName",
+      u.role,
+      u.is_active as "isActive",
+      u.created_at as "createdAt",
+      u.updated_at as "updatedAt",
+      r.id as "rbacRoleId",
+      r.name as "rbacRoleName"
+    FROM users u
+    LEFT JOIN rbac_user_roles ur ON ur.user_id = u.id AND ur.is_active = true
+      AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+    LEFT JOIN rbac_roles r ON r.id = ur.role_id AND r.is_active = true
+    ORDER BY u.created_at DESC`
   );
 
   return result.rows;
@@ -40,16 +45,21 @@ export async function findUserById(id: string, dbPool?: DbClient): Promise<User 
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
-      id,
-      user_number as "userNumber",
-      email,
-      full_name as "fullName",
-      role,
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt"
-    FROM users 
-    WHERE id = $1`,
+      u.id,
+      u.user_number as "userNumber",
+      u.email,
+      u.full_name as "fullName",
+      u.role,
+      u.is_active as "isActive",
+      u.created_at as "createdAt",
+      u.updated_at as "updatedAt",
+      r.id as "rbacRoleId",
+      r.name as "rbacRoleName"
+    FROM users u
+    LEFT JOIN rbac_user_roles ur ON ur.user_id = u.id AND ur.is_active = true
+      AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+    LEFT JOIN rbac_roles r ON r.id = ur.role_id AND r.is_active = true
+    WHERE u.id = $1`,
     [id]
   );
 
@@ -85,6 +95,7 @@ export async function findUserByEmail(email: string, dbPool?: DbClient): Promise
 export async function createUser(data: CreateUser, dbPool?: DbClient): Promise<User> {
   const pool = dbPool || globalPool;
   const passwordHash = await bcrypt.hash(data.password, SALT_ROUNDS);
+  const role = data.role || 'STAFF';
 
   const result = await pool.query(
     `INSERT INTO users (email, password_hash, full_name, role, is_active, user_number)
@@ -98,7 +109,7 @@ export async function createUser(data: CreateUser, dbPool?: DbClient): Promise<U
       is_active as "isActive",
       created_at as "createdAt",
       updated_at as "updatedAt"`,
-    [data.email, passwordHash, data.fullName, data.role, true]
+    [data.email, passwordHash, data.fullName, role, true]
   );
 
   return result.rows[0];

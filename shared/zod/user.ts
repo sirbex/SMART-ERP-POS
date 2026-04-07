@@ -44,14 +44,18 @@ export const CreateUserSchema = z.object({
   email: z.string().email('Invalid email format'),
   password: StrongPasswordSchema,
   fullName: z.string().min(1, 'Full name is required').max(255),
-  role: UserRoleEnum,
+  role: UserRoleEnum.optional(),
+  rbacRoleId: z.string().uuid('Invalid RBAC role ID').optional(),
   isActive: z.boolean().optional().default(true),
-}).strict();
+}).strict().refine(data => data.role || data.rbacRoleId, {
+  message: 'Either role or rbacRoleId must be provided',
+});
 
 export const UpdateUserSchema = z.object({
   email: z.string().email().optional(),
   fullName: z.string().min(1).max(255).optional(),
   role: UserRoleEnum.optional(),
+  rbacRoleId: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
 }).strict();
 

@@ -20,6 +20,8 @@ interface User {
   email: string;
   fullName: string;
   role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
+  rbacRoleId?: string;
+  rbacRoleName?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -57,13 +59,13 @@ interface CreateUserData {
   email: string;
   password: string;
   fullName: string;
-  role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
+  rbacRoleId: string;
 }
 
 interface UpdateUserData {
   email?: string;
   fullName?: string;
-  role?: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
+  rbacRoleId?: string;
   isActive?: boolean;
 }
 
@@ -75,6 +77,7 @@ interface ResetPasswordData {
 export default function UserManagementTab() {
   const [users, setUsers] = useState<User[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [rbacRoles, setRbacRoles] = useState<RbacRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
@@ -90,6 +93,7 @@ export default function UserManagementTab() {
   useEffect(() => {
     fetchUsers();
     fetchStats();
+    fetchRbacRoles();
   }, []);
 
   const fetchUsers = async () => {
@@ -118,6 +122,17 @@ export default function UserManagementTab() {
       }
     } catch (err) {
       console.error('Failed to fetch stats:', err);
+    }
+  };
+
+  const fetchRbacRoles = async () => {
+    try {
+      const { data: result } = await api.get('/rbac/roles');
+      if (result.success) {
+        setRbacRoles(result.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch RBAC roles:', err);
     }
   };
 
@@ -194,7 +209,7 @@ export default function UserManagementTab() {
       user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       user.fullName?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesRole = roleFilter === 'ALL' || user.role === roleFilter;
+    const matchesRole = roleFilter === 'ALL' || user.rbacRoleName === roleFilter || (!user.rbacRoleName && user.role === roleFilter);
     const matchesStatus =
       statusFilter === 'ALL' ||
       (statusFilter === 'ACTIVE' && user.isActive) ||
@@ -203,16 +218,30 @@ export default function UserManagementTab() {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  const getRoleBadgeColor = (role: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF') => {
-    switch (role) {
+  const getRoleBadgeColor = (roleName: string) => {
+    switch (roleName) {
+      case 'Super Administrator':
       case 'ADMIN':
         return 'bg-red-100 text-red-800';
+      case 'Administrator':
+        return 'bg-orange-100 text-orange-800';
+      case 'Manager':
       case 'MANAGER':
         return 'bg-purple-100 text-purple-800';
+      case 'Cashier':
       case 'CASHIER':
         return 'bg-blue-100 text-blue-800';
+      case 'Auditor':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'Accountant':
+        return 'bg-emerald-100 text-emerald-800';
+      case 'Warehouse Clerk':
+        return 'bg-cyan-100 text-cyan-800';
+      case 'Sales Representative':
+        return 'bg-indigo-100 text-indigo-800';
+      case 'HR Manager':
+        return 'bg-pink-100 text-pink-800';
       case 'STAFF':
-        return 'bg-gray-100 text-gray-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -311,10 +340,9 @@ export default function UserManagementTab() {
                 aria-label="Filter by role"
               >
                 <option value="ALL">All Roles</option>
-                <option value="ADMIN">Admin</option>
-                <option value="MANAGER">Manager</option>
-                <option value="CASHIER">Cashier</option>
-                <option value="STAFF">Staff</option>
+                {rbacRoles.map((role) => (
+                  <option key={role.id} value={role.name}>{role.name}</option>
+                ))}
               </select>
 
               {/* Status Filter */}
@@ -414,10 +442,10 @@ export default function UserManagementTab() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleBadgeColor(
-                          user.role
+                          user.rbacRoleName || user.role
                         )}`}
                       >
-                        {user.role}
+                        {user.rbacRoleName || user.role}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -485,12 +513,13 @@ export default function UserManagementTab() {
 
       {/* Modals */}
       {isCreateModalOpen && (
-        <CreateUserModal onClose={() => setIsCreateModalOpen(false)} onCreate={handleCreateUser} />
+        <CreateUserModal onClose={() => setIsCreateModalOpen(false)} onCreate={handleCreateUser} rbacRoles={rbacRoles} />
       )}
 
       {isEditModalOpen && selectedUser && (
         <EditUserModal
           user={selectedUser}
+          rbacRoles={rbacRoles}
           onClose={() => {
             setIsEditModalOpen(false);
             setSelectedUser(null);
@@ -539,20 +568,27 @@ export default function UserManagementTab() {
 function CreateUserModal({
   onClose,
   onCreate,
+  rbacRoles,
 }: {
   onClose: () => void;
   onCreate: (data: CreateUserData) => void;
+  rbacRoles: RbacRole[];
 }) {
   const [formData, setFormData] = useState<CreateUserData>({
     email: '',
     password: '',
     fullName: '',
-    role: 'STAFF',
+    rbacRoleId: '',
   });
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!formData.rbacRoleId) {
+      alert('Please select a role');
+      return;
+    }
 
     if (formData.password !== confirmPassword) {
       alert('Passwords do not match');
@@ -609,17 +645,19 @@ function CreateUserModal({
             <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
             <select
               required
-              value={formData.role}
+              value={formData.rbacRoleId}
               onChange={(e) =>
-                setFormData({ ...formData, role: e.target.value as CreateUserData['role'] })
+                setFormData({ ...formData, rbacRoleId: e.target.value })
               }
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               aria-label="User role"
             >
-              <option value="STAFF">Staff</option>
-              <option value="CASHIER">Cashier</option>
-              <option value="MANAGER">Manager</option>
-              <option value="ADMIN">Admin</option>
+              <option value="">Select a role...</option>
+              {rbacRoles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -675,17 +713,19 @@ function CreateUserModal({
 // Edit User Modal Component
 function EditUserModal({
   user,
+  rbacRoles,
   onClose,
   onUpdate,
 }: {
   user: User;
+  rbacRoles: RbacRole[];
   onClose: () => void;
   onUpdate: (data: UpdateUserData) => void;
 }) {
   const [formData, setFormData] = useState<UpdateUserData>({
     email: user.email,
     fullName: user.fullName,
-    role: user.role,
+    rbacRoleId: user.rbacRoleId || '',
     isActive: user.isActive,
   });
 
@@ -739,17 +779,19 @@ function EditUserModal({
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
             <select
-              value={formData.role}
+              value={formData.rbacRoleId}
               onChange={(e) =>
-                setFormData({ ...formData, role: e.target.value as UpdateUserData['role'] })
+                setFormData({ ...formData, rbacRoleId: e.target.value })
               }
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               aria-label="User role"
             >
-              <option value="STAFF">Staff</option>
-              <option value="CASHIER">Cashier</option>
-              <option value="MANAGER">Manager</option>
-              <option value="ADMIN">Admin</option>
+              <option value="">Select a role...</option>
+              {rbacRoles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
             </select>
           </div>
 
