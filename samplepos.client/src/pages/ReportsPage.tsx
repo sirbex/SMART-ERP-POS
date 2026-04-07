@@ -524,7 +524,7 @@ const REPORT_OPTIONS: ReportOption[] = [
     value: 'SUPPLIER_PAYMENT_STATUS',
     label: 'Supplier Payment Status',
     description: 'Outstanding supplier payment tracking with payment details',
-    requiresDateRange: true,
+    requiresDateRange: false,
     supportsFilters: ['supplier', 'status'],
     category: 'Supplier',
     icon: '💸',
