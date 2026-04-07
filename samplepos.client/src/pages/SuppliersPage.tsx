@@ -12,6 +12,7 @@ import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
 import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
+import { useCanAccess } from '../components/auth/ProtectedRoute';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -173,6 +174,11 @@ export default function SuppliersPage() {
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [page, setPage] = useState(1);
   const limit = 20;
+
+  // Permission gating
+  const canCreateSupplier = useCanAccess([], ['suppliers.create']);
+  const canUpdateSupplier = useCanAccess([], ['suppliers.update']);
+  const canDeleteSupplier = useCanAccess([], ['suppliers.delete']);
 
   // Invoice summary stats for top cards
   const [invoiceSummary, setInvoiceSummary] = useState<{
@@ -395,12 +401,14 @@ export default function SuppliersPage() {
             >
               📤 Export
             </button>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1 sm:gap-2 text-sm"
-            >
-              ➕ Add Supplier
-            </button>
+            {canCreateSupplier && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1 sm:gap-2 text-sm"
+              >
+                ➕ Add Supplier
+              </button>
+            )}
           </div>
         </div>
 
@@ -595,8 +603,12 @@ export default function SuppliersPage() {
                     </div>
                     <div className="flex gap-2 border-t border-gray-100 pt-2">
                       <button onClick={() => setViewingSupplier(supplier)} className="flex-1 text-xs text-gray-600 hover:text-gray-900 font-medium py-1">👁️ View</button>
-                      <button onClick={() => setEditingSupplier(supplier)} className="flex-1 text-xs text-blue-600 hover:text-blue-900 font-medium py-1">✏️ Edit</button>
-                      <button onClick={() => handleDelete(supplier.id, supplier.name)} className="flex-1 text-xs text-red-600 hover:text-red-900 font-medium py-1">🗑️ Delete</button>
+                      {canUpdateSupplier && (
+                        <button onClick={() => setEditingSupplier(supplier)} className="flex-1 text-xs text-blue-600 hover:text-blue-900 font-medium py-1">✏️ Edit</button>
+                      )}
+                      {canDeleteSupplier && (
+                        <button onClick={() => handleDelete(supplier.id, supplier.name)} className="flex-1 text-xs text-red-600 hover:text-red-900 font-medium py-1">🗑️ Delete</button>
+                      )}
                     </div>
                   </div>
                 ))
@@ -696,20 +708,24 @@ export default function SuppliersPage() {
                             >
                               👁️
                             </button>
-                            <button
-                              onClick={() => setEditingSupplier(supplier)}
-                              className="text-blue-600 hover:text-blue-900"
-                              title="Edit Supplier"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              onClick={() => handleDelete(supplier.id, supplier.name)}
-                              className="text-red-600 hover:text-red-900"
-                              title="Delete Supplier"
-                            >
-                              🗑️
-                            </button>
+                            {canUpdateSupplier && (
+                              <button
+                                onClick={() => setEditingSupplier(supplier)}
+                                className="text-blue-600 hover:text-blue-900"
+                                title="Edit Supplier"
+                              >
+                                ✏️
+                              </button>
+                            )}
+                            {canDeleteSupplier && (
+                              <button
+                                onClick={() => handleDelete(supplier.id, supplier.name)}
+                                className="text-red-600 hover:text-red-900"
+                                title="Delete Supplier"
+                              >
+                                🗑️
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -798,18 +814,22 @@ export default function SuppliersPage() {
                     >
                       👁️ View
                     </button>
-                    <button
-                      onClick={() => setEditingSupplier(supplier)}
-                      className="flex-1 px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
-                    >
-                      ✏️ Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(supplier.id, supplier.name)}
-                      className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
-                    >
-                      🗑️
-                    </button>
+                    {canUpdateSupplier && (
+                      <button
+                        onClick={() => setEditingSupplier(supplier)}
+                        className="flex-1 px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
+                      >
+                        ✏️ Edit
+                      </button>
+                    )}
+                    {canDeleteSupplier && (
+                      <button
+                        onClick={() => handleDelete(supplier.id, supplier.name)}
+                        className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
@@ -873,10 +893,10 @@ export default function SuppliersPage() {
           <SupplierDetailModal
             supplier={viewingSupplier}
             onClose={() => setViewingSupplier(null)}
-            onEdit={() => {
+            onEdit={canUpdateSupplier ? () => {
               setEditingSupplier(viewingSupplier);
               setViewingSupplier(null);
-            }}
+            } : undefined}
           />
         )}
 
@@ -900,7 +920,7 @@ export default function SuppliersPage() {
 interface SupplierDetailModalProps {
   supplier: Supplier;
   onClose: () => void;
-  onEdit: () => void;
+  onEdit?: () => void;
 }
 
 function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalProps) {
@@ -2036,12 +2056,14 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           >
             Close
           </button>
-          <button
-            onClick={onEdit}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-          >
-            ✏️ Edit Supplier
-          </button>
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+            >
+              ✏️ Edit Supplier
+            </button>
+          )}
         </div>
       </div>
     </div>

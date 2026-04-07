@@ -69,6 +69,10 @@ api.interceptors.response.use(
       localStorage.removeItem('user');
       window.location.href = '/login';
     }
+    if (error.response?.status === 403) {
+      const msg = error.response.data?.error || 'You do not have permission to perform this action';
+      window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
+    }
     return Promise.reject(error);
   }
 );
@@ -81,6 +85,10 @@ accountingApi.interceptors.response.use(
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user');
       window.location.href = '/login';
+    }
+    if (error.response?.status === 403) {
+      const msg = error.response.data?.error || 'You do not have permission to perform this action';
+      window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
     }
     return Promise.reject(error);
   }

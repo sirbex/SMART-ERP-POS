@@ -10,6 +10,7 @@ import type { Customer } from '@shared/zod/customer';
 import QuickAddCustomerModal from '../components/customers/QuickAddCustomerModal';
 import CustomerDetailModal from '../components/customers/CustomerDetailModal';
 import { useModalAccessibility } from '../hooks/useFocusTrap';
+import { useCanAccess } from '../components/auth/ProtectedRoute';
 
 interface StatementResponse {
   openingBalance: number | string;
@@ -58,6 +59,9 @@ export default function CustomersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+
+  // Permission gating
+  const canCreateCustomer = useCanAccess([], ['customers.create']);
 
   // Customer detail modal state
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -118,12 +122,14 @@ export default function CustomersPage() {
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Customer Center</h1>
             <p className="text-sm sm:text-base text-gray-600 mt-1">Manage customers, track balances, and view accounting</p>
           </div>
-          <button
-            onClick={() => setShowQuickAdd(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 whitespace-nowrap self-start sm:self-auto"
-          >
-            + New Customer
-          </button>
+          {canCreateCustomer && (
+            <button
+              onClick={() => setShowQuickAdd(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 whitespace-nowrap self-start sm:self-auto"
+            >
+              + New Customer
+            </button>
+          )}
         </div>
 
         {/* Tabs */}

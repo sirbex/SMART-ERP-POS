@@ -17,6 +17,7 @@ import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import Decimal from 'decimal.js';
+import { useCanAccess } from '../../components/auth/ProtectedRoute';
 
 import { DatePicker } from '../../components/ui/date-picker';
 import { jsPDF } from 'jspdf';
@@ -998,6 +999,12 @@ export default function PurchaseOrdersPage() {
   const cancelPOMutation = useCancelPurchaseOrder();
   const deletePOMutation = useDeletePurchaseOrder();
 
+  // Permission gating
+  const canCreatePO = useCanAccess([], ['purchasing.create']);
+  const canSubmitPO = useCanAccess([], ['purchasing.approve']);
+  const canCancelPO = useCanAccess([], ['purchasing.update']);
+  const canDeletePO = useCanAccess([], ['purchasing.delete']);
+
   // Auto-open create modal when navigated with state
   const [pendingReorderItems, setPendingReorderItems] = useState<ReorderItemState[] | undefined>(undefined);
 
@@ -1389,12 +1396,14 @@ export default function PurchaseOrdersPage() {
           <h2 className="text-2xl font-bold text-gray-900">Purchase Orders</h2>
           <p className="text-gray-600 mt-1">Manage supplier orders with full workflow tracking</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-        >
-          ➕ Create PO
-        </button>
+        {canCreatePO && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            ➕ Create PO
+          </button>
+        )}
       </div>
 
       {/* Summary Statistics */}
@@ -1533,12 +1542,18 @@ export default function PurchaseOrdersPage() {
                   <div className="flex gap-3 border-t border-gray-100 pt-2">
                     {po.status === 'DRAFT' && (
                       <>
-                        <button onClick={(e) => { e.stopPropagation(); handleEditPO(po); }} className="text-xs text-indigo-600 font-medium">Edit</button>
-                        <button onClick={(e) => { e.stopPropagation(); handleSubmitPO(po.id); }} className="text-xs text-blue-600 font-medium">Submit</button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id); }} className="text-xs text-red-600 font-medium">Delete</button>
+                        {canCreatePO && (
+                          <button onClick={(e) => { e.stopPropagation(); handleEditPO(po); }} className="text-xs text-indigo-600 font-medium">Edit</button>
+                        )}
+                        {canSubmitPO && (
+                          <button onClick={(e) => { e.stopPropagation(); handleSubmitPO(po.id); }} className="text-xs text-blue-600 font-medium">Submit</button>
+                        )}
+                        {canDeletePO && (
+                          <button onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id); }} className="text-xs text-red-600 font-medium">Delete</button>
+                        )}
                       </>
                     )}
-                    {(po.status === 'PENDING' || po.status === 'APPROVED') && (
+                    {(po.status === 'PENDING' || po.status === 'APPROVED') && canCancelPO && (
                       <button onClick={(e) => { e.stopPropagation(); handleCancelPO(po.id); }} className="text-xs text-orange-600 font-medium">Cancel</button>
                     )}
                   </div>
@@ -1639,30 +1654,36 @@ export default function PurchaseOrdersPage() {
                           <div className="flex justify-end gap-2">
                             {po.status === 'DRAFT' && (
                               <>
-                                <button
-                                  onClick={() => handleEditPO(po)}
-                                  className="text-indigo-600 hover:text-indigo-900"
-                                  title="Edit Draft PO"
-                                >
-                                  ✏️
-                                </button>
-                                <button
-                                  onClick={() => handleSubmitPO(po.id)}
-                                  className="text-blue-600 hover:text-blue-900"
-                                  title="Submit PO & Send to Receiving"
-                                >
-                                  📤
-                                </button>
-                                <button
-                                  onClick={() => handleDeletePO(po.id)}
-                                  className="text-red-600 hover:text-red-900"
-                                  title="Delete"
-                                >
-                                  🗑️
-                                </button>
+                                {canCreatePO && (
+                                  <button
+                                    onClick={() => handleEditPO(po)}
+                                    className="text-indigo-600 hover:text-indigo-900"
+                                    title="Edit Draft PO"
+                                  >
+                                    ✏️
+                                  </button>
+                                )}
+                                {canSubmitPO && (
+                                  <button
+                                    onClick={() => handleSubmitPO(po.id)}
+                                    className="text-blue-600 hover:text-blue-900"
+                                    title="Submit PO & Send to Receiving"
+                                  >
+                                    📤
+                                  </button>
+                                )}
+                                {canDeletePO && (
+                                  <button
+                                    onClick={() => handleDeletePO(po.id)}
+                                    className="text-red-600 hover:text-red-900"
+                                    title="Delete"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
                               </>
                             )}
-                            {(po.status === 'PENDING' || po.status === 'APPROVED') && (
+                            {(po.status === 'PENDING' || po.status === 'APPROVED') && canCancelPO && (
                               <button
                                 onClick={() => handleCancelPO(po.id)}
                                 className="text-orange-600 hover:text-orange-900"

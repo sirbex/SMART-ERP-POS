@@ -212,10 +212,12 @@ const SupplierPaymentsPage: React.FC = () => {
             await Promise.all([loadPayments(), loadBills()]);
         } catch (error: unknown) {
             console.error('[SupplierPayments] Error loading tab data:', error);
-            const errMsg = error instanceof AxiosError
-                ? (error.response?.data as { error?: string })?.error
-                : error instanceof Error ? error.message : undefined;
-            toast.error(errMsg || 'Failed to load data');
+            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+                const errMsg = error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error ? error.message : undefined;
+                toast.error(errMsg || 'Failed to load data');
+            }
         } finally {
             setLoading(false);
         }
@@ -358,10 +360,12 @@ const SupplierPaymentsPage: React.FC = () => {
             }
         } catch (error: unknown) {
             console.error('Error creating payment:', error);
-            const errMsg = error instanceof AxiosError
-                ? (error.response?.data as { error?: string })?.error
-                : error instanceof Error ? error.message : undefined;
-            toast.error(errMsg || 'Failed to record payment');
+            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+                const errMsg = error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error ? error.message : undefined;
+                toast.error(errMsg || 'Failed to record payment');
+            }
         } finally {
             setIsRecordingPayment(false);
         }
@@ -762,10 +766,12 @@ const SupplierPaymentsPage: React.FC = () => {
             }
         } catch (error: unknown) {
             console.error('Error creating bill:', error);
-            const errMsg = error instanceof AxiosError
-                ? (error.response?.data as { error?: string })?.error
-                : error instanceof Error ? error.message : undefined;
-            toast.error(errMsg || 'Failed to record bill');
+            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+                const errMsg = error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error ? error.message : undefined;
+                toast.error(errMsg || 'Failed to record bill');
+            }
         }
     };
 
@@ -794,7 +800,9 @@ const SupplierPaymentsPage: React.FC = () => {
             setIsAllocationModalOpen(true);
         } catch (error) {
             console.error('Error loading outstanding bills:', error);
-            toast.error('Failed to load outstanding bills');
+            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+                toast.error('Failed to load outstanding bills');
+            }
         }
     };
 
@@ -814,10 +822,12 @@ const SupplierPaymentsPage: React.FC = () => {
             }
         } catch (error: unknown) {
             console.error('Error auto-allocating payment:', error);
-            const errMsg = error instanceof AxiosError
-                ? (error.response?.data as { error?: string })?.error
-                : error instanceof Error ? error.message : undefined;
-            toast.error(errMsg || 'Failed to allocate payment');
+            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+                const errMsg = error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error ? error.message : undefined;
+                toast.error(errMsg || 'Failed to allocate payment');
+            }
         } finally {
             setAllocatingPayment(false);
         }
@@ -855,10 +865,12 @@ const SupplierPaymentsPage: React.FC = () => {
             refetchSuppliers();
         } catch (error: unknown) {
             console.error('Error allocating payment:', error);
-            const errMsg = error instanceof AxiosError
-                ? (error.response?.data as { error?: string })?.error
-                : error instanceof Error ? error.message : undefined;
-            toast.error(errMsg || 'Failed to allocate payment');
+            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+                const errMsg = error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error ? error.message : undefined;
+                toast.error(errMsg || 'Failed to allocate payment');
+            }
         } finally {
             setAllocatingPayment(false);
         }

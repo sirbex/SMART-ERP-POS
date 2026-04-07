@@ -28,6 +28,7 @@ import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapp
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { ProcurementProductSearch } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
+import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { inventoryKeys } from '../../hooks/useInventory';
 // DatePicker removed — GR uses native date input for keyboard-driven receiving
 
@@ -195,6 +196,10 @@ export default function GoodsReceiptsPage() {
   const [selectedGR, setSelectedGR] = useState<GRRow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Permission gating
+  const canCreateGR = useCanAccess([], ['purchasing.create']);
+  const canFinalizeGR = useCanAccess([], ['purchasing.post']);
   const [showAlertsModal, setShowAlertsModal] = useState(false);
   const [costAlerts, setCostAlerts] = useState<CostAlert[]>([]);
   const [baseline, setBaseline] = useState<'PO' | 'PRODUCT'>('PO');
@@ -894,13 +899,15 @@ export default function GoodsReceiptsPage() {
               <option value="PRODUCT">Product Cost</option>
             </select>
           </div>
-          <ManualGRButton />
-          <button
-            onClick={openCreateModal}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-          >
-            + Create from PO
-          </button>
+          {canCreateGR && <ManualGRButton />}
+          {canCreateGR && (
+            <button
+              onClick={openCreateModal}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+            >
+              + Create from PO
+            </button>
+          )}
         </div>
       </div>
 
@@ -1001,7 +1008,7 @@ export default function GoodsReceiptsPage() {
                           >
                             👁️ View
                           </button>
-                          {gr.status === 'DRAFT' && (
+                          {gr.status === 'DRAFT' && canFinalizeGR && (
                             <button
                               onClick={() => handleFinalize(gr.id)}
                               className="text-green-600 hover:text-green-800 font-medium"
@@ -1298,12 +1305,14 @@ export default function GoodsReceiptsPage() {
                     >
                       Cancel
                     </button>
-                    <button
-                      onClick={() => handleFinalize(selectedGR.id)}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                    >
-                      ✓ Finalize Goods Receipt
-                    </button>
+                    {canFinalizeGR && (
+                      <button
+                        onClick={() => handleFinalize(selectedGR.id)}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                      >
+                        ✓ Finalize Goods Receipt
+                      </button>
+                    )}
                   </div>
                 )}
                 {(selectedGR.status === 'COMPLETED' || selectedGR.status === 'FINALIZED') && (

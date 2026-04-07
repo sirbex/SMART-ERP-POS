@@ -15,6 +15,7 @@ import { EXPENSE_CATEGORIES, EXPENSE_STATUSES } from '@shared/types/expense';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Link } from 'react-router-dom';
+import { useCanAccess } from '../../components/auth/ProtectedRoute';
 
 const ExpensesPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -31,6 +32,11 @@ const ExpensesPage: React.FC = () => {
 
   const { data, isLoading, error, refetch } = useExpenses(filter);
   const { data: paymentAccounts } = usePaymentAccounts();
+
+  // Permission gating
+  const canCreateExpense = useCanAccess([], ['expenses.create']);
+  const canApproveExpense = useCanAccess([], ['expenses.approve']);
+  const canDeleteExpense = useCanAccess([], ['expenses.delete']);
 
   // Action mutations
   const submitMutation = useSubmitExpense();
@@ -168,13 +174,15 @@ const ExpensesPage: React.FC = () => {
           <Download className="h-4 w-4" />
           Export
         </Button>
-        <Button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4" />
-          New Expense
-        </Button>
+        {canCreateExpense && (
+          <Button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+          >
+            <Plus className="h-4 w-4" />
+            New Expense
+          </Button>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -405,10 +413,12 @@ const ExpensesPage: React.FC = () => {
               <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No expenses found</h3>
               <p className="text-gray-500 mb-4">Get started by creating your first expense.</p>
-              <Button onClick={() => setIsCreateModalOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Expense
-              </Button>
+              {canCreateExpense && (
+                <Button onClick={() => setIsCreateModalOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Expense
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
@@ -559,7 +569,7 @@ const ExpensesPage: React.FC = () => {
               <div className="flex justify-between pt-6 mt-4 border-t-2 sticky bottom-0 bg-white -mx-6 px-6 pb-2">
                 <div className="flex gap-3">
                   {/* Cancel button - only for DRAFT */}
-                  {selectedExpense.status === 'DRAFT' && (
+                  {selectedExpense.status === 'DRAFT' && canDeleteExpense && (
                     <Button
                       variant="destructive"
                       onClick={handleCancel}
@@ -583,7 +593,7 @@ const ExpensesPage: React.FC = () => {
 
                 <div className="flex gap-3">
                   {/* Submit for Approval - only for DRAFT */}
-                  {selectedExpense.status === 'DRAFT' && (
+                  {selectedExpense.status === 'DRAFT' && canCreateExpense && (
                     <Button
                       onClick={handleSubmitForApproval}
                       disabled={submitMutation.isPending}
@@ -605,7 +615,7 @@ const ExpensesPage: React.FC = () => {
                   )}
 
                   {/* Approve/Reject - only for PENDING_APPROVAL */}
-                  {selectedExpense.status === 'PENDING_APPROVAL' && (
+                  {selectedExpense.status === 'PENDING_APPROVAL' && canApproveExpense && (
                     <>
                       <Button
                         variant="destructive"
@@ -638,7 +648,7 @@ const ExpensesPage: React.FC = () => {
                   )}
 
                   {/* Mark as Paid - only for APPROVED */}
-                  {selectedExpense.status === 'APPROVED' && (
+                  {selectedExpense.status === 'APPROVED' && canApproveExpense && (
                     <Button
                       onClick={handleOpenPaymentDialog}
                       disabled={markPaidMutation.isPending}
