@@ -47,6 +47,9 @@ export interface SystemSettings {
     invoiceShowPaymentTerms: boolean;
     invoiceDefaultPaymentTerms?: string;
 
+    // POS Session Policy
+    posSessionPolicy: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
+
     // Low Stock Alerts
     lowStockAlertsEnabled: boolean;
     lowStockThreshold: number;
@@ -88,6 +91,7 @@ export interface SystemSettingsDbRow {
     invoice_show_logo: boolean;
     invoice_show_payment_terms: boolean;
     invoice_default_payment_terms?: string;
+    pos_session_policy: string;
     low_stock_alerts_enabled: boolean;
     low_stock_threshold: number;
     created_at: string;
@@ -125,6 +129,7 @@ export interface UpdateSystemSettingsDto {
     invoiceShowLogo?: boolean;
     invoiceShowPaymentTerms?: boolean;
     invoiceDefaultPaymentTerms?: string;
+    posSessionPolicy?: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
     lowStockAlertsEnabled?: boolean;
     lowStockThreshold?: number;
     updatedById?: string;
@@ -162,6 +167,7 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         invoiceShowLogo: dbRow.invoice_show_logo,
         invoiceShowPaymentTerms: dbRow.invoice_show_payment_terms,
         invoiceDefaultPaymentTerms: dbRow.invoice_default_payment_terms,
+        posSessionPolicy: (dbRow.pos_session_policy || 'DISABLED') as SystemSettings['posSessionPolicy'],
         lowStockAlertsEnabled: dbRow.low_stock_alerts_enabled,
         lowStockThreshold: dbRow.low_stock_threshold,
         createdAt: dbRow.created_at,

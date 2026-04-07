@@ -373,6 +373,7 @@ export const reportsRepository = {
       endDate: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
       customerId?: string;
+      sessionId?: string;
     }
   ): Promise<{
     rows: SalesReportRow[];
@@ -381,10 +382,22 @@ export const reportsRepository = {
     const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
     const params: unknown[] = [startUtc, endUtc];
     let customerFilter = '';
+    let sessionFilter = '';
 
     if (options.customerId) {
-      customerFilter = 'AND s.customer_id = $3';
+      customerFilter = `AND s.customer_id = $${params.length + 1}`;
       params.push(options.customerId);
+    }
+
+    if (options.sessionId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.sessionId);
+      if (isUuid) {
+        sessionFilter = `AND s.cash_register_session_id = $${params.length + 1}`;
+        params.push(options.sessionId);
+      } else {
+        sessionFilter = `AND s.cash_register_session_id = (SELECT id FROM cash_register_sessions WHERE session_number = $${params.length + 1} LIMIT 1)`;
+        params.push(options.sessionId);
+      }
     }
 
     // ── SQL summary (single row, no grouping overhead) ──
@@ -395,6 +408,7 @@ export const reportsRepository = {
         WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
           ${customerFilter}
+          ${sessionFilter}
       ),
       sale_line_agg AS (
         SELECT si.sale_id,
@@ -469,6 +483,7 @@ export const reportsRepository = {
         WHERE s.sale_date >= $1 AND s.sale_date < $2
           AND s.status NOT IN ('VOID', 'REFUNDED')
           ${customerFilter}
+          ${sessionFilter}
         GROUP BY COALESCE(p.name, si.product_name, 'Custom Item')
         ORDER BY period
       `;
@@ -481,6 +496,7 @@ export const reportsRepository = {
           WHERE s.sale_date >= $1 AND s.sale_date < $2
             AND s.status NOT IN ('VOID', 'REFUNDED')
             ${customerFilter}
+            ${sessionFilter}
         ),
         sale_line_agg AS (
           SELECT si.sale_id,
@@ -3805,6 +3821,54 @@ export const reportsRepository = {
         [actualSessionId]
       );
 
+      // Get linked sales for this session (uses new cash_register_session_id column)
+      const salesResult = await pool.query(
+        `
+        SELECT
+          s.id,
+          s.sale_number as "saleNumber",
+          s.total_amount as "totalAmount",
+          s.total_cost as "totalCost",
+          s.profit,
+          s.payment_method as "paymentMethod",
+          s.amount_paid as "amountPaid",
+          s.status,
+          s.sale_date as "saleDate",
+          s.created_at as "createdAt",
+          c.name as "customerName"
+        FROM sales s
+        LEFT JOIN customers c ON c.id = s.customer_id
+        WHERE s.cash_register_session_id = $1
+          AND s.status NOT IN ('VOID')
+        ORDER BY s.created_at ASC
+      `,
+        [actualSessionId]
+      );
+
+      const sessionSales = salesResult.rows.map((row) => ({
+        id: row.id,
+        saleNumber: row.saleNumber,
+        totalAmount: new Decimal(row.totalAmount || 0).toDecimalPlaces(2).toNumber(),
+        totalCost: new Decimal(row.totalCost || 0).toDecimalPlaces(2).toNumber(),
+        profit: new Decimal(row.profit || 0).toDecimalPlaces(2).toNumber(),
+        paymentMethod: row.paymentMethod,
+        amountPaid: new Decimal(row.amountPaid || 0).toDecimalPlaces(2).toNumber(),
+        status: row.status,
+        saleDate: row.saleDate,
+        createdAt: row.createdAt?.toISOString(),
+        customerName: row.customerName || 'Walk-in',
+      }));
+
+      const salesSummary = {
+        totalTransactions: sessionSales.length,
+        totalRevenue: sessionSales.reduce(
+          (sum, s2) => sum.plus(new Decimal(s2.totalAmount)), new Decimal(0)
+        ).toDecimalPlaces(2).toNumber(),
+        totalProfit: sessionSales.reduce(
+          (sum, s2) => sum.plus(new Decimal(s2.profit)), new Decimal(0)
+        ).toDecimalPlaces(2).toNumber(),
+      };
+
       return {
         reportType: 'CASH_REGISTER_SESSION_SUMMARY',
         generatedAt: new Date().toISOString(),
@@ -3854,6 +3918,9 @@ export const reportsRepository = {
           createdAt: m.createdAt?.toISOString(),
           createdByName: m.createdByName,
         })),
+
+        sales: sessionSales,
+        salesSummary,
       };
     } catch (error) {
       console.error('Error in getCashRegisterSessionSummary:', error);

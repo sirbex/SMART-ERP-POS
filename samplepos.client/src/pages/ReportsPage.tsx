@@ -372,7 +372,7 @@ const REPORT_OPTIONS: ReportOption[] = [
     label: 'Sales Report',
     description: 'Revenue, profit, and transactions by period or category',
     requiresDateRange: true,
-    supportsFilters: ['groupBy', 'customer', 'paymentMethod'],
+    supportsFilters: ['groupBy', 'customer', 'paymentMethod', 'sessionId'],
     category: 'Sales',
     icon: '📊',
   },
@@ -968,6 +968,7 @@ export default function ReportsPage() {
         if (categoryFilter) params.categoryId = categoryFilter;
       } else if (selectedReport === 'SALES_REPORT' || selectedReport === 'PROFIT_LOSS') {
         params.groupBy = groupBy;
+        if (sessionId) params.sessionId = sessionId;
       } else if (selectedReport === 'EXPIRING_ITEMS') {
         params.daysAhead = daysAhead;
       } else if (selectedReport === 'LOW_STOCK') {
@@ -1311,6 +1312,25 @@ export default function ReportsPage() {
                 </>
               )}
             </select>
+          </div>
+        )}
+
+        {/* Days Ahead */}
+        {selectedReportOption.supportsFilters.includes('sessionId') && (
+          <div>
+            <label htmlFor="salesSessionFilter" className="block text-sm font-semibold text-gray-700 mb-2">
+              🖥️ POS Session (Optional)
+            </label>
+            <input
+              id="salesSessionFilter"
+              type="text"
+              value={sessionId}
+              onChange={(e) => setSessionId(e.target.value.toUpperCase())}
+              placeholder="REG-2026-0001"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm uppercase"
+              aria-label="Filter by POS session number"
+            />
+            <p className="text-xs text-gray-500 mt-1">Filter sales by a specific cash register session</p>
           </div>
         )}
 

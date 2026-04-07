@@ -321,6 +321,7 @@ export const SalesReportParamsSchema = z.object({
   end_date: z.string(),
   group_by: z.enum(['day', 'week', 'month', 'product', 'customer', 'payment_method']).optional(),
   customer_id: z.string().uuid().optional(),
+  session_id: z.string().optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });
 

@@ -145,6 +145,7 @@ export interface CreateSaleData {
   quoteId?: string | null; // Link to quotation if sale is from quote conversion
   idempotencyKey?: string; // Offline sync idempotency key
   offlineId?: string; // Offline sale identifier
+  cashRegisterSessionId?: string; // Link to cash register session for drawer tracking
 }
 
 export interface CreateSaleItemData {
@@ -230,8 +231,8 @@ export const salesRepository = {
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
         payment_method, amount_paid, change_amount, cashier_id, quote_id,
-        idempotency_key, offline_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        idempotency_key, offline_id, cash_register_session_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING 
         id,
         sale_number as "saleNumber",
@@ -249,6 +250,7 @@ export const salesRepository = {
         change_amount as "changeAmount",
         cashier_id as "cashierId",
         quote_id as "quoteId",
+        cash_register_session_id as "cashRegisterSessionId",
         created_at as "createdAt"`,
         [
           saleNumber,
@@ -268,6 +270,7 @@ export const salesRepository = {
           data.quoteId || null, // Link to quotation
           data.idempotencyKey || null,
           data.offlineId || null,
+          data.cashRegisterSessionId || null, // Link to cash register session
         ]
       );
     } catch (dbError: unknown) {

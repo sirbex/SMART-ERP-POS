@@ -24,6 +24,7 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -178,6 +179,75 @@ export const salesService = {
 
       // Maintenance mode guard (replaces trg_maintenance_check_sales)
       await checkMaintenanceMode(client);
+
+      // ========== POS SESSION ENFORCEMENT ==========
+      // Check session policy from system settings and validate session if required
+      let validatedSessionId: string | null = null;
+      try {
+        const settings = await systemSettingsService.getSettings(pool);
+        const policy = settings.posSessionPolicy || 'DISABLED';
+
+        if (policy !== 'DISABLED') {
+          if (!input.cashRegisterSessionId) {
+            throw new BusinessError(
+              'POS session is required. Please open a cash register session before making sales.',
+              'ERR_SESSION_001',
+              { policy }
+            );
+          }
+
+          // Validate the session exists and is OPEN
+          const sessionCheck = await client.query(
+            `SELECT id, status, user_id, register_id FROM cash_register_sessions WHERE id = $1`,
+            [input.cashRegisterSessionId]
+          );
+
+          if (sessionCheck.rows.length === 0) {
+            throw new BusinessError(
+              'Invalid cash register session. The session does not exist.',
+              'ERR_SESSION_002',
+              { sessionId: input.cashRegisterSessionId }
+            );
+          }
+
+          const session = sessionCheck.rows[0];
+          if (session.status !== 'OPEN') {
+            throw new BusinessError(
+              `Cash register session is ${session.status}. Only OPEN sessions can process sales.`,
+              'ERR_SESSION_003',
+              { sessionId: input.cashRegisterSessionId, status: session.status }
+            );
+          }
+
+          // Policy-specific validation
+          if (policy === 'PER_CASHIER_SESSION' && session.user_id !== input.soldBy) {
+            throw new BusinessError(
+              'This session belongs to a different cashier. Per-cashier policy requires your own session.',
+              'ERR_SESSION_004',
+              { sessionUserId: session.user_id, currentUserId: input.soldBy }
+            );
+          }
+
+          validatedSessionId = input.cashRegisterSessionId;
+          logger.info('POS session validated for sale', {
+            sessionId: validatedSessionId,
+            policy,
+            userId: input.soldBy,
+          });
+        } else if (input.cashRegisterSessionId) {
+          // Policy is DISABLED but session was provided — still link it
+          validatedSessionId = input.cashRegisterSessionId;
+        }
+      } catch (sessionError: unknown) {
+        if (sessionError instanceof BusinessError) throw sessionError;
+        // Non-blocking: settings fetch failure should not block sales
+        logger.warn('Session policy check failed, proceeding without enforcement', {
+          error: sessionError instanceof Error ? sessionError.message : String(sessionError),
+        });
+        if (input.cashRegisterSessionId) {
+          validatedSessionId = input.cashRegisterSessionId;
+        }
+      }
 
       // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
       // Sales code already creates proper MOV- movements for each batch deduction
@@ -667,6 +737,7 @@ export const salesService = {
         quoteId: input.quoteId || null, // Link to quotation for auto-conversion
         idempotencyKey: input.idempotencyKey,
         offlineId: input.offlineId,
+        cashRegisterSessionId: validatedSessionId || undefined,
       };
 
       const sale = await salesRepository.createSale(client, saleData);

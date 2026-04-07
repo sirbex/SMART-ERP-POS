@@ -306,6 +306,20 @@ export interface CashRegisterMovement {
     createdByName: string | null;
 }
 
+export interface CashRegisterSessionSaleEntry {
+    id: string;
+    saleNumber: string;
+    totalAmount: number;
+    totalCost: number;
+    profit: number;
+    paymentMethod: string;
+    amountPaid: number;
+    status: string;
+    saleDate: string;
+    createdAt: string;
+    customerName: string;
+}
+
 export interface CashRegisterSessionSummaryData {
     reportType: string;
     generatedAt: string;
@@ -313,6 +327,12 @@ export interface CashRegisterSessionSummaryData {
     summary: CashRegisterSummaryInfo;
     paymentSummary: unknown;
     movements: CashRegisterMovement[];
+    sales?: CashRegisterSessionSaleEntry[];
+    salesSummary?: {
+        totalTransactions: number;
+        totalRevenue: number;
+        totalProfit: number;
+    };
 }
 
 // ── Cash Register Movement Breakdown ──

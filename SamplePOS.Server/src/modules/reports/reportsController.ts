@@ -246,6 +246,7 @@ export const reportsController = {
       endDate: params.end_date,
       groupBy: params.group_by,
       customerId: params.customer_id,
+      sessionId: params.session_id,
       format: params.format,
       userId,
     });
@@ -3902,6 +3903,7 @@ export const reportsController = {
           end_date: params.endDate,
           group_by: params.groupBy,
           customer_id: params.customerId,
+          session_id: params.sessionId,
           format: params.format,
         };
         return await reportsController.getSalesReport(modifiedReq, res, pool);

@@ -40,6 +40,7 @@ import { ServiceBadge } from '../../components/pos/ServiceBadge';
 import AddServiceItemDialog from '../../components/pos/AddServiceItemDialog';
 import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/cash-register';
 import { useCurrentSession } from '../../hooks/useCashRegister';
+import { useQuery } from '@tanstack/react-query';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
 import quotationApi from '../../api/quotations';
 import type {
@@ -255,6 +256,18 @@ export default function POSPage() {
 
   // Cash register session for drawer tracking
   const { data: currentSession, isLoading: isLoadingSession, isError: isSessionError } = useCurrentSession();
+
+  // Fetch POS session policy from system settings
+  const { data: posSessionPolicy } = useQuery<string>({
+    queryKey: ['systemSettings', 'posSessionPolicy'],
+    queryFn: async (): Promise<string> => {
+      const res = await api.get('/system-settings');
+      const settings = res.data?.data as Record<string, unknown> | undefined;
+      return (settings?.posSessionPolicy as string) || 'DISABLED';
+    },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+  const sessionEnforced = posSessionPolicy !== undefined && posSessionPolicy !== 'DISABLED';
 
   // State for showing open register dialog when required
   const [showOpenRegisterDialog, setShowOpenRegisterDialog] = useState(false);
@@ -1981,9 +1994,10 @@ export default function POSPage() {
     console.log('🔵 handleFinalizeSale called');
 
     // CRITICAL: Block sales if no cash register session is open (ONLINE only)
+    // Only enforce when session policy is enabled (not DISABLED)
     // Offline sales bypass register check – tagged for reconciliation on sync
     // Also allow if session query errored (don't block on network blips)
-    if (!hasOpenRegister && isOnline && !isSessionError) {
+    if (sessionEnforced && !hasOpenRegister && isOnline && !isSessionError) {
       console.log('⚠️ BLOCKED: No open cash register session');
       toast.error('Please open a cash register before making sales');
       setShowOpenRegisterDialog(true);
@@ -4286,8 +4300,9 @@ export default function POSPage() {
       />
 
       {/* Blocking overlay when no cash register session - prevents sales (ONLINE ONLY) */}
+      {/* Only shown when session policy is enforced (not DISABLED) */}
       {/* Also skip when session query errored (network blip ≠ no session) */}
-      {!isLoadingSession && !isSessionError && !hasOpenRegister && isOnline && (
+      {sessionEnforced && !isLoadingSession && !isSessionError && !hasOpenRegister && isOnline && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-yellow-100 flex items-center justify-center">

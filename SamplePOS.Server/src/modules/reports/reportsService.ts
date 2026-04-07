@@ -247,6 +247,7 @@ export const reportsService = {
       endDate: string;
       groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
       customerId?: string;
+      sessionId?: string;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
@@ -261,6 +262,7 @@ export const reportsService = {
       endDate: options.endDate,
       groupBy: options.groupBy,
       customerId: options.customerId,
+      sessionId: options.sessionId,
     });
 
     // Summary already computed in SQL — no JS .reduce() needed

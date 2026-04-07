@@ -150,6 +150,10 @@ export const systemSettingsRepository = {
             setClauses.push(`invoice_default_payment_terms = $${paramIndex++}`);
             values.push(updates.invoiceDefaultPaymentTerms);
         }
+        if (updates.posSessionPolicy !== undefined) {
+            setClauses.push(`pos_session_policy = $${paramIndex++}`);
+            values.push(updates.posSessionPolicy);
+        }
         if (updates.lowStockAlertsEnabled !== undefined) {
             setClauses.push(`low_stock_alerts_enabled = $${paramIndex++}`);
             values.push(updates.lowStockAlertsEnabled);

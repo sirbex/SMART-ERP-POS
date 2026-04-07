@@ -45,6 +45,7 @@ interface SystemSettings {
     invoiceDefaultPaymentTerms?: string;
     lowStockAlertsEnabled: boolean;
     lowStockThreshold: number;
+    posSessionPolicy: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
 }
 
 async function fetchSettings(): Promise<SystemSettings> {
@@ -149,6 +150,12 @@ export default function SystemSettingsTab() {
                     >
                         Registers
                     </Tabs.Trigger>
+                    <Tabs.Trigger
+                        value="pos-session"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
+                    >
+                        POS Session
+                    </Tabs.Trigger>
                 </Tabs.List>
 
                 <Tabs.Content value="general" className="p-6">
@@ -169,6 +176,10 @@ export default function SystemSettingsTab() {
 
                 <Tabs.Content value="registers" className="p-6">
                     <RegisterManagement />
+                </Tabs.Content>
+
+                <Tabs.Content value="pos-session" className="p-6">
+                    <POSSessionPolicySettings settings={settings} onSave={handleSave} isSaving={isSaving} />
                 </Tabs.Content>
             </Tabs.Root>
         </div>
@@ -759,6 +770,96 @@ function AlertSettings({
                 </button>
             </div>
         </form>
+    );
+}
+
+// POS Session Policy Settings Tab
+function POSSessionPolicySettings({
+    settings,
+    onSave,
+    isSaving,
+}: {
+    settings: SystemSettings;
+    onSave: (updates: Partial<SystemSettings>) => void;
+    isSaving: boolean;
+}) {
+    const [policy, setPolicy] = useState<SystemSettings['posSessionPolicy']>(
+        settings.posSessionPolicy || 'DISABLED'
+    );
+
+    const policies = [
+        {
+            value: 'DISABLED' as const,
+            label: 'Disabled',
+            description: 'No session enforcement. Cashiers can process sales without opening a register session.',
+        },
+        {
+            value: 'PER_CASHIER_SESSION' as const,
+            label: 'Per Cashier',
+            description: 'Each cashier must open their own session on a register. Sales are only allowed under the cashier\'s own session.',
+        },
+        {
+            value: 'PER_COUNTER_SHARED_SESSION' as const,
+            label: 'Per Counter (Shared)',
+            description: 'One session per register, shared by all cashiers. Any cashier can sell on an open register.',
+        },
+        {
+            value: 'GLOBAL_STORE_SESSION' as const,
+            label: 'Global Store',
+            description: 'Any open session in the store works. Minimal enforcement — useful for single-register setups.',
+        },
+    ];
+
+    const handleSave = () => {
+        onSave({ posSessionPolicy: policy });
+    };
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-900">POS Session Policy</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                    Controls whether cashiers must open a cash register session before processing sales.
+                    When enabled, all sales are linked to a session for end-of-day reconciliation.
+                </p>
+            </div>
+
+            <div className="space-y-3">
+                {policies.map((p) => (
+                    <label
+                        key={p.value}
+                        className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${
+                            policy === p.value
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                    >
+                        <input
+                            type="radio"
+                            name="posSessionPolicy"
+                            value={p.value}
+                            checked={policy === p.value}
+                            onChange={() => setPolicy(p.value)}
+                            className="mt-1"
+                        />
+                        <div>
+                            <div className="font-medium text-gray-900">{p.label}</div>
+                            <div className="text-sm text-gray-500 mt-0.5">{p.description}</div>
+                        </div>
+                    </label>
+                ))}
+            </div>
+
+            <div className="flex justify-end">
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving || policy === settings.posSessionPolicy}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 px-6 rounded-lg transition-colors"
+                >
+                    {isSaving ? 'Saving...' : 'Save Policy'}
+                </button>
+            </div>
+        </div>
     );
 }
 
