@@ -94,14 +94,15 @@ export function useIdleTimeout({
             window.addEventListener(event, handleActivity, { passive: true });
         }
 
-        // Visibility change: if user was away longer than timeout, logout immediately
+        // Visibility change: if user was away longer than timeout, show warning first
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'hidden') {
                 hiddenAt = Date.now();
             } else if (document.visibilityState === 'visible') {
                 if (hiddenAt && Date.now() - hiddenAt >= timeoutMs) {
-                    // Tab was hidden longer than idle threshold → fire immediately
-                    onIdleRef.current();
+                    // Tab was hidden longer than idle threshold → fire warning, give 60s grace
+                    onWarningRef.current?.();
+                    idleTimerRef.current = setTimeout(() => onIdleRef.current(), WARNING_BEFORE_MS);
                 } else {
                     // Tab was hidden briefly → reset (user came back quickly)
                     resetTimers();

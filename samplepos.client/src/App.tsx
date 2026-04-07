@@ -111,6 +111,19 @@ function App() {
     return () => window.removeEventListener('app:forbidden', handler);
   }, []);
 
+  // Session expiry warning — visible toast when idle timeout is about to fire
+  useEffect(() => {
+    const handler = () => {
+      toast('Session expiring soon — move your mouse or press any key to stay logged in', {
+        duration: 55000,
+        icon: '⏳',
+        style: { background: '#fef3c7', border: '1px solid #f59e0b', fontWeight: 500 },
+      });
+    };
+    window.addEventListener('app:session-warning', handler);
+    return () => window.removeEventListener('app:session-warning', handler);
+  }, []);
+
   // Show loading screen while authentication is being initialized
   if (isLoading) {
     return (

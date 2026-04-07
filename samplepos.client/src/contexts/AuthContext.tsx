@@ -196,7 +196,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  // ── Auto-logout on idle (10 minutes of inactivity) ────────
+  // ── Auto-logout on idle (30 minutes of inactivity) ────────
   const idleLogout = useCallback(() => {
     logout();
     // Signal the login page to show "session expired" banner
@@ -204,10 +204,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [logout]);
 
   useIdleTimeout({
-    timeoutMs: 10 * 60 * 1000, // 10 minutes
+    timeoutMs: 30 * 60 * 1000, // 30 minutes — POS users step away frequently
     onIdle: idleLogout,
     onWarning: () => {
-      // Could integrate with a toast/notification system
+      // Visible notification — fire event so SessionWarningBanner can react
+      window.dispatchEvent(new CustomEvent('app:session-warning'));
       console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
     },
     enabled: isAuthenticated && isOnline, // Don't idle-logout when offline
