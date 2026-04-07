@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast } from 'react-hot-toast';
 import { Toaster as SonnerToaster } from 'sonner';
 import { useAuth } from './hooks/useAuth';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
@@ -100,6 +100,16 @@ function PlatformProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   const { isAuthenticated, isLoading } = useAuth();
+
+  // Global 403 Forbidden listener — shows toast when backend rejects due to missing permissions
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail || 'You do not have permission to perform this action';
+      toast.error(msg, { duration: 6000, icon: '🔒' });
+    };
+    window.addEventListener('app:forbidden', handler);
+    return () => window.removeEventListener('app:forbidden', handler);
+  }, []);
 
   // Show loading screen while authentication is being initialized
   if (isLoading) {

@@ -48,6 +48,7 @@ import { formatCurrency } from '../../utils/currency';
 import { toast } from 'react-hot-toast';
 import { ERROR_MESSAGES } from '../../constants/errorMessages';
 import { SUPPLIER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/paymentMethods';
+import { useCanAccess } from '../../components/auth/ProtectedRoute';
 // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
 import { useSuppliers } from '../../hooks/useSuppliers';
 import {
@@ -100,6 +101,10 @@ const safeParseFloat = (value: unknown): number => {
 };
 
 const SupplierPaymentsPage: React.FC = () => {
+    // Permission checks (SAP/Odoo pattern: hide actions user cannot perform)
+    const canCreatePayment = useCanAccess([], ['suppliers.create']);
+    const canCreateBill = useCanAccess([], ['purchasing.create']);
+
     const [activeTab, setActiveTab] = useState('payments');
     const [payments, setPayments] = useState<SupplierPayment[]>([]);
     const [bills, setBills] = useState<SupplierInvoice[]>([]);
@@ -966,6 +971,7 @@ const SupplierPaymentsPage: React.FC = () => {
                 </div>
 
                 <div className="flex gap-2">
+                    {canCreateBill && (
                     <Dialog open={isBillModalOpen} onOpenChange={setIsBillModalOpen}>
                         <DialogTrigger asChild>
                             <Button variant="outline" className="flex items-center gap-2">
@@ -974,7 +980,9 @@ const SupplierPaymentsPage: React.FC = () => {
                             </Button>
                         </DialogTrigger>
                     </Dialog>
+                    )}
 
+                    {canCreatePayment && (
                     <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
                         <DialogTrigger asChild>
                             <Button className="flex items-center gap-2">
@@ -983,6 +991,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </Button>
                         </DialogTrigger>
                     </Dialog>
+                    )}
                 </div>
             </div>
 
@@ -1192,6 +1201,7 @@ const SupplierPaymentsPage: React.FC = () => {
 
                                             <div className="flex items-center gap-2 ml-4">
                                                 {safeParseFloat(payment.unallocatedAmount) > 0 ? (
+                                                    canCreatePayment ? (
                                                     <Button
                                                         variant="default"
                                                         size="sm"
@@ -1201,6 +1211,11 @@ const SupplierPaymentsPage: React.FC = () => {
                                                         <ArrowUpRight className="h-4 w-4" />
                                                         Allocate
                                                     </Button>
+                                                    ) : (
+                                                    <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
+                                                        Unallocated
+                                                    </Badge>
+                                                    )
                                                 ) : (
                                                     <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
                                                         Fully Allocated
@@ -1269,6 +1284,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                             {/* Pay Now button for outstanding bills */}
                                             <div className="flex items-center gap-2 ml-4">
                                                 {safeParseFloat(bill.outstandingBalance) > 0 ? (
+                                                    canCreatePayment ? (
                                                     <Button
                                                         variant="default"
                                                         size="sm"
@@ -1288,6 +1304,11 @@ const SupplierPaymentsPage: React.FC = () => {
                                                         <DollarSign className="h-4 w-4" />
                                                         Pay Now
                                                     </Button>
+                                                    ) : (
+                                                    <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
+                                                        Outstanding
+                                                    </Badge>
+                                                    )
                                                 ) : (
                                                     <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
                                                         Paid

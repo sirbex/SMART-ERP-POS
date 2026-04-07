@@ -196,8 +196,11 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
-      // Forbidden - show access denied message
-      console.error('Access denied:', error.response.data.error);
+      // Forbidden - show access denied notification
+      const msg = error.response.data?.error || 'You do not have permission to perform this action';
+      console.error('Access denied:', msg);
+      // Dispatch custom event so any toast system can pick it up
+      window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
     }
 
     return Promise.reject(error);
