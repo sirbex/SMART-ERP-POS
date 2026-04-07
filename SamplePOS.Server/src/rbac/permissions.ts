@@ -63,10 +63,20 @@ export const PERMISSIONS: Record<string, Permission> = {
   ),
   ACCOUNTING_VOID: p('accounting.void', 'accounting', 'void', 'Void posted entries'),
   ACCOUNTING_EXPORT: p('accounting.export', 'accounting', 'export', 'Export accounting data'),
+  ACCOUNTING_PERIOD_MANAGE: p('accounting.period_manage', 'accounting', 'period_manage', 'Close, reopen, and lock accounting periods'),
+  ACCOUNTING_RECONCILE: p('accounting.reconcile', 'accounting', 'reconcile', 'Perform account reconciliations (AR, AP, cash, inventory)'),
+  ACCOUNTING_CHART_MANAGE: p('accounting.chart_manage', 'accounting', 'chart_manage', 'Manage chart of accounts (create, edit, deactivate accounts)'),
 
-  REPORTS_READ: p('reports.read', 'reports', 'read', 'View reports'),
+  REPORTS_READ: p('reports.read', 'reports', 'read', 'Access reports dashboard'),
   REPORTS_CREATE: p('reports.create', 'reports', 'create', 'Create custom reports'),
-  REPORTS_EXPORT: p('reports.export', 'reports', 'export', 'Export reports'),
+  REPORTS_EXPORT: p('reports.export', 'reports', 'export', 'Export reports to CSV/PDF'),
+  REPORTS_SALES_VIEW: p('reports.sales_view', 'reports', 'sales_view', 'View sales reports (daily summary, by cashier, by category, by payment method, voids, refunds)'),
+  REPORTS_INVENTORY_VIEW: p('reports.inventory_view', 'reports', 'inventory_view', 'View inventory reports (valuation, stock aging, low stock, expiring, adjustments, waste)'),
+  REPORTS_FINANCIAL_VIEW: p('reports.financial_view', 'reports', 'financial_view', 'View financial reports (P&L, balance sheet, cash flow, trial balance, business position)'),
+  REPORTS_PURCHASING_VIEW: p('reports.purchasing_view', 'reports', 'purchasing_view', 'View purchasing reports (PO summary, supplier cost analysis, goods received)'),
+  REPORTS_CUSTOMERS_VIEW: p('reports.customers_view', 'reports', 'customers_view', 'View customer reports (aging, statements, top customers, purchase history)'),
+  REPORTS_BANKING_VIEW: p('reports.banking_view', 'reports', 'banking_view', 'View banking reports (transactions, reconciliation, bank statements)'),
+  REPORTS_HR_VIEW: p('reports.hr_view', 'reports', 'hr_view', 'View HR and payroll reports'),
 
   ADMIN_READ: p('admin.read', 'admin', 'read', 'View admin panel'),
   ADMIN_CREATE: p('admin.create', 'admin', 'create', 'Create admin resources'),
@@ -137,6 +147,21 @@ export const PERMISSIONS: Record<string, Permission> = {
     'manage',
     'Manage physical stock counts'
   ),
+  INVENTORY_ADJUST: p('inventory.adjust', 'inventory', 'adjust', 'Perform stock adjustments (add, remove, transfer)'),
+
+  // Expenses Module
+  EXPENSES_READ: p('expenses.read', 'expenses', 'read', 'View expenses and expense summaries'),
+  EXPENSES_CREATE: p('expenses.create', 'expenses', 'create', 'Create expense entries and claims'),
+  EXPENSES_UPDATE: p('expenses.update', 'expenses', 'update', 'Modify expense records'),
+  EXPENSES_DELETE: p('expenses.delete', 'expenses', 'delete', 'Delete expense records'),
+  EXPENSES_APPROVE: p('expenses.approve', 'expenses', 'approve', 'Approve or reject expense submissions'),
+  EXPENSES_EXPORT: p('expenses.export', 'expenses', 'export', 'Export expense data to CSV'),
+
+  // Quotations Module
+  QUOTATIONS_READ: p('quotations.read', 'quotations', 'read', 'View quotations'),
+  QUOTATIONS_CREATE: p('quotations.create', 'quotations', 'create', 'Create quotations'),
+  QUOTATIONS_UPDATE: p('quotations.update', 'quotations', 'update', 'Modify quotations'),
+  QUOTATIONS_DELETE: p('quotations.delete', 'quotations', 'delete', 'Delete quotations'),
 } as const;
 
 export const PERMISSION_KEYS = Object.values(PERMISSIONS).map((p) => p.key);

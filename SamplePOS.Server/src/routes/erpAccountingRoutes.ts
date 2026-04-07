@@ -319,7 +319,7 @@ router.get(
  */
 router.post(
   '/periods/close',
-  requirePermission('accounting.approve'),
+  requirePermission('accounting.period_manage'),
   asyncHandler(async (req, res) => {
     const validation = ClosePeriodSchema.safeParse(req.body);
     if (!validation.success) {
@@ -359,7 +359,7 @@ router.post(
  */
 router.post(
   '/periods/reopen',
-  requirePermission('accounting.approve'),
+  requirePermission('accounting.period_manage'),
   asyncHandler(async (req, res) => {
     const validation = ReopenPeriodSchema.safeParse(req.body);
     if (!validation.success) {
@@ -400,7 +400,7 @@ router.post(
  */
 router.post(
   '/periods/lock',
-  requirePermission('accounting.approve'),
+  requirePermission('accounting.period_manage'),
   asyncHandler(async (req, res) => {
     const validation = LockPeriodSchema.safeParse(req.body);
     if (!validation.success) {
@@ -746,7 +746,7 @@ router.get(
  */
 router.get(
   '/reconciliation/summary',
-  requirePermission('accounting.read'),
+  requirePermission('accounting.reconcile'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
@@ -767,7 +767,7 @@ router.get(
  */
 router.get(
   '/reconciliation/cash',
-  requirePermission('accounting.read'),
+  requirePermission('accounting.reconcile'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
@@ -788,7 +788,7 @@ router.get(
  */
 router.get(
   '/reconciliation/accounts-receivable',
-  requirePermission('accounting.read'),
+  requirePermission('accounting.reconcile'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
@@ -809,7 +809,7 @@ router.get(
  */
 router.get(
   '/reconciliation/inventory',
-  requirePermission('accounting.read'),
+  requirePermission('accounting.reconcile'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
@@ -830,7 +830,7 @@ router.get(
  */
 router.get(
   '/reconciliation/accounts-payable',
-  requirePermission('accounting.read'),
+  requirePermission('accounting.reconcile'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
@@ -851,7 +851,7 @@ router.get(
  */
 router.get(
   '/reconciliation/:accountCode/discrepancies',
-  requirePermission('accounting.read'),
+  requirePermission('accounting.reconcile'),
   asyncHandler(async (req, res) => {
     const { accountCode } = req.params;
     const { asOfDate } = req.query;

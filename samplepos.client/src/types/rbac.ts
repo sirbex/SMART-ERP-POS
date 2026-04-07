@@ -19,7 +19,9 @@ export type PermissionModule =
   | 'delivery'
   | 'settings'
   | 'crm'
-  | 'hr';
+  | 'hr'
+  | 'expenses'
+  | 'quotations';
 
 // Permission Action Types
 export type PermissionAction =
@@ -36,7 +38,17 @@ export type PermissionAction =
   | 'reconcile'
   | 'manage'
   | 'payroll_process'
-  | 'payroll_post';
+  | 'payroll_post'
+  | 'adjust'
+  | 'sales_view'
+  | 'inventory_view'
+  | 'financial_view'
+  | 'purchasing_view'
+  | 'customers_view'
+  | 'banking_view'
+  | 'hr_view'
+  | 'period_manage'
+  | 'chart_manage';
 
 // Scope Types for multi-tenant permissions
 export type ScopeType = 'global' | 'organization' | 'branch' | 'warehouse';

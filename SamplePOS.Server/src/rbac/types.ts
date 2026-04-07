@@ -13,7 +13,9 @@ export type PermissionModule =
   | 'delivery'
   | 'settings'
   | 'crm'
-  | 'hr';
+  | 'hr'
+  | 'expenses'
+  | 'quotations';
 
 export type PermissionAction =
   | 'read'
@@ -29,7 +31,17 @@ export type PermissionAction =
   | 'reconcile'
   | 'manage'
   | 'payroll_process'
-  | 'payroll_post';
+  | 'payroll_post'
+  | 'adjust'
+  | 'sales_view'
+  | 'inventory_view'
+  | 'financial_view'
+  | 'purchasing_view'
+  | 'customers_view'
+  | 'banking_view'
+  | 'hr_view'
+  | 'period_manage'
+  | 'chart_manage';
 
 export interface Permission {
   key: string;

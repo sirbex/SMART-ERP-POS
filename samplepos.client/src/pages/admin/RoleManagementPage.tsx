@@ -20,8 +20,8 @@ import toast from 'react-hot-toast';
 
 // Module display order (enterprise: most critical first)
 const MODULE_ORDER: string[] = [
-  'system', 'admin', 'sales', 'pos', 'inventory', 'purchasing',
-  'accounting', 'banking', 'customers', 'suppliers', 'delivery',
+  'system', 'admin', 'sales', 'pos', 'quotations', 'inventory', 'purchasing',
+  'accounting', 'expenses', 'banking', 'customers', 'suppliers', 'delivery',
   'reports', 'settings', 'crm', 'hr',
 ];
 
@@ -31,14 +31,16 @@ const MODULE_DESCRIPTIONS: Record<string, string> = {
   admin: 'Administrative panel access',
   sales: 'Sales transactions & invoicing',
   pos: 'Point of Sale terminal',
+  quotations: 'Sales quotations & estimates',
   inventory: 'Stock & batch management',
   purchasing: 'Purchase orders & goods receipts',
-  accounting: 'General Ledger & journal entries',
+  accounting: 'General Ledger, journal entries & periods',
+  expenses: 'Expense tracking & approval workflow',
   banking: 'Bank accounts & reconciliation',
   customers: 'Customer records & groups',
   suppliers: 'Supplier records',
   delivery: 'Delivery orders & routing',
-  reports: 'Business reports & exports',
+  reports: 'Business reports & analytics',
   settings: 'Application configuration',
   crm: 'Leads, opportunities & pipeline',
   hr: 'Employees, departments & payroll',
@@ -94,8 +96,11 @@ export default function RoleManagementPage() {
   const permissionLabel = useCallback((perm: Permission): string => {
     const parts = perm.key.split('.');
     const actionPart = parts[1] || perm.action;
-    if (perm.module === 'system' && actionPart.includes('_')) {
-      const [sub, act] = actionPart.split('_');
+    // Compound keys with underscore: show "sub: action" format
+    if (actionPart.includes('_')) {
+      const underscoreIdx = actionPart.indexOf('_');
+      const sub = actionPart.slice(0, underscoreIdx);
+      const act = actionPart.slice(underscoreIdx + 1);
       return `${sub}: ${act}`;
     }
     return perm.action.replace(/_/g, ' ');

@@ -18,16 +18,16 @@ router.use((req, res, next) => {
 });
 
 // Standard quotation management (all routes require authentication)
-router.post('/quotations', authenticate, quotationController.createQuotation);
-router.get('/quotations', authenticate, quotationController.listQuotations);
-router.get('/quotations/:id', authenticate, quotationController.getQuotation);
-router.get('/quotations/number/:quoteNumber', authenticate, quotationController.getQuotationByNumber);
-router.put('/quotations/:id', authenticate, quotationController.updateQuotation);
-router.put('/quotations/:id/status', authenticate, requirePermission('sales.update'), quotationController.updateQuotationStatus);
+router.post('/quotations', authenticate, requirePermission('quotations.create'), quotationController.createQuotation);
+router.get('/quotations', authenticate, requirePermission('quotations.read'), quotationController.listQuotations);
+router.get('/quotations/:id', authenticate, requirePermission('quotations.read'), quotationController.getQuotation);
+router.get('/quotations/number/:quoteNumber', authenticate, requirePermission('quotations.read'), quotationController.getQuotationByNumber);
+router.put('/quotations/:id', authenticate, requirePermission('quotations.update'), quotationController.updateQuotation);
+router.put('/quotations/:id/status', authenticate, requirePermission('quotations.update'), quotationController.updateQuotationStatus);
 router.post('/quotations/:id/convert', authenticate, requirePermission('sales.create'), quotationController.convertQuotation);
-router.delete('/quotations/:id', authenticate, requirePermission('sales.delete'), quotationController.deleteQuotation);
+router.delete('/quotations/:id', authenticate, requirePermission('quotations.delete'), quotationController.deleteQuotation);
 
 // POS quick quote endpoints
-router.post('/pos/quote', authenticate, quotationController.createQuickQuote);
+router.post('/pos/quote', authenticate, requirePermission('quotations.create'), quotationController.createQuickQuote);
 
 export default router;

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
+import { requirePermission } from '../rbac/middleware.js';
 import { pool as globalPool } from '../db/pool.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import * as businessReportService from '../services/businessReportService.js';
@@ -19,6 +20,7 @@ router.use(authenticate);
  */
 router.get(
   '/business-performance',
+  requirePermission('reports.financial_view'),
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const {

@@ -194,7 +194,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     const managerRoleId = managerResult.rows[0].id;
 
     const managerPermissions = permissions.filter(p =>
-      ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'banking', 'delivery', 'settings', 'crm'].includes(p.module)
+      ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'banking', 'delivery', 'settings', 'crm', 'expenses', 'quotations'].includes(p.module)
     );
     for (const permission of managerPermissions) {
       await client.query(
@@ -221,6 +221,8 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       'inventory.read',
       'delivery.read',
       'settings.read',
+      'quotations.read', 'quotations.create',
+      'reports.sales_view',
     ];
     for (const permKey of cashierPermissions) {
       await client.query(
@@ -260,9 +262,9 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     );
     const accountantRoleId = accountantResult.rows[0].id;
     const accountantPerms = permissions.filter(p =>
-      ['accounting', 'banking', 'reports'].includes(p.module) ||
+      ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
       ['sales.read', 'sales.export', 'purchasing.read', 'customers.read', 'customers.export',
-       'suppliers.read', 'inventory.read', 'settings.read'].includes(p.key)
+       'suppliers.read', 'inventory.read', 'settings.read', 'quotations.read'].includes(p.key)
     );
     for (const permission of accountantPerms) {
       await client.query(
@@ -305,7 +307,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     );
     const salesRepRoleId = salesRepResult.rows[0].id;
     const salesRepPerms = permissions.filter(p =>
-      ['sales', 'customers', 'crm', 'reports'].includes(p.module) ||
+      ['sales', 'customers', 'crm', 'reports', 'quotations'].includes(p.module) ||
       ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(p.key)
     );
     for (const permission of salesRepPerms) {
