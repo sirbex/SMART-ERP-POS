@@ -81,11 +81,32 @@ export class RbacService {
       throw new RbacError('Role not found', 'ROLE_NOT_FOUND', 404);
     }
 
+    // System roles: allow permission updates only — block name/description changes
     if (existingRole.isSystemRole) {
-      throw new RbacError('System roles cannot be modified', 'SYSTEM_ROLE_IMMUTABLE', 403);
+      if (input.name && input.name !== existingRole.name) {
+        throw new RbacError(
+          'System role names cannot be changed',
+          'SYSTEM_ROLE_NAME_IMMUTABLE',
+          403
+        );
+      }
+      if (input.description && input.description !== existingRole.description) {
+        throw new RbacError(
+          'System role descriptions cannot be changed',
+          'SYSTEM_ROLE_DESC_IMMUTABLE',
+          403
+        );
+      }
+      if (!input.permissionKeys || input.permissionKeys.length === 0) {
+        throw new RbacError(
+          'System roles require at least one permission',
+          'SYSTEM_ROLE_EMPTY_PERMS',
+          400
+        );
+      }
     }
 
-    if (input.name && input.name !== existingRole.name) {
+    if (!existingRole.isSystemRole && input.name && input.name !== existingRole.name) {
       const duplicateRole = await this.repository.getRoleByName(input.name);
       if (duplicateRole && duplicateRole.id !== roleId) {
         throw new RbacError(`Role with name "${input.name}" already exists`, 'DUPLICATE_ROLE', 409);
@@ -104,18 +125,17 @@ export class RbacService {
 
     const client = await this.repository.beginTransaction();
     try {
-      const updatedRole = await this.repository.updateRole(client, roleId, {
-        name: input.name,
-        description: input.description,
-        updatedBy: actorUserId,
-      });
+      let updatedRole: Role;
 
-      if (!updatedRole) {
-        throw new RbacError('Failed to update role', 'UPDATE_FAILED', 500);
-      }
+      if (existingRole.isSystemRole) {
+        // System role: only update permissions, bump version
+        await this.repository.setRolePermissions(client, roleId, input.permissionKeys!, actorUserId);
 
-      if (input.permissionKeys) {
-        await this.repository.setRolePermissions(client, roleId, input.permissionKeys, actorUserId);
+        const touched = await this.repository.touchSystemRole(client, roleId, actorUserId);
+        if (!touched) {
+          throw new RbacError('Failed to update system role', 'UPDATE_FAILED', 500);
+        }
+        updatedRole = touched;
 
         await this.repository.createAuditLog(client, {
           actorUserId,
@@ -126,17 +146,43 @@ export class RbacService {
           ipAddress,
           userAgent,
         });
-      }
+      } else {
+        // Custom role: full update
+        const updated = await this.repository.updateRole(client, roleId, {
+          name: input.name,
+          description: input.description,
+          updatedBy: actorUserId,
+        });
 
-      await this.repository.createAuditLog(client, {
-        actorUserId,
-        targetRoleId: roleId,
-        action: 'role_updated',
-        previousState: { name: existingRole.name, description: existingRole.description, version: existingRole.version },
-        newState: { name: updatedRole.name, description: updatedRole.description, version: updatedRole.version },
-        ipAddress,
-        userAgent,
-      });
+        if (!updated) {
+          throw new RbacError('Failed to update role', 'UPDATE_FAILED', 500);
+        }
+        updatedRole = updated;
+
+        if (input.permissionKeys) {
+          await this.repository.setRolePermissions(client, roleId, input.permissionKeys, actorUserId);
+
+          await this.repository.createAuditLog(client, {
+            actorUserId,
+            targetRoleId: roleId,
+            action: 'role_permissions_updated',
+            previousState: { permissions: previousPermissions },
+            newState: { permissions: input.permissionKeys },
+            ipAddress,
+            userAgent,
+          });
+        }
+
+        await this.repository.createAuditLog(client, {
+          actorUserId,
+          targetRoleId: roleId,
+          action: 'role_updated',
+          previousState: { name: existingRole.name, description: existingRole.description, version: existingRole.version },
+          newState: { name: updatedRole.name, description: updatedRole.description, version: updatedRole.version },
+          ipAddress,
+          userAgent,
+        });
+      }
 
       await this.repository.commitTransaction(client);
       this.invalidatePermissionCache();

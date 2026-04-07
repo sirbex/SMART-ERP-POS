@@ -61,6 +61,25 @@ export class RbacRepository {
     return result.rows[0] || null;
   }
 
+  /**
+   * Bump version + updated_by on a system role after its permissions are changed.
+   * System roles cannot have name/description changed — only permissions.
+   */
+  async touchSystemRole(
+    client: Pool | PoolClient,
+    roleId: string,
+    updatedBy: string
+  ): Promise<Role | null> {
+    const result = await client.query<Role>(
+      `UPDATE rbac_roles SET version = version + 1, updated_by = $2, updated_at = NOW()
+       WHERE id = $1 AND is_active = true AND is_system_role = true
+       RETURNING id, name, description, version, is_system_role as "isSystemRole", is_active as "isActive",
+                 created_at as "createdAt", updated_at as "updatedAt", created_by as "createdBy", updated_by as "updatedBy"`,
+      [roleId, updatedBy]
+    );
+    return result.rows[0] || null;
+  }
+
   async softDeleteRole(client: Pool | PoolClient, roleId: string, deletedBy: string): Promise<boolean> {
     const result = await client.query(
       `UPDATE rbac_roles SET is_active = false, updated_by = $2, updated_at = NOW(), version = version + 1
