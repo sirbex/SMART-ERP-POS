@@ -139,6 +139,38 @@ export function useDeletePurchaseOrder() {
 }
 
 /**
+ * Update draft purchase order (SAP ME22N pattern)
+ */
+export function useUpdateDraftPO() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, data }: {
+      id: string;
+      data: {
+        supplierId?: string;
+        expectedDate?: string | null;
+        notes?: string | null;
+        items?: Array<{
+          productId: string;
+          productName: string;
+          quantity: number;
+          unitCost: number;
+          uomId?: string | null;
+        }>;
+      };
+    }) => {
+      const response = await api.purchaseOrders.update(id, data);
+      return response.data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.detail(variables.id) });
+    },
+  });
+}
+
+/**
  * Send PO to supplier (auto-creates goods receipt draft)
  */
 export function useSendPOToSupplier() {

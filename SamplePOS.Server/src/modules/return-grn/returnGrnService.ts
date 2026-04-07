@@ -251,9 +251,10 @@ export const returnGrnService = {
             if (returnTotalNum > 0) {
                 // Look up supplier name for GL description
                 const grResult = await client.query(
-                    `SELECT g.supplier_id, s."CompanyName" AS supplier_name, g.gr_number
+                    `SELECT po.supplier_id, s."CompanyName" AS supplier_name, g.receipt_number AS gr_number
                      FROM goods_receipts g
-                     LEFT JOIN suppliers s ON s."Id" = g.supplier_id
+                     LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
+                     LEFT JOIN suppliers s ON s."Id" = po.supplier_id
                      WHERE g.id = $1`,
                     [rgrn.grnId]
                 );

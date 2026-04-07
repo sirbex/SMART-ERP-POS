@@ -402,6 +402,8 @@ export const api = {
       apiClient.post<ApiResponse>(`purchase-orders/${id}/send-to-supplier`),
     cancel: (id: string) => apiClient.post<ApiResponse>(`purchase-orders/${id}/cancel`),
     delete: (id: string) => apiClient.delete<ApiResponse>(`purchase-orders/${id}`),
+    update: (id: string, data: { supplierId?: string; expectedDate?: string | null; notes?: string | null; items?: Array<{ productId: string; productName: string; quantity: number; unitCost: number; uomId?: string | null }> }) =>
+      apiClient.put<ApiResponse>(`purchase-orders/${id}`, data),
     createInvoice: (data: CreatePOInvoiceInput) =>
       apiClient.post<ApiResponse>('purchase-orders/invoices', data),
     recordPayment: (data: RecordPOPaymentInput) =>
@@ -421,6 +423,10 @@ export const api = {
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`, data),
     batchUpdateItems: (grId: string, items: Array<{ itemId: string; receivedQuantity?: number; unitCost?: number; batchNumber?: string | null; isBonus?: boolean; expiryDate?: string | null }>) =>
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items`, { items }),
+    addItem: (grId: string, data: { productId: string; productName: string; receivedQuantity: number; unitCost: number; batchNumber?: string | null; expiryDate?: string | null }) =>
+      apiClient.post<ApiResponse>(`goods-receipts/${grId}/items`, data),
+    removeItem: (grId: string, itemId: string) =>
+      apiClient.delete<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`),
     hydrateFromPO: (id: string) =>
       apiClient.post<ApiResponse>(`goods-receipts/${id}/hydrate-from-po`),
   },

@@ -1009,6 +1009,84 @@ export const goodsReceiptService = {
     });
   },
 
+  /**
+   * Add a new item to a DRAFT goods receipt
+   */
+  async addGRItem(
+    pool: Pool,
+    grId: string,
+    data: {
+      productId: string;
+      productName: string;
+      receivedQuantity: number;
+      unitCost: number;
+      batchNumber?: string | null;
+      expiryDate?: string | null;
+    }
+  ): Promise<GoodsReceiptItem> {
+    return UnitOfWork.run(pool, async (client) => {
+      const grResult = await goodsReceiptRepository.getGRById(client, grId);
+      if (!grResult) throw new Error(`Goods receipt ${grId} not found`);
+      const { gr } = grResult;
+
+      if (gr.status !== 'DRAFT')
+        throw new Error('Cannot add items to a finalized goods receipt');
+
+      InventoryBusinessRules.validatePositiveQuantity(data.receivedQuantity, 'goods receipt item');
+      PurchaseOrderBusinessRules.validateUnitCost(data.unitCost);
+
+      if (data.expiryDate) {
+        InventoryBusinessRules.validateExpiryDate(data.expiryDate, false);
+      }
+
+      const items = await goodsReceiptRepository.addGRItems(client, [{
+        goodsReceiptId: grId,
+        poItemId: null,
+        productId: data.productId,
+        productName: data.productName,
+        orderedQuantity: 0,
+        receivedQuantity: data.receivedQuantity,
+        unitCost: data.unitCost,
+        batchNumber: data.batchNumber || null,
+        expiryDate: data.expiryDate || null,
+      }]);
+
+      return items[0];
+    });
+  },
+
+  /**
+   * Remove an item from a DRAFT goods receipt
+   */
+  async removeGRItem(
+    pool: Pool,
+    grId: string,
+    itemId: string
+  ): Promise<void> {
+    return UnitOfWork.run(pool, async (client) => {
+      const grResult = await goodsReceiptRepository.getGRById(client, grId);
+      if (!grResult) throw new Error(`Goods receipt ${grId} not found`);
+      const { gr, items } = grResult;
+
+      if (gr.status !== 'DRAFT')
+        throw new Error('Cannot remove items from a finalized goods receipt');
+
+      // Verify item belongs to this GR
+      const item = items.find((i: GoodsReceiptItem) => i.id === itemId);
+      if (!item) throw new Error(`Item ${itemId} not found in goods receipt ${grId}`);
+
+      // Must keep at least one item
+      if (items.length <= 1) {
+        throw new Error('Cannot remove the last item from a goods receipt. Delete the GR instead.');
+      }
+
+      await client.query(
+        'DELETE FROM goods_receipt_items WHERE id = $1 AND goods_receipt_id = $2',
+        [itemId, grId]
+      );
+    });
+  },
+
   /** Hydrate a DRAFT GR's items from its Purchase Order (for GRs created without items) */
   async hydrateFromPO(
     pool: Pool,

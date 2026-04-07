@@ -37,6 +37,13 @@ const UpdatePOStatusSchema = z
   })
   .strict();
 
+const UpdateDraftPOSchema = z.object({
+  supplierId: z.string().uuid().optional(),
+  expectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD').optional().nullable(),
+  notes: z.string().optional().nullable(),
+  items: z.array(POItemSchema).min(1, 'Purchase order must have at least one item').optional(),
+}).strict();
+
 const ListPOsQuerySchema = z.object({
   page: z
     .string()
@@ -285,6 +292,23 @@ export const purchaseOrderController = {
   },
 
   /**
+   * Update draft purchase order (SAP ME22N pattern)
+   */
+  async updateDraftPO(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const validatedData = UpdateDraftPOSchema.parse(req.body);
+
+    const result = await purchaseOrderService.updateDraftPO(pool, id, validatedData);
+
+    res.json({
+      success: true,
+      data: result,
+      message: 'Purchase order updated successfully',
+    });
+  },
+
+  /**
    * Send PO to supplier (auto-creates goods receipt draft)
    */
   async sendPOToSupplier(req: Request, res: Response): Promise<void> {
@@ -436,6 +460,12 @@ purchaseOrderRoutes.put(
   authenticate,
   requirePermission('purchasing.update'),
   asyncHandler(purchaseOrderController.updatePOStatus)
+);
+purchaseOrderRoutes.put(
+  '/:id',
+  authenticate,
+  requirePermission('purchasing.update'),
+  asyncHandler(purchaseOrderController.updateDraftPO)
 );
 purchaseOrderRoutes.post(
   '/:id/submit',

@@ -8,6 +8,8 @@ import {
   useFinalizeGoodsReceipt,
   useGoodsReceipt,
   useCreateGoodsReceipt,
+  useAddGRItem,
+  useRemoveGRItem,
 } from '../../hooks/useGoodsReceipts';
 import {
   useReturnableItems,
@@ -24,6 +26,8 @@ import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
+import { ProcurementProductSearch } from '../../components/inventory/shared';
+import type { ProcurementProduct } from '../../components/inventory/shared';
 import { inventoryKeys } from '../../hooks/useInventory';
 // DatePicker removed — GR uses native date input for keyboard-driven receiving
 
@@ -206,6 +210,7 @@ export default function GoodsReceiptsPage() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnReason, setReturnReason] = useState('');
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [showAddItemForm, setShowAddItemForm] = useState(false);
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [receiveAllFlash, setReceiveAllFlash] = useState('');
 
@@ -268,6 +273,8 @@ export default function GoodsReceiptsPage() {
   const finalizeMutation = useFinalizeGoodsReceipt();
   const createReturnGrnMutation = useCreateReturnGrn();
   const postReturnGrnMutation = usePostReturnGrn();
+  const addGRItemMutation = useAddGRItem();
+  const removeGRItemMutation = useRemoveGRItem();
 
   // Return GRN data for selected GRN
   const selectedGRId = selectedGR?.id || '';
@@ -1133,8 +1140,31 @@ export default function GoodsReceiptsPage() {
                     {detailsQuery.isLoading && (
                       <span className="text-sm text-gray-500">Loading items…</span>
                     )}
+                    {selectedGR.status === 'DRAFT' && !isFromPO && (
+                      <button
+                        onClick={() => setShowAddItemForm(true)}
+                        className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium flex items-center gap-1.5"
+                        title="Add a new item to this goods receipt"
+                      >
+                        + Add Item
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* Inline Add Item Form */}
+                {showAddItemForm && selectedGR.status === 'DRAFT' && (
+                  <AddGRItemForm
+                    grId={selectedGR.id}
+                    addMutation={addGRItemMutation}
+                    onClose={() => setShowAddItemForm(false)}
+                    onSuccess={() => {
+                      setShowAddItemForm(false);
+                      detailsQuery.refetch();
+                    }}
+                  />
+                )}
+
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
@@ -1166,6 +1196,10 @@ export default function GoodsReceiptsPage() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Variance
                         </th>
+                        {selectedGR.status === 'DRAFT' && !isFromPO && (
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -1191,6 +1225,13 @@ export default function GoodsReceiptsPage() {
                             itemIndex={idx}
                             totalItems={items.length}
                             bundledUoms={productUomsMap[it.productId || it.product_id || ''] || []}
+                            onRemove={selectedGR.status === 'DRAFT' && !isFromPO && items.length > 1 ? (itemId: string) => {
+                              if (!confirm('Remove this item from the goods receipt?')) return;
+                              removeGRItemMutation.mutate({ grId: selectedGR.id, itemId }, {
+                                onSuccess: () => detailsQuery.refetch(),
+                                onError: (err: Error) => alert(err.message || 'Failed to remove item'),
+                              });
+                            } : undefined}
                           />
                         ))
                       )}
@@ -1749,6 +1790,108 @@ export default function GoodsReceiptsPage() {
   );
 }
 
+// ── Inline Add Item Form for DRAFT GRs ──
+function AddGRItemForm({
+  grId,
+  addMutation,
+  onClose,
+  onSuccess,
+}: {
+  grId: string;
+  addMutation: ReturnType<typeof useAddGRItem>;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [selectedProduct, setSelectedProduct] = useState<ProcurementProduct | null>(null);
+  const [quantity, setQuantity] = useState('1');
+  const [unitCost, setUnitCost] = useState('0');
+  const [batchNumber, setBatchNumber] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+
+  const handleProductSelect = (product: ProcurementProduct) => {
+    setSelectedProduct(product);
+    // Auto-fill cost from product
+    if (product.costPrice > 0) {
+      setUnitCost(new Decimal(product.costPrice).toFixed(2));
+    } else if (product.lastCost > 0) {
+      setUnitCost(new Decimal(product.lastCost).toFixed(2));
+    }
+  };
+
+  const handleAdd = () => {
+    if (!selectedProduct) { alert('Please select a product'); return; }
+    const qty = parseFloat(quantity);
+    const cost = parseFloat(unitCost);
+    if (!qty || qty <= 0) { alert('Quantity must be positive'); return; }
+    if (cost < 0) { alert('Unit cost cannot be negative'); return; }
+
+    addMutation.mutate({
+      grId,
+      data: {
+        productId: selectedProduct.id,
+        productName: selectedProduct.name,
+        receivedQuantity: qty,
+        unitCost: cost,
+        batchNumber: batchNumber || null,
+        expiryDate: expiryDate || null,
+      },
+    }, {
+      onSuccess: () => onSuccess(),
+      onError: (err: Error) => alert(err.message || 'Failed to add item'),
+    });
+  };
+
+  return (
+    <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+      <div className="flex items-center justify-between mb-3">
+        <h5 className="text-sm font-semibold text-green-800">Add New Item</h5>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="md:col-span-2">
+          <label className="block text-xs font-medium text-gray-700 mb-1">Product</label>
+          {selectedProduct ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-900 truncate">{selectedProduct.name}</span>
+              <button onClick={() => setSelectedProduct(null)} className="text-xs text-red-500 hover:text-red-700">change</button>
+            </div>
+          ) : (
+            <ProcurementProductSearch supplierId="" onProductSelect={handleProductSelect} disabled={addMutation.isPending} className="w-full" />
+          )}
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Qty Received</label>
+          <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} min="1" step="1"
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Unit Cost</label>
+          <input type="number" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} min="0" step="0.01"
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div className="flex items-end">
+          <button onClick={handleAdd} disabled={addMutation.isPending || !selectedProduct}
+            className="w-full px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+            {addMutation.isPending ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Batch # (optional)</label>
+          <input type="text" value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} placeholder="BATCH-YYYYMMDD-001"
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date (optional)</label>
+          <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)}
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Child row component to satisfy React Hook rules
 function GRItemRow({
   item,
@@ -1763,6 +1906,7 @@ function GRItemRow({
   itemIndex,
   totalItems,
   bundledUoms,
+  onRemove,
 }: {
   item: GRItemRow;
   baseline: 'PO' | 'PRODUCT';
@@ -1780,6 +1924,7 @@ function GRItemRow({
   itemIndex: number;
   totalItems: number;
   bundledUoms: ProductUomEntry[];
+  onRemove?: (itemId: string) => void;
 }) {
   const es = editState || {};
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
@@ -2043,6 +2188,18 @@ function GRItemRow({
           )}
         </div>
       </td>
+      {onRemove && !disabled && (
+        <td className="px-2 py-2 text-center">
+          <button
+            type="button"
+            onClick={() => onRemove(item.id)}
+            className="text-red-500 hover:text-red-700 text-sm"
+            title="Remove item"
+          >
+            ✕
+          </button>
+        </td>
+      )}
     </tr>
   );
 }

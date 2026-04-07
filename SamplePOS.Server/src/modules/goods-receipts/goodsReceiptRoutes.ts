@@ -91,6 +91,15 @@ const UuidParamSchema = z.object({
   id: z.string().uuid(),
 });
 
+const AddGRItemSchema = z.object({
+  productId: z.string().uuid('Product ID must be a valid UUID'),
+  productName: z.string().min(1, 'Product name is required'),
+  receivedQuantity: z.number().positive('Received quantity must be positive'),
+  unitCost: z.number().nonnegative('Unit cost must be non-negative'),
+  batchNumber: z.string().optional().nullable(),
+  expiryDate: z.string().optional().nullable(),
+});
+
 export const goodsReceiptController = {
   /**
    * Create goods receipt
@@ -362,6 +371,36 @@ export const goodsReceiptController = {
     const results = await goodsReceiptService.batchUpdateGRItems(pool, grId, items);
     res.json({ success: true, data: results, message: `${results.length} item(s) updated` });
   },
+
+  /**
+   * Add item to a DRAFT goods receipt
+   */
+  async addGRItem(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id: grId } = UuidParamSchema.parse(req.params);
+    const payload = AddGRItemSchema.parse(req.body);
+    const item = await goodsReceiptService.addGRItem(pool, grId, payload);
+
+    res.status(201).json({
+      success: true,
+      data: item,
+      message: 'Item added to goods receipt',
+    });
+  },
+
+  /**
+   * Remove item from a DRAFT goods receipt
+   */
+  async removeGRItem(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id: grId, itemId } = z.object({ id: z.string().uuid(), itemId: z.string().uuid() }).parse(req.params);
+    await goodsReceiptService.removeGRItem(pool, grId, itemId);
+
+    res.json({
+      success: true,
+      message: 'Item removed from goods receipt',
+    });
+  },
 };
 
 // Routes
@@ -401,4 +440,16 @@ goodsReceiptRoutes.post(
   authenticate,
   requirePermission('purchasing.create'),
   asyncHandler(goodsReceiptController.hydrateFromPO)
+);
+goodsReceiptRoutes.post(
+  '/:id/items',
+  authenticate,
+  requirePermission('purchasing.update'),
+  asyncHandler(goodsReceiptController.addGRItem)
+);
+goodsReceiptRoutes.delete(
+  '/:id/items/:itemId',
+  authenticate,
+  requirePermission('purchasing.update'),
+  asyncHandler(goodsReceiptController.removeGRItem)
 );

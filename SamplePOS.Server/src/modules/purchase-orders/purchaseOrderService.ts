@@ -32,6 +32,19 @@ export interface CreatePOInput {
   }[];
 }
 
+export interface UpdateDraftPOInput {
+  supplierId?: string;
+  expectedDate?: string | null;
+  notes?: string | null;
+  items?: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitCost: number;
+    uomId?: string | null;
+  }[];
+}
+
 export const purchaseOrderService = {
   /**
    * Create purchase order with items and validation (ATOMIC TRANSACTION)
@@ -183,6 +196,125 @@ export const purchaseOrderService = {
       const updatedPO = await purchaseOrderRepository.getPOById(client, po.id);
 
       logger.info('Purchase order created successfully', { poId: po.id, itemCount: items.length });
+      return updatedPO!;
+    });
+  },
+
+  /**
+   * Update a DRAFT purchase order (SAP ME22N / Odoo draft edit pattern)
+   * Allows full header + item replacement while PO is in DRAFT status.
+   * 
+   * Business Rules: Same as createPO (supplier validation, item validation, etc.)
+   * Transaction: Atomic — all-or-nothing via UnitOfWork
+   */
+  async updateDraftPO(
+    pool: Pool,
+    id: string,
+    input: UpdateDraftPOInput
+  ): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
+    return UnitOfWork.run(pool, async (client) => {
+      await checkMaintenanceMode(client);
+
+      // Fetch existing PO — must be DRAFT
+      const existing = await purchaseOrderRepository.getPOById(client, id);
+      if (!existing) {
+        throw new Error(`Purchase order ${id} not found`);
+      }
+      if (existing.po.status !== 'DRAFT') {
+        throw new Error('Can only edit purchase orders in DRAFT status');
+      }
+
+      // Validate supplier if changed
+      const supplierId = input.supplierId || existing.po.supplierId;
+      if (input.supplierId) {
+        await PurchaseOrderBusinessRules.validateSupplierExists(client, input.supplierId);
+      }
+
+      // Validate expected date if provided
+      if (input.expectedDate) {
+        PurchaseOrderBusinessRules.validateExpectedDate(input.expectedDate);
+      }
+
+      // Update header fields
+      if (input.supplierId || input.expectedDate !== undefined || input.notes !== undefined) {
+        await purchaseOrderRepository.updatePOHeader(client, id, {
+          supplierId: input.supplierId,
+          expectedDate: input.expectedDate,
+          notes: input.notes,
+        });
+      }
+
+      // If items are provided, replace all items (delete + re-insert)
+      if (input.items && input.items.length > 0) {
+        // Validate each item
+        for (const item of input.items) {
+          InventoryBusinessRules.validatePositiveQuantity(item.quantity, 'PO item');
+
+          // Cost normalization (same as createPO)
+          const productRes = await client.query(
+            'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+            [item.productId]
+          );
+          if (productRes.rows.length > 0) {
+            const baseCost = Money.parseDb(productRes.rows[0].cost_price).toNumber();
+            if (baseCost > 0 && item.unitCost > 0) {
+              const ratio = item.unitCost / baseCost;
+              const rounded = Math.round(ratio);
+              const isIntegerish = Math.abs(ratio - rounded) < 1e-6;
+              if (isIntegerish && rounded >= 2 && rounded <= 200) {
+                logger.info(
+                  `Normalizing unit cost for ${item.productName}: ${item.unitCost} → ${item.unitCost / rounded} (factor: ${rounded})`
+                );
+                item.unitCost = item.unitCost / rounded;
+              }
+            }
+          }
+
+          const unitCostDecimal = new Decimal(item.unitCost);
+          PurchaseOrderBusinessRules.validateUnitCost(Money.toNumber(unitCostDecimal));
+        }
+
+        // Validate total and business rules
+        const totalAmount = Money.toNumber(input.items.reduce(
+          (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
+          new Decimal(0)
+        ));
+
+        if (input.expectedDate) {
+          await PurchaseOrderBusinessRules.validateLeadTime(
+            client,
+            supplierId,
+            existing.po.orderDate,
+            input.expectedDate
+          );
+        }
+
+        await PurchaseOrderBusinessRules.validateMinimumOrderValue(client, supplierId, totalAmount);
+
+        // Delete existing items and re-insert
+        await client.query(
+          'DELETE FROM purchase_order_items WHERE purchase_order_id = $1',
+          [id]
+        );
+
+        const poItems: CreatePOItemData[] = input.items.map((item) => ({
+          purchaseOrderId: id,
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitCost: Money.toNumber(new Decimal(item.unitCost)),
+          uomId: item.uomId || null,
+        }));
+
+        await purchaseOrderRepository.addPOItems(client, poItems);
+      }
+
+      // Update total
+      await purchaseOrderRepository.updatePOTotal(client, id);
+
+      // Return updated PO
+      const updatedPO = await purchaseOrderRepository.getPOById(client, id);
+      logger.info('Purchase order updated successfully', { poId: id });
       return updatedPO!;
     });
   },

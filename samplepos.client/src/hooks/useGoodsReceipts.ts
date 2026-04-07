@@ -75,3 +75,33 @@ export function useUpdateGRItem() {
     }
   });
 }
+
+// Add item to DRAFT goods receipt
+export function useAddGRItem() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ grId, data }: {
+      grId: string;
+      data: { productId: string; productName: string; receivedQuantity: number; unitCost: number; batchNumber?: string | null; expiryDate?: string | null };
+    }) => api.goodsReceipts.addItem(grId, data),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.detail(vars.grId) });
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.lists() });
+    },
+  });
+}
+
+// Remove item from DRAFT goods receipt
+export function useRemoveGRItem() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ grId, itemId }: { grId: string; itemId: string }) =>
+      api.goodsReceipts.removeItem(grId, itemId),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.detail(vars.grId) });
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.lists() });
+    },
+  });
+}

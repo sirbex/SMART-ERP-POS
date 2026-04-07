@@ -7,6 +7,7 @@ import {
   useCancelPurchaseOrder,
   useDeletePurchaseOrder,
   useSendPOToSupplier,
+  useUpdateDraftPO,
 } from '../../hooks/usePurchaseOrders';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { formatCurrency } from '../../utils/currency';
@@ -687,12 +688,292 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   );
 }
 
+// ── Edit PO Modal (SAP ME22N pattern) ──
+interface EditPOModalProps {
+  po: PORow;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
+  const supplierId = po.supplierId || '';
+  const [expectedDelivery, setExpectedDelivery] = useState(po.expectedDelivery || po.expected_delivery_date || '');
+  const [notes, setNotes] = useState(po.notes || '');
+  const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
+    if (!po.items || po.items.length === 0) return [];
+    return po.items.map((item: POItemRow) => ({
+      id: item.id || `existing-${Math.random()}`,
+      productId: item.product_id || item.productId || '',
+      productName: item.product_name || item.productName || '',
+      quantity: String(item.ordered_quantity || item.quantity || 0),
+      unitCost: String(item.unit_price || item.unitCost || 0),
+      selectedUomId: null,
+      quantityOnHand: undefined,
+      reorderLevel: undefined,
+      reorderQuantity: undefined,
+      costSource: '',
+    }));
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const updatePOMutation = useUpdateDraftPO();
+
+  // Quick-create modals
+  const [showQuickProduct, setShowQuickProduct] = useState(false);
+
+  // Refs for spreadsheet navigation
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const qtyRefs = useRef<Map<number, HTMLInputElement>>(new Map());
+  const costRefs = useRef<Map<number, HTMLInputElement>>(new Map());
+
+  const focusSearch = useCallback(() => {
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  }, []);
+
+  const handleTabFromRow = useCallback(() => {
+    focusSearch();
+  }, [focusSearch]);
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    let subtotal = new Decimal(0);
+    let itemCount = 0;
+    lineItems.forEach((item) => {
+      try {
+        const qty = new Decimal(item.quantity || 0);
+        const cost = new Decimal(item.unitCost || 0);
+        subtotal = subtotal.plus(qty.times(cost));
+        itemCount++;
+      } catch { /* skip */ }
+    });
+    return {
+      subtotal: subtotal.toNumber(),
+      itemCount,
+      avgCost: itemCount > 0 ? subtotal.div(itemCount).toNumber() : 0,
+    };
+  }, [lineItems]);
+
+  const addLineItem = useCallback((product: ProcurementProduct) => {
+    let initialCost = '0.00';
+    let costSource = '';
+    if (product.supplierLastPrice && product.supplierLastPrice > 0) {
+      initialCost = new Decimal(product.supplierLastPrice).toFixed(2);
+      costSource = 'Supplier';
+    } else if (product.lastCost > 0) {
+      initialCost = new Decimal(product.lastCost).toFixed(2);
+      costSource = 'Last';
+    } else if (product.costPrice > 0) {
+      initialCost = new Decimal(product.costPrice).toFixed(2);
+      costSource = 'Cost';
+    }
+
+    let suggestedQty = '1';
+    if (product.quantityOnHand <= product.reorderLevel && product.reorderQuantity > 0) {
+      suggestedQty = String(product.reorderQuantity);
+    }
+
+    const newItem: POLineItem = {
+      id: `temp-${Date.now()}-${Math.random()}`,
+      productId: product.id,
+      productName: product.name,
+      quantity: suggestedQty,
+      unitCost: initialCost,
+      selectedUomId: product.purchaseUomId || null,
+      quantityOnHand: product.quantityOnHand,
+      reorderLevel: product.reorderLevel,
+      reorderQuantity: product.reorderQuantity,
+      costSource,
+    };
+
+    setLineItems((prev) => [...prev, newItem]);
+    const newIndex = lineItems.length;
+    setTimeout(() => {
+      const qtyEl = qtyRefs.current.get(newIndex);
+      if (qtyEl) { qtyEl.focus(); qtyEl.select(); }
+    }, 100);
+  }, [lineItems.length]);
+
+  const updateLineItem = useCallback((id: string, field: keyof POLineItem, value: string) => {
+    setLineItems((prev) => prev.map((item) => item.id === id ? { ...item, [field]: value } : item));
+  }, []);
+
+  const removeLineItem = useCallback((id: string) => {
+    setLineItems((prev) => prev.filter((item) => item.id !== id));
+    focusSearch();
+  }, [focusSearch]);
+
+  const validateForm = (): string | null => {
+    if (lineItems.length === 0) return 'BR-PO-002: Purchase order must have at least one line item';
+    if (expectedDelivery) {
+      const deliveryDate = new Date(expectedDelivery);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (deliveryDate <= today) return 'BR-PO-005: Expected delivery date must be in the future';
+    }
+    for (const item of lineItems) {
+      try {
+        const qty = new Decimal(item.quantity);
+        if (qty.lte(0)) return `BR-INV-002: ${item.productName} - Quantity must be positive`;
+      } catch { return `${item.productName} - Invalid quantity format`; }
+      try {
+        const cost = new Decimal(item.unitCost);
+        if (cost.lt(0)) return `BR-PO-004: ${item.productName} - Unit cost cannot be negative`;
+      } catch { return `${item.productName} - Invalid unit cost format`; }
+    }
+    return null;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationError = validateForm();
+    if (validationError) { alert(validationError); return; }
+
+    setIsSubmitting(true);
+    try {
+      await updatePOMutation.mutateAsync({
+        id: po.id,
+        data: {
+          expectedDate: expectedDelivery || null,
+          notes: notes || null,
+          items: lineItems.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: parseFloat(item.quantity),
+            unitCost: parseFloat(item.unitCost),
+            uomId: item.selectedUomId || null,
+          })),
+        },
+      });
+      alert('Purchase Order updated successfully!');
+      onSuccess();
+      onClose();
+    } catch (error: unknown) {
+      handleApiError(error, { fallback: 'Failed to update purchase order' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Keyboard shortcut: Ctrl+Enter to submit
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'Enter' && lineItems.length > 0 && !isSubmitting) {
+        e.preventDefault();
+        handleSubmit(new Event('submit') as unknown as React.FormEvent);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  });
+
+  return (
+    <ModalContainer>
+      <ModalHeader
+        title={`Edit Purchase Order — ${po.poNumber || po.order_number}`}
+        description="Edit draft PO — modify header, add/remove items. Ctrl+Enter to save."
+        onClose={onClose}
+      />
+
+      <form onSubmit={handleSubmit}>
+        {/* Header — SAP ME22N: Vendor is read-only, only items and delivery are editable */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide">Supplier</span>
+              <span className="text-sm font-semibold text-gray-900">{po.supplierName || po.supplier_name || 'Unknown'}</span>
+            </div>
+            <div>
+              <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide">PO Number</span>
+              <span className="text-sm font-semibold text-gray-900">{po.poNumber || po.order_number}</span>
+            </div>
+            <div>
+              <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide">Order Date</span>
+              <span className="text-sm font-semibold text-gray-900">{po.orderDate || po.order_date || '—'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <label htmlFor="editExpectedDelivery" className="block text-sm font-medium text-gray-700 mb-2">Expected Delivery Date</label>
+            <DatePicker value={expectedDelivery} onChange={(date) => setExpectedDelivery(date)} placeholder="Select expected delivery date"
+              minDate={new Date(Date.now() + 86400000)} disabled={isSubmitting} />
+          </div>
+        </div>
+
+        <NotesField value={notes} onChange={setNotes} disabled={isSubmitting} placeholder="Optional notes..." className="mb-4" />
+
+        {/* Line Items */}
+        <div className="mb-6 border border-gray-300 rounded-lg p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="text-sm font-semibold text-gray-900">Line Items <span className="text-red-500">*</span></h4>
+            <div className="text-xs text-gray-500">{lineItems.length} item{lineItems.length !== 1 ? 's' : ''}</div>
+          </div>
+
+          <div className="flex items-start gap-2 mb-3">
+            <ProcurementProductSearch supplierId={supplierId} onProductSelect={addLineItem} disabled={isSubmitting} className="flex-1" inputRef={searchInputRef} />
+            <button type="button" onClick={() => setShowQuickProduct(true)} disabled={isSubmitting}
+              className="mt-6 px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap">+ New</button>
+          </div>
+
+          {lineItems.length > 0 ? (
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <ResponsiveTableWrapper>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">Qty</th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Unit Cost</th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Line Total</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {lineItems.map((item, idx) => (
+                      <LineItemRow key={item.id} item={item} index={idx} onUpdate={updateLineItem}
+                        onRemove={removeLineItem} disabled={isSubmitting}
+                        onQtyRef={(el) => { if (el) qtyRefs.current.set(idx, el); else qtyRefs.current.delete(idx); }}
+                        onCostRef={(el) => { if (el) costRefs.current.set(idx, el); else costRefs.current.delete(idx); }}
+                        onTab={handleTabFromRow} />
+                    ))}
+                  </tbody>
+                </table>
+              </ResponsiveTableWrapper>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
+              Search products above to add line items.
+            </div>
+          )}
+
+          {lineItems.length > 0 && (
+            <TotalsSummary itemCount={totals.itemCount} subtotal={totals.subtotal} avgCost={totals.avgCost} className="mt-3 pt-3 border-t border-gray-200" />
+          )}
+        </div>
+
+        <BusinessRulesInfo rules={PURCHASE_ORDER_RULES} className="mb-6" />
+
+        <ModalFooter onCancel={onClose}
+          onSubmit={() => handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)}
+          submitLabel="Save Changes" isSubmitting={isSubmitting} submitDisabled={lineItems.length === 0} />
+      </form>
+
+      {showQuickProduct && (
+        <QuickCreateProductModal onClose={() => setShowQuickProduct(false)}
+          onCreated={() => { setShowQuickProduct(false); focusSearch(); }} />
+      )}
+    </ModalContainer>
+  );
+}
+
 export default function PurchaseOrdersPage() {
   const location = useLocation();
   // State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PORow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [editingPO, setEditingPO] = useState<PORow | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<POStatus | 'ALL'>('ALL');
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [page, setPage] = useState(1);
@@ -740,6 +1021,7 @@ export default function PurchaseOrdersPage() {
     expectedDelivery: po.expected_delivery_date || po.expectedDelivery,
     totalAmount: po.total_amount || po.totalAmount,
     supplierName: po.supplier_name || po.supplierName,
+    supplierId: (po as PORow & { supplier_id?: string }).supplier_id || po.supplierId,
     createdBy: po.created_by_id || po.createdBy,
     createdAt: po.created_at || po.createdAt,
     updatedAt: po.updated_at || po.updatedAt,
@@ -839,6 +1121,35 @@ export default function PurchaseOrdersPage() {
       alert('Purchase order deleted');
     } catch (error: unknown) {
       handleApiError(error, { fallback: 'Failed to delete purchase order' });
+    }
+  };
+
+  // Handle edit draft PO (SAP ME22N pattern) — loads full PO with items
+  const handleEditPO = async (po: PORow) => {
+    try {
+      const response = await api.purchaseOrders.getById(po.id);
+      const apiData = response.data;
+      const responseData = (apiData.data || apiData) as PODetailData;
+      const poData = responseData.po || responseData;
+      const items = responseData.items || [];
+
+      const mappedItems = items.map((item: POItemRow) => ({
+        ...item,
+        productName: item.product_name || item.productName,
+        purchaseOrderId: item.purchase_order_id || item.purchaseOrderId,
+        productId: item.product_id || item.productId,
+        quantity: item.ordered_quantity || item.quantity,
+        unitCost: item.unit_price || item.unitCost,
+        receivedQuantity: item.received_quantity || item.receivedQuantity,
+        totalPrice: item.total_price || item.totalPrice,
+      }));
+
+      setEditingPO({
+        ...mapPOFromDB(poData as PORow),
+        items: mappedItems,
+      });
+    } catch (error: unknown) {
+      handleApiError(error, { fallback: 'Failed to load purchase order for editing' });
     }
   };
 
@@ -1222,6 +1533,7 @@ export default function PurchaseOrdersPage() {
                   <div className="flex gap-3 border-t border-gray-100 pt-2">
                     {po.status === 'DRAFT' && (
                       <>
+                        <button onClick={(e) => { e.stopPropagation(); handleEditPO(po); }} className="text-xs text-indigo-600 font-medium">Edit</button>
                         <button onClick={(e) => { e.stopPropagation(); handleSubmitPO(po.id); }} className="text-xs text-blue-600 font-medium">Submit</button>
                         <button onClick={(e) => { e.stopPropagation(); handleDeletePO(po.id); }} className="text-xs text-red-600 font-medium">Delete</button>
                       </>
@@ -1327,6 +1639,13 @@ export default function PurchaseOrdersPage() {
                           <div className="flex justify-end gap-2">
                             {po.status === 'DRAFT' && (
                               <>
+                                <button
+                                  onClick={() => handleEditPO(po)}
+                                  className="text-indigo-600 hover:text-indigo-900"
+                                  title="Edit Draft PO"
+                                >
+                                  ✏️
+                                </button>
                                 <button
                                   onClick={() => handleSubmitPO(po.id)}
                                   className="text-blue-600 hover:text-blue-900"
@@ -1439,6 +1758,15 @@ export default function PurchaseOrdersPage() {
           onClose={() => { setShowCreateModal(false); setPendingReorderItems(undefined); }}
           onSuccess={() => { refetch(); setPendingReorderItems(undefined); }}
           initialReorderItems={pendingReorderItems}
+        />
+      )}
+
+      {/* Edit PO Modal (SAP ME22N pattern) */}
+      {editingPO && (
+        <EditPOModal
+          po={editingPO}
+          onClose={() => setEditingPO(null)}
+          onSuccess={() => { refetch(); setEditingPO(null); }}
         />
       )}
 

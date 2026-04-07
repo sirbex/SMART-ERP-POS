@@ -314,6 +314,119 @@ export const purchaseOrderRepository = {
   },
 
   /**
+   * Update PO header fields (DRAFT only)
+   */
+  async updatePOHeader(
+    pool: Pool | PoolClient,
+    id: string,
+    data: { supplierId?: string; expectedDate?: string | null; notes?: string | null }
+  ): Promise<PurchaseOrder> {
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (data.supplierId !== undefined) {
+      setClauses.push(`supplier_id = $${paramIndex++}`);
+      values.push(data.supplierId);
+    }
+    if (data.expectedDate !== undefined) {
+      setClauses.push(`expected_delivery_date = $${paramIndex++}`);
+      values.push(data.expectedDate);
+    }
+    if (data.notes !== undefined) {
+      setClauses.push(`notes = $${paramIndex++}`);
+      values.push(data.notes);
+    }
+
+    if (setClauses.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    setClauses.push(`version = version + 1`);
+    setClauses.push(`updated_at = CURRENT_TIMESTAMP`);
+
+    const result = await pool.query(
+      `UPDATE purchase_orders 
+       SET ${setClauses.join(', ')} 
+       WHERE id = $${paramIndex} AND status = 'DRAFT'
+       RETURNING *`,
+      [...values, id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error(`Purchase order ${id} not found or not in DRAFT status`);
+    }
+
+    return result.rows[0];
+  },
+
+  /**
+   * Update a single PO item
+   */
+  async updatePOItem(
+    pool: Pool | PoolClient,
+    itemId: string,
+    poId: string,
+    data: { quantity?: number; unitCost?: number; uomId?: string | null }
+  ): Promise<PurchaseOrderItem> {
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (data.quantity !== undefined) {
+      setClauses.push(`ordered_quantity = $${paramIndex++}`);
+      values.push(data.quantity);
+    }
+    if (data.unitCost !== undefined) {
+      setClauses.push(`unit_price = $${paramIndex++}`);
+      values.push(data.unitCost);
+    }
+    if (data.uomId !== undefined) {
+      setClauses.push(`uom_id = $${paramIndex++}`);
+      values.push(data.uomId);
+    }
+
+    if (setClauses.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    // Recalculate total_price if quantity or unitCost changed
+    if (data.quantity !== undefined || data.unitCost !== undefined) {
+      setClauses.push(`total_price = COALESCE($${paramIndex}, ordered_quantity) * COALESCE($${paramIndex + 1}, unit_price)`);
+      values.push(data.quantity ?? null, data.unitCost ?? null);
+      paramIndex += 2;
+    }
+
+    const result = await pool.query(
+      `UPDATE purchase_order_items 
+       SET ${setClauses.join(', ')} 
+       WHERE id = $${paramIndex} AND purchase_order_id = $${paramIndex + 1}
+       RETURNING *`,
+      [...values, itemId, poId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error(`PO item ${itemId} not found for purchase order ${poId}`);
+    }
+
+    return result.rows[0];
+  },
+
+  /**
+   * Remove a PO item (DRAFT only — verified at service layer)
+   */
+  async removePOItem(pool: Pool | PoolClient, itemId: string, poId: string): Promise<void> {
+    const result = await pool.query(
+      `DELETE FROM purchase_order_items WHERE id = $1 AND purchase_order_id = $2`,
+      [itemId, poId]
+    );
+
+    if (result.rowCount === 0) {
+      throw new Error(`PO item ${itemId} not found for purchase order ${poId}`);
+    }
+  },
+
+  /**
    * Delete PO (only if DRAFT)
    */
   async deletePO(pool: Pool, id: string): Promise<void> {
