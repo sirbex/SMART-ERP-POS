@@ -172,6 +172,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       p.module === 'system' ||
       p.module === 'admin' ||
       p.module === 'reports' ||
+      p.module === 'settings' ||
       p.action === 'read'
     );
     for (const permission of adminPermissions) {
@@ -193,7 +194,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     const managerRoleId = managerResult.rows[0].id;
 
     const managerPermissions = permissions.filter(p =>
-      ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos'].includes(p.module)
+      ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'banking', 'delivery', 'settings', 'crm'].includes(p.module)
     );
     for (const permission of managerPermissions) {
       await client.query(
@@ -218,6 +219,8 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       'sales.read', 'sales.create',
       'customers.read', 'customers.create',
       'inventory.read',
+      'delivery.read',
+      'settings.read',
     ];
     for (const permKey of cashierPermissions) {
       await client.query(
@@ -244,6 +247,95 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
          VALUES ($1, $2, $3)
          ON CONFLICT (role_id, permission_key) DO NOTHING`,
         [auditorRoleId, permission.key, systemUserId]
+      );
+    }
+
+    // ----- Accountant -----
+    const accountantResult = await client.query(
+      `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+       VALUES ($1, $2, true, $3, $3)
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+       RETURNING id`,
+      ['Accountant', 'Financial operations - accounting, banking, and reporting', systemUserId]
+    );
+    const accountantRoleId = accountantResult.rows[0].id;
+    const accountantPerms = permissions.filter(p =>
+      ['accounting', 'banking', 'reports'].includes(p.module) ||
+      ['sales.read', 'sales.export', 'purchasing.read', 'customers.read', 'customers.export',
+       'suppliers.read', 'inventory.read', 'settings.read'].includes(p.key)
+    );
+    for (const permission of accountantPerms) {
+      await client.query(
+        `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (role_id, permission_key) DO NOTHING`,
+        [accountantRoleId, permission.key, systemUserId]
+      );
+    }
+
+    // ----- Warehouse Clerk -----
+    const warehouseResult = await client.query(
+      `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+       VALUES ($1, $2, true, $3, $3)
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+       RETURNING id`,
+      ['Warehouse Clerk', 'Inventory and warehouse operations - receiving, stock counts, deliveries', systemUserId]
+    );
+    const warehouseRoleId = warehouseResult.rows[0].id;
+    const warehousePerms = permissions.filter(p =>
+      ['inventory', 'delivery'].includes(p.module) ||
+      ['purchasing.read', 'purchasing.post', 'suppliers.read', 'settings.read', 'reports.read'].includes(p.key)
+    );
+    for (const permission of warehousePerms) {
+      await client.query(
+        `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (role_id, permission_key) DO NOTHING`,
+        [warehouseRoleId, permission.key, systemUserId]
+      );
+    }
+
+    // ----- Sales Representative -----
+    const salesRepResult = await client.query(
+      `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+       VALUES ($1, $2, true, $3, $3)
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+       RETURNING id`,
+      ['Sales Representative', 'Sales operations - sales, customers, CRM, and quotations', systemUserId]
+    );
+    const salesRepRoleId = salesRepResult.rows[0].id;
+    const salesRepPerms = permissions.filter(p =>
+      ['sales', 'customers', 'crm', 'reports'].includes(p.module) ||
+      ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(p.key)
+    );
+    for (const permission of salesRepPerms) {
+      await client.query(
+        `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (role_id, permission_key) DO NOTHING`,
+        [salesRepRoleId, permission.key, systemUserId]
+      );
+    }
+
+    // ----- HR Manager -----
+    const hrResult = await client.query(
+      `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+       VALUES ($1, $2, true, $3, $3)
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+       RETURNING id`,
+      ['HR Manager', 'Human resources and payroll management', systemUserId]
+    );
+    const hrRoleId = hrResult.rows[0].id;
+    const hrPerms = permissions.filter(p =>
+      ['hr', 'reports'].includes(p.module) ||
+      ['settings.read', 'accounting.read'].includes(p.key)
+    );
+    for (const permission of hrPerms) {
+      await client.query(
+        `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (role_id, permission_key) DO NOTHING`,
+        [hrRoleId, permission.key, systemUserId]
       );
     }
 
