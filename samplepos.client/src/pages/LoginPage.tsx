@@ -233,7 +233,7 @@ export default function LoginPage() {
           const offlineUser = await validateOfflineLogin(email, password);
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
-            login(offlineUser, existingToken);
+            await login(offlineUser, existingToken);
             navigate(from, { replace: true });
             return;
           }
@@ -266,7 +266,7 @@ export default function LoginPage() {
         // Check if 2FA setup is required (role requires it but not set up)
         if (loginData.requires2FASetup) {
           const { user, token, accessToken, refreshToken, expiresIn } = loginData;
-          login(user, accessToken || token, refreshToken, expiresIn);
+          await login(user, accessToken || token, refreshToken, expiresIn);
           // Cache for offline login
           await cacheLoginCredential(email, password, user);
           navigate('/settings/security', {
@@ -276,7 +276,7 @@ export default function LoginPage() {
         }
 
         const { user, token, accessToken, refreshToken, expiresIn } = loginData;
-        login(user, accessToken || token, refreshToken, expiresIn);
+        await login(user, accessToken || token, refreshToken, expiresIn);
         // Cache for offline login
         await cacheLoginCredential(email, password, user);
         navigate(from, { replace: true });
@@ -300,7 +300,7 @@ export default function LoginPage() {
           const offlineUser = await validateOfflineLogin(email, password);
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
-            login(offlineUser, existingToken);
+            await login(offlineUser, existingToken);
             navigate(from, { replace: true });
             return;
           }
@@ -327,13 +327,13 @@ export default function LoginPage() {
     }
   };
 
-  const handle2FASuccess = (data: {
+  const handle2FASuccess = async (data: {
     user: { id: string; email: string; fullName: string; role: string };
     token: string;
     accessToken?: string;
     refreshToken?: string;
     expiresIn?: number;
-  }): void => {
+  }): Promise<void> => {
     const token = data.accessToken || data.token;
 
     if (!token) {
@@ -351,7 +351,7 @@ export default function LoginPage() {
       ...data.user,
       role: data.user.role as UserRole,
     };
-    login(authUser, token, data.refreshToken, data.expiresIn);
+    await login(authUser, token, data.refreshToken, data.expiresIn);
     // Cache for offline login (email/password are still in component state)
     if (email && password) {
       cacheLoginCredential(email, password, authUser).catch(() => { });

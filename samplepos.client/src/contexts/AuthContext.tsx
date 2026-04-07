@@ -18,7 +18,7 @@ interface AuthContextType {
   permissions: Set<string>;
   /** Force re-fetch permissions (e.g. after role change) */
   refreshPermissions: () => Promise<void>;
-  login: (userData: User, token: string, refreshToken?: string, expiresIn?: number) => void;
+  login: (userData: User, token: string, refreshToken?: string, expiresIn?: number) => Promise<void>;
   logout: () => void;
 }
 
@@ -141,16 +141,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
   }, []);
 
-  const login = (userData: User, token: string, refreshToken?: string, expiresIn?: number) => {
+  const login = async (userData: User, token: string, refreshToken?: string, expiresIn?: number) => {
     if (!token || token === 'undefined' || token.length < 20) {
       throw new Error('Invalid token received from server');
     }
 
-    // Set state FIRST to ensure immediate UI updates
-    setUser(userData);
-    setIsAuthenticated(true);
-
-    // Store tokens
+    // Store tokens FIRST (fetchPermissionKeys reads from localStorage)
     if (refreshToken && expiresIn) {
       storeTokens(token, refreshToken, expiresIn);
     } else {
@@ -158,13 +154,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     localStorage.setItem('user', JSON.stringify(userData));
 
-    // SAP/Odoo pattern: eagerly fetch permissions on login
-    fetchPermissionKeys().then(perms => {
-      if (perms.length > 0) {
-        setPermissionKeys(perms);
-        localStorage.setItem('rbac_permissions', JSON.stringify(perms));
-      }
-    });
+    // SAP/Odoo pattern: fetch permissions BEFORE marking authenticated
+    // This prevents the race where routes render with empty permissions
+    const perms = await fetchPermissionKeys();
+    if (perms.length > 0) {
+      setPermissionKeys(perms);
+      localStorage.setItem('rbac_permissions', JSON.stringify(perms));
+    }
+
+    // NOW set authenticated — routes will render with permissions already loaded
+    setUser(userData);
+    setIsAuthenticated(true);
 
     // Notify other tabs/components
     window.dispatchEvent(new Event('auth-changed'));
