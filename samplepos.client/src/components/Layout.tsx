@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useMyPermissions } from '../hooks/useRbac';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
@@ -14,45 +15,63 @@ interface NavItem {
   path: string;
   icon: string;
   color: string;
+  permissions?: string[];  // RBAC permission keys — user needs ANY
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(false); // Default closed on mobile
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout } = useAuth();
+  const { data: rbacPermissions } = useMyPermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const { config } = useTenant();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
 
+  const userPermKeys = useMemo(() => {
+    if (!rbacPermissions) return new Set<string>();
+    return new Set(rbacPermissions.map(p => p.permissionKey));
+  }, [rbacPermissions]);
+
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
-    { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600' },
-    { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600' },
-    { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600' },
-    { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600' },
-    { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600' },
-    { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500' },
-    { name: 'CRM', path: '/crm', icon: '🤝', color: 'text-violet-600' },
-    { name: 'HR & Payroll', path: '/hr', icon: '📇', color: 'text-pink-600' },
-    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📋', color: 'text-orange-600' },
-    { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600' },
-    { name: 'Pricing', path: '/pricing', icon: '🏷️', color: 'text-rose-600' },
-    { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600' },
-    { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600' },
+    { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600', permissions: ['pos.read', 'pos.create'] },
+    { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600', permissions: ['inventory.read'] },
+    { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600', permissions: ['customers.read'] },
+    { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600', permissions: ['suppliers.read'] },
+    { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600', permissions: ['sales.read'] },
+    { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500', permissions: ['quotations.read'] },
+    { name: 'CRM', path: '/crm', icon: '🤝', color: 'text-violet-600', permissions: ['crm.read'] },
+    { name: 'HR & Payroll', path: '/hr', icon: '📇', color: 'text-pink-600', permissions: ['hr.read'] },
+    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📋', color: 'text-orange-600', permissions: ['delivery.read'] },
+    { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600', permissions: ['delivery.read'] },
+    { name: 'Pricing', path: '/pricing', icon: '🏷️', color: 'text-rose-600', permissions: ['settings.read'] },
+    { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600', permissions: ['accounting.read'] },
+    { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600', permissions: ['reports.read', 'reports.sales_view', 'reports.financial_view'] },
   ];
 
-  // Admin-only navigation items
   const adminNavItems: NavItem[] = [
-    { name: 'Import', path: '/import', icon: '📥', color: 'text-violet-600' },
-    { name: 'Settings', path: '/settings', icon: '⚙️', color: 'text-gray-600' },
-    { name: 'Roles', path: '/admin/roles', icon: '🔐', color: 'text-pink-600' },
+    { name: 'Import', path: '/import', icon: '📥', color: 'text-violet-600', permissions: ['admin.create'] },
+    { name: 'Settings', path: '/settings', icon: '⚙️', color: 'text-gray-600', permissions: ['system.manage'] },
+    { name: 'Roles', path: '/admin/roles', icon: '🔐', color: 'text-pink-600', permissions: ['admin.update'] },
   ];
 
-  // Add admin items for ADMIN users
-  const allNavItems = user?.role === 'ADMIN'
-    ? [...navItems, ...adminNavItems]
-    : navItems;
+  // Filter items: show if user has legacy role access OR RBAC permission
+  const isAdminOrManager = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+
+  const allNavItems = useMemo(() => {
+    const items = [...navItems, ...adminNavItems];
+    return items.filter(item => {
+      // Dashboard always visible
+      if (!item.permissions) return true;
+      // Legacy role: ADMIN sees everything, MANAGER sees non-admin items
+      if (user?.role === 'ADMIN') return true;
+      if (isAdminOrManager && !adminNavItems.includes(item)) return true;
+      // RBAC check: any required permission present
+      if (item.permissions.some(p => userPermKeys.has(p))) return true;
+      return false;
+    });
+  }, [user?.role, userPermKeys, isAdminOrManager]);
 
   const handleLogout = () => {
     logout();

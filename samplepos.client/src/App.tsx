@@ -180,31 +180,31 @@ function App() {
                     }
                   />
 
-                  {/* POS - ADMIN, MANAGER, CASHIER */}
+                  {/* POS */}
                   <Route
                     path="/pos"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['pos.read', 'pos.create']}>
                         <POSPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Sales - ADMIN, MANAGER, CASHIER */}
+                  {/* Sales */}
                   <Route
                     path="/sales"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.read']}>
                         <SalesPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Customers - ADMIN, MANAGER, CASHIER */}
+                  {/* Customers */}
                   <Route
                     path="/customers"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['customers.read']}>
                         <CustomersPage />
                       </ProtectedRoute>
                     }
@@ -212,27 +212,27 @@ function App() {
                   <Route
                     path="/customers/:id"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['customers.read']}>
                         <CustomerDetailPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Suppliers - ADMIN, MANAGER only */}
+                  {/* Suppliers */}
                   <Route
                     path="/suppliers"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['suppliers.read']}>
                         <SuppliersPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Quotations - ADMIN, MANAGER, CASHIER */}
+                  {/* Quotations */}
                   <Route
                     path="/quotations"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']}>
                         <QuotationsPage />
                       </ProtectedRoute>
                     }
@@ -240,7 +240,7 @@ function App() {
                   <Route
                     path="/quotations/new"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.create']}>
                         <NewQuotationPage />
                       </ProtectedRoute>
                     }
@@ -248,7 +248,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber/edit"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.update']}>
                         <EditQuotationPage />
                       </ProtectedRoute>
                     }
@@ -256,7 +256,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber/convert"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.create']}>
                         <QuoteConversionPage />
                       </ProtectedRoute>
                     }
@@ -264,27 +264,27 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']}>
                         <QuoteDetailPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* CRM - ADMIN, MANAGER */}
+                  {/* CRM */}
                   <Route
                     path="/crm"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['crm.read']}>
                         <CRMPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* HR & Payroll - ADMIN, MANAGER */}
+                  {/* HR & Payroll */}
                   <Route
                     path="/hr"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['hr.read']}>
                         <HRPage />
                       </ProtectedRoute>
                     }
@@ -298,7 +298,7 @@ function App() {
                   <Route
                     path="/pricing/rules"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']}>
                         <PriceRulesPage />
                       </ProtectedRoute>
                     }
@@ -306,7 +306,7 @@ function App() {
                   <Route
                     path="/pricing/categories"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']}>
                         <CategoriesPage />
                       </ProtectedRoute>
                     }
@@ -314,17 +314,17 @@ function App() {
                   <Route
                     path="/pricing/preview"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']}>
                         <PricePreviewPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Accounting Routes - ADMIN, MANAGER only */}
+                  {/* Accounting Routes */}
                   <Route
                     path="/accounting"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <AccountingIntegrationDashboard />
                         </AccountingLayout>
@@ -334,7 +334,7 @@ function App() {
                   <Route
                     path="/accounting/dashboard"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <AccountingIntegrationDashboard />
                         </AccountingLayout>
@@ -344,7 +344,7 @@ function App() {
                   <Route
                     path="/accounting/chart-of-accounts"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.chart_manage', 'accounting.read']}>
                         <AccountingLayout>
                           <ChartOfAccountsPage />
                         </AccountingLayout>
@@ -354,7 +354,7 @@ function App() {
                   <Route
                     path="/accounting/general-ledger"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <GeneralLedgerPage />
                         </AccountingLayout>
@@ -364,7 +364,7 @@ function App() {
                   <Route
                     path="/accounting/trial-balance"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <TrialBalancePage />
                         </AccountingLayout>
@@ -374,7 +374,7 @@ function App() {
                   <Route
                     path="/accounting/financial-statements"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read', 'reports.financial_view']}>
                         <AccountingLayout>
                           <FinancialStatementsPage />
                         </AccountingLayout>
@@ -384,7 +384,7 @@ function App() {
                   <Route
                     path="/accounting/customer-financial"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <CustomerFinancialPage />
                         </AccountingLayout>
@@ -394,7 +394,7 @@ function App() {
                   <Route
                     path="/accounting/invoice-integration"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <InvoiceLedgerIntegrationPage />
                         </AccountingLayout>
@@ -404,7 +404,7 @@ function App() {
                   <Route
                     path="/accounting/expenses"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['expenses.read']}>
                         <AccountingLayout>
                           <ExpensesPage />
                         </AccountingLayout>
@@ -414,7 +414,7 @@ function App() {
                   <Route
                     path="/accounting/expense-categories"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['expenses.read']}>
                         <AccountingLayout>
                           <ExpenseCategoriesPage />
                         </AccountingLayout>
@@ -424,7 +424,7 @@ function App() {
                   <Route
                     path="/accounting/invoices"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <ComprehensiveInvoicesPage />
                         </AccountingLayout>
@@ -434,7 +434,7 @@ function App() {
                   <Route
                     path="/accounting/customer-payments"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <CustomerPaymentsPage />
                         </AccountingLayout>
@@ -444,7 +444,7 @@ function App() {
                   <Route
                     path="/accounting/supplier-payments"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <SupplierPaymentsPage />
                         </AccountingLayout>
@@ -454,7 +454,7 @@ function App() {
                   <Route
                     path="/accounting/credit-debit-notes"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
                         <AccountingLayout>
                           <CreditDebitNotesPage />
                         </AccountingLayout>
@@ -464,7 +464,7 @@ function App() {
                   <Route
                     path="/accounting/profit-loss"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read', 'reports.financial_view']}>
                         <AccountingLayout>
                           <ProfitLossPage />
                         </AccountingLayout>
@@ -474,7 +474,7 @@ function App() {
                   <Route
                     path="/accounting/reconciliation"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.reconcile', 'accounting.read']}>
                         <AccountingLayout>
                           <ReconciliationPage />
                         </AccountingLayout>
@@ -484,7 +484,7 @@ function App() {
                   <Route
                     path="/accounting/journal-entries"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.post', 'accounting.read']}>
                         <AccountingLayout>
                           <JournalEntriesPage />
                         </AccountingLayout>
@@ -494,7 +494,7 @@ function App() {
                   <Route
                     path="/accounting/periods"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.period_manage', 'accounting.read']}>
                         <AccountingLayout>
                           <PeriodManagementPage />
                         </AccountingLayout>
@@ -504,7 +504,7 @@ function App() {
                   <Route
                     path="/accounting/banking"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['banking.read']}>
                         <AccountingLayout>
                           <BankingPage />
                         </AccountingLayout>
@@ -516,7 +516,7 @@ function App() {
                   <Route
                     path="/settings"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['system.manage']}>
                         <SettingsPage />
                       </ProtectedRoute>
                     }
@@ -524,47 +524,47 @@ function App() {
                   <Route
                     path="/settings/security"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['system.manage']}>
                         <SecuritySettingsPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Reports - ADMIN, MANAGER */}
+                  {/* Reports */}
                   <Route
                     path="/reports"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.read', 'reports.sales_view', 'reports.inventory_view', 'reports.financial_view', 'reports.purchasing_view', 'reports.customers_view', 'reports.banking_view']}>
                         <ReportsPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Expense Reports - ADMIN, MANAGER */}
+                  {/* Expense Reports */}
                   <Route
                     path="/reports/expenses"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['expenses.read', 'reports.financial_view']}>
                         <ExpenseReportsPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Business Performance Report - ADMIN, MANAGER */}
+                  {/* Business Performance Report */}
                   <Route
                     path="/reports/business-performance"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.financial_view']}>
                         <BusinessPerformancePage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Reorder Dashboard - ADMIN, MANAGER */}
+                  {/* Reorder Dashboard */}
                   <Route
                     path="/reports/reorder"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'inventory.read']}>
                         <ReorderDashboardPage />
                       </ProtectedRoute>
                     }
@@ -574,7 +574,7 @@ function App() {
                   <Route
                     path="/admin/data-management"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['admin.delete']}>
                         <AdminDataManagementPage />
                       </ProtectedRoute>
                     }
@@ -582,7 +582,7 @@ function App() {
                   <Route
                     path="/admin/audit-trail"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['admin.read']}>
                         <AuditLogPage />
                       </ProtectedRoute>
                     }
@@ -590,47 +590,47 @@ function App() {
                   <Route
                     path="/admin/roles"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['admin.update']}>
                         <RoleManagementPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Delivery - ADMIN, MANAGER */}
+                  {/* Delivery */}
                   <Route
                     path="/delivery"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']}>
                         <DeliveryPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Wholesale Delivery Notes - ADMIN, MANAGER */}
+                  {/* Wholesale Delivery Notes */}
                   <Route
                     path="/delivery-notes"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']}>
                         <DeliveryNotesPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* CSV Import - ADMIN, MANAGER */}
+                  {/* CSV Import */}
                   <Route
                     path="/import"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['admin.create']}>
                         <ImportPage />
                       </ProtectedRoute>
                     }
                   />
 
-                  {/* Inventory Routes - ADMIN, MANAGER, STAFF (view), CASHIER (view) */}
+                  {/* Inventory Routes */}
                   <Route
                     path="/inventory"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']}>
                         <InventoryLayout>
                           <StockLevelsPage />
                         </InventoryLayout>
@@ -640,7 +640,7 @@ function App() {
                   <Route
                     path="/inventory/products"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.create']}>
                         <InventoryLayout>
                           <ProductsPage />
                         </InventoryLayout>
@@ -650,7 +650,7 @@ function App() {
                   <Route
                     path="/inventory/batches"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']}>
                         <InventoryLayout>
                           <BatchManagementPage />
                         </InventoryLayout>
@@ -660,7 +660,7 @@ function App() {
                   <Route
                     path="/inventory/stock-movements"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']}>
                         <InventoryLayout>
                           <StockMovementsPage />
                         </InventoryLayout>
@@ -670,7 +670,7 @@ function App() {
                   <Route
                     path="/inventory/adjustments"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.adjust']}>
                         <InventoryLayout>
                           <InventoryAdjustmentsPage />
                         </InventoryLayout>
@@ -680,7 +680,7 @@ function App() {
                   <Route
                     path="/inventory/purchase-orders"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['purchasing.read']}>
                         <InventoryLayout>
                           <PurchaseOrdersPage />
                         </InventoryLayout>
@@ -690,7 +690,7 @@ function App() {
                   <Route
                     path="/inventory/goods-receipts"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['purchasing.read']}>
                         <InventoryLayout>
                           <GoodsReceiptsPage />
                         </InventoryLayout>
@@ -700,7 +700,7 @@ function App() {
                   <Route
                     path="/inventory/uoms"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']}>
                         <InventoryLayout>
                           <UomManagementPage />
                         </InventoryLayout>
@@ -710,7 +710,7 @@ function App() {
                   <Route
                     path="/inventory/barcode-lookup"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']}>
                         <InventoryLayout>
                           <BarcodeLookupPage />
                         </InventoryLayout>
