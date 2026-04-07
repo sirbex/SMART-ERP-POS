@@ -835,12 +835,16 @@ export default function ReportsPage() {
 
   // Customer Purchase History specific state
   const [customerId, setCustomerId] = useState<string>('');
+  const [customersList, setCustomersList] = useState<Array<{ id: string; customerNumber: string; name: string }>>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
 
   // Cash Register Session specific state
   const [sessionId, setSessionId] = useState<string>('');
 
   // Supplier Statement specific state
   const [supplierId, setSupplierId] = useState<string>('');
+  const [suppliersList, setSuppliersList] = useState<Array<{ id: string; name: string }>>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(false);
 
   // Note Register filters
   const [noteSide, setNoteSide] = useState<string>('');
@@ -850,6 +854,48 @@ export default function ReportsPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
+
+  // Fetch customers when customer reports are selected
+  useEffect(() => {
+    if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY' || selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' || selectedReport === 'AR_LEDGER') {
+      setCustomersLoading(true);
+      const token = localStorage.getItem('auth_token');
+      api.get('/customers', {
+        params: { limit: 500 },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(res => {
+          const data = res.data?.data;
+          const list = Array.isArray(data) ? data : data?.data || [];
+          setCustomersList(list.map((c: Record<string, unknown>) => ({
+            id: String(c.id),
+            customerNumber: String(c.customerNumber || c.customer_number || ''),
+            name: String(c.name || ''),
+          })));
+        })
+        .catch(() => { /* customers fetch failed */ })
+        .finally(() => setCustomersLoading(false));
+    }
+  }, [selectedReport]);
+
+  // Fetch suppliers when supplier statement or AP ledger is selected
+  useEffect(() => {
+    if (selectedReport === 'SUPPLIER_STATEMENT' || selectedReport === 'AP_LEDGER') {
+      setSuppliersLoading(true);
+      const token = localStorage.getItem('auth_token');
+      api.get('/suppliers', {
+        params: { limit: 500 },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(res => {
+          const data = res.data?.data;
+          const list = Array.isArray(data) ? data : data?.data || [];
+          setSuppliersList(list.map((s: Record<string, unknown>) => ({ id: String(s.id), name: String(s.name || s.CompanyName || '') })));
+        })
+        .catch(() => { /* suppliers fetch failed, user can still type UUID */ })
+        .finally(() => setSuppliersLoading(false));
+    }
+  }, [selectedReport]);
 
   // Fetch categories when inventory valuation is selected
   useEffect(() => {
@@ -932,11 +978,12 @@ export default function ReportsPage() {
         params.previousEndDate = previousEndDate;
         params.groupBy = groupBy;
       } else if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY') {
-        // Customer Purchase History requires customer ID
+        // Customer Purchase History requires customer ID (UUID)
         params.customerId = customerId;
       } else if (selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT') {
         // Customer Account Statement requires customer number (CUST-0001)
-        params.customerNumber = customerId; // Using customerId state variable for customer number input
+        const selectedCustomer = customersList.find(c => c.id === customerId);
+        params.customerNumber = selectedCustomer?.customerNumber || customerId;
       } else if (selectedReport === 'SALES_SUMMARY_BY_DATE') {
         // Sales Summary by Date - requires groupBy
         params.groupBy = groupBy;
@@ -953,7 +1000,7 @@ export default function ReportsPage() {
         if (status) params.status = status;
       } else if (selectedReport === 'SUPPLIER_STATEMENT') {
         if (!supplierId.trim()) {
-          setError('Supplier ID is required for Supplier Statement');
+          setError('Please select a supplier for Supplier Statement');
           setIsLoading(false);
           return;
         }
@@ -1063,7 +1110,8 @@ export default function ReportsPage() {
         params.append('limit', limit.toString());
         if (sortBy) params.append('sort_by', sortBy);
       } else if (selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' && customerId) {
-        params.append('customer_number', customerId);
+        const selectedCustomer = customersList.find(c => c.id === customerId);
+        params.append('customer_number', selectedCustomer?.customerNumber || customerId);
       } else if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY' && customerId) {
         params.append('customer_id', customerId);
       } else if (selectedReport === 'WASTE_DAMAGE_REPORT' && reason) {
@@ -1452,45 +1500,29 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* Customer Purchase History - Customer ID */}
-        {selectedReport === 'CUSTOMER_PURCHASE_HISTORY' && (
+        {/* Customer Purchase History / Account Statement - Customer Dropdown */}
+        {(selectedReport === 'CUSTOMER_PURCHASE_HISTORY' || selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT') && (
           <div>
             <label htmlFor="customerId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Customer Number
+              Customer
             </label>
-            <input
+            <select
               id="customerId"
-              type="text"
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
-              placeholder="CUST-0001"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-              aria-label="Customer Number"
-            />
-            <p className="text-xs text-gray-500 mt-1">Enter customer number (e.g., CUST-0001)</p>
-          </div>
-        )}
-
-        {/* Customer Account Statement - Customer Number */}
-        {selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' && (
-          <div>
-            <label htmlFor="customerId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Customer Number
-            </label>
-            <input
-              id="customerId"
-              type="text"
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value.toUpperCase())}
-              placeholder="CUST-0001"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm uppercase"
-              aria-label="Customer Number"
-            />
-            <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Available: CUST-0001, CUST-0002, CUST-0003, CUST-0004, CUST-0006
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              aria-label="Select customer"
+              disabled={customersLoading}
+            >
+              <option value="">
+                {customersLoading ? 'Loading customers...' : '-- Select Customer --'}
+              </option>
+              {customersList.map((c) => (
+                <option key={c.id} value={c.id}>{c.customerNumber} — {c.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' ? 'Required: Select a customer' : 'Select a customer to view purchase history'}
             </p>
           </div>
         )}
@@ -1514,42 +1546,54 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* Supplier Statement / AP Ledger - Supplier ID */}
+        {/* Supplier Statement / AP Ledger - Supplier Dropdown */}
         {(selectedReport === 'SUPPLIER_STATEMENT' || selectedReport === 'AP_LEDGER') && (
           <div>
             <label htmlFor="supplierId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Supplier ID
+              Supplier
             </label>
-            <input
+            <select
               id="supplierId"
-              type="text"
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
-              placeholder="Enter supplier UUID"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-              aria-label="Supplier ID"
-            />
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              aria-label="Select supplier"
+              disabled={suppliersLoading}
+            >
+              <option value="">
+                {suppliersLoading ? 'Loading suppliers...' : selectedReport === 'SUPPLIER_STATEMENT' ? '-- Select Supplier (Required) --' : '-- All Suppliers --'}
+              </option>
+              {suppliersList.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
             <p className="text-xs text-gray-500 mt-1">
-              {selectedReport === 'SUPPLIER_STATEMENT' ? 'Required: Supplier UUID' : 'Optional: Filter by supplier'}
+              {selectedReport === 'SUPPLIER_STATEMENT' ? 'Required: Select a supplier' : 'Optional: Filter by supplier'}
             </p>
           </div>
         )}
 
-        {/* AR Ledger - Customer filter */}
+        {/* AR Ledger - Customer Dropdown */}
         {selectedReport === 'AR_LEDGER' && (
           <div>
             <label htmlFor="arCustomerId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Customer ID (Optional)
+              Customer (Optional)
             </label>
-            <input
+            <select
               id="arCustomerId"
-              type="text"
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
-              placeholder="Filter by customer UUID"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-              aria-label="Customer ID for AR Ledger"
-            />
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              aria-label="Select customer for AR Ledger"
+              disabled={customersLoading}
+            >
+              <option value="">
+                {customersLoading ? 'Loading customers...' : '-- All Customers --'}
+              </option>
+              {customersList.map((c) => (
+                <option key={c.id} value={c.id}>{c.customerNumber} — {c.name}</option>
+              ))}
+            </select>
           </div>
         )}
 
