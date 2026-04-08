@@ -1394,33 +1394,47 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
 function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewProps) {
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Fetch all credit sales on-demand from API
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.sales.list({ page: 1, limit: 500, paymentMethod: 'CREDIT', startDate, endDate })
+    setFetchError(null);
+    const params = { page: 1, limit: 500, paymentMethod: 'CREDIT' as const, startDate, endDate };
+    api.sales.list(params)
       .then((resp) => {
         if (cancelled) return;
-        const rows = (resp.data?.data ?? resp.data ?? []) as Record<string, unknown>[];
+        // Handle both direct data array and wrapped {success, data} response shapes
+        const body = resp.data;
+        const salesArray = Array.isArray(body?.data) ? body.data
+          : Array.isArray(body) ? body
+          : [];
+        const rows = salesArray as Record<string, unknown>[];
         setSales(rows.map((sale) => ({
           id: String(sale.id || ''),
-          saleNumber: String(sale.sale_number || sale.saleNumber || ''),
-          saleDate: String(sale.sale_date || sale.saleDate || ''),
-          createdAt: String(sale.created_at || sale.createdAt || ''),
-          totalAmount: Number(sale.total_amount || sale.totalAmount || 0),
+          saleNumber: String(sale.saleNumber || sale.sale_number || ''),
+          saleDate: String(sale.saleDate || sale.sale_date || ''),
+          createdAt: String(sale.createdAt || sale.created_at || ''),
+          totalAmount: Number(sale.totalAmount || sale.total_amount || 0),
           profit: Number(sale.profit || 0),
-          customerName: String(sale.customer_name || sale.customerName || ''),
-          customerId: String(sale.customer_id || sale.customerId || ''),
-          paymentMethod: String(sale.payment_method || sale.paymentMethod || '') as 'CREDIT',
+          customerName: String(sale.customerName || sale.customer_name || ''),
+          customerId: String(sale.customerId || sale.customer_id || ''),
+          paymentMethod: String(sale.paymentMethod || sale.payment_method || '') as 'CREDIT',
           status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
-          cashierId: String(sale.cashier_id || sale.cashierId || ''),
-          cashierName: String(sale.cashier_name || sale.cashierName || ''),
-          amountPaid: Number(sale.amount_paid || sale.amountPaid || 0),
-          paymentReceived: Number(sale.amount_paid || sale.amountPaid || sale.paymentReceived || 0),
+          cashierId: String(sale.cashierId || sale.cashier_id || ''),
+          cashierName: String(sale.cashierName || sale.cashier_name || ''),
+          amountPaid: Number(sale.amountPaid || sale.amount_paid || 0),
+          paymentReceived: Number(sale.amountPaid || sale.amount_paid || sale.paymentReceived || 0),
         }) as SaleRow));
       })
-      .catch(() => { if (!cancelled) setSales([]); })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err?.response?.data?.error || err?.message || 'Unknown error';
+        console.error('[CreditSalesView] Fetch failed:', msg, err);
+        setFetchError(msg);
+        setSales([]);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [startDate, endDate]);
@@ -1440,9 +1454,13 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
   if (sales.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500 text-lg">No credit sales found</p>
+        <p className="text-gray-500 text-lg">
+          {fetchError ? 'Failed to load credit sales' : 'No credit sales found'}
+        </p>
         <p className="text-gray-400 text-sm mt-2">
-          Credit sales will appear here when payment method is CREDIT
+          {fetchError
+            ? `Error: ${fetchError}`
+            : 'Credit sales will appear here when payment method is CREDIT'}
         </p>
       </div>
     );
@@ -1542,30 +1560,37 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
 function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymentsViewProps) {
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Fetch credit sales, then filter for partial payments client-side
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.sales.list({ page: 1, limit: 500, paymentMethod: 'CREDIT', startDate, endDate })
+    setFetchError(null);
+    const params = { page: 1, limit: 500, paymentMethod: 'CREDIT' as const, startDate, endDate };
+    api.sales.list(params)
       .then((resp) => {
         if (cancelled) return;
-        const rows = (resp.data?.data ?? resp.data ?? []) as Record<string, unknown>[];
+        const body = resp.data;
+        const salesArray = Array.isArray(body?.data) ? body.data
+          : Array.isArray(body) ? body
+          : [];
+        const rows = salesArray as Record<string, unknown>[];
         const allCredit = rows.map((sale) => ({
           id: String(sale.id || ''),
-          saleNumber: String(sale.sale_number || sale.saleNumber || ''),
-          saleDate: String(sale.sale_date || sale.saleDate || ''),
-          createdAt: String(sale.created_at || sale.createdAt || ''),
-          totalAmount: Number(sale.total_amount || sale.totalAmount || 0),
+          saleNumber: String(sale.saleNumber || sale.sale_number || ''),
+          saleDate: String(sale.saleDate || sale.sale_date || ''),
+          createdAt: String(sale.createdAt || sale.created_at || ''),
+          totalAmount: Number(sale.totalAmount || sale.total_amount || 0),
           profit: Number(sale.profit || 0),
-          customerName: String(sale.customer_name || sale.customerName || ''),
-          customerId: String(sale.customer_id || sale.customerId || ''),
-          paymentMethod: String(sale.payment_method || sale.paymentMethod || '') as 'CREDIT',
+          customerName: String(sale.customerName || sale.customer_name || ''),
+          customerId: String(sale.customerId || sale.customer_id || ''),
+          paymentMethod: String(sale.paymentMethod || sale.payment_method || '') as 'CREDIT',
           status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
-          cashierId: String(sale.cashier_id || sale.cashierId || ''),
-          cashierName: String(sale.cashier_name || sale.cashierName || ''),
-          amountPaid: Number(sale.amount_paid || sale.amountPaid || 0),
-          paymentReceived: Number(sale.amount_paid || sale.amountPaid || sale.paymentReceived || 0),
+          cashierId: String(sale.cashierId || sale.cashier_id || ''),
+          cashierName: String(sale.cashierName || sale.cashier_name || ''),
+          amountPaid: Number(sale.amountPaid || sale.amount_paid || 0),
+          paymentReceived: Number(sale.amountPaid || sale.amount_paid || sale.paymentReceived || 0),
         }) as SaleRow);
         // Filter for partial: paid > 0 but less than total
         setSales(allCredit.filter((s) => {
@@ -1574,7 +1599,13 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
           return paid.greaterThan(0) && paid.lessThan(total);
         }));
       })
-      .catch(() => { if (!cancelled) setSales([]); })
+      .catch((err) => {
+        if (cancelled) return;
+        const msg = err?.response?.data?.error || err?.message || 'Unknown error';
+        console.error('[PartialPaymentsView] Fetch failed:', msg, err);
+        setFetchError(msg);
+        setSales([]);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [startDate, endDate]);
@@ -1586,9 +1617,13 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
   if (sales.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500 text-lg">No partial payments found</p>
+        <p className="text-gray-500 text-lg">
+          {fetchError ? 'Failed to load partial payments' : 'No partial payments found'}
+        </p>
         <p className="text-gray-400 text-sm mt-2">
-          Partial payments will appear here when credit sales are partially paid
+          {fetchError
+            ? `Error: ${fetchError}`
+            : 'Partial payments will appear here when credit sales are partially paid'}
         </p>
       </div>
     );
