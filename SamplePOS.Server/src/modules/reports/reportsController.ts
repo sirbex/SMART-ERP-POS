@@ -1069,28 +1069,11 @@ export const reportsController = {
         generatedAt: formatDateTime(),
       });
 
-      pdfGen.addSummaryCards([
-        {
-          label: 'Total Revenue',
-          value: formatCurrencyPDF(report.summary.totalRevenue || 0),
-          color: PDFColors.success,
-        },
-        {
-          label: 'Total COGS',
-          value: formatCurrencyPDF(report.summary.totalCOGS || 0),
-          color: PDFColors.danger,
-        },
-        {
-          label: 'Gross Profit',
-          value: formatCurrencyPDF(report.summary.grossProfit || 0),
-          color: PDFColors.primary,
-        },
-        {
-          label: 'Profit Margin',
-          value: `${report.summary.grossProfitMargin || 0}%`,
-          color: PDFColors.info,
-        },
-      ]);
+      // SAP FI-CO Income Statement
+      pdfGen.addIncomeStatement(report.summary, report.expenseBreakdown);
+
+      // Period breakdown table
+      pdfGen.addSectionHeading('Period Breakdown');
 
       const columns: PDFTableColumn[] = [
         { header: 'Period', key: 'period', width: 0.2 },
