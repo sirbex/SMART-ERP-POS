@@ -332,6 +332,7 @@ export default function POSPage() {
     companyName?: string;
     companyAddress?: string | null;
     companyPhone?: string | null;
+    customReceiptNote?: string | null;
     paymentAccounts?: InvoiceSettingsData['paymentAccounts'];
   } | null>(null);
 
@@ -404,6 +405,7 @@ export default function POSPage() {
             companyName: settingsData.companyName,
             companyAddress: settingsData.companyAddress,
             companyPhone: settingsData.companyPhone,
+            customReceiptNote: settingsData.customReceiptNote,
             paymentAccounts: settingsData.paymentAccounts,
           });
         }
