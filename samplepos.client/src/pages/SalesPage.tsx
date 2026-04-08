@@ -136,13 +136,15 @@ interface UserSalesViewProps {
 }
 
 interface CreditSalesViewProps {
-  sales: SaleRow[];
   onSelectSale: (sale: SaleRow) => void;
+  startDate?: string;
+  endDate?: string;
 }
 
 interface PartialPaymentsViewProps {
-  sales: SaleRow[];
   onSelectSale: (sale: SaleRow) => void;
+  startDate?: string;
+  endDate?: string;
 }
 
 interface SaleDetailModalProps {
@@ -560,20 +562,6 @@ export default function SalesPage() {
     return Array.from(grouped.values()).sort((a, b) => b.salesCount - a.salesCount);
   }, [filteredSales, cashierData]);
 
-  // Get credit/invoice sales
-  const creditSales = useMemo(() => {
-    return filteredSales.filter((sale) => sale.paymentMethod === 'CREDIT');
-  }, [filteredSales]);
-
-  // Calculate partial payments
-  const partialPayments = useMemo(() => {
-    return creditSales.filter((sale) => {
-      const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
-      const total = new Decimal(sale.totalAmount || 0);
-      return paid.greaterThan(0) && paid.lessThan(total);
-    });
-  }, [creditSales]);
-
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: '📊', adminOnly: true },
     {
@@ -985,34 +973,12 @@ export default function SalesPage() {
 
                 {/* Credit Sales Tab */}
                 {activeTab === 'invoices' && (
-                  <>
-                    {creditSales.length > 0 ? (
-                      <CreditSalesView sales={creditSales} onSelectSale={setSelectedSale} />
-                    ) : (
-                      <div className="text-center py-12">
-                        <p className="text-gray-500 text-lg">No credit sales found</p>
-                        <p className="text-gray-400 text-sm mt-2">
-                          Credit sales will appear here when payment method is CREDIT
-                        </p>
-                      </div>
-                    )}
-                  </>
+                  <CreditSalesView onSelectSale={setSelectedSale} startDate={startDate} endDate={endDate} />
                 )}
 
                 {/* Partial Payments Tab */}
                 {activeTab === 'payments' && (
-                  <>
-                    {partialPayments.length > 0 ? (
-                      <PartialPaymentsView sales={partialPayments} onSelectSale={setSelectedSale} />
-                    ) : (
-                      <div className="text-center py-12">
-                        <p className="text-gray-500 text-lg">No partial payments found</p>
-                        <p className="text-gray-400 text-sm mt-2">
-                          Partial payments will appear here when credit sales are partially paid
-                        </p>
-                      </div>
-                    )}
-                  </>
+                  <PartialPaymentsView onSelectSale={setSelectedSale} startDate={startDate} endDate={endDate} />
                 )}
               </>
             )}
@@ -1425,7 +1391,40 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
 }
 
 // Credit Sales View Component
-function CreditSalesView({ sales, onSelectSale }: CreditSalesViewProps) {
+function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewProps) {
+  const [sales, setSales] = useState<SaleRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch all credit sales on-demand from API
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.sales.list({ page: 1, limit: 500, paymentMethod: 'CREDIT', startDate, endDate })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = (resp.data?.data ?? resp.data ?? []) as Record<string, unknown>[];
+        setSales(rows.map((sale) => ({
+          id: String(sale.id || ''),
+          saleNumber: String(sale.sale_number || sale.saleNumber || ''),
+          saleDate: String(sale.sale_date || sale.saleDate || ''),
+          createdAt: String(sale.created_at || sale.createdAt || ''),
+          totalAmount: Number(sale.total_amount || sale.totalAmount || 0),
+          profit: Number(sale.profit || 0),
+          customerName: String(sale.customer_name || sale.customerName || ''),
+          customerId: String(sale.customer_id || sale.customerId || ''),
+          paymentMethod: String(sale.payment_method || sale.paymentMethod || '') as 'CREDIT',
+          status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
+          cashierId: String(sale.cashier_id || sale.cashierId || ''),
+          cashierName: String(sale.cashier_name || sale.cashierName || ''),
+          amountPaid: Number(sale.amount_paid || sale.amountPaid || 0),
+          paymentReceived: Number(sale.amount_paid || sale.amountPaid || sale.paymentReceived || 0),
+        }) as SaleRow));
+      })
+      .catch(() => { if (!cancelled) setSales([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [startDate, endDate]);
+
   const totalOutstanding = useMemo(() => {
     return sales.reduce((sum: Decimal, sale: SaleRow) => {
       const total = new Decimal(sale.totalAmount || 0);
@@ -1433,6 +1432,21 @@ function CreditSalesView({ sales, onSelectSale }: CreditSalesViewProps) {
       return sum.plus(total.minus(paid));
     }, new Decimal(0));
   }, [sales]);
+
+  if (loading) {
+    return <div className="text-center py-12 text-gray-500">Loading credit sales...</div>;
+  }
+
+  if (sales.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 text-lg">No credit sales found</p>
+        <p className="text-gray-400 text-sm mt-2">
+          Credit sales will appear here when payment method is CREDIT
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -1525,7 +1539,61 @@ function CreditSalesView({ sales, onSelectSale }: CreditSalesViewProps) {
 }
 
 // Partial Payments View Component
-function PartialPaymentsView({ sales, onSelectSale }: PartialPaymentsViewProps) {
+function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymentsViewProps) {
+  const [sales, setSales] = useState<SaleRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch credit sales, then filter for partial payments client-side
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.sales.list({ page: 1, limit: 500, paymentMethod: 'CREDIT', startDate, endDate })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = (resp.data?.data ?? resp.data ?? []) as Record<string, unknown>[];
+        const allCredit = rows.map((sale) => ({
+          id: String(sale.id || ''),
+          saleNumber: String(sale.sale_number || sale.saleNumber || ''),
+          saleDate: String(sale.sale_date || sale.saleDate || ''),
+          createdAt: String(sale.created_at || sale.createdAt || ''),
+          totalAmount: Number(sale.total_amount || sale.totalAmount || 0),
+          profit: Number(sale.profit || 0),
+          customerName: String(sale.customer_name || sale.customerName || ''),
+          customerId: String(sale.customer_id || sale.customerId || ''),
+          paymentMethod: String(sale.payment_method || sale.paymentMethod || '') as 'CREDIT',
+          status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
+          cashierId: String(sale.cashier_id || sale.cashierId || ''),
+          cashierName: String(sale.cashier_name || sale.cashierName || ''),
+          amountPaid: Number(sale.amount_paid || sale.amountPaid || 0),
+          paymentReceived: Number(sale.amount_paid || sale.amountPaid || sale.paymentReceived || 0),
+        }) as SaleRow);
+        // Filter for partial: paid > 0 but less than total
+        setSales(allCredit.filter((s) => {
+          const paid = new Decimal(s.paymentReceived || s.amountPaid || 0);
+          const total = new Decimal(s.totalAmount || 0);
+          return paid.greaterThan(0) && paid.lessThan(total);
+        }));
+      })
+      .catch(() => { if (!cancelled) setSales([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [startDate, endDate]);
+
+  if (loading) {
+    return <div className="text-center py-12 text-gray-500">Loading partial payments...</div>;
+  }
+
+  if (sales.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 text-lg">No partial payments found</p>
+        <p className="text-gray-400 text-sm mt-2">
+          Partial payments will appear here when credit sales are partially paid
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">

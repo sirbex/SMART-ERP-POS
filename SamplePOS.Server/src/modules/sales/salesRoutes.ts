@@ -39,6 +39,7 @@ const ListSalesQuerySchema = z.object({
   status: z.enum(['COMPLETED', 'CANCELLED', 'REFUNDED']).optional(),
   customerId: z.string().uuid().optional(),
   cashierId: z.string().uuid().optional(),
+  paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']).optional(),
   startDate: z.string().optional(), // Keep as string (YYYY-MM-DD format)
   endDate: z.string().optional(), // Keep as string (YYYY-MM-DD format)
 });
@@ -298,6 +299,7 @@ export const salesController = {
       status: query.status,
       customerId: query.customerId,
       cashierId: effectiveCashierId,
+      paymentMethod: query.paymentMethod,
       startDate: query.startDate,
       endDate: query.endDate,
     });

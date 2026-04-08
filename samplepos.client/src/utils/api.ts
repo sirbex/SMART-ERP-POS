@@ -322,6 +322,7 @@ export const api = {
       startDate?: string;
       endDate?: string;
       cashierId?: string;
+      paymentMethod?: string;
     }) => apiClient.get<ApiResponse>('sales', { params }),
     getById: (id: string) => apiClient.get<ApiResponse>(`sales/${id}`),
     create: (data: CreateSaleInput) => apiClient.post<ApiResponse>('sales', data),

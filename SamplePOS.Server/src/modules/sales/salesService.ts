@@ -1842,6 +1842,7 @@ export const salesService = {
       status?: string;
       customerId?: string;
       cashierId?: string;
+      paymentMethod?: string;
       startDate?: string;
       endDate?: string;
     }

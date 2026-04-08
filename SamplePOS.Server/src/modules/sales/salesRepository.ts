@@ -456,6 +456,7 @@ export const salesRepository = {
       status?: string;
       customerId?: string;
       cashierId?: string;
+      paymentMethod?: string;
       startDate?: string;
       endDate?: string;
     }
@@ -478,6 +479,11 @@ export const salesRepository = {
     if (filters?.cashierId) {
       whereClauses.push(`s.cashier_id = $${paramIndex++}`);
       values.push(filters.cashierId);
+    }
+
+    if (filters?.paymentMethod) {
+      whereClauses.push(`s.payment_method = $${paramIndex++}`);
+      values.push(filters.paymentMethod);
     }
 
     if (filters?.startDate) {
