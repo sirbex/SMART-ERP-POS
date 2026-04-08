@@ -793,7 +793,7 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const { rows: data, summary: sqlSummary } = await reportsRepository.getProfitLossReport(pool, {
+    const { rows: data, summary: sqlSummary, expenseBreakdown } = await reportsRepository.getProfitLossReport(pool, {
       startDate: options.startDate,
       endDate: options.endDate,
       groupBy: options.groupBy,
@@ -832,7 +832,14 @@ export const reportsService = {
         totalCOGS: sqlSummary.totalCOGS,
         grossProfit: sqlSummary.grossProfit,
         grossProfitMargin: sqlSummary.grossProfitMargin,
+        totalExpenses: sqlSummary.totalExpenses,
+        operatingProfit: sqlSummary.operatingProfit,
+        netProfit: sqlSummary.netProfit,
+        netProfitMargin: sqlSummary.netProfitMargin,
+        totalSupplierPayments: sqlSummary.totalSupplierPayments,
+        supplierPaymentCount: sqlSummary.supplierPaymentCount,
       },
+      expenseBreakdown,
       recordCount: data.length,
       executionTimeMs: executionTime,
     };

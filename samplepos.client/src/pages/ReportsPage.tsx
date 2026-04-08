@@ -135,6 +135,17 @@ const formatFieldValue = (key: string, value: unknown): string => {
       return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 });
     }
 
+    // Percentage fields (margin, rate, percentage, change)
+    // Check BEFORE currency — grossProfitMargin contains 'profit' but IS a percentage
+    if (
+      lowerKey.includes('margin') ||
+      lowerKey.includes('rate') ||
+      lowerKey.includes('percentage') ||
+      lowerKey.includes('change')
+    ) {
+      return `${value.toFixed(2)}%`;
+    }
+
     // Currency fields (amount, value, cost, price, revenue, profit, discount, sales, payment, balance)
     if (
       lowerKey.includes('amount') ||
@@ -151,16 +162,6 @@ const formatFieldValue = (key: string, value: unknown): string => {
       lowerKey.includes('subtotal')
     ) {
       return formatCurrency(value);
-    }
-
-    // Percentage fields (margin, rate, percentage, change)
-    if (
-      lowerKey.includes('margin') ||
-      lowerKey.includes('rate') ||
-      lowerKey.includes('percentage') ||
-      lowerKey.includes('change')
-    ) {
-      return `${value.toFixed(2)}%`;
     }
 
     // Default number formatting
@@ -1829,8 +1830,8 @@ export default function ReportsPage() {
             )}
           </div>
         ) : (
-          /* Standard Summary Statistics for Other Reports */
-          reportData.summary && (
+          /* Standard Summary Statistics for Other Reports (skip PROFIT_LOSS - has custom renderer) */
+          reportData.reportType !== 'PROFIT_LOSS' && reportData.summary && (
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 sm:px-6 py-3">
                 <h4 className="text-base sm:text-lg font-semibold text-white">📊 Summary Statistics</h4>
@@ -2191,11 +2192,10 @@ export default function ReportsPage() {
                   </div>
                   <div>
                     <div className="text-xs text-gray-500 uppercase tracking-wide">Status</div>
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      reportData.session.status === 'OPEN' ? 'bg-green-100 text-green-800' :
-                      reportData.session.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}>{reportData.session.status}</span>
+                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${reportData.session.status === 'OPEN' ? 'bg-green-100 text-green-800' :
+                        reportData.session.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
+                          'bg-yellow-100 text-yellow-800'
+                      }`}>{reportData.session.status}</span>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4 text-sm text-gray-600">
@@ -2345,12 +2345,11 @@ export default function ReportsPage() {
                       {reportData.movements.map((mv: Record<string, unknown>, idx: number) => (
                         <tr key={idx} className="hover:bg-purple-50">
                           <td className="px-4 py-3 text-sm">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                              String(mv.movementType).includes('IN') ? 'bg-green-100 text-green-700' :
-                              String(mv.movementType).includes('OUT') ? 'bg-red-100 text-red-700' :
-                              String(mv.movementType) === 'SALE' ? 'bg-blue-100 text-blue-700' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>{String(mv.movementType).replace(/_/g, ' ')}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${String(mv.movementType).includes('IN') ? 'bg-green-100 text-green-700' :
+                                String(mv.movementType).includes('OUT') ? 'bg-red-100 text-red-700' :
+                                  String(mv.movementType) === 'SALE' ? 'bg-blue-100 text-blue-700' :
+                                    'bg-gray-100 text-gray-700'
+                              }`}>{String(mv.movementType).replace(/_/g, ' ')}</span>
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(mv.amount))}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{String(mv.reason || '—')}</td>
@@ -2440,10 +2439,9 @@ export default function ReportsPage() {
                             <td className="px-4 py-3 text-sm text-right text-gray-600">
                               {grandTotal > 0 ? ((data.totalSales / grandTotal) * 100).toFixed(1) : '0.0'}%
                             </td>
-                            <td className={`px-4 py-3 text-sm text-right font-semibold ${
-                              data.totalVariance === 0 ? 'text-green-600' :
-                              data.totalVariance > 0 ? 'text-blue-600' : 'text-red-600'
-                            }`}>{formatCurrency(data.totalVariance)}</td>
+                            <td className={`px-4 py-3 text-sm text-right font-semibold ${data.totalVariance === 0 ? 'text-green-600' :
+                                data.totalVariance > 0 ? 'text-blue-600' : 'text-red-600'
+                              }`}>{formatCurrency(data.totalVariance)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2497,11 +2495,10 @@ export default function ReportsPage() {
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{String(s.registerName)}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">{String(s.cashierName)}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            s.status === 'OPEN' ? 'bg-green-100 text-green-800' :
-                            s.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>{String(s.status)}</span>
+                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${s.status === 'OPEN' ? 'bg-green-100 text-green-800' :
+                              s.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
+                                'bg-yellow-100 text-yellow-800'
+                            }`}>{String(s.status)}</span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">{s.openedAt ? new Date(String(s.openedAt)).toLocaleString() : '—'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500">{s.closedAt ? new Date(String(s.closedAt)).toLocaleString() : '—'}</td>
@@ -2509,11 +2506,10 @@ export default function ReportsPage() {
                         <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">{formatCurrency(Number(s.totalSales))}</td>
                         <td className="px-4 py-3 text-sm text-right">{s.expectedClosing != null ? formatCurrency(Number(s.expectedClosing)) : '—'}</td>
                         <td className="px-4 py-3 text-sm text-right">{s.actualClosing != null ? formatCurrency(Number(s.actualClosing)) : '—'}</td>
-                        <td className={`px-4 py-3 text-sm text-right font-semibold ${
-                          s.variance == null ? 'text-gray-400' :
-                          Number(s.variance) === 0 ? 'text-green-600' :
-                          Number(s.variance) > 0 ? 'text-blue-600' : 'text-red-600'
-                        }`}>
+                        <td className={`px-4 py-3 text-sm text-right font-semibold ${s.variance == null ? 'text-gray-400' :
+                            Number(s.variance) === 0 ? 'text-green-600' :
+                              Number(s.variance) > 0 ? 'text-blue-600' : 'text-red-600'
+                          }`}>
                           {s.variance != null ? formatCurrency(Number(s.variance)) : '—'}
                         </td>
                         <td className="px-4 py-3 text-sm text-right text-gray-600">{Number(s.movementCount)}</td>
@@ -2584,13 +2580,12 @@ export default function ReportsPage() {
                         return (
                           <tr key={type} className="hover:bg-purple-50">
                             <td className="px-4 py-3 text-sm">
-                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                type.includes('IN') ? 'bg-green-100 text-green-700' :
-                                type.includes('OUT') ? 'bg-red-100 text-red-700' :
-                                type === 'SALE' ? 'bg-blue-100 text-blue-700' :
-                                type === 'REFUND' ? 'bg-orange-100 text-orange-700' :
-                                'bg-gray-100 text-gray-700'
-                              }`}>{type.replace(/_/g, ' ')}</span>
+                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${type.includes('IN') ? 'bg-green-100 text-green-700' :
+                                  type.includes('OUT') ? 'bg-red-100 text-red-700' :
+                                    type === 'SALE' ? 'bg-blue-100 text-blue-700' :
+                                      type === 'REFUND' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-gray-100 text-gray-700'
+                                }`}>{type.replace(/_/g, ' ')}</span>
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-600">{d.count}</td>
                             <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(d.amount)}</td>
@@ -2743,8 +2738,8 @@ export default function ReportsPage() {
             )}
           </div>
         ) : (
-          /* Standard Data Table for Other Reports */
-          reportData.data && reportData.data.length > 0 && (
+          /* Standard Data Table for Other Reports (skip PROFIT_LOSS - has custom renderer) */
+          reportData.reportType !== 'PROFIT_LOSS' && reportData.data && reportData.data.length > 0 && (
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h4 className="text-base sm:text-lg font-semibold text-white">📋 Detailed Data</h4>
@@ -2862,8 +2857,8 @@ export default function ReportsPage() {
                       <p className="text-xs text-gray-500 mt-1">{formatDisplayDate(payment.paymentDate)}</p>
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                        payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-gray-100 text-gray-800'
+                      payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-800'
                       }`}>{payment.status}</span>
                   </div>
                   <p className="text-sm font-medium text-gray-900 mb-2">{payment.supplierName}</p>
@@ -2925,8 +2920,8 @@ export default function ReportsPage() {
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">{payment.paymentMethod}</td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                            payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-gray-100 text-gray-800'
+                          payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-800'
                           }`}>{payment.status}</span>
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-600">{payment.reference || '-'}</td>
@@ -2949,6 +2944,193 @@ export default function ReportsPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* ═══════════ SAP-STYLE PROFIT & LOSS STATEMENT ═══════════ */}
+        {reportData.reportType === 'PROFIT_LOSS' && reportData.summary && (
+          <div className="space-y-6">
+            {/* ── Income Statement (SAP FI-CO Format) ── */}
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-700 to-indigo-900 px-4 sm:px-6 py-4">
+                <h4 className="text-lg sm:text-xl font-bold text-white tracking-wide">Income Statement (P&L)</h4>
+                <p className="text-indigo-200 text-xs mt-1">SAP FI-CO Format • {reportData.parameters?.startDate} to {reportData.parameters?.endDate}</p>
+              </div>
+
+              <div className="divide-y divide-gray-100">
+                {/* Section 1: Revenue */}
+                <div className="px-4 sm:px-6 py-3 bg-blue-50/50">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-bold text-gray-800 uppercase tracking-wider">Revenue (Sales)</span>
+                    <span className="text-lg sm:text-xl font-bold text-blue-700">{formatCurrency(reportData.summary.totalRevenue ?? 0)}</span>
+                  </div>
+                </div>
+
+                {/* Section 2: COGS */}
+                <div className="px-4 sm:px-6 py-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Less: Cost of Goods Sold (COGS)</span>
+                    <span className="text-sm font-semibold text-red-600">({formatCurrency(reportData.summary.totalCOGS ?? 0)})</span>
+                  </div>
+                </div>
+
+                {/* Gross Profit Line */}
+                <div className="px-4 sm:px-6 py-3 bg-green-50 border-t-2 border-green-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-bold text-green-800 uppercase tracking-wider">Gross Profit</span>
+                    <div className="text-right">
+                      <span className={`text-lg sm:text-xl font-bold ${(reportData.summary.grossProfit ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                        {formatCurrency(reportData.summary.grossProfit ?? 0)}
+                      </span>
+                      <span className="block text-xs text-green-600 font-medium">
+                        Margin: {(reportData.summary.grossProfitMargin ?? 0).toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Operating Expenses */}
+                <div className="px-4 sm:px-6 py-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Less: Operating Expenses</span>
+                    <span className="text-sm font-semibold text-red-600">({formatCurrency(reportData.summary.totalExpenses ?? 0)})</span>
+                  </div>
+                </div>
+
+                {/* Expense Breakdown (if available) */}
+                {reportData.expenseBreakdown && (reportData.expenseBreakdown as Array<{ accountCode: string; accountName: string; entryCount: number; totalAmount: number }>).length > 0 && (
+                  <div className="px-6 sm:px-10 py-2 bg-gray-50/50">
+                    {(reportData.expenseBreakdown as Array<{ accountCode: string; accountName: string; entryCount: number; totalAmount: number }>).map((exp, idx) => (
+                      <div key={idx} className="flex justify-between items-center py-1">
+                        <span className="text-xs text-gray-500">{exp.accountCode} — {exp.accountName}</span>
+                        <span className="text-xs font-medium text-gray-700">{formatCurrency(exp.totalAmount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Operating Profit / EBIT */}
+                <div className="px-4 sm:px-6 py-3 bg-amber-50 border-t-2 border-amber-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-bold text-amber-800 uppercase tracking-wider">Operating Profit (EBIT)</span>
+                    <span className={`text-lg sm:text-xl font-bold ${(reportData.summary.operatingProfit ?? 0) >= 0 ? 'text-amber-700' : 'text-red-700'}`}>
+                      {formatCurrency(reportData.summary.operatingProfit ?? 0)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Net Profit */}
+                <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-t-2 border-indigo-300">
+                  <div className="flex justify-between items-center">
+                    <span className="text-base font-bold text-indigo-900 uppercase tracking-wider">Net Profit</span>
+                    <div className="text-right">
+                      <span className={`text-xl sm:text-2xl font-bold ${(reportData.summary.netProfit ?? 0) >= 0 ? 'text-indigo-700' : 'text-red-700'}`}>
+                        {formatCurrency(reportData.summary.netProfit ?? 0)}
+                      </span>
+                      <span className="block text-xs text-indigo-500 font-medium">
+                        Net Margin: {(reportData.summary.netProfitMargin ?? 0).toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Supplementary: Payments to Vendors (non-P&L) */}
+                {(reportData.summary.totalSupplierPayments ?? 0) > 0 && (
+                  <div className="px-4 sm:px-6 py-3 bg-gray-50 border-t border-dashed border-gray-300">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Memo: Payments to Vendors</span>
+                        <span className="block text-[10px] text-gray-400">Cash disbursements (non-P&L)</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-bold text-orange-600">{formatCurrency(reportData.summary.totalSupplierPayments ?? 0)}</span>
+                        <span className="block text-[10px] text-gray-400">{reportData.summary.supplierPaymentCount ?? 0} payments</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Period Detail Table ── */}
+            {reportData.data && reportData.data.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <h4 className="text-base sm:text-lg font-semibold text-white">📊 Period Breakdown</h4>
+                  <span className="text-indigo-200 text-xs sm:text-sm">{reportData.data.length} periods</span>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="block sm:hidden p-4 space-y-4">
+                  {reportData.data.map((row: Record<string, unknown>, idx: number) => (
+                    <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white">
+                      <div className="text-sm font-bold text-indigo-700 mb-3 pb-2 border-b border-indigo-100">
+                        {String(row.period ?? '')}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Revenue</div>
+                          <div className="text-sm font-bold text-blue-600">{formatCurrency(Number(row.revenue ?? 0))}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">COGS</div>
+                          <div className="text-sm font-semibold text-red-500">{formatCurrency(Number(row.costOfGoodsSold ?? 0))}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Gross Profit</div>
+                          <div className={`text-sm font-bold ${Number(row.grossProfit ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(Number(row.grossProfit ?? 0))}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Margin</div>
+                          <div className="text-sm font-bold text-indigo-600">{Number(row.grossProfitMargin ?? 0).toFixed(2)}%</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full min-w-full">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Period</th>
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Revenue</th>
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">COGS</th>
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Gross Profit</th>
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Margin %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {reportData.data.map((row: Record<string, unknown>, idx: number) => (
+                        <tr key={idx} className="hover:bg-indigo-50/40 transition-colors">
+                          <td className="px-6 py-3 text-sm font-medium text-gray-900">{String(row.period ?? '')}</td>
+                          <td className="px-6 py-3 text-sm text-right font-semibold text-blue-700">{formatCurrency(Number(row.revenue ?? 0))}</td>
+                          <td className="px-6 py-3 text-sm text-right text-red-600">{formatCurrency(Number(row.costOfGoodsSold ?? 0))}</td>
+                          <td className={`px-6 py-3 text-sm text-right font-bold ${Number(row.grossProfit ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(Number(row.grossProfit ?? 0))}
+                          </td>
+                          <td className="px-6 py-3 text-sm text-right font-bold text-indigo-600">{Number(row.grossProfitMargin ?? 0).toFixed(2)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-indigo-50 border-t-2 border-indigo-300">
+                      <tr>
+                        <td className="px-6 py-3 text-sm font-bold text-gray-900 uppercase">Total</td>
+                        <td className="px-6 py-3 text-sm text-right font-bold text-blue-700">{formatCurrency(reportData.summary.totalRevenue ?? 0)}</td>
+                        <td className="px-6 py-3 text-sm text-right font-bold text-red-600">{formatCurrency(reportData.summary.totalCOGS ?? 0)}</td>
+                        <td className={`px-6 py-3 text-sm text-right font-bold ${(reportData.summary.grossProfit ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                          {formatCurrency(reportData.summary.grossProfit ?? 0)}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-right font-bold text-indigo-700">{(reportData.summary.grossProfitMargin ?? 0).toFixed(2)}%</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

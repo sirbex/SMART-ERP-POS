@@ -496,6 +496,26 @@ export interface ProfitLossRow {
     totalDiscounts?: number;
 }
 
+export interface ProfitLossSummary {
+    totalRevenue: number;
+    totalCOGS: number;
+    grossProfit: number;
+    grossProfitMargin: number;
+    totalExpenses: number;
+    operatingProfit: number;
+    netProfit: number;
+    netProfitMargin: number;
+    totalSupplierPayments: number;
+    supplierPaymentCount: number;
+}
+
+export interface ExpenseBreakdownRow {
+    accountCode: string;
+    accountName: string;
+    entryCount: number;
+    totalAmount: number;
+}
+
 // ── Deleted Items Report ──
 export interface DeletedItemRow {
     productId: string;

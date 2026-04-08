@@ -28,6 +28,8 @@ import type {
   GoodsReceivedRow,
   CustomerPaymentsRow,
   ProfitLossRow,
+  ProfitLossSummary,
+  ExpenseBreakdownRow,
   DeletedItemRow,
   ProfitMarginByProductRow,
   SupplierPaymentStatusRow,
@@ -1174,12 +1176,8 @@ export const reportsRepository = {
     }
   ): Promise<{
     rows: ProfitLossRow[];
-    summary: {
-      totalRevenue: number;
-      totalCOGS: number;
-      grossProfit: number;
-      grossProfitMargin: number;
-    };
+    summary: ProfitLossSummary;
+    expenseBreakdown: ExpenseBreakdownRow[];
   }> {
     const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
     let dateGroup = '';
@@ -1222,12 +1220,66 @@ export const reportsRepository = {
         AND s.status NOT IN ('VOID', 'REFUNDED')
     `;
 
-    const [result, summaryResult] = await Promise.all([
+    const [result, summaryResult, expenseResult, supplierPayResult] = await Promise.all([
       pool.query(query, [startUtc, endUtc]),
       pool.query(summaryQuery, [startUtc, endUtc]),
+      // Operating expenses from GL
+      pool.query(`
+        SELECT
+          a."AccountCode" AS account_code,
+          a."AccountName" AS account_name,
+          COUNT(le."Id")::integer AS entry_count,
+          ROUND(COALESCE(SUM(le."DebitAmount"), 0)::numeric, 2) AS total_amount
+        FROM ledger_entries le
+        JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+        JOIN accounts a ON a."Id" = le."AccountId"
+        WHERE lt."Status" = 'POSTED'
+          AND lt."ReferenceType" IN ('EXPENSE', 'EXPENSE_PAYMENT')
+          AND a."AccountType" = 'EXPENSE'
+          AND le."DebitAmount" > 0
+          AND ($1::timestamptz IS NULL OR le."EntryDate" >= $1::timestamptz)
+          AND ($2::timestamptz IS NULL OR le."EntryDate" < $2::timestamptz)
+        GROUP BY a."AccountCode", a."AccountName"
+        ORDER BY total_amount DESC
+      `, [startUtc, endUtc]),
+      // Supplier payments (non-P&L cash disbursements)
+      pool.query(`
+        SELECT
+          ROUND(COALESCE(SUM(le."CreditAmount"), 0)::numeric, 2) AS total_paid,
+          COUNT(DISTINCT lt."Id")::integer AS payment_count
+        FROM ledger_entries le
+        JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+        JOIN accounts a ON a."Id" = le."AccountId"
+        WHERE lt."Status" = 'POSTED'
+          AND lt."ReferenceType" = 'SUPPLIER_PAYMENT'
+          AND le."CreditAmount" > 0
+          AND a."AccountType" IN ('ASSET', 'BANK')
+          AND ($1::timestamptz IS NULL OR le."EntryDate" >= $1::timestamptz)
+          AND ($2::timestamptz IS NULL OR le."EntryDate" < $2::timestamptz)
+      `, [startUtc, endUtc]),
     ]);
 
     const sRow = summaryResult.rows[0] || {};
+    const totalRevenue = new Decimal(sRow.total_revenue || 0);
+    const totalCOGS = new Decimal(sRow.total_cogs || 0);
+    const grossProfit = totalRevenue.minus(totalCOGS);
+    const grossProfitMargin = totalRevenue.isZero()
+      ? new Decimal(0)
+      : grossProfit.dividedBy(totalRevenue).times(100);
+
+    // Compute total expenses
+    const totalExpenses = expenseResult.rows.reduce(
+      (sum: Decimal, r: Record<string, unknown>) => sum.plus(new Decimal(String(r.total_amount) || '0')),
+      new Decimal(0)
+    );
+    const operatingProfit = grossProfit.minus(totalExpenses);
+    const netProfit = operatingProfit; // same for now (no interest/tax)
+    const netProfitMargin = totalRevenue.isZero()
+      ? new Decimal(0)
+      : netProfit.dividedBy(totalRevenue).times(100);
+
+    // Supplier payments (memo)
+    const spRow = supplierPayResult.rows[0] || {};
 
     return {
       rows: result.rows.map((row) => {
@@ -1247,11 +1299,23 @@ export const reportsRepository = {
         };
       }),
       summary: {
-        totalRevenue: new Decimal(sRow.total_revenue || 0).toDecimalPlaces(2).toNumber(),
-        totalCOGS: new Decimal(sRow.total_cogs || 0).toDecimalPlaces(2).toNumber(),
-        grossProfit: new Decimal(sRow.gross_profit || 0).toDecimalPlaces(2).toNumber(),
-        grossProfitMargin: new Decimal(sRow.gross_profit_margin || 0).toDecimalPlaces(2).toNumber(),
+        totalRevenue: totalRevenue.toDecimalPlaces(2).toNumber(),
+        totalCOGS: totalCOGS.toDecimalPlaces(2).toNumber(),
+        grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
+        grossProfitMargin: grossProfitMargin.toDecimalPlaces(2).toNumber(),
+        totalExpenses: totalExpenses.toDecimalPlaces(2).toNumber(),
+        operatingProfit: operatingProfit.toDecimalPlaces(2).toNumber(),
+        netProfit: netProfit.toDecimalPlaces(2).toNumber(),
+        netProfitMargin: netProfitMargin.toDecimalPlaces(2).toNumber(),
+        totalSupplierPayments: new Decimal(spRow.total_paid || 0).toDecimalPlaces(2).toNumber(),
+        supplierPaymentCount: Number(spRow.payment_count || 0),
       },
+      expenseBreakdown: expenseResult.rows.map((r) => ({
+        accountCode: String(r.account_code),
+        accountName: String(r.account_name),
+        entryCount: Number(r.entry_count),
+        totalAmount: new Decimal(String(r.total_amount) || '0').toDecimalPlaces(2).toNumber(),
+      })),
     };
   },
 
