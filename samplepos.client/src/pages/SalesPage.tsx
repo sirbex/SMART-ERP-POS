@@ -1268,6 +1268,7 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
                   <tr>
                     <th className="text-left pb-2">Sale #</th>
                     <th className="text-left pb-2">Date</th>
+                    <th className="text-left pb-2">Time</th>
                     <th className="text-right pb-2">Amount</th>
                     <th className="text-left pb-2">Payment</th>
                     <th className="text-right pb-2">Actions</th>
@@ -1278,6 +1279,7 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
                     <tr key={sale.id} className="border-t border-gray-100">
                       <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                       <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
+                      <td className="py-2 text-gray-600">{formatDisplayTime(sale.createdAt)}</td>
                       <td className="py-2 text-right font-medium">
                         {formatCurrency(sale.totalAmount)}
                       </td>
@@ -1386,6 +1388,7 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                       <th className="text-left pb-2">Sale #</th>
                       <th className="text-left pb-2">Customer</th>
                       <th className="text-left pb-2">Date</th>
+                      <th className="text-left pb-2">Time</th>
                       <th className="text-right pb-2">Amount</th>
                       <th className="text-right pb-2">Actions</th>
                     </tr>
@@ -1396,6 +1399,7 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                         <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                         <td className="py-2">{sale.customerName || 'Walk-in'}</td>
                         <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
+                        <td className="py-2 text-gray-600">{formatDisplayTime(sale.createdAt)}</td>
                         <td className="py-2 text-right font-medium">
                           {formatCurrency(sale.totalAmount)}
                         </td>
@@ -1460,6 +1464,9 @@ function CreditSalesView({ sales, onSelectSale }: CreditSalesViewProps) {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Date
               </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Time
+              </th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                 Total
               </th>
@@ -1486,6 +1493,9 @@ function CreditSalesView({ sales, onSelectSale }: CreditSalesViewProps) {
                   <td className="px-4 py-3 text-sm text-gray-900">{sale.customerName}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">
                     {formatDisplayDate(sale.saleDate)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {formatDisplayTime(sale.createdAt)}
                   </td>
                   <td className="px-4 py-3 text-sm text-right font-medium">
                     {formatCurrency(total.toNumber())}
@@ -1537,6 +1547,9 @@ function PartialPaymentsView({ sales, onSelectSale }: PartialPaymentsViewProps) 
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Date
               </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Time
+              </th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                 Total
               </th>
@@ -1569,6 +1582,9 @@ function PartialPaymentsView({ sales, onSelectSale }: PartialPaymentsViewProps) 
                   <td className="px-4 py-3 text-sm text-gray-900">{sale.customerName}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">
                     {formatDisplayDate(sale.saleDate)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {formatDisplayTime(sale.createdAt)}
                   </td>
                   <td className="px-4 py-3 text-sm text-right font-medium">
                     {formatCurrency(total.toNumber())}
