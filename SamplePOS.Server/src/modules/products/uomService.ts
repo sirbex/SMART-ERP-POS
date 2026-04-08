@@ -6,6 +6,8 @@ import * as repo from './uomRepository.js';
 import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import { pool as globalPool } from '../../db/pool.js';
+import { ConflictError } from '../../middleware/errorHandler.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import type pg from 'pg';
 
 export async function listMasterUoms(dbPool?: pg.Pool) {
@@ -31,7 +33,39 @@ export async function updateMasterUom(id: string, input: unknown, dbPool?: pg.Po
 }
 
 export async function deleteMasterUom(id: string, dbPool?: pg.Pool) {
-  return repo.deleteUom(id, dbPool);
+  const pool = dbPool || globalPool;
+
+  // Check usage before attempting delete
+  const usage = await repo.getUomUsageCounts(id, pool);
+
+  // Block deletion if UoM is referenced in immutable transactional records
+  const txnCount = usage.saleItems + usage.poItems + usage.grItems + usage.stockMovements;
+  if (txnCount > 0) {
+    const parts: string[] = [];
+    if (usage.saleItems > 0) parts.push(`${usage.saleItems} sale item(s)`);
+    if (usage.poItems > 0) parts.push(`${usage.poItems} PO item(s)`);
+    if (usage.grItems > 0) parts.push(`${usage.grItems} GR item(s)`);
+    if (usage.stockMovements > 0) parts.push(`${usage.stockMovements} stock movement(s)`);
+    throw new ConflictError(
+      `Cannot delete UoM: it is referenced in ${parts.join(', ')}. Historical transaction data cannot be modified.`
+    );
+  }
+
+  // Block deletion if UoM is a product's base UoM
+  if (usage.productBase > 0) {
+    throw new ConflictError(
+      `Cannot delete UoM: it is the base unit of measure for ${usage.productBase} product(s). Remove it as base UoM first.`
+    );
+  }
+
+  // Use transaction: remove product mappings then delete master UoM
+  return UnitOfWork.run(pool, async (client) => {
+    if (usage.productUoms > 0) {
+      await repo.deleteProductUomsByUomId(id, client);
+    }
+    const res = await client.query(`DELETE FROM uoms WHERE id = $1`, [id]);
+    return (res.rowCount ?? 0) > 0;
+  });
 }
 
 export async function getProductUoms(productId: string, dbPool?: pg.Pool) {

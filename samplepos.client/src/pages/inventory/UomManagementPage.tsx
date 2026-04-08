@@ -92,10 +92,16 @@ export default function UomManagementPage() {
     },
   });
 
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteMasterUom(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['uoms', 'master'] });
+      setDeleteError(null);
+    },
+    onError: (err: Error) => {
+      setDeleteError(err.message);
     },
   });
 
@@ -138,6 +144,13 @@ export default function UomManagementPage() {
             ) : error ? (
               <div className="text-sm text-red-600">Failed to load master UoMs</div>
             ) : (
+              <>
+                {deleteError && (
+                  <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                    {deleteError}
+                    <button onClick={() => setDeleteError(null)} className="ml-2 text-red-500 hover:text-red-700 font-bold">&times;</button>
+                  </div>
+                )}
               <ul className="divide-y">
                 {(masterUoms || []).map(u => (
                   <li key={u.id} className="py-2">
@@ -201,7 +214,8 @@ export default function UomManagementPage() {
                           </button>
                           <button
                             onClick={() => {
-                              if (confirm(`Delete UoM "${u.name}"? This will also remove all product mappings using this UoM.`)) {
+                              setDeleteError(null);
+                              if (confirm(`Delete UoM "${u.name}"? This will remove all product mappings. (Cannot delete if used in historical transactions.)`)) {
                                 deleteMutation.mutate(u.id);
                               }
                             }}
@@ -220,6 +234,7 @@ export default function UomManagementPage() {
                   <li className="py-3 text-sm text-gray-500">No UoMs yet</li>
                 )}
               </ul>
+              </>
             )}
 
             <div className="mt-4 border-t pt-4">

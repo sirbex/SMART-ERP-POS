@@ -92,6 +92,35 @@ export async function deleteUom(id: string, dbPool?: pg.Pool): Promise<boolean> 
   return (res.rowCount ?? 0) > 0;
 }
 
+/** Delete all product_uoms mappings for a given master UoM */
+export async function deleteProductUomsByUomId(uomId: string, client: pg.PoolClient): Promise<number> {
+  const res = await client.query(`DELETE FROM product_uoms WHERE uom_id = $1`, [uomId]);
+  return res.rowCount ?? 0;
+}
+
+/** Check if a UoM is referenced in immutable transactional tables or as a product base UoM */
+export async function getUomUsageCounts(uomId: string, dbPool?: pg.Pool): Promise<{
+  productBase: number;
+  productUoms: number;
+  saleItems: number;
+  poItems: number;
+  grItems: number;
+  stockMovements: number;
+}> {
+  const pool = dbPool || globalPool;
+  const res = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM products WHERE base_uom_id = $1) AS "productBase",
+       (SELECT COUNT(*)::int FROM product_uoms WHERE uom_id = $1) AS "productUoms",
+       (SELECT COUNT(*)::int FROM sale_items WHERE base_uom_id = $1) AS "saleItems",
+       (SELECT COUNT(*)::int FROM purchase_order_items WHERE base_uom_id = $1) AS "poItems",
+       (SELECT COUNT(*)::int FROM goods_receipt_items WHERE base_uom_id = $1) AS "grItems",
+       (SELECT COUNT(*)::int FROM stock_movements WHERE base_uom_id = $1) AS "stockMovements"`,
+    [uomId]
+  );
+  return res.rows[0];
+}
+
 export async function listProductUoms(productId: string, dbPool?: pg.Pool): Promise<DbProductUom[]> {
   const pool = dbPool || globalPool;
   const res = await pool.query(
