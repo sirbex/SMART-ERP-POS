@@ -159,6 +159,9 @@ export interface CreateSaleItemData {
   profit: number;
   discountAmount?: number; // Per-item discount amount
   uomId?: string; // UUID of the product_uom used (optional for backward compatibility)
+  baseQty?: number | null; // SAP UoM snapshot: quantity in base unit
+  baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
+  conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
 }
 
 export const salesRepository = {
@@ -339,9 +342,9 @@ export const salesRepository = {
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
-      const offset = index * 13; // 13 fields now (added product_type, income_account_id)
+      const offset = index * 16; // 16 fields (added base_qty, base_uom_id, conversion_factor)
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13})`
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14}, $${offset + 15}, $${offset + 16})`
       );
 
       // Use provided profit if available (may include discount allocation),
@@ -377,13 +380,16 @@ export const salesRepository = {
         item.uomId || null, // Include uom_id (NULL if not provided)
         item.discountAmount || 0, // Per-item discount amount
         productType,
-        incomeAccountId
+        incomeAccountId,
+        item.baseQty ?? null, // SAP UoM snapshot: base quantity
+        item.baseUomId ?? null, // SAP UoM snapshot: base UoM at posting time
+        item.conversionFactor ?? 1 // SAP UoM snapshot: conversion factor at posting time
       );
     });
 
     const result = await pool.query(
       `INSERT INTO sale_items (
-        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount, product_type, income_account_id
+        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount, product_type, income_account_id, base_qty, base_uom_id, conversion_factor
       ) VALUES ${placeholders.join(', ')}
       RETURNING *`,
       values

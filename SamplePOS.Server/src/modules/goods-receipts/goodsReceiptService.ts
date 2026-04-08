@@ -259,6 +259,31 @@ export const goodsReceiptService = {
         // BR-INV-009: Check if receiving would exceed max stock
         await InventoryBusinessRules.validateMaxStockLevel(client, it.productId, receivedQty);
 
+        // SAP UoM snapshot: resolve base UoM and conversion factor
+        let grBaseQty: number | null = null;
+        let grBaseUomId: string | null = null;
+        let grConversionFactor = 1;
+
+        const puRes = await client.query(
+          `SELECT pu.uom_id, pu.conversion_factor, pu.is_default
+           FROM product_uoms pu
+           WHERE pu.product_id = $1`,
+          [it.productId]
+        );
+        const defaultPu = puRes.rows.find((r: { is_default: boolean }) => r.is_default);
+        grBaseUomId = defaultPu?.uom_id || null;
+
+        if (it.uomId && grBaseUomId && it.uomId !== grBaseUomId) {
+          const selectedPu = puRes.rows.find((r: { uom_id: string }) => r.uom_id === it.uomId);
+          if (selectedPu) {
+            grConversionFactor = Number(selectedPu.conversion_factor) || 1;
+            grBaseQty = new Decimal(receivedQty).times(grConversionFactor).toNumber();
+          }
+        } else {
+          grBaseQty = receivedQty;
+          grConversionFactor = 1;
+        }
+
         itemsToInsert.push({
           goodsReceiptId: gr.id,
           poItemId: it.poItemId || null,
@@ -270,6 +295,9 @@ export const goodsReceiptService = {
           batchNumber: it.batchNumber ?? null,
           expiryDate: expiry,
           uomId: it.uomId || null,
+          baseQty: grBaseQty,
+          baseUomId: grBaseUomId,
+          conversionFactor: grConversionFactor,
         });
       }
 
@@ -386,6 +414,15 @@ export const goodsReceiptService = {
         const unitCost: number = Money.parseDb(item.unitCost).toNumber();
         const isBonus: boolean = !!item.isBonus;
 
+        // SAP UoM snapshot: resolve base UoM and conversion factor for stock movement
+        let finBaseUomId: string | null = null;
+        const finConversionFactor = Number(item.conversionFactor) || 1;
+        const finPuRes = await client.query(
+          `SELECT pu.uom_id FROM product_uoms pu WHERE pu.product_id = $1 AND pu.is_default = true LIMIT 1`,
+          [productId]
+        );
+        finBaseUomId = finPuRes.rows[0]?.uom_id || null;
+
         // Bonus stock: cost recorded as 0 for inventory batches (free goods from supplier)
         const effectiveCost: number = isBonus ? 0 : unitCost;
 
@@ -498,8 +535,9 @@ export const goodsReceiptService = {
         await client.query(
           `INSERT INTO stock_movements (
             movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-            reference_type, reference_id, notes, created_by_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            reference_type, reference_id, notes, created_by_id,
+            entered_qty, base_uom_id, conversion_factor
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             movementNumber,
             productId,
@@ -511,6 +549,9 @@ export const goodsReceiptService = {
             gr.id,
             `GR ${grNumber || gr.id} - Batch ${batchNumber}${isBonus ? ' (BONUS)' : ''}`,
             receivedBy || null,
+            receivedQty, // SAP UoM snapshot: entered quantity (same as received in GR context)
+            finBaseUomId, // SAP UoM snapshot: base UoM at posting time
+            finConversionFactor, // SAP UoM snapshot: conversion factor at posting time
           ]
         );
 
@@ -1263,12 +1304,20 @@ export const goodsReceiptService = {
           movNumResult.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
 
         // Create stock movement
+        // SAP UoM snapshot: resolve base UoM for opening balance (always base unit, factor=1)
+        const obPuRes = await client.query(
+          `SELECT pu.uom_id FROM product_uoms pu WHERE pu.product_id = $1 AND pu.is_default = true LIMIT 1`,
+          [item.productId]
+        );
+        const obBaseUomId: string | null = obPuRes.rows[0]?.uom_id || null;
+
         const smResult = await client.query(
           `INSERT INTO stock_movements (
             movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-            reference_type, reference_id, notes, created_by_id
+            reference_type, reference_id, notes, created_by_id,
+            entered_qty, base_uom_id, conversion_factor
           ) VALUES ($1, $2, $3, 'OPENING_BALANCE'::movement_type, $4, $5,
-                    'GOODS_RECEIPT', $6, $7, $8)
+                    'GOODS_RECEIPT', $6, $7, $8, $9, $10, $11)
           RETURNING id, movement_number`,
           [
             movementNumber,
@@ -1281,6 +1330,9 @@ export const goodsReceiptService = {
               ? `Opening balance increase (qty ${oldQty}→${batchQty}, cost ${oldCost}→${batchCost})`
               : `Opening balance decrease (qty ${oldQty}→${batchQty}, cost ${oldCost}→${batchCost})`,
             userId,
+            Math.abs(qtyDelta), // SAP UoM snapshot: entered qty = base qty for opening balance
+            obBaseUomId, // SAP UoM snapshot: base UoM at posting time
+            1, // SAP UoM snapshot: opening balance always factor=1
           ]
         );
 

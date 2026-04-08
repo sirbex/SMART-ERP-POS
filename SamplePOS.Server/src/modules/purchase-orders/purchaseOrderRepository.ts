@@ -45,6 +45,9 @@ export interface CreatePOItemData {
   quantity: number;
   unitCost: number;
   uomId?: string | null;
+  baseQty?: number | null; // SAP UoM snapshot: quantity in base unit
+  baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
+  conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
 }
 
 export const purchaseOrderRepository = {
@@ -157,11 +160,11 @@ export const purchaseOrderRepository = {
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
-      const offset = index * 6; // Changed from 5 to 6 to include uomId
+      const offset = index * 9; // 9 fields (added base_qty, base_uom_id, conversion_factor)
       const lineTotal = new Decimal(item.quantity).times(item.unitCost).toNumber();
 
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
       );
 
       values.push(
@@ -170,13 +173,16 @@ export const purchaseOrderRepository = {
         item.quantity,
         item.unitCost,
         lineTotal,
-        item.uomId || null
+        item.uomId || null,
+        item.baseQty ?? null, // SAP UoM snapshot: base quantity
+        item.baseUomId ?? null, // SAP UoM snapshot: base UoM at posting time
+        item.conversionFactor ?? 1 // SAP UoM snapshot: conversion factor at posting time
       );
     });
 
     const result = await pool.query(
       `INSERT INTO purchase_order_items (
-        purchase_order_id, product_id, ordered_quantity, unit_price, total_price, uom_id
+        purchase_order_id, product_id, ordered_quantity, unit_price, total_price, uom_id, base_qty, base_uom_id, conversion_factor
       ) VALUES ${placeholders.join(', ')}
       RETURNING *`,
       values

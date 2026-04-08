@@ -61,6 +61,9 @@ export interface CreateGRItemData {
   batchNumber: string | null;
   expiryDate: string | null;
   uomId?: string | null; // SAP pattern: inherited from PO item
+  baseQty?: number | null; // SAP UoM snapshot: received quantity in base unit
+  baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
+  conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
 }
 
 export interface UpdateGRItemData {
@@ -145,9 +148,9 @@ export const goodsReceiptRepository = {
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
-      const offset = index * 8; // Changed from 7 to 8 to include po_item_id
+      const offset = index * 11; // 11 fields (added base_qty, base_uom_id, conversion_factor)
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`
       );
       values.push(
         item.goodsReceiptId,
@@ -157,13 +160,16 @@ export const goodsReceiptRepository = {
         item.expiryDate || null,
         item.unitCost,
         item.uomId || null,  // SAP pattern: inherited from PO item
-        item.poItemId || null  // po_item_id - link to purchase order item
+        item.poItemId || null,  // po_item_id - link to purchase order item
+        item.baseQty ?? null, // SAP UoM snapshot: base quantity
+        item.baseUomId ?? null, // SAP UoM snapshot: base UoM at posting time
+        item.conversionFactor ?? 1 // SAP UoM snapshot: conversion factor at posting time
       );
     });
 
     const result = await pool.query(
       `INSERT INTO goods_receipt_items (
-        goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id
+        goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id, base_qty, base_uom_id, conversion_factor
       ) VALUES ${placeholders.join(', ')}
       RETURNING 
         id,

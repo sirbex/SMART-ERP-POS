@@ -346,6 +346,8 @@ export const salesService = {
         let baseQty = new Decimal(item.quantity);
         const selectedUom = (item.uom || '').trim();
         let baseUnit = 'PIECE';
+        let snapshotConversionFactor = new Decimal(1); // SAP UoM snapshot
+        let snapshotBaseUomId: string | null = null; // SAP UoM snapshot
         try {
           // Use pre-fetched product data (batch query instead of per-item)
           const prefetchedProduct = productsMap.get(item.productId);
@@ -356,6 +358,7 @@ export const salesService = {
           const productUoms = uomsMap.get(item.productId) || [];
           const defaultUom = productUoms.find((u) => u.is_default);
           baseUnit = defaultUom?.symbol || 'PIECE';
+          snapshotBaseUomId = defaultUom?.uom_id || null; // Capture base UoM ID at posting time
 
           // If UoM provided and different from base, try find conversion
           if (selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
@@ -368,6 +371,7 @@ export const salesService = {
             if (match) {
               const factor = new Decimal(match.conversion_factor || 1);
               baseQty = new Decimal(item.quantity).times(factor);
+              snapshotConversionFactor = factor; // Capture conversion factor at posting time
             }
           }
           // Use productResult later below
@@ -496,6 +500,9 @@ export const salesService = {
           profit: Money.toNumber(profit),
           discountAmount: Money.toNumber(itemDiscountAmount),
           uomId: actualUomId, // Use the actual uom_id from uoms table
+          baseQty: baseQty.toNumber(), // SAP UoM snapshot: base quantity at posting time
+          baseUomId: snapshotBaseUomId, // SAP UoM snapshot: base UoM ID at posting time
+          conversionFactor: snapshotConversionFactor.toNumber(), // SAP UoM snapshot: conversion factor at posting time
         });
       }
 
@@ -877,9 +884,11 @@ export const salesService = {
         let baseQty = new Decimal(item.quantity);
         const selectedUom = (item.uom || '').trim();
         let baseUnit = 'PIECE';
+        let deductConversionFactor = new Decimal(1); // SAP UoM snapshot for stock movements
+        let deductBaseUomId: string | null = null; // SAP UoM snapshot for stock movements
         // Get base unit from default product_uom
         const productBaseRes = await client.query(
-          `SELECT u.symbol
+          `SELECT u.symbol, u.id AS uom_id
            FROM product_uoms pu
            JOIN uoms u ON u.id = pu.uom_id
            WHERE pu.product_id = $1 AND pu.is_default = true
@@ -887,6 +896,7 @@ export const salesService = {
           [item.productId]
         );
         baseUnit = productBaseRes.rows[0]?.symbol || 'PIECE';
+        deductBaseUomId = productBaseRes.rows[0]?.uom_id || null;
         if (selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
           const conv = await client.query(
             `SELECT pu.conversion_factor, u.name, u.symbol
@@ -904,6 +914,7 @@ export const salesService = {
           if (match) {
             const factor = new Decimal(Number(match.conversion_factor) || 1);
             baseQty = new Decimal(item.quantity).times(factor);
+            deductConversionFactor = factor;
           }
         }
         // Get product costing method again
@@ -1009,8 +1020,9 @@ export const salesService = {
           await client.query(
             `INSERT INTO stock_movements (
               movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-              reference_type, reference_id, notes, created_by_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+              reference_type, reference_id, notes, created_by_id,
+              entered_qty, base_uom_id, conversion_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
             [
               movementNumber,
               item.productId,
@@ -1022,6 +1034,9 @@ export const salesService = {
               sale.id,
               `Sale ${sale.saleNumber} - FEFO batch deduction`,
               input.soldBy || null,
+              item.quantity, // SAP UoM snapshot: original entered quantity
+              deductBaseUomId, // SAP UoM snapshot: base UoM at posting time
+              deductConversionFactor.toFixed(6), // SAP UoM snapshot: conversion factor at posting time
             ]
           );
 
