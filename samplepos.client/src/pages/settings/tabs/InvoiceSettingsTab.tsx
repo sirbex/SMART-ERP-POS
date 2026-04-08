@@ -50,6 +50,7 @@ interface InvoiceSettings {
   paymentInstructions: string | null;
   termsAndConditions: string | null;
   footerText: string | null;
+  customReceiptNote: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -201,6 +202,7 @@ export default function InvoiceSettingsTab() {
       paymentInstructions: getFormValue('paymentInstructions'),
       termsAndConditions: getFormValue('termsAndConditions'),
       footerText: getFormValue('footerText'),
+      customReceiptNote: getFormValue('customReceiptNote'),
     };
 
     // Remove undefined values to avoid sending them to API
@@ -814,6 +816,23 @@ export default function InvoiceSettingsTab() {
               name="footerText"
               defaultValue={settings.footerText || ''}
               placeholder="Thank you for your business!"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div>
+            <Label.Root className="block text-sm font-medium text-gray-700 mb-2" htmlFor="customReceiptNote">
+              Custom Receipt Note
+            </Label.Root>
+            <p className="text-xs text-gray-500 mb-2">
+              Add any custom text to display on receipts (e.g. MoMo numbers, promo messages, opening hours)
+            </p>
+            <textarea
+              id="customReceiptNote"
+              name="customReceiptNote"
+              defaultValue={settings.customReceiptNote || ''}
+              rows={3}
+              placeholder="e.g. Pay via MoMo: 0770 123 456 (Name) | Airtel Money: 0750 123 456"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>

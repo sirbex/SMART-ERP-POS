@@ -58,6 +58,7 @@ export const InvoiceSettingsSchema = z.object({
   paymentInstructions: z.string().max(2000, 'Payment instructions too long').nullable(),
   termsAndConditions: z.string().max(5000, 'Terms and conditions too long').nullable(),
   footerText: z.string().max(500, 'Footer text too long').nullable(),
+  customReceiptNote: z.string().max(1000, 'Custom receipt note too long').nullable(),
 
   // Timestamps
   createdAt: z.string().datetime(),
@@ -114,6 +115,10 @@ export const UpdateInvoiceSettingsSchema = z.object({
   footerText: z.preprocess(
     val => val === '' ? null : val,
     z.string().max(500, 'Footer text too long').nullable().optional()
+  ),
+  customReceiptNote: z.preprocess(
+    val => val === '' ? null : val,
+    z.string().max(1000, 'Custom receipt note too long').nullable().optional()
   ),
 }).strict();
 

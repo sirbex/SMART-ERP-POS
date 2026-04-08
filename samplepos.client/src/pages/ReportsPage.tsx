@@ -2193,8 +2193,8 @@ export default function ReportsPage() {
                   <div>
                     <div className="text-xs text-gray-500 uppercase tracking-wide">Status</div>
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${reportData.session.status === 'OPEN' ? 'bg-green-100 text-green-800' :
-                        reportData.session.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
-                          'bg-yellow-100 text-yellow-800'
+                      reportData.session.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
+                        'bg-yellow-100 text-yellow-800'
                       }`}>{reportData.session.status}</span>
                   </div>
                 </div>
@@ -2346,9 +2346,9 @@ export default function ReportsPage() {
                         <tr key={idx} className="hover:bg-purple-50">
                           <td className="px-4 py-3 text-sm">
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${String(mv.movementType).includes('IN') ? 'bg-green-100 text-green-700' :
-                                String(mv.movementType).includes('OUT') ? 'bg-red-100 text-red-700' :
-                                  String(mv.movementType) === 'SALE' ? 'bg-blue-100 text-blue-700' :
-                                    'bg-gray-100 text-gray-700'
+                              String(mv.movementType).includes('OUT') ? 'bg-red-100 text-red-700' :
+                                String(mv.movementType) === 'SALE' ? 'bg-blue-100 text-blue-700' :
+                                  'bg-gray-100 text-gray-700'
                               }`}>{String(mv.movementType).replace(/_/g, ' ')}</span>
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(mv.amount))}</td>
@@ -2440,7 +2440,7 @@ export default function ReportsPage() {
                               {grandTotal > 0 ? ((data.totalSales / grandTotal) * 100).toFixed(1) : '0.0'}%
                             </td>
                             <td className={`px-4 py-3 text-sm text-right font-semibold ${data.totalVariance === 0 ? 'text-green-600' :
-                                data.totalVariance > 0 ? 'text-blue-600' : 'text-red-600'
+                              data.totalVariance > 0 ? 'text-blue-600' : 'text-red-600'
                               }`}>{formatCurrency(data.totalVariance)}</td>
                           </tr>
                         ))}
@@ -2496,8 +2496,8 @@ export default function ReportsPage() {
                         <td className="px-4 py-3 text-sm text-gray-700">{String(s.cashierName)}</td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${s.status === 'OPEN' ? 'bg-green-100 text-green-800' :
-                              s.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
-                                'bg-yellow-100 text-yellow-800'
+                            s.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
+                              'bg-yellow-100 text-yellow-800'
                             }`}>{String(s.status)}</span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500">{s.openedAt ? new Date(String(s.openedAt)).toLocaleString() : '—'}</td>
@@ -2507,8 +2507,8 @@ export default function ReportsPage() {
                         <td className="px-4 py-3 text-sm text-right">{s.expectedClosing != null ? formatCurrency(Number(s.expectedClosing)) : '—'}</td>
                         <td className="px-4 py-3 text-sm text-right">{s.actualClosing != null ? formatCurrency(Number(s.actualClosing)) : '—'}</td>
                         <td className={`px-4 py-3 text-sm text-right font-semibold ${s.variance == null ? 'text-gray-400' :
-                            Number(s.variance) === 0 ? 'text-green-600' :
-                              Number(s.variance) > 0 ? 'text-blue-600' : 'text-red-600'
+                          Number(s.variance) === 0 ? 'text-green-600' :
+                            Number(s.variance) > 0 ? 'text-blue-600' : 'text-red-600'
                           }`}>
                           {s.variance != null ? formatCurrency(Number(s.variance)) : '—'}
                         </td>
@@ -2581,10 +2581,10 @@ export default function ReportsPage() {
                           <tr key={type} className="hover:bg-purple-50">
                             <td className="px-4 py-3 text-sm">
                               <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${type.includes('IN') ? 'bg-green-100 text-green-700' :
-                                  type.includes('OUT') ? 'bg-red-100 text-red-700' :
-                                    type === 'SALE' ? 'bg-blue-100 text-blue-700' :
-                                      type === 'REFUND' ? 'bg-orange-100 text-orange-700' :
-                                        'bg-gray-100 text-gray-700'
+                                type.includes('OUT') ? 'bg-red-100 text-red-700' :
+                                  type === 'SALE' ? 'bg-blue-100 text-blue-700' :
+                                    type === 'REFUND' ? 'bg-orange-100 text-orange-700' :
+                                      'bg-gray-100 text-gray-700'
                                 }`}>{type.replace(/_/g, ' ')}</span>
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-600">{d.count}</td>

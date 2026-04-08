@@ -52,6 +52,7 @@ export interface ReceiptData {
     accountNumber: string;
     branchOrCode?: string;
   }>;
+  customReceiptNote?: string;
 }
 
 /**
@@ -338,6 +339,11 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
               `).join('')}
             </div>
           ` : ''}
+          ${data.customReceiptNote ? `
+            <div style="border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 8px; text-align: left; font-size: 10px; white-space: pre-line;">
+              ${data.customReceiptNote.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+            </div>
+          ` : ''}
           <p>Thank you for your business!</p>
         </div>
       </body>
@@ -542,6 +548,11 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
                   ${acc.branchOrCode ? `<div>${acc.branchOrCode}</div>` : ''}
                 </div>
               `).join('')}
+            </div>
+          ` : ''}
+          ${data.customReceiptNote ? `
+            <div style="border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px; text-align: left; font-size: 9px; white-space: pre-line;">
+              ${data.customReceiptNote.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
             </div>
           ` : ''}
           <p style="margin: 3px 0;">Thank you!</p>

@@ -175,6 +175,7 @@ interface InvoiceSettingsData {
   companyName?: string;
   companyAddress?: string | null;
   companyPhone?: string | null;
+  customReceiptNote?: string | null;
   paymentAccounts?: Array<{
     type: string;
     provider: string;
@@ -2269,6 +2270,7 @@ export default function POSPage() {
           paymentAccounts: invoiceSettings?.paymentAccounts
             ?.filter(a => a.isActive && a.showOnReceipt)
             .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
+          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
         });
         setLastSale({
           id: offlineId,
@@ -2359,6 +2361,7 @@ export default function POSPage() {
           paymentAccounts: invoiceSettings?.paymentAccounts
             ?.filter(a => a.isActive && a.showOnReceipt)
             .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
+          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
         });
 
         // Clear cart and payment lines

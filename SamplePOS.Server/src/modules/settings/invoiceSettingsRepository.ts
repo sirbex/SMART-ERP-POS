@@ -32,6 +32,7 @@ export interface InvoiceSettings {
   paymentInstructions: string | null;
   termsAndConditions: string | null;
   footerText: string | null;
+  customReceiptNote: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,6 +58,7 @@ export async function getInvoiceSettings(pool: Pool): Promise<InvoiceSettings | 
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
       footer_text as "footerText",
+      custom_receipt_note as "customReceiptNote",
       created_at as "createdAt",
       updated_at as "updatedAt"
     FROM invoice_settings
@@ -110,6 +112,7 @@ export async function initializeDefaults(pool: Pool): Promise<InvoiceSettings> {
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
       footer_text as "footerText",
+      custom_receipt_note as "customReceiptNote",
       created_at as "createdAt",
       updated_at as "updatedAt"`
   );
@@ -194,6 +197,10 @@ export async function updateInvoiceSettings(
     fields.push(`footer_text = $${paramIndex++}`);
     values.push(data.footerText);
   }
+  if (data.customReceiptNote !== undefined) {
+    fields.push(`custom_receipt_note = $${paramIndex++}`);
+    values.push(data.customReceiptNote);
+  }
 
   fields.push(`updated_at = CURRENT_TIMESTAMP`);
 
@@ -219,6 +226,7 @@ export async function updateInvoiceSettings(
       payment_instructions as "paymentInstructions",
       terms_and_conditions as "termsAndConditions",
       footer_text as "footerText",
+      custom_receipt_note as "customReceiptNote",
       created_at as "createdAt",
       updated_at as "updatedAt"`,
     values
