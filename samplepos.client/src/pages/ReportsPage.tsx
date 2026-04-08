@@ -2403,6 +2403,69 @@ export default function ReportsPage() {
               </div>
             )}
 
+            {/* Revenue by Register */}
+            {reportData.sessions.length > 0 && (() => {
+              const byRegister: Record<string, { sessions: number; totalSales: number; totalVariance: number }> = {};
+              for (const s of reportData.sessions as Array<Record<string, unknown>>) {
+                const name = String(s.registerName || 'Unknown');
+                if (!byRegister[name]) byRegister[name] = { sessions: 0, totalSales: 0, totalVariance: 0 };
+                byRegister[name].sessions++;
+                byRegister[name].totalSales += Number(s.totalSales || 0);
+                byRegister[name].totalVariance += Number(s.variance || 0);
+              }
+              const entries = Object.entries(byRegister).sort((a, b) => b[1].totalSales - a[1].totalSales);
+              const grandTotal = entries.reduce((s, [, v]) => s + v.totalSales, 0);
+              return (
+                <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4">
+                    <h4 className="text-lg font-semibold text-white">💰 Revenue by Register</h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-full">
+                      <thead className="bg-gray-100 border-b-2 border-gray-300">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Register</th>
+                          <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Sessions</th>
+                          <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Total Sales</th>
+                          <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">% of Total</th>
+                          <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Variance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {entries.map(([name, data]) => (
+                          <tr key={name} className="hover:bg-blue-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{name}</td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">{data.sessions}</td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">{formatCurrency(data.totalSales)}</td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {grandTotal > 0 ? ((data.totalSales / grandTotal) * 100).toFixed(1) : '0.0'}%
+                            </td>
+                            <td className={`px-4 py-3 text-sm text-right font-semibold ${
+                              data.totalVariance === 0 ? 'text-green-600' :
+                              data.totalVariance > 0 ? 'text-blue-600' : 'text-red-600'
+                            }`}>{formatCurrency(data.totalVariance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                        <tr className="font-bold">
+                          <td className="px-4 py-3 text-sm text-gray-900">TOTAL</td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">
+                            {entries.reduce((s, [, v]) => s + v.sessions, 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-blue-600">{formatCurrency(grandTotal)}</td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">100.0%</td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">
+                            {formatCurrency(entries.reduce((s, [, v]) => s + v.totalVariance, 0))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Sessions Table */}
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-6 py-4 flex items-center justify-between">

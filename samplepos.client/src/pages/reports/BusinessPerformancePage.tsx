@@ -802,16 +802,6 @@ const BusinessPerformancePage: React.FC = () => {
                           ({formatCurrency(report.summary.totalExpenses)})
                         </td>
                       </tr>
-                      {report.summary.totalSupplierPayments > 0 && (
-                        <tr>
-                          <td className="px-4 py-3 text-sm text-gray-900">
-                            Supplier Payments (Cash Outflow)
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-orange-600 font-semibold">
-                            ({formatCurrency(report.summary.totalSupplierPayments)})
-                          </td>
-                        </tr>
-                      )}
                       <tr
                         className={`${
                           report.summary.netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'
@@ -834,6 +824,26 @@ const BusinessPerformancePage: React.FC = () => {
                         </td>
                       </tr>
                     </tbody>
+                    {/* Supplementary: Cash Disbursements (not part of P&L) */}
+                    {report.summary.totalSupplierPayments > 0 && (
+                      <tfoot className="border-t-2 border-gray-200">
+                        <tr className="bg-gray-50">
+                          <td colSpan={2} className="px-4 py-2">
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              Supplementary — Cash Disbursements (non-P&L)
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            Payments to Vendors
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-orange-600 font-semibold">
+                            {formatCurrency(report.summary.totalSupplierPayments)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </ResponsiveTableWrapper>
               </div>
