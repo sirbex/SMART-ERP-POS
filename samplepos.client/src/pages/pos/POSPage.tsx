@@ -102,8 +102,22 @@ interface SaleRecord {
   sale_number?: string;
   saleDate?: string;
   sale_date?: string;
+  createdAt?: string;
+  created_at?: string;
   totalAmount?: number;
   total_amount?: number;
+}
+
+/** Format a Date into a receipt-friendly date+time string: DD/MM/YYYY h:mm AM/PM */
+function formatReceiptDateTime(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const hour12 = hours % 12 || 12;
+  return `${dd}/${mm}/${yyyy} ${hour12}:${minutes} ${ampm}`;
 }
 
 /** Product search result (mirrors POSProductSearch's ProductSearchResult) */
@@ -2245,7 +2259,7 @@ export default function POSPage() {
 
         setReceiptData({
           saleNumber: offlineId,
-          saleDate: offlineSaleDate,
+          saleDate: formatReceiptDateTime(today),
           subtotal,
           discountAmount: cartDiscountAmount + itemDiscountTotalOffline,
           taxAmount: tax,
@@ -2335,7 +2349,9 @@ export default function POSPage() {
         );
         setReceiptData({
           saleNumber: sale.saleNumber || sale.sale_number || '',
-          saleDate: sale.saleDate || sale.sale_date || new Date().toISOString(),
+          saleDate: formatReceiptDateTime(
+            (sale.createdAt || sale.created_at) ? new Date(sale.createdAt || sale.created_at || '') : new Date()
+          ),
           subtotal,
           discountAmount: cartDiscountAmount + itemDiscountTotal,
           taxAmount: tax,
