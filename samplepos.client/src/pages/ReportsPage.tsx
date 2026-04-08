@@ -2167,6 +2167,205 @@ export default function ReportsPage() {
           </div>
         )}
 
+        {/* Cash Register Session Summary - Custom Renderer */}
+        {reportData.reportType === 'CASH_REGISTER_SESSION_SUMMARY' && reportData.session && (
+          <div className="space-y-6">
+            {/* Session Info Card */}
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-6 py-4">
+                <h4 className="text-lg font-semibold text-white">🧾 Session Details</h4>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Session</div>
+                    <div className="font-mono font-semibold text-gray-900">{reportData.session.sessionNumber}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Register</div>
+                    <div className="font-semibold text-gray-900">{reportData.session.registerName}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Cashier</div>
+                    <div className="font-semibold text-gray-900">{reportData.session.cashierName}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Status</div>
+                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      reportData.session.status === 'OPEN' ? 'bg-green-100 text-green-800' :
+                      reportData.session.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>{reportData.session.status}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4 text-sm text-gray-600">
+                  <div>Opened: {reportData.session.openedAt ? new Date(reportData.session.openedAt).toLocaleString() : '—'}</div>
+                  <div>Closed: {reportData.session.closedAt ? new Date(reportData.session.closedAt).toLocaleString() : '—'}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Financial Summary */}
+            {reportData.summary && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-green-500 to-green-600 px-6 py-4">
+                  <h4 className="text-lg font-semibold text-white">💰 Financial Summary</h4>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="flex justify-between py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Opening Float</span>
+                      <span className="font-semibold">{formatCurrency(reportData.summary.openingFloat)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Expected Closing</span>
+                      <span className="font-semibold">{formatCurrency(reportData.summary.expectedClosing)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Cash Sales</span>
+                      <span className="font-semibold text-green-600">+ {formatCurrency(reportData.summary.totalSales)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Cash In</span>
+                      <span className="font-semibold text-green-600">+ {formatCurrency(reportData.summary.totalCashIn)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Cash Out</span>
+                      <span className="font-semibold text-red-600">- {formatCurrency(reportData.summary.totalCashOut)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-100">
+                      <span className="text-gray-600">Refunds</span>
+                      <span className="font-semibold text-red-600">- {formatCurrency(reportData.summary.totalRefunds)}</span>
+                    </div>
+                    {reportData.summary.actualClosing != null && (
+                      <>
+                        <div className="flex justify-between py-2 border-b border-gray-100">
+                          <span className="text-gray-600">Actual Closing</span>
+                          <span className="font-semibold">{formatCurrency(reportData.summary.actualClosing)}</span>
+                        </div>
+                        <div className="flex justify-between py-2 border-b border-gray-100">
+                          <span className="text-gray-600">Variance</span>
+                          <span className={`font-semibold ${(reportData.summary.variance ?? 0) === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(reportData.summary.variance ?? 0)}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex justify-between py-2 col-span-2 bg-blue-50 px-3 rounded-lg">
+                      <span className="font-semibold text-blue-900">Net Cash Flow</span>
+                      <span className="font-bold text-blue-900 text-lg">{formatCurrency(reportData.summary.netCashFlow)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sales Summary */}
+            {reportData.salesSummary && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4">
+                  <h4 className="text-lg font-semibold text-white">🛒 Sales Summary</h4>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">{reportData.salesSummary.totalTransactions}</div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Transactions</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-green-600">{formatCurrency(reportData.salesSummary.totalRevenue)}</div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Revenue</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-blue-600">{formatCurrency(reportData.salesSummary.totalProfit)}</div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Profit</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Linked Sales Table */}
+            {reportData.sales && reportData.sales.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-4 flex items-center justify-between">
+                  <h4 className="text-lg font-semibold text-white">📋 Linked Sales</h4>
+                  <span className="text-amber-100 text-sm">{reportData.sales.length} sales</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Sale #</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Customer</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Payment</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Amount</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Profit</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {reportData.sales.map((sale: Record<string, unknown>, idx: number) => (
+                        <tr key={idx} className="hover:bg-blue-50">
+                          <td className="px-4 py-3 text-sm font-mono font-medium text-gray-900">{String(sale.saleNumber)}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{String(sale.customerName || 'Walk-in')}</td>
+                          <td className="px-4 py-3 text-sm">
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">{String(sale.paymentMethod)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(sale.totalAmount))}</td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">{formatCurrency(Number(sale.profit))}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{sale.createdAt ? new Date(String(sale.createdAt)).toLocaleTimeString() : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Cash Movements Table */}
+            {reportData.movements && reportData.movements.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-6 py-4 flex items-center justify-between">
+                  <h4 className="text-lg font-semibold text-white">📊 Cash Movements</h4>
+                  <span className="text-purple-100 text-sm">{reportData.movements.length} movements</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Type</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Amount</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Reason</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">By</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {reportData.movements.map((mv: Record<string, unknown>, idx: number) => (
+                        <tr key={idx} className="hover:bg-purple-50">
+                          <td className="px-4 py-3 text-sm">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              String(mv.movementType).includes('IN') ? 'bg-green-100 text-green-700' :
+                              String(mv.movementType).includes('OUT') ? 'bg-red-100 text-red-700' :
+                              String(mv.movementType) === 'SALE' ? 'bg-blue-100 text-blue-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>{String(mv.movementType).replace(/_/g, ' ')}</span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(mv.amount))}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{String(mv.reason || '—')}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{String(mv.createdByName || '—')}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{mv.createdAt ? new Date(String(mv.createdAt)).toLocaleTimeString() : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Daily Cash Flow - Mobile-Optimized Data Cards */}
         {reportData.reportType === 'DAILY_CASH_FLOW' && reportData.data && reportData.data.length > 0 ? (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">

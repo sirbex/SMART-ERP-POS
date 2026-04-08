@@ -60,6 +60,12 @@ async function updateSettings(updates: Partial<SystemSettings>): Promise<SystemS
     return response.data.data!;
 }
 
+interface SettingsComponentProps {
+    settings: SystemSettings;
+    onSave: (updates: Partial<SystemSettings>) => void;
+    isSaving: boolean;
+}
+
 export default function SystemSettingsTab() {
     const queryClient = useQueryClient();
     const [activeTab, setActiveTab] = useState('general');
@@ -150,12 +156,6 @@ export default function SystemSettingsTab() {
                     >
                         Registers
                     </Tabs.Trigger>
-                    <Tabs.Trigger
-                        value="pos-session"
-                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
-                    >
-                        POS Session
-                    </Tabs.Trigger>
                 </Tabs.List>
 
                 <Tabs.Content value="general" className="p-6">
@@ -175,11 +175,7 @@ export default function SystemSettingsTab() {
                 </Tabs.Content>
 
                 <Tabs.Content value="registers" className="p-6">
-                    <RegisterManagement />
-                </Tabs.Content>
-
-                <Tabs.Content value="pos-session" className="p-6">
-                    <POSSessionPolicySettings settings={settings} onSave={handleSave} isSaving={isSaving} />
+                    <RegisterManagement settings={settings} onSave={handleSave} isSaving={isSaving} />
                 </Tabs.Content>
             </Tabs.Root>
         </div>
@@ -773,16 +769,12 @@ function AlertSettings({
     );
 }
 
-// POS Session Policy Settings Tab
-function POSSessionPolicySettings({
+// POS Session Policy (inline within Registers tab)
+function POSSessionPolicyInline({
     settings,
     onSave,
     isSaving,
-}: {
-    settings: SystemSettings;
-    onSave: (updates: Partial<SystemSettings>) => void;
-    isSaving: boolean;
-}) {
+}: SettingsComponentProps) {
     const [policy, setPolicy] = useState<SystemSettings['posSessionPolicy']>(
         settings.posSessionPolicy || 'DISABLED'
     );
@@ -863,8 +855,8 @@ function POSSessionPolicySettings({
     );
 }
 
-// Register Management Tab
-function RegisterManagement() {
+// Register Management Tab (includes Session Policy)
+function RegisterManagement({ settings, onSave, isSaving }: SettingsComponentProps) {
     const { data: registers, isLoading } = useRegisters();
     const createRegister = useCreateRegister();
     const updateRegister = useUpdateRegister();
@@ -1115,6 +1107,9 @@ function RegisterManagement() {
                     <li>Deactivated registers are hidden from cashiers but their history is preserved</li>
                 </ul>
             </div>
+
+            {/* Session Policy */}
+            <POSSessionPolicyInline settings={settings} onSave={onSave} isSaving={isSaving} />
         </div>
     );
 }

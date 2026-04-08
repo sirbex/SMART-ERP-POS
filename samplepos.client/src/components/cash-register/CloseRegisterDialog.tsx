@@ -43,20 +43,9 @@ export function CloseRegisterDialog({
     const { data: summary, isLoading } = useSessionSummary(sessionId);
     const closeSession = useCloseSession();
 
-    // Debug logging
-    console.log('CloseRegisterDialog render:', {
-        open,
-        sessionId,
-        isLoading,
-        hasSummary: !!summary,
-        isPending: closeSession.isPending,
-        error: closeSession.error
-    });
-
     // Reset form when dialog opens
     useEffect(() => {
         if (open) {
-            console.log('CloseRegisterDialog: Dialog opened with sessionId:', sessionId);
             setActualClosing('');
             setVarianceReason('');
             setNotes('');
@@ -72,13 +61,7 @@ export function CloseRegisterDialog({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        // CRITICAL DEBUG - show what we're working with
-        alert(`Submit called!\nSession ID: ${sessionId}\nActual: ${actualClosing}\nAmount: ${actualAmount}\nHas Variance: ${hasVariance}\nReason: ${varianceReason}`);
-
-        if (!sessionId || !actualClosing) {
-            alert(`Missing data! sessionId=${sessionId}, actualClosing=${actualClosing}`);
-            return;
-        }
+        if (!sessionId || !actualClosing) return;
 
         try {
             await closeSession.mutateAsync({
@@ -89,12 +72,10 @@ export function CloseRegisterDialog({
                     notes: notes || undefined,
                 },
             });
-            alert('Session closed successfully!');
             onOpenChange(false);
             onSuccess?.();
         } catch (error: unknown) {
-            alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            console.error('CloseRegisterDialog: Failed to close session:', error);
+            console.error('Failed to close session:', error);
         }
     };
 
@@ -247,17 +228,6 @@ export function CloseRegisterDialog({
                                     closeSession.isPending
                                 }
                                 className="bg-blue-600 hover:bg-blue-700"
-                                onClick={() => {
-                                    console.log('Close Register button clicked', {
-                                        sessionId,
-                                        actualClosing,
-                                        actualAmount,
-                                        hasVariance,
-                                        varianceReason,
-                                        isPending: closeSession.isPending,
-                                        isDisabled: !actualClosing || (hasVariance && !varianceReason) || closeSession.isPending
-                                    });
-                                }}
                             >
                                 {closeSession.isPending ? (
                                     <>
