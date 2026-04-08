@@ -281,10 +281,10 @@ export const returnGrnRepository = {
        WHERE r.grn_id = $1
          AND l.product_id = $2
          AND r.status = 'POSTED'
-         ${batchId ? 'AND l.batch_id = $3' : 'AND l.batch_id IS NULL'}`,
+         ${batchId ? 'AND l.batch_id = $3' : ''}`,
             batchId ? [grnId, productId, batchId] : [grnId, productId]
         );
-        return parseFloat(result.rows[0].returned);
+        return Number(result.rows[0].returned) || 0;
     },
 
     /**
@@ -297,6 +297,7 @@ export const returnGrnRepository = {
         productName: string;
         batchId: string | null;
         batchNumber: string | null;
+        expiryDate: string | null;
         uomId: string | null;
         uomName: string | null;
         uomSymbol: string | null;
@@ -306,6 +307,9 @@ export const returnGrnRepository = {
         returnedQuantity: number;
         returnableQuantity: number;
     }>> {
+        // Join batches via goods_receipt_id+product_id (batch_number on GR items is often NULL
+        // because batches are auto-generated during finalization, not written back to GR items).
+        // When goods_receipt_item_id is set, prefer that for an exact 1:1 match.
         const result = await pool.query(
             `SELECT
          gri.id                    AS "grItemId",
@@ -313,6 +317,7 @@ export const returnGrnRepository = {
          p.name                    AS "productName",
          ib.id                     AS "batchId",
          ib.batch_number           AS "batchNumber",
+         ib.expiry_date::text      AS "expiryDate",
          gri.uom_id               AS "uomId",
          COALESCE(u.name, def_u.name)   AS "uomName",
          COALESCE(u.symbol, def_u.symbol) AS "uomSymbol",
@@ -325,7 +330,12 @@ export const returnGrnRepository = {
        JOIN products p ON p.id = gri.product_id
        LEFT JOIN inventory_batches ib
          ON ib.product_id = gri.product_id
-         AND ib.batch_number = gri.batch_number
+         AND (
+           (ib.goods_receipt_item_id IS NOT NULL AND ib.goods_receipt_item_id = gri.id)
+           OR
+           (ib.goods_receipt_item_id IS NULL AND ib.goods_receipt_id = gri.goods_receipt_id)
+         )
+         AND ib.status = 'ACTIVE'
        LEFT JOIN uoms u ON u.id = gri.uom_id
        LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = gri.uom_id
        LEFT JOIN product_uoms def_pu ON def_pu.product_id = gri.product_id AND def_pu.is_default = true

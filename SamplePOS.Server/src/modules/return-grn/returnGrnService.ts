@@ -52,13 +52,19 @@ export const returnGrnService = {
 
         return UnitOfWork.run(pool, async (client) => {
             // 1. Validate source GRN exists and is finalized
+            // Resolve supplier through PO (standard) or through manual PO (for manual GRs)
             const grResult = await client.query(
                 `SELECT g.id, g.status, g.purchase_order_id,
-                s."Id" AS "supplierId", s."CompanyName" AS "supplierName"
+                COALESCE(s."Id", s2."Id") AS "supplierId",
+                COALESCE(s."CompanyName", s2."CompanyName") AS "supplierName"
          FROM goods_receipts g
          LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
          LEFT JOIN suppliers s ON s."Id" = po.supplier_id
-         WHERE g.id = $1`,
+         LEFT JOIN inventory_batches ib_any ON ib_any.goods_receipt_id = g.id
+         LEFT JOIN purchase_orders po2 ON po2.id = ib_any.purchase_order_id
+         LEFT JOIN suppliers s2 ON s2."Id" = po2.supplier_id
+         WHERE g.id = $1
+         LIMIT 1`,
                 [input.grnId]
             );
             if (grResult.rows.length === 0) throw new Error('Goods receipt not found');
@@ -161,23 +167,38 @@ export const returnGrnService = {
 
             // 3. Process each line
             for (const line of lines) {
-                // 3a. Validate returnable quantity
+                // 3a. Resolve batch — prefer explicit batchId, otherwise look up via GR linkage
+                let effectiveBatchId = line.batchId;
+                if (!effectiveBatchId) {
+                    const batchLookup = await client.query(
+                        `SELECT ib.id FROM inventory_batches ib
+                         WHERE ib.goods_receipt_id = $1
+                           AND ib.product_id = $2
+                           AND ib.status = 'ACTIVE'
+                           AND ib.remaining_quantity > 0
+                         ORDER BY ib.expiry_date ASC NULLS LAST, ib.created_at ASC
+                         LIMIT 1`,
+                        [rgrn.grnId, line.productId]
+                    );
+                    if (batchLookup.rows.length > 0) {
+                        effectiveBatchId = batchLookup.rows[0].id;
+                    }
+                }
+
+                // 3b. Validate returnable quantity
                 const alreadyReturned = await returnGrnRepository.getReturnedQuantity(
-                    client, rgrn.grnId, line.productId, line.batchId,
+                    client, rgrn.grnId, line.productId, effectiveBatchId,
                 );
 
-                // Get originally received quantity for this product+batch  
+                // Get originally received quantity for this product from the GR
                 const receivedResult = await client.query(
                     `SELECT COALESCE(SUM(gri.received_quantity), 0) AS received
            FROM goods_receipt_items gri
-           LEFT JOIN inventory_batches ib
-             ON ib.product_id = gri.product_id AND ib.batch_number = gri.batch_number
            WHERE gri.goods_receipt_id = $1
-             AND gri.product_id = $2
-             ${line.batchId ? 'AND ib.id = $3' : ''}`,
-                    line.batchId ? [rgrn.grnId, line.productId, line.batchId] : [rgrn.grnId, line.productId]
+             AND gri.product_id = $2`,
+                    [rgrn.grnId, line.productId]
                 );
-                const received = parseFloat(receivedResult.rows[0].received);
+                const received = Number(receivedResult.rows[0].received) || 0;
                 const returnable = received - alreadyReturned;
 
                 if (line.baseQuantity > returnable) {
@@ -187,27 +208,32 @@ export const returnGrnService = {
                     );
                 }
 
-                // 3b. Reduce batch remaining_quantity (if batch-tracked)
-                if (line.batchId) {
+                // 3c. Reduce batch remaining_quantity
+                if (effectiveBatchId) {
                     const batchUpdate = await client.query(
                         `UPDATE inventory_batches
              SET remaining_quantity = remaining_quantity - $1,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = $2 AND remaining_quantity >= $1
              RETURNING remaining_quantity`,
-                        [line.baseQuantity, line.batchId]
+                        [line.baseQuantity, effectiveBatchId]
                     );
                     if (batchUpdate.rows.length === 0) {
                         throw new Error(
-                            `Insufficient batch quantity for ${line.productName} (batch ${line.batchNumber})`
+                            `Insufficient batch quantity for ${line.productName} (batch ${line.batchNumber || 'auto'})`
                         );
                     }
+                } else {
+                    logger.warn('No batch found for return line — stock movement will be recorded but batch not deducted', {
+                        productId: line.productId,
+                        grnId: rgrn.grnId,
+                    });
                 }
 
-                // 3c. Create SUPPLIER_RETURN stock movement
+                // 3d. Create SUPPLIER_RETURN stock movement
                 await stockMovementRepository.recordMovement(client, {
                     productId: line.productId,
-                    batchId: line.batchId,
+                    batchId: effectiveBatchId,
                     movementType: 'SUPPLIER_RETURN',
                     quantity: -line.baseQuantity, // Negative = stock decrease
                     unitCost: line.unitCost,
@@ -250,12 +276,19 @@ export const returnGrnService = {
 
             if (returnTotalNum > 0) {
                 // Look up supplier name for GL description
+                // Handles both PO-linked and manual GRs (fallback through inventory_batches → PO → supplier)
                 const grResult = await client.query(
-                    `SELECT po.supplier_id, s."CompanyName" AS supplier_name, g.receipt_number AS gr_number
+                    `SELECT COALESCE(po.supplier_id, po2.supplier_id) AS supplier_id,
+                            COALESCE(s."CompanyName", s2."CompanyName") AS supplier_name,
+                            g.receipt_number AS gr_number
                      FROM goods_receipts g
                      LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
                      LEFT JOIN suppliers s ON s."Id" = po.supplier_id
-                     WHERE g.id = $1`,
+                     LEFT JOIN inventory_batches ib_any ON ib_any.goods_receipt_id = g.id
+                     LEFT JOIN purchase_orders po2 ON po2.id = ib_any.purchase_order_id
+                     LEFT JOIN suppliers s2 ON s2."Id" = po2.supplier_id
+                     WHERE g.id = $1
+                     LIMIT 1`,
                     [rgrn.grnId]
                 );
                 const supplierName = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
