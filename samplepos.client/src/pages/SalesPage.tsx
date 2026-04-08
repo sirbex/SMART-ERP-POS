@@ -131,6 +131,8 @@ interface CustomerSalesViewProps {
 interface UserSalesViewProps {
   users: UserGroup[];
   onSelectSale: (sale: SaleRow) => void;
+  startDate?: string;
+  endDate?: string;
 }
 
 interface CreditSalesViewProps {
@@ -969,7 +971,7 @@ export default function SalesPage() {
                 {activeTab === 'by-user' && (
                   <>
                     {salesByUser.length > 0 ? (
-                      <UserSalesView users={salesByUser} onSelectSale={setSelectedSale} />
+                      <UserSalesView users={salesByUser} onSelectSale={setSelectedSale} startDate={startDate} endDate={endDate} />
                     ) : (
                       <div className="text-center py-12">
                         <p className="text-gray-500 text-lg">No cashier sales found</p>
@@ -1305,8 +1307,42 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
 }
 
 // User Sales View Component
-function UserSalesView({ users, onSelectSale }: UserSalesViewProps) {
+function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesViewProps) {
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
+  const [expandedSales, setExpandedSales] = useState<SaleRow[]>([]);
+  const [loadingSales, setLoadingSales] = useState(false);
+
+  // Fetch sales for the expanded cashier on-demand
+  useEffect(() => {
+    if (!expandedUser) {
+      setExpandedSales([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSales(true);
+    api.sales.list({ page: 1, limit: 200, cashierId: expandedUser, startDate, endDate })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = (resp.data?.data ?? []) as Record<string, unknown>[];
+        setExpandedSales(rows.map((sale) => ({
+          id: String(sale.id || ''),
+          saleNumber: String(sale.sale_number || sale.saleNumber || ''),
+          saleDate: String(sale.sale_date || sale.saleDate || ''),
+          totalAmount: Number(sale.total_amount || sale.totalAmount || 0),
+          profit: Number(sale.profit || 0),
+          customerName: String(sale.customer_name || sale.customerName || ''),
+          paymentMethod: String(sale.payment_method || sale.paymentMethod || ''),
+          status: String(sale.status || ''),
+          cashierId: String(sale.cashier_id || sale.cashierId || ''),
+          cashierName: String(sale.cashier_name || sale.cashierName || ''),
+          soldById: String(sale.cashier_id || sale.cashierId || ''),
+          soldByName: String(sale.cashier_name || sale.cashierName || ''),
+        } as SaleRow)));
+      })
+      .catch(() => { if (!cancelled) setExpandedSales([]); })
+      .finally(() => { if (!cancelled) setLoadingSales(false); });
+    return () => { cancelled = true; };
+  }, [expandedUser, startDate, endDate]);
 
   return (
     <div className="space-y-4">
@@ -1339,37 +1375,43 @@ function UserSalesView({ users, onSelectSale }: UserSalesViewProps) {
 
           {expandedUser === user.userId && (
             <div className="p-4 bg-white border-t border-gray-200">
-              <table className="min-w-full">
-                <thead className="text-xs text-gray-500 uppercase">
-                  <tr>
-                    <th className="text-left pb-2">Sale #</th>
-                    <th className="text-left pb-2">Customer</th>
-                    <th className="text-left pb-2">Date</th>
-                    <th className="text-right pb-2">Amount</th>
-                    <th className="text-right pb-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm">
-                  {user.sales.map((sale: SaleRow) => (
-                    <tr key={sale.id} className="border-t border-gray-100">
-                      <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
-                      <td className="py-2">{sale.customerName || 'Walk-in'}</td>
-                      <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
-                      <td className="py-2 text-right font-medium">
-                        {formatCurrency(sale.totalAmount)}
-                      </td>
-                      <td className="py-2 text-right">
-                        <button
-                          onClick={() => onSelectSale(sale)}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          View
-                        </button>
-                      </td>
+              {loadingSales ? (
+                <div className="text-center py-4 text-gray-500">Loading sales...</div>
+              ) : expandedSales.length === 0 ? (
+                <div className="text-center py-4 text-gray-400">No sales found</div>
+              ) : (
+                <table className="min-w-full">
+                  <thead className="text-xs text-gray-500 uppercase">
+                    <tr>
+                      <th className="text-left pb-2">Sale #</th>
+                      <th className="text-left pb-2">Customer</th>
+                      <th className="text-left pb-2">Date</th>
+                      <th className="text-right pb-2">Amount</th>
+                      <th className="text-right pb-2">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="text-sm">
+                    {expandedSales.map((sale: SaleRow) => (
+                      <tr key={sale.id} className="border-t border-gray-100">
+                        <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
+                        <td className="py-2">{sale.customerName || 'Walk-in'}</td>
+                        <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
+                        <td className="py-2 text-right font-medium">
+                          {formatCurrency(sale.totalAmount)}
+                        </td>
+                        <td className="py-2 text-right">
+                          <button
+                            onClick={() => onSelectSale(sale)}
+                            className="text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
         </div>
