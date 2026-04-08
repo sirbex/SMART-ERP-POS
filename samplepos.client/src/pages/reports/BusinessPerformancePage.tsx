@@ -8,6 +8,7 @@ import {
   BarChart3,
   Wallet,
   Package,
+  CreditCard,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
@@ -51,6 +52,14 @@ interface ExpenseByAccountEntry {
   pctOfTotal: number;
 }
 
+interface SupplierPaymentByAccountEntry {
+  fundingAccountCode: string;
+  fundingAccountName: string;
+  supplierName: string;
+  paymentCount: number;
+  totalPaid: number;
+}
+
 interface BusinessSummary {
   totalRevenue: number;
   totalCogs: number;
@@ -69,6 +78,7 @@ interface BusinessPerformanceData {
   revenueByCategory: RevenueByCategoryEntry[];
   costAndStock: CostAndStockEntry[];
   expensesByAccount: ExpenseByAccountEntry[];
+  supplierPaymentsByAccount?: SupplierPaymentByAccountEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -638,6 +648,78 @@ const BusinessPerformancePage: React.FC = () => {
                       </table>
                     </ResponsiveTableWrapper>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Section 4b: Supplier Payments by Funding Account ── */}
+            {report.supplierPaymentsByAccount && report.supplierPaymentsByAccount.length > 0 && (
+              <div className="bg-white rounded-lg border shadow-sm">
+                <div className="px-6 py-4 border-b">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5 text-orange-600" />
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      Section 4b — Supplier Payments by Account
+                    </h2>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Payments made to suppliers and which account funded them
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <ResponsiveTableWrapper>
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Funding Account
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                            Supplier
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Payments
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
+                            Total Paid
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {report.supplierPaymentsByAccount.map((row, idx) => (
+                          <tr key={`${row.fundingAccountCode}-${row.supplierName}-${idx}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm">
+                              <span className="font-mono text-gray-600">{row.fundingAccountCode}</span>
+                              {' — '}
+                              <span className="text-gray-900">{row.fundingAccountName}</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                              {row.supplierName}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">
+                              {row.paymentCount}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-orange-600 font-semibold">
+                              {formatCurrency(row.totalPaid)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                        <tr className="font-bold">
+                          <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">
+                            TOTAL SUPPLIER PAYMENTS
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-gray-600">
+                            {report.supplierPaymentsByAccount.reduce((s, r) => s + r.paymentCount, 0)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-orange-600">
+                            {formatCurrency(report.supplierPaymentsByAccount.reduce((s, r) => s + r.totalPaid, 0))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </ResponsiveTableWrapper>
                 </div>
               </div>
             )}

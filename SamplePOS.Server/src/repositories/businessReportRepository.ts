@@ -51,6 +51,15 @@ export interface ExpenseByAccountRow {
   pct_of_total: string;
 }
 
+/** Section 4b — Supplier payments by funding account */
+export interface SupplierPaymentByAccountRow {
+  funding_account_code: string;
+  funding_account_name: string;
+  supplier_name: string;
+  payment_count: number;
+  total_paid: string;
+}
+
 /** Section 5 — summary totals (computed in service, but we gather raw numbers here) */
 export interface SummaryTotalsRow {
   total_revenue: string;
@@ -327,6 +336,54 @@ export async function getExpensesByAccount(
 
   const result = await db.query(query, dateParams(filters));
   return result.rows;
+}
+
+// ---------------------------------------------------------------------------
+// Section 4b — Supplier Payments by Funding Account
+// Shows which accounts (Cash-1010, Bank-1030) paid which suppliers
+// ---------------------------------------------------------------------------
+
+export async function getSupplierPaymentsByAccount(
+  filters: BusinessReportFilters,
+  dbPool?: Pool | PoolClient
+): Promise<SupplierPaymentByAccountRow[]> {
+  const db = dbPool || globalPool;
+
+  const query = `
+    SELECT
+      a."AccountCode"  AS funding_account_code,
+      a."AccountName"  AS funding_account_name,
+      lt."Description" AS description,
+      COUNT(DISTINCT lt."Id")::integer AS payment_count,
+      ROUND(COALESCE(SUM(le."CreditAmount"), 0)::numeric, 2) AS total_paid
+    FROM ledger_entries le
+    JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+    JOIN accounts a ON a."Id" = le."AccountId"
+    WHERE lt."Status" = 'POSTED'
+      AND lt."ReferenceType" = 'SUPPLIER_PAYMENT'
+      AND le."CreditAmount" > 0
+      AND a."AccountType" IN ('ASSET', 'BANK')
+      ${dateClause(1)}
+    GROUP BY a."AccountCode", a."AccountName", lt."Description"
+    ORDER BY total_paid DESC
+  `;
+
+  const rows = await db.query(query, dateParams(filters));
+
+  // Extract supplier name from GL description: "Payment to supplier: XYZ"
+  return rows.rows.map((r: Record<string, unknown>) => ({
+    funding_account_code: r.funding_account_code as string,
+    funding_account_name: r.funding_account_name as string,
+    supplier_name: extractSupplierName(r.description as string),
+    payment_count: r.payment_count as number,
+    total_paid: r.total_paid as string,
+  }));
+}
+
+/** Extract supplier name from GL description like "Payment to supplier: ABC Pharma" */
+function extractSupplierName(description: string): string {
+  const match = description?.match(/Payment to supplier:\s*(.+)/i);
+  return match ? match[1].trim() : description || 'Unknown';
 }
 
 // ---------------------------------------------------------------------------

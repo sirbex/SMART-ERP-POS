@@ -2366,6 +2366,228 @@ export default function ReportsPage() {
           </div>
         )}
 
+        {/* Cash Register Session History - SAP-style */}
+        {reportData.reportType === 'CASH_REGISTER_SESSION_HISTORY' && reportData.sessions && (
+          <div className="space-y-6">
+            {/* Summary Cards */}
+            {reportData.summary && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="bg-white rounded-xl shadow border p-4 text-center">
+                  <div className="text-2xl font-bold text-indigo-600">{reportData.summary.totalSessions}</div>
+                  <div className="text-xs text-gray-500 mt-1">Total Sessions</div>
+                </div>
+                <div className="bg-white rounded-xl shadow border p-4 text-center">
+                  <div className="text-2xl font-bold text-green-600">{reportData.summary.openSessions}</div>
+                  <div className="text-xs text-gray-500 mt-1">Open</div>
+                </div>
+                <div className="bg-white rounded-xl shadow border p-4 text-center">
+                  <div className="text-2xl font-bold text-gray-600">{reportData.summary.closedSessions}</div>
+                  <div className="text-xs text-gray-500 mt-1">Closed</div>
+                </div>
+                <div className="bg-white rounded-xl shadow border p-4 text-center">
+                  <div className={`text-2xl font-bold ${Number(reportData.summary.totalVariance) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(Number(reportData.summary.totalVariance))}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">Total Variance</div>
+                </div>
+                <div className="bg-white rounded-xl shadow border p-4 text-center">
+                  <div className="text-2xl font-bold text-orange-600">
+                    {formatCurrency(Number(reportData.summary.averageVariance))}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">Avg Variance</div>
+                </div>
+                <div className="bg-white rounded-xl shadow border p-4 text-center">
+                  <div className="text-2xl font-bold text-red-600">{reportData.summary.sessionsWithVariance}</div>
+                  <div className="text-xs text-gray-500 mt-1">With Variance</div>
+                </div>
+              </div>
+            )}
+
+            {/* Sessions Table */}
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-6 py-4 flex items-center justify-between">
+                <h4 className="text-lg font-semibold text-white">📋 Session History</h4>
+                <span className="text-indigo-100 text-sm">{reportData.sessions.length} sessions</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-full">
+                  <thead className="bg-gray-100 border-b-2 border-gray-300">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Session #</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Register</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Cashier</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-gray-700 uppercase">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Opened</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Closed</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Opening Float</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Sales Total</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Expected</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Actual</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Variance</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Movements</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {reportData.sessions.map((s: Record<string, unknown>, idx: number) => (
+                      <tr key={idx} className="hover:bg-indigo-50">
+                        <td className="px-4 py-3 text-sm font-mono font-semibold text-indigo-700">{String(s.sessionNumber)}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{String(s.registerName)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{String(s.cashierName)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            s.status === 'OPEN' ? 'bg-green-100 text-green-800' :
+                            s.status === 'CLOSED' ? 'bg-gray-100 text-gray-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>{String(s.status)}</span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{s.openedAt ? new Date(String(s.openedAt)).toLocaleString() : '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{s.closedAt ? new Date(String(s.closedAt)).toLocaleString() : '—'}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(s.openingFloat))}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">{formatCurrency(Number(s.totalSales))}</td>
+                        <td className="px-4 py-3 text-sm text-right">{s.expectedClosing != null ? formatCurrency(Number(s.expectedClosing)) : '—'}</td>
+                        <td className="px-4 py-3 text-sm text-right">{s.actualClosing != null ? formatCurrency(Number(s.actualClosing)) : '—'}</td>
+                        <td className={`px-4 py-3 text-sm text-right font-semibold ${
+                          s.variance == null ? 'text-gray-400' :
+                          Number(s.variance) === 0 ? 'text-green-600' :
+                          Number(s.variance) > 0 ? 'text-blue-600' : 'text-red-600'
+                        }`}>
+                          {s.variance != null ? formatCurrency(Number(s.variance)) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right text-gray-600">{Number(s.movementCount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cash Register Movement Breakdown - SAP-style */}
+        {reportData.reportType === 'CASH_REGISTER_MOVEMENT_BREAKDOWN' && reportData.totals && (
+          <div className="space-y-6">
+            {/* Totals Overview Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4">
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className="text-xl font-bold text-green-600">{formatCurrency(Number(reportData.totals.totalCashIn))}</div>
+                <div className="text-xs text-gray-500 mt-1">Cash In</div>
+              </div>
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className="text-xl font-bold text-red-600">{formatCurrency(Number(reportData.totals.totalCashOut))}</div>
+                <div className="text-xs text-gray-500 mt-1">Cash Out</div>
+              </div>
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className="text-xl font-bold text-blue-600">{formatCurrency(Number(reportData.totals.totalSales))}</div>
+                <div className="text-xs text-gray-500 mt-1">Sales</div>
+              </div>
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className="text-xl font-bold text-orange-600">{formatCurrency(Number(reportData.totals.totalRefunds))}</div>
+                <div className="text-xs text-gray-500 mt-1">Refunds</div>
+              </div>
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className={`text-xl font-bold ${Number(reportData.totals.netCashFlow) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatCurrency(Number(reportData.totals.netCashFlow))}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">Net Cash Flow</div>
+              </div>
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className="text-xl font-bold text-indigo-600">{reportData.totals.sessionCount}</div>
+                <div className="text-xs text-gray-500 mt-1">Sessions</div>
+              </div>
+              <div className="bg-white rounded-xl shadow border p-4 text-center">
+                <div className="text-xl font-bold text-gray-600">{reportData.totals.movementCount}</div>
+                <div className="text-xs text-gray-500 mt-1">Movements</div>
+              </div>
+            </div>
+
+            {/* Movement Type Breakdown */}
+            {reportData.byMovementType && Object.keys(reportData.byMovementType).length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-6 py-4">
+                  <h4 className="text-lg font-semibold text-white">📊 Breakdown by Movement Type</h4>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Movement Type</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Count</th>
+                        <th className="px-4 py-3 text-right text-xs font-bold text-gray-700 uppercase">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {Object.entries(reportData.byMovementType).map(([type, data]: [string, unknown]) => {
+                        const d = data as { count: number; amount: number };
+                        return (
+                          <tr key={type} className="hover:bg-purple-50">
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                type.includes('IN') ? 'bg-green-100 text-green-700' :
+                                type.includes('OUT') ? 'bg-red-100 text-red-700' :
+                                type === 'SALE' ? 'bg-blue-100 text-blue-700' :
+                                type === 'REFUND' ? 'bg-orange-100 text-orange-700' :
+                                'bg-gray-100 text-gray-700'
+                              }`}>{type.replace(/_/g, ' ')}</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">{d.count}</td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(d.amount)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Daily Breakdown Table */}
+            {reportData.dailyBreakdown && reportData.dailyBreakdown.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-6 py-4 flex items-center justify-between">
+                  <h4 className="text-lg font-semibold text-white">📅 Daily Breakdown</h4>
+                  <span className="text-teal-100 text-sm">{reportData.dailyBreakdown.length} days</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase">Date</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Float In</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Pay In</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Other In</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Bank Out</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Expense Out</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Other Out</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Sales</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Refunds</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase">Net Flow</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {reportData.dailyBreakdown.map((day: Record<string, unknown>, idx: number) => (
+                        <tr key={idx} className="hover:bg-teal-50">
+                          <td className="px-3 py-3 text-sm font-medium text-gray-900">{String(day.date)}</td>
+                          <td className="px-3 py-3 text-sm text-right text-green-600">{formatCurrency(Number(day.cashInFloat))}</td>
+                          <td className="px-3 py-3 text-sm text-right text-green-600">{formatCurrency(Number(day.cashInPayment))}</td>
+                          <td className="px-3 py-3 text-sm text-right text-green-600">{formatCurrency(Number(day.cashInOther))}</td>
+                          <td className="px-3 py-3 text-sm text-right text-red-600">{formatCurrency(Number(day.cashOutBank))}</td>
+                          <td className="px-3 py-3 text-sm text-right text-red-600">{formatCurrency(Number(day.cashOutExpense))}</td>
+                          <td className="px-3 py-3 text-sm text-right text-red-600">{formatCurrency(Number(day.cashOutOther))}</td>
+                          <td className="px-3 py-3 text-sm text-right font-semibold text-blue-600">{formatCurrency(Number(day.sales))}</td>
+                          <td className="px-3 py-3 text-sm text-right text-orange-600">{formatCurrency(Number(day.refunds))}</td>
+                          <td className={`px-3 py-3 text-sm text-right font-bold ${Number(day.netFlow) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {formatCurrency(Number(day.netFlow))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Daily Cash Flow - Mobile-Optimized Data Cards */}
         {reportData.reportType === 'DAILY_CASH_FLOW' && reportData.data && reportData.data.length > 0 ? (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">

@@ -54,6 +54,18 @@ export interface ExpenseByAccountEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Section 4b — Supplier Payments by Funding Account
+// ---------------------------------------------------------------------------
+
+export interface SupplierPaymentByAccountEntry {
+  fundingAccountCode: string;
+  fundingAccountName: string;
+  supplierName: string;
+  paymentCount: number;
+  totalPaid: number;
+}
+
+// ---------------------------------------------------------------------------
 // Section 5 — Summary
 // ---------------------------------------------------------------------------
 
@@ -79,6 +91,7 @@ export interface BusinessPerformanceReport {
   revenueByCategory: RevenueByCategoryEntry[];
   costAndStock: CostAndStockEntry[];
   expensesByAccount: ExpenseByAccountEntry[];
+  supplierPaymentsByAccount: SupplierPaymentByAccountEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -93,13 +106,14 @@ export async function getBusinessPerformanceReport(
 
   try {
     // Run all 5 sections in parallel
-    const [moneyInRows, revRows, costRows, expRows, totals] = await Promise.all([
+    const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals] = await Promise.all([
       repo.getMoneyIn(filters, pool),
       repo.getRevenueByCategory(filters, pool),
       repo.getCostAndStock(filters, pool),
       filters.includeExpenses !== false
         ? repo.getExpensesByAccount(filters, pool)
         : Promise.resolve([]),
+      repo.getSupplierPaymentsByAccount(filters, pool),
       repo.getSummaryTotals(filters, pool),
     ]);
 
@@ -139,6 +153,15 @@ export async function getBusinessPerformanceReport(
       pctOfTotal: Money.toNumber(Money.parseDb(r.pct_of_total)),
     }));
 
+    // --- Normalize Section 4b ---
+    const supplierPaymentsByAccount: SupplierPaymentByAccountEntry[] = supplierPayRows.map((r) => ({
+      fundingAccountCode: r.funding_account_code,
+      fundingAccountName: r.funding_account_name,
+      supplierName: r.supplier_name,
+      paymentCount: r.payment_count,
+      totalPaid: Money.toNumber(Money.parseDb(r.total_paid)),
+    }));
+
     // --- Section 5: Summary ---
     const totalRevenue = Money.toNumber(Money.parseDb(totals.total_revenue));
     const totalCogs = Money.toNumber(Money.parseDb(totals.total_cogs));
@@ -171,6 +194,7 @@ export async function getBusinessPerformanceReport(
       revenueByCategory,
       costAndStock,
       expensesByAccount,
+      supplierPaymentsByAccount,
     };
   } catch (error) {
     logger.error('Error generating business performance report', { error, filters });
