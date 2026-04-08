@@ -76,6 +76,7 @@ export interface BusinessSummary {
   grossMarginPct: number;
   totalExpenses: number;
   totalStockAdjustments: number;
+  totalSupplierPayments: number;
   netProfit: number;
   netMarginPct: number;
   saleCount: number;
@@ -167,6 +168,7 @@ export async function getBusinessPerformanceReport(
     const totalCogs = Money.toNumber(Money.parseDb(totals.total_cogs));
     const totalExpenses = Money.toNumber(Money.parseDb(totals.total_expenses));
     const totalStockAdjustments = Money.toNumber(Money.parseDb(totals.total_stock_adjustments));
+    const totalSupplierPayments = supplierPaymentsByAccount.reduce((sum, r) => Money.toNumber(Money.add(sum, r.totalPaid)), 0);
     const grossProfit = Money.toNumber(Money.subtract(totalRevenue, totalCogs));
     const netProfit = Money.toNumber(Money.subtract(grossProfit, totalExpenses));
     const grossMarginPct = totalRevenue > 0
@@ -183,6 +185,7 @@ export async function getBusinessPerformanceReport(
       grossMarginPct,
       totalExpenses,
       totalStockAdjustments,
+      totalSupplierPayments,
       netProfit,
       netMarginPct,
       saleCount: totals.sale_count,

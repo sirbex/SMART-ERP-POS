@@ -67,6 +67,7 @@ interface BusinessSummary {
   grossMarginPct: number;
   totalExpenses: number;
   totalStockAdjustments: number;
+  totalSupplierPayments: number;
   netProfit: number;
   netMarginPct: number;
   saleCount: number;
@@ -801,6 +802,16 @@ const BusinessPerformancePage: React.FC = () => {
                           ({formatCurrency(report.summary.totalExpenses)})
                         </td>
                       </tr>
+                      {report.summary.totalSupplierPayments > 0 && (
+                        <tr>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            Supplier Payments (Cash Outflow)
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right text-orange-600 font-semibold">
+                            ({formatCurrency(report.summary.totalSupplierPayments)})
+                          </td>
+                        </tr>
+                      )}
                       <tr
                         className={`${
                           report.summary.netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'
