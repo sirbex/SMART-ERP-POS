@@ -2050,11 +2050,13 @@ export default function POSPage() {
     }
 
     // Validate payment lines
-    if (paymentLines.length === 0) {
+    // SAP-style: Allow 0 payment (full credit / "pay later") when customer is selected
+    // The auto-credit logic below will create a CREDIT line for the full amount
+    if (paymentLines.length === 0 && !selectedCustomer) {
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
       alert(
-        `❌ Cannot Complete Sale\n\n💳 No Payment Added\n\nTotal to pay: ${formatCurrency(grandTotal)}\n\nPlease add payment:\n\n1. Select payment method (Cash/Card/Mobile Money)\n2. Enter amount\n3. Click "Add Payment"\n4. Then click "Complete Sale"\n\n💡 Tip: You can split payments across multiple methods!`
+        `❌ Cannot Complete Sale\n\n💳 No Payment Added\n\nTotal to pay: ${formatCurrency(grandTotal)}\n\nPlease add payment:\n\n1. Select payment method (Cash/Card/Mobile Money)\n2. Enter amount\n3. Click "Add Payment"\n4. Then click "Complete Sale"\n\n💡 Tip: Select a customer to allow "Pay Later" (full credit sale).`
       );
       return;
     }
