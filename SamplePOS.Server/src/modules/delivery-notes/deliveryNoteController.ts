@@ -42,7 +42,7 @@ const ListFiltersSchema = z.object({
   limit: z.coerce.number().int().positive().max(200).default(20),
   quotationId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
-  status: z.enum(['DRAFT', 'POSTED']).optional(),
+  status: z.enum(['DRAFT', 'PICKED', 'POSTED']).optional(),
 });
 
 // ── Controller ─────────────────────────────────────────────────
@@ -71,7 +71,7 @@ export const deliveryNoteController = {
 
   /**
    * POST /api/delivery-notes/:id/post
-   * Post a delivery note — moves stock, marks immutable.
+   * Post Goods Issue (PGI) — moves stock, marks immutable. Accepts DRAFT or PICKED.
    */
   post: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
@@ -83,7 +83,41 @@ export const deliveryNoteController = {
     res.json({
       success: true,
       data: dn,
-      message: `Delivery note ${dn.deliveryNoteNumber} posted — stock deducted`,
+      message: `${dn.deliveryNoteNumber} — Goods Issue posted, stock deducted`,
+    });
+  }),
+
+  /**
+   * POST /api/delivery-notes/:id/pick
+   * Confirm pick — validates stock availability, locks lines, transitions to PICKED.
+   */
+  pick: asyncHandler(async (req: Request, res: Response) => {
+    const pool: Pool = req.pool!;
+    const userId = req.user!.id;
+    const { id } = UuidParamSchema.parse(req.params);
+
+    const dn = await deliveryNoteService.pickDeliveryNote(pool, id, userId);
+
+    res.json({
+      success: true,
+      data: dn,
+      message: `${dn.deliveryNoteNumber} — Pick confirmed, ready for Goods Issue`,
+    });
+  }),
+
+  /**
+   * GET /api/delivery-notes/:id/pick-list
+   * Get pick list with FEFO-suggested batches for warehouse staff.
+   */
+  pickList: asyncHandler(async (req: Request, res: Response) => {
+    const pool: Pool = req.pool!;
+    const { id } = UuidParamSchema.parse(req.params);
+
+    const pickList = await deliveryNoteService.getPickList(pool, id);
+
+    res.json({
+      success: true,
+      data: pickList,
     });
   }),
 

@@ -371,7 +371,7 @@ export const creditDebitNoteService = {
                         `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
                          VALUES ($1, $2, $3, $4, $5, $6)`,
                         [note.customerId, r.customer_name, r.old_balance ?? 0, r.balance ?? 0,
-                         (r.balance ?? 0) - (r.old_balance ?? 0), 'CREDIT_DEBIT_NOTE']
+                        (r.balance ?? 0) - (r.old_balance ?? 0), 'CREDIT_DEBIT_NOTE']
                     );
                 }
 
@@ -478,7 +478,7 @@ export const creditDebitNoteService = {
                         `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
                          VALUES ($1, $2, $3, $4, $5, $6)`,
                         [noteData.customerId, r.customer_name, r.old_balance ?? 0, r.balance ?? 0,
-                         (r.balance ?? 0) - (r.old_balance ?? 0), 'NOTE_CANCELLATION']
+                        (r.balance ?? 0) - (r.old_balance ?? 0), 'NOTE_CANCELLATION']
                     );
                 }
 

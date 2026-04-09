@@ -151,89 +151,89 @@ export default function UomManagementPage() {
                     <button onClick={() => setDeleteError(null)} className="ml-2 text-red-500 hover:text-red-700 font-bold">&times;</button>
                   </div>
                 )}
-              <ul className="divide-y">
-                {(masterUoms || []).map(u => (
-                  <li key={u.id} className="py-2">
-                    {editingUom?.id === u.id ? (
-                      <div className="flex flex-col gap-2">
-                        <input
-                          className="border rounded px-2 py-1"
-                          placeholder="Name"
-                          value={editingUom.name}
-                          onChange={e => setEditingUom(s => s ? ({ ...s, name: e.target.value }) : null)}
-                        />
-                        <input
-                          className="border rounded px-2 py-1"
-                          placeholder="Symbol"
-                          value={editingUom.symbol || ''}
-                          onChange={e => setEditingUom(s => s ? ({ ...s, symbol: e.target.value }) : null)}
-                        />
-                        <select
-                          className="border rounded px-2 py-1"
-                          aria-label="UoM type"
-                          title="UoM type"
-                          value={editingUom.type}
-                          onChange={e => setEditingUom(s => s ? ({ ...s, type: e.target.value as 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' }) : null)}
-                        >
-                          <option value="QUANTITY">QUANTITY</option>
-                          <option value="WEIGHT">WEIGHT</option>
-                          <option value="VOLUME">VOLUME</option>
-                          <option value="LENGTH">LENGTH</option>
-                          <option value="AREA">AREA</option>
-                          <option value="TIME">TIME</option>
-                        </select>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => updateMutation.mutate(editingUom)}
-                            disabled={!editingUom.name.trim() || updateMutation.isPending}
-                            className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                <ul className="divide-y">
+                  {(masterUoms || []).map(u => (
+                    <li key={u.id} className="py-2">
+                      {editingUom?.id === u.id ? (
+                        <div className="flex flex-col gap-2">
+                          <input
+                            className="border rounded px-2 py-1"
+                            placeholder="Name"
+                            value={editingUom.name}
+                            onChange={e => setEditingUom(s => s ? ({ ...s, name: e.target.value }) : null)}
+                          />
+                          <input
+                            className="border rounded px-2 py-1"
+                            placeholder="Symbol"
+                            value={editingUom.symbol || ''}
+                            onChange={e => setEditingUom(s => s ? ({ ...s, symbol: e.target.value }) : null)}
+                          />
+                          <select
+                            className="border rounded px-2 py-1"
+                            aria-label="UoM type"
+                            title="UoM type"
+                            value={editingUom.type}
+                            onChange={e => setEditingUom(s => s ? ({ ...s, type: e.target.value as 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' }) : null)}
                           >
-                            {updateMutation.isPending ? 'Saving…' : 'Save'}
-                          </button>
-                          <button
-                            onClick={() => setEditingUom(null)}
-                            className="px-3 py-1.5 border rounded hover:bg-gray-50"
-                          >
-                            Cancel
-                          </button>
+                            <option value="QUANTITY">QUANTITY</option>
+                            <option value="WEIGHT">WEIGHT</option>
+                            <option value="VOLUME">VOLUME</option>
+                            <option value="LENGTH">LENGTH</option>
+                            <option value="AREA">AREA</option>
+                            <option value="TIME">TIME</option>
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => updateMutation.mutate(editingUom)}
+                              disabled={!editingUom.name.trim() || updateMutation.isPending}
+                              className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {updateMutation.isPending ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              onClick={() => setEditingUom(null)}
+                              className="px-3 py-1.5 border rounded hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{u.name} {u.symbol ? <span className="text-gray-500">({u.symbol})</span> : null}</div>
-                          <div className="text-xs text-gray-500">Type: {u.type}</div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">{u.name} {u.symbol ? <span className="text-gray-500">({u.symbol})</span> : null}</div>
+                            <div className="text-xs text-gray-500">Type: {u.type}</div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setEditingUom({ id: u.id, name: u.name, symbol: u.symbol || '', type: u.type as 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' })}
+                              className="text-sm text-blue-600 hover:text-blue-800"
+                              title="Edit UoM"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => {
+                                setDeleteError(null);
+                                if (confirm(`Delete UoM "${u.name}"? This will remove all product mappings. (Cannot delete if used in historical transactions.)`)) {
+                                  deleteMutation.mutate(u.id);
+                                }
+                              }}
+                              disabled={deleteMutation.isPending}
+                              className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+                              title="Delete UoM"
+                            >
+                              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setEditingUom({ id: u.id, name: u.name, symbol: u.symbol || '', type: u.type as 'QUANTITY' | 'WEIGHT' | 'VOLUME' | 'LENGTH' | 'AREA' | 'TIME' })}
-                            className="text-sm text-blue-600 hover:text-blue-800"
-                            title="Edit UoM"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => {
-                              setDeleteError(null);
-                              if (confirm(`Delete UoM "${u.name}"? This will remove all product mappings. (Cannot delete if used in historical transactions.)`)) {
-                                deleteMutation.mutate(u.id);
-                              }
-                            }}
-                            disabled={deleteMutation.isPending}
-                            className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
-                            title="Delete UoM"
-                          >
-                            {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </li>
-                ))}
-                {masterUoms && masterUoms.length === 0 && (
-                  <li className="py-3 text-sm text-gray-500">No UoMs yet</li>
-                )}
-              </ul>
+                      )}
+                    </li>
+                  ))}
+                  {masterUoms && masterUoms.length === 0 && (
+                    <li className="py-3 text-sm text-gray-500">No UoMs yet</li>
+                  )}
+                </ul>
               </>
             )}
 

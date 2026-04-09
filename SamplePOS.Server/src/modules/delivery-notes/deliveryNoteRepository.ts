@@ -29,6 +29,8 @@ function normalizeRow(row: Record<string, unknown>): DeliveryNote {
     totalAmount: Money.toNumber(Money.parseDb(row.total_amount)),
     postedAt: row.posted_at ? String(row.posted_at) : null,
     postedById: (row.posted_by_id as string) || null,
+    pickedAt: row.picked_at ? String(row.picked_at) : null,
+    pickedById: (row.picked_by_id as string) || null,
     createdById: (row.created_by_id as string) || null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -173,6 +175,20 @@ export const deliveryNoteRepository = {
        WHERE id = $2
        RETURNING *`,
       [postedById, id]
+    );
+    return normalizeRow(result.rows[0]);
+  },
+
+  /**
+   * Mark a delivery note as PICKED (pick confirmation).
+   */
+  async markPicked(client: PoolClient, id: string, pickedById: string): Promise<DeliveryNote> {
+    const result = await client.query(
+      `UPDATE delivery_notes
+       SET status = 'PICKED', picked_at = NOW(), picked_by_id = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [pickedById, id]
     );
     return normalizeRow(result.rows[0]);
   },

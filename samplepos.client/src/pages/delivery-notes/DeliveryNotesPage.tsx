@@ -18,6 +18,7 @@ import type {
   DeliveryNoteListItem,
   DeliveryNoteStatus,
   CreateDeliveryNoteLine,
+  PickListData,
 } from '../../api/deliveryNotes';
 import type { Quotation, QuotationItem } from '@shared/types/quotation';
 
@@ -25,6 +26,7 @@ import type { Quotation, QuotationItem } from '@shared/types/quotation';
 
 const STATUS_COLORS: Record<DeliveryNoteStatus, string> = {
   DRAFT: 'bg-yellow-100 text-yellow-800',
+  PICKED: 'bg-blue-100 text-blue-800',
   POSTED: 'bg-green-100 text-green-800',
 };
 
@@ -59,7 +61,7 @@ export default function DeliveryNotesPage() {
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900">Wholesale Delivery Notes</h1>
           <p className="text-gray-600 mt-1">
-            Create delivery notes from wholesale quotations, post to move stock, then invoice
+            SAP-style flow: Create DN → Pick Confirm → Post Goods Issue (PGI) → Invoice
           </p>
         </div>
 
@@ -119,7 +121,7 @@ function DeliveryNotesList({
       {/* Actions Bar */}
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex gap-2">
-          {(['ALL', 'DRAFT', 'POSTED'] as const).map((s) => (
+          {(['ALL', 'DRAFT', 'PICKED', 'POSTED'] as const).map((s) => (
             <button
               key={s}
               onClick={() => { setStatusFilter(s); setPage(1); }}
@@ -636,16 +638,37 @@ function DeliveryNoteDetail({
   onBack: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [showPickList, setShowPickList] = useState(false);
 
   const { data: dn, isLoading, error, refetch } = useQuery({
     queryKey: ['delivery-note-detail', deliveryNoteId],
     queryFn: () => deliveryNotesApi.getById(deliveryNoteId),
   });
 
+  const { data: pickListData } = useQuery({
+    queryKey: ['delivery-note-pick-list', deliveryNoteId],
+    queryFn: () => deliveryNotesApi.getPickList(deliveryNoteId),
+    enabled: showPickList && !!dn && (dn.status === 'DRAFT' || dn.status === 'PICKED'),
+  });
+
+  const pickMutation = useMutation({
+    mutationFn: () => deliveryNotesApi.pick(deliveryNoteId),
+    onSuccess: (picked) => {
+      toast.success(`${picked.deliveryNoteNumber} — Pick confirmed`);
+      queryClient.invalidateQueries({ queryKey: ['delivery-notes'] });
+      queryClient.invalidateQueries({ queryKey: ['delivery-note-detail', deliveryNoteId] });
+      refetch();
+    },
+    onError: (error: Error) => {
+      const msg = (error as { response?: { data?: { error?: string } } }).response?.data?.error || error.message;
+      toast.error(msg);
+    },
+  });
+
   const postMutation = useMutation({
     mutationFn: () => deliveryNotesApi.post(deliveryNoteId),
     onSuccess: (posted) => {
-      toast.success(`${posted.deliveryNoteNumber} posted — stock deducted`);
+      toast.success(`${posted.deliveryNoteNumber} — Goods Issue posted, stock deducted`);
       queryClient.invalidateQueries({ queryKey: ['delivery-notes'] });
       queryClient.invalidateQueries({ queryKey: ['delivery-note-detail', deliveryNoteId] });
       refetch();
@@ -747,12 +770,48 @@ function DeliveryNoteDetail({
               <p className="font-medium">{dn.deliveryAddress}</p>
             </div>
           )}
+          {dn.pickedAt && (
+            <div>
+              <p className="text-sm text-gray-500">Picked At</p>
+              <p className="font-medium">{new Date(dn.pickedAt).toLocaleString()}</p>
+            </div>
+          )}
           {dn.postedAt && (
             <div>
-              <p className="text-sm text-gray-500">Posted At</p>
+              <p className="text-sm text-gray-500">Goods Issue At</p>
               <p className="font-medium">{new Date(dn.postedAt).toLocaleString()}</p>
             </div>
           )}
+        </div>
+
+        {/* SAP Flow Progress Bar */}
+        <div className="mb-6 bg-gray-50 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            {[
+              { label: 'Created', done: true },
+              { label: 'Picked', done: dn.status === 'PICKED' || dn.status === 'POSTED' },
+              { label: 'Goods Issued', done: dn.status === 'POSTED' },
+              { label: 'Invoiced', done: !!dn.invoiceId },
+            ].map((step, i) => (
+              <div key={step.label} className="flex items-center flex-1">
+                <div className="flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                    step.done
+                      ? 'bg-green-500 text-white'
+                      : 'bg-gray-300 text-gray-600'
+                  }`}>
+                    {step.done ? '✓' : i + 1}
+                  </div>
+                  <span className={`text-xs mt-1 font-medium ${step.done ? 'text-green-700' : 'text-gray-500'}`}>
+                    {step.label}
+                  </span>
+                </div>
+                {i < 3 && (
+                  <div className={`flex-1 h-0.5 mx-2 ${step.done ? 'bg-green-400' : 'bg-gray-300'}`} />
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         {dn.warehouseNotes && (
@@ -797,7 +856,7 @@ function DeliveryNoteDetail({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-3 pt-4 border-t">
+        <div className="flex flex-wrap gap-3 pt-4 border-t">
           <button
             onClick={async () => {
               try {
@@ -815,18 +874,41 @@ function DeliveryNoteDetail({
             Export PDF
           </button>
           <DocumentFlowButton entityType="DELIVERY_NOTE" entityId={deliveryNoteId} size="sm" />
+
+          {/* Pick List — available for DRAFT & PICKED */}
+          {(dn.status === 'DRAFT' || dn.status === 'PICKED') && (
+            <button
+              onClick={() => setShowPickList(!showPickList)}
+              className="px-5 py-3 border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 font-medium"
+            >
+              {showPickList ? 'Hide Pick List' : 'View Pick List'}
+            </button>
+          )}
+
+          {/* DRAFT → Pick Confirm (SAP step 1) */}
           {dn.status === 'DRAFT' && (
             <>
               <button
                 onClick={() => {
-                  if (confirm(`Post ${dn.deliveryNoteNumber}? This will deduct stock and cannot be undone.`)) {
+                  if (confirm(`Confirm pick for ${dn.deliveryNoteNumber}? This locks the lines and validates stock.`)) {
+                    pickMutation.mutate();
+                  }
+                }}
+                disabled={pickMutation.isPending}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50"
+              >
+                {pickMutation.isPending ? 'Confirming...' : 'Confirm Pick'}
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm(`Post Goods Issue for ${dn.deliveryNoteNumber}? This deducts stock and cannot be undone.`)) {
                     postMutation.mutate();
                   }
                 }}
                 disabled={postMutation.isPending}
                 className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold disabled:opacity-50"
               >
-                {postMutation.isPending ? 'Posting...' : 'Post Delivery Note'}
+                {postMutation.isPending ? 'Posting...' : 'Post Goods Issue (PGI)'}
               </button>
               <button
                 onClick={() => {
@@ -841,6 +923,23 @@ function DeliveryNoteDetail({
               </button>
             </>
           )}
+
+          {/* PICKED → Post Goods Issue (SAP step 2) */}
+          {dn.status === 'PICKED' && (
+            <button
+              onClick={() => {
+                if (confirm(`Post Goods Issue for ${dn.deliveryNoteNumber}? This deducts stock and cannot be undone.`)) {
+                  postMutation.mutate();
+                }
+              }}
+              disabled={postMutation.isPending}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold disabled:opacity-50"
+            >
+              {postMutation.isPending ? 'Posting...' : 'Post Goods Issue (PGI)'}
+            </button>
+          )}
+
+          {/* POSTED → Create Invoice (SAP billing step) */}
           {dn.status === 'POSTED' && !dn.invoiceId && (
             <button
               onClick={() => {
@@ -851,7 +950,7 @@ function DeliveryNoteDetail({
               disabled={invoiceMutation.isPending}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50"
             >
-              {invoiceMutation.isPending ? 'Creating Invoice...' : 'Create Invoice from DN'}
+              {invoiceMutation.isPending ? 'Creating Invoice...' : 'Create Invoice (Billing)'}
             </button>
           )}
           {dn.status === 'POSTED' && dn.invoiceId && (
@@ -860,6 +959,73 @@ function DeliveryNoteDetail({
             </span>
           )}
         </div>
+
+        {/* Pick List Panel */}
+        {showPickList && pickListData && (
+          <div className="mt-6 bg-orange-50 border border-orange-200 rounded-lg p-6">
+            <h3 className="text-lg font-bold text-orange-900 mb-1">
+              Picking List — {pickListData.deliveryNoteNumber}
+            </h3>
+            <p className="text-sm text-orange-700 mb-4">
+              {pickListData.customerName} · {pickListData.deliveryDate}
+              {pickListData.deliveryAddress && ` · ${pickListData.deliveryAddress}`}
+            </p>
+            {pickListData.warehouseNotes && (
+              <div className="mb-4 bg-yellow-100 border border-yellow-300 rounded p-3 text-sm text-yellow-800">
+                <strong>Notes:</strong> {pickListData.warehouseNotes}
+              </div>
+            )}
+            <table className="w-full">
+              <thead className="bg-orange-100 border-b border-orange-200">
+                <tr>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-orange-800">Product</th>
+                  <th className="text-right py-2 px-3 text-sm font-semibold text-orange-800">Required</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-orange-800">Batch (FEFO)</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-orange-800">Expiry</th>
+                  <th className="text-right py-2 px-3 text-sm font-semibold text-orange-800">Available</th>
+                  <th className="text-right py-2 px-3 text-sm font-semibold text-orange-800">Pick Qty</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-orange-800">Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pickListData.lines.map((line, li) => (
+                  line.suggestedBatches.length > 0 ? (
+                    line.suggestedBatches.map((batch, bi) => (
+                      <tr key={`${li}-${bi}`} className="border-b border-orange-100">
+                        {bi === 0 && (
+                          <>
+                            <td className="py-2 px-3 font-medium" rowSpan={line.suggestedBatches.length}>
+                              {line.productName}
+                              {line.uomName && <span className="text-xs text-gray-500 ml-1">({line.uomName})</span>}
+                            </td>
+                            <td className="py-2 px-3 text-right font-semibold" rowSpan={line.suggestedBatches.length}>
+                              {line.quantityRequired}
+                            </td>
+                          </>
+                        )}
+                        <td className="py-2 px-3 font-mono text-sm">{batch.batchNumber}</td>
+                        <td className="py-2 px-3 text-sm">
+                          {batch.expiryDate || <span className="text-gray-400">N/A</span>}
+                        </td>
+                        <td className="py-2 px-3 text-right text-sm">{batch.availableQty}</td>
+                        <td className="py-2 px-3 text-right font-semibold text-green-700">{batch.pickQty}</td>
+                        <td className="py-2 px-3 text-sm text-gray-600">{batch.location || '-'}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr key={li} className="border-b border-orange-100">
+                      <td className="py-2 px-3 font-medium">{line.productName}</td>
+                      <td className="py-2 px-3 text-right font-semibold">{line.quantityRequired}</td>
+                      <td colSpan={5} className="py-2 px-3 text-red-600 text-sm italic">
+                        No batches available
+                      </td>
+                    </tr>
+                  )
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </>
   );

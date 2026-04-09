@@ -1,7 +1,8 @@
 // Delivery Note Types
 // Wholesale delivery notes from quotations (SAP-style DN)
+// Flow: Quotation → DN (DRAFT) → Pick (PICKED) → Goods Issue (POSTED) → Invoice
 
-export type DeliveryNoteStatus = 'DRAFT' | 'POSTED';
+export type DeliveryNoteStatus = 'DRAFT' | 'PICKED' | 'POSTED';
 
 export interface DeliveryNote {
   id: string;
@@ -18,6 +19,8 @@ export interface DeliveryNote {
   totalAmount: number;
   postedAt: string | null;
   postedById: string | null;
+  pickedAt: string | null;
+  pickedById: string | null;
   createdById: string | null;
   createdAt: string;
   updatedAt: string;

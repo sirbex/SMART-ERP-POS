@@ -30,8 +30,14 @@ router.get('/', deliveryNoteController.list);
 router.get('/:id', deliveryNoteController.getById);
 router.delete('/:id', requirePermission('sales.delete'), deliveryNoteController.remove);
 
-// Posting (stock movement)
+// Posting (stock movement) — SAP: Post Goods Issue (PGI)
 router.post('/:id/post', requirePermission('sales.create'), deliveryNoteController.post);
+
+// Pick confirmation — SAP: Pick Confirm
+router.post('/:id/pick', requirePermission('sales.create'), deliveryNoteController.pick);
+
+// Pick list data (FEFO-suggested batches for warehouse)
+router.get('/:id/pick-list', deliveryNoteController.pickList);
 
 // Invoice from DN (wholesale invoicing)
 router.post('/:id/invoice', requirePermission('sales.create'), deliveryNoteController.createInvoice);

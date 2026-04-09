@@ -8,7 +8,7 @@ import apiClient from '../utils/api';
 
 // ── Types ─────────────────────────────────────────────────
 
-export type DeliveryNoteStatus = 'DRAFT' | 'POSTED';
+export type DeliveryNoteStatus = 'DRAFT' | 'PICKED' | 'POSTED';
 
 export interface DeliveryNote {
   id: string;
@@ -25,6 +25,8 @@ export interface DeliveryNote {
   totalAmount: number;
   postedAt: string | null;
   postedById: string | null;
+  pickedAt: string | null;
+  pickedById: string | null;
   createdById: string | null;
   createdAt: string;
   updatedAt: string;
@@ -107,6 +109,32 @@ export interface DeliveryNoteListResponse {
   };
 }
 
+export interface PickListBatch {
+  batchNumber: string;
+  expiryDate: string | null;
+  availableQty: number;
+  pickQty: number;
+  location: string | null;
+}
+
+export interface PickListLine {
+  description: string | null;
+  productName: string;
+  quantityRequired: number;
+  uomName: string | null;
+  suggestedBatches: PickListBatch[];
+}
+
+export interface PickListData {
+  deliveryNoteNumber: string;
+  customerName: string | null;
+  deliveryDate: string;
+  deliveryAddress: string | null;
+  warehouseNotes: string | null;
+  status: string;
+  lines: PickListLine[];
+}
+
 // ── API Client ────────────────────────────────────────────
 
 const deliveryNotesApi = {
@@ -117,6 +145,16 @@ const deliveryNotesApi = {
 
   async post(id: string): Promise<DeliveryNoteWithLines> {
     const response = await apiClient.post(`/delivery-notes/${id}/post`);
+    return response.data.data;
+  },
+
+  async pick(id: string): Promise<DeliveryNoteWithLines> {
+    const response = await apiClient.post(`/delivery-notes/${id}/pick`);
+    return response.data.data;
+  },
+
+  async getPickList(id: string): Promise<PickListData> {
+    const response = await apiClient.get(`/delivery-notes/${id}/pick-list`);
     return response.data.data;
   },
 

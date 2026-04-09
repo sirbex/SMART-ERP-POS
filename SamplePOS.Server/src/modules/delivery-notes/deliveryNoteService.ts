@@ -140,7 +140,142 @@ export const deliveryNoteService = {
   },
 
   /**
-   * POST a delivery note — moves stock via FEFO batch deduction.
+   * PICK a delivery note — SAP-style pick confirmation.
+   *
+   * Validates:
+   * 1. DN exists and is in DRAFT status
+   * 2. Sufficient stock is available for all lines (availability check, no deduction)
+   * 3. Quotation item remaining quantities are still valid
+   *
+   * After picking:
+   * - DN transitions to PICKED (immutable lines, but no stock movement yet)
+   * - picked_at / picked_by_id recorded
+   * - Warehouse staff can proceed to pack and then post goods issue
+   */
+  async pickDeliveryNote(
+    pool: Pool,
+    deliveryNoteId: string,
+    pickedById: string
+  ): Promise<DeliveryNoteWithLines> {
+    return UnitOfWork.run(pool, async (client: PoolClient) => {
+      // ── Load & validate DN ───────────────────────────────────
+      const dnResult = await client.query(
+        `SELECT * FROM delivery_notes WHERE id = $1 FOR UPDATE`,
+        [deliveryNoteId]
+      );
+      if (dnResult.rows.length === 0) {
+        throw new NotFoundError('Delivery note not found');
+      }
+      const dn = dnResult.rows[0];
+      if (dn.status !== 'DRAFT') {
+        throw new ConflictError(
+          `Delivery note ${dn.delivery_note_number} is ${dn.status} — only DRAFT can be picked`
+        );
+      }
+
+      // Load lines
+      const linesResult = await client.query(
+        `SELECT * FROM delivery_note_lines WHERE delivery_note_id = $1`,
+        [deliveryNoteId]
+      );
+      if (linesResult.rows.length === 0) {
+        throw new ValidationError('Delivery note has no lines');
+      }
+
+      // ── Validate quotation item remaining quantities ─────────
+      for (const line of linesResult.rows) {
+        const qiResult = await client.query(
+          `SELECT quantity, delivered_quantity, description
+           FROM quotation_items WHERE id = $1`,
+          [line.quotation_item_id]
+        );
+        if (qiResult.rows.length === 0) {
+          throw new NotFoundError(`Quotation item ${line.quotation_item_id} not found`);
+        }
+        const qi = qiResult.rows[0];
+        const ordered = new Decimal(qi.quantity);
+        const alreadyDelivered = new Decimal(qi.delivered_quantity);
+        const remaining = ordered.minus(alreadyDelivered);
+        const requested = new Decimal(line.quantity_delivered);
+
+        if (requested.greaterThan(remaining)) {
+          throw new ValidationError(
+            `Cannot deliver ${requested.toFixed(2)} of "${qi.description}". ` +
+            `Remaining: ${remaining.toFixed(2)}`
+          );
+        }
+      }
+
+      // ── Stock availability check (no deduction) ──────────────
+      for (const line of linesResult.rows) {
+        const productId = line.product_id as string;
+        const required = new Decimal(line.quantity_delivered);
+
+        if (line.batch_id) {
+          // Specific batch — check its remaining qty
+          const batchResult = await client.query(
+            `SELECT remaining_quantity
+             FROM inventory_batches
+             WHERE id = $1 AND product_id = $2 AND status = 'ACTIVE'`,
+            [line.batch_id, productId]
+          );
+          if (batchResult.rows.length === 0) {
+            throw new NotFoundError(`Batch ${line.batch_id} not found or not active`);
+          }
+          const available = new Decimal(batchResult.rows[0].remaining_quantity);
+          if (required.greaterThan(available)) {
+            const pResult = await client.query('SELECT name FROM products WHERE id = $1', [productId]);
+            const productName = pResult.rows[0]?.name || productId;
+            throw new ValidationError(
+              `Insufficient stock for "${productName}": batch has ${available.toFixed(2)} remaining, ` +
+              `need ${required.toFixed(2)}`
+            );
+          }
+        } else {
+          // FEFO — check total available across active non-expired batches
+          const stockResult = await client.query(
+            `SELECT COALESCE(SUM(remaining_quantity), 0) AS available
+             FROM inventory_batches
+             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)`,
+            [productId]
+          );
+          const available = new Decimal(stockResult.rows[0].available);
+          if (required.greaterThan(available)) {
+            const pResult = await client.query('SELECT name FROM products WHERE id = $1', [productId]);
+            const productName = pResult.rows[0]?.name || productId;
+            throw new ValidationError(
+              `Insufficient stock for "${productName}": ${available.toFixed(2)} available, ` +
+              `need ${required.toFixed(2)}`
+            );
+          }
+        }
+      }
+
+      // ── Recalc total ─────────────────────────────────────────
+      await deliveryNoteRepository.recalcTotal(client, deliveryNoteId);
+
+      // ── Mark as PICKED ───────────────────────────────────────
+      await deliveryNoteRepository.markPicked(client, deliveryNoteId, pickedById);
+
+      const result = await deliveryNoteRepository.getById(client, deliveryNoteId);
+      if (!result) throw new NotFoundError('Failed to retrieve picked delivery note');
+
+      logger.info('Delivery note picked (pick confirmed)', {
+        deliveryNoteId,
+        deliveryNoteNumber: result.deliveryNoteNumber,
+        quotationId: dn.quotation_id,
+        lineCount: linesResult.rows.length,
+        pickedById,
+      });
+
+      return result;
+    });
+  },
+
+  /**
+   * POST a delivery note — SAP-style Post Goods Issue (PGI).
+   * Moves stock via FEFO batch deduction.
    *
    * For each line:
    * 1. If batch_id specified → deduct from that batch
@@ -167,7 +302,12 @@ export const deliveryNoteService = {
       }
       const dn = dnResult.rows[0];
       if (dn.status === 'POSTED') {
-        throw new ConflictError(`Delivery note ${dn.delivery_note_number} is already POSTED`);
+        throw new ConflictError(`Delivery note ${dn.delivery_note_number} is already POSTED (Goods Issued)`);
+      }
+      if (dn.status !== 'DRAFT' && dn.status !== 'PICKED') {
+        throw new ConflictError(
+          `Delivery note ${dn.delivery_note_number} is ${dn.status} — only DRAFT or PICKED can be posted`
+        );
       }
 
       // Load lines
@@ -332,7 +472,7 @@ export const deliveryNoteService = {
         );
       }
 
-      // ── Recalc total while still DRAFT (immutability trigger blocks updates after POSTED) ──
+      // ── Recalc total (safe: trigger allows DRAFT→POSTED and PICKED→POSTED) ──
       await deliveryNoteRepository.recalcTotal(client, deliveryNoteId);
       // ── Mark DN as POSTED ────────────────────────────────────
       await deliveryNoteRepository.markPosted(client, deliveryNoteId, postedById);
@@ -455,7 +595,139 @@ export const deliveryNoteService = {
           `Cannot delete POSTED delivery note ${dnResult.rows[0].delivery_note_number}`
         );
       }
+      if (dnResult.rows[0].status === 'PICKED') {
+        throw new ConflictError(
+          `Cannot delete PICKED delivery note ${dnResult.rows[0].delivery_note_number} — revert pick first or post goods issue`
+        );
+      }
       await deliveryNoteRepository.deleteDraft(client, id);
     });
+  },
+
+  /**
+   * Generate pick list data for a delivery note.
+   * Returns product details with FEFO-suggested batches for warehouse picking.
+   */
+  async getPickList(
+    pool: Pool,
+    deliveryNoteId: string
+  ): Promise<{
+    deliveryNoteNumber: string;
+    customerName: string | null;
+    deliveryDate: string;
+    deliveryAddress: string | null;
+    warehouseNotes: string | null;
+    status: string;
+    lines: Array<{
+      description: string | null;
+      productName: string;
+      quantityRequired: number;
+      uomName: string | null;
+      suggestedBatches: Array<{
+        batchNumber: string;
+        expiryDate: string | null;
+        availableQty: number;
+        pickQty: number;
+        location: string | null;
+      }>;
+    }>;
+  }> {
+    const dn = await deliveryNoteRepository.getById(pool, deliveryNoteId);
+    if (!dn) throw new NotFoundError('Delivery note not found');
+
+    const lines: Array<{
+      description: string | null;
+      productName: string;
+      quantityRequired: number;
+      uomName: string | null;
+      suggestedBatches: Array<{
+        batchNumber: string;
+        expiryDate: string | null;
+        availableQty: number;
+        pickQty: number;
+        location: string | null;
+      }>;
+    }> = [];
+
+    for (const line of dn.lines) {
+      // Get product name
+      const pResult = await pool.query(
+        'SELECT name FROM products WHERE id = $1',
+        [line.productId]
+      );
+      const productName = pResult.rows[0]?.name || 'Unknown';
+
+      const suggestedBatches: Array<{
+        batchNumber: string;
+        expiryDate: string | null;
+        availableQty: number;
+        pickQty: number;
+        location: string | null;
+      }> = [];
+
+      if (line.batchId) {
+        // Specific batch
+        const batchResult = await pool.query(
+          `SELECT batch_number, expiry_date, remaining_quantity, storage_location
+           FROM inventory_batches WHERE id = $1`,
+          [line.batchId]
+        );
+        if (batchResult.rows.length > 0) {
+          const b = batchResult.rows[0];
+          suggestedBatches.push({
+            batchNumber: b.batch_number as string,
+            expiryDate: b.expiry_date ? String(b.expiry_date) : null,
+            availableQty: Money.toNumber(Money.parseDb(b.remaining_quantity)),
+            pickQty: line.quantityDelivered,
+            location: (b.storage_location as string) || null,
+          });
+        }
+      } else {
+        // FEFO suggested batches
+        const batchesResult = await pool.query(
+          `SELECT id, batch_number, expiry_date, remaining_quantity, storage_location
+           FROM inventory_batches
+           WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+             AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
+           ORDER BY expiry_date ASC NULLS LAST, received_date ASC`,
+          [line.productId]
+        );
+
+        let remainingQty = new Decimal(line.quantityDelivered);
+        for (const batch of batchesResult.rows) {
+          if (remainingQty.lessThanOrEqualTo(0)) break;
+          const available = new Decimal(batch.remaining_quantity);
+          const pickQty = Decimal.min(remainingQty, available);
+
+          suggestedBatches.push({
+            batchNumber: batch.batch_number as string,
+            expiryDate: batch.expiry_date ? String(batch.expiry_date) : null,
+            availableQty: Money.toNumber(available),
+            pickQty: Money.toNumber(pickQty),
+            location: (batch.storage_location as string) || null,
+          });
+
+          remainingQty = remainingQty.minus(pickQty);
+        }
+      }
+
+      lines.push({
+        description: line.description,
+        productName,
+        quantityRequired: line.quantityDelivered,
+        uomName: line.uomName,
+        suggestedBatches,
+      });
+    }
+
+    return {
+      deliveryNoteNumber: dn.deliveryNoteNumber,
+      customerName: dn.customerName,
+      deliveryDate: dn.deliveryDate,
+      deliveryAddress: dn.deliveryAddress,
+      warehouseNotes: dn.warehouseNotes,
+      status: dn.status,
+      lines,
+    };
   },
 };
