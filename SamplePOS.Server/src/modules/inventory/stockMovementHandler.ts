@@ -79,12 +79,20 @@ export class StockMovementHandler {
   /**
    * Process a stock movement transaction
    * This is the SINGLE authoritative entry point for stock changes
+   *
+   * @param params Movement parameters
+   * @param txClient Optional external PoolClient for joining an existing transaction.
+   *                 When provided, the handler skips BEGIN/COMMIT/ROLLBACK and
+   *                 participates in the caller's transaction boundary.
    */
-  async processMovement(params: StockMovementParams): Promise<StockMovementResult> {
-    const client = await this.pool.connect();
+  async processMovement(params: StockMovementParams, txClient?: PoolClient): Promise<StockMovementResult> {
+    const ownConnection = !txClient;
+    const client = txClient ?? await this.pool.connect();
 
     try {
-      await client.query('BEGIN');
+      if (ownConnection) {
+        await client.query('BEGIN');
+      }
 
       // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
       // This handler already creates proper MOV- movements in Step 9
@@ -118,9 +126,10 @@ export class StockMovementHandler {
       );
 
       // Step 7: Calculate inventory value changes
+      // Use the SAME unitCost for GL posting, stock_movements.unit_cost, and cost_layers
+      // to prevent drift between GL balance and cost layer valuation.
       const unitCost = params.unitCost ?? batch.cost_price ?? 0;
-      const valueBefore = previousQty.times(batch.cost_price ?? 0).toNumber();
-      const valueAfter = newQty.times(batch.cost_price ?? 0).toNumber();
+      const movementValue = new Decimal(Math.abs(quantityChange)).times(unitCost).toNumber();
 
       // Step 8: Generate movement number
       const movementNumber = await this.generateMovementNumber(client);
@@ -183,13 +192,14 @@ export class StockMovementHandler {
       // Step 11: Update product quantity_on_hand (aggregate from batches)
       await this.updateProductQuantity(client, params.productId);
 
-      await client.query('COMMIT');
+      if (ownConnection) {
+        await client.query('COMMIT');
+      }
 
       // Step 12: Post GL journal entry for adjustment/damage/expiry movements
       // Done AFTER commit so inventory state is persisted first (same pattern as GRN).
       // GL failure is fatal — consistency with sales/GR error handling.
       if (GL_MOVEMENT_TYPES.has(params.movementType)) {
-        const movementValue = Math.abs(valueAfter - valueBefore);
         if (movementValue > 0) {
           // Get product name for GL description
           const prodRes = await this.pool.query('SELECT name FROM products WHERE id = $1', [params.productId]);
@@ -224,19 +234,23 @@ export class StockMovementHandler {
         previousQuantity: previousQty.toNumber(),
         newQuantity: newQty.toNumber(),
         actualQuantityChanged: changeQty.toNumber(),
-        valueBefore,
-        valueAfter,
+        valueBefore: previousQty.times(unitCost).toNumber(),
+        valueAfter: newQty.times(unitCost).toNumber(),
       };
     } catch (error) {
-      await client.query('ROLLBACK');
-      logger.error('Stock movement failed - transaction rolled back', {
+      if (ownConnection) {
+        await client.query('ROLLBACK');
+      }
+      logger.error('Stock movement failed', {
         productId: params.productId,
         movementType: params.movementType,
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     } finally {
-      client.release();
+      if (ownConnection) {
+        client.release();
+      }
     }
   }
 
@@ -311,7 +325,30 @@ export class StockMovementHandler {
       return result.rows[0];
     }
 
-    // No batchId provided - find or create MAIN batch (with row lock)
+    // No batchId provided
+    const isOutbound = ['ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY', 'SALE', 'TRANSFER_OUT'].includes(params.movementType);
+
+    if (isOutbound) {
+      // For outbound movements, pick the batch with the earliest expiry (FEFO)
+      // that has sufficient remaining_quantity. Fall back to any batch with stock.
+      const fefoResult = await client.query(
+        `SELECT id, product_id, batch_number, remaining_quantity, cost_price
+         FROM inventory_batches
+         WHERE product_id = $1 AND status = 'ACTIVE' AND remaining_quantity > 0
+         ORDER BY expiry_date ASC NULLS LAST, created_at ASC
+         LIMIT 1
+         FOR UPDATE`,
+        [params.productId]
+      );
+
+      if (fefoResult.rows.length > 0) {
+        return fefoResult.rows[0];
+      }
+      // No batch with stock — fall through to MAIN batch creation below
+      // (will fail at validateResultingQuantity for outbound)
+    }
+
+    // For inbound movements (or outbound with zero stock), find or create MAIN batch
     let result = await client.query(
       `SELECT id, product_id, batch_number, remaining_quantity, cost_price 
        FROM inventory_batches 

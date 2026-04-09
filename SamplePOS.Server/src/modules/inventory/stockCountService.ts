@@ -82,7 +82,7 @@ export const stockCountService = {
           stockCountId: stockCount.id,
           productId: row.product_id,
           batchId: row.batch_id,
-          expectedQtyBase: parseFloat(row.expected_qty || '0'),
+          expectedQtyBase: Number(row.expected_qty || 0),
           createdById: data.createdById,
         });
         linesCreated++;
@@ -227,7 +227,7 @@ export const stockCountService = {
           data.batchId ? [data.batchId] : [data.productId]
         );
 
-        const expectedQty = parseFloat(batchResult.rows[0]?.remaining_quantity || '0');
+        const expectedQty = Number(batchResult.rows[0]?.remaining_quantity || 0);
 
         line = await stockCountRepository.createStockCountLine(client, {
           stockCountId: data.stockCountId,
@@ -278,7 +278,7 @@ export const stockCountService = {
       throw new Error(`UOM ${uom} not found for product ${productId}`);
     }
 
-    const conversionFactor = parseFloat(uomResult.rows[0].conversion_factor);
+    const conversionFactor = Number(uomResult.rows[0].conversion_factor);
     return new Decimal(quantity).times(conversionFactor).toNumber();
   },
 
@@ -395,7 +395,8 @@ export const stockCountService = {
             }
           }
 
-          // Use unified stock movement handler
+          // Use unified stock movement handler — pass txClient so movements
+          // are atomic with the stock count state transition
           const result = await handler.processMovement({
             productId: line.product_id,
             batchId: line.batch_id,
@@ -405,7 +406,7 @@ export const stockCountService = {
             referenceType: 'STOCK_COUNT',
             referenceId: data.stockCountId,
             userId: data.validatedById,
-          });
+          }, client);
 
           movementIds.push(result.movementId);
           linesProcessed++;
