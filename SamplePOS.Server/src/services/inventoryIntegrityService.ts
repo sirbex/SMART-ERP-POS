@@ -160,6 +160,9 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
 
     // 4d. Check for stock movements WITHOUT matching GL entries
     //     These are guaranteed discrepancy sources (inventory moved, GL didn't)
+    //     OPENING_BALANCE movements are excluded — their GL entries are posted
+    //     under ReferenceType='OPENING_STOCK' keyed by individual movement ID,
+    //     not by the parent GR reference_id.
     const unpostedOps = await pool.query(`
         SELECT 
             sm.reference_type,
@@ -169,6 +172,7 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
         FROM stock_movements sm
         WHERE sm.reference_type IN ('GOODS_RECEIPT', 'SALE', 'SALE_VOID', 'SALE_REFUND', 'RETURN_GRN')
           AND sm.reference_id IS NOT NULL
+          AND sm.movement_type != 'OPENING_BALANCE'
           AND NOT EXISTS (
             SELECT 1 FROM ledger_transactions lt
             WHERE lt."ReferenceId" = sm.reference_id
