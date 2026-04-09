@@ -3,7 +3,7 @@
  * Edit DRAFT quotations - loads existing data and allows modifications
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -148,6 +148,12 @@ export default function EditQuotationPage() {
 
   // Pre-fetch all stock data once — filtering is instant in-memory
   const [productSearch, setProductSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const productListRef = useRef<HTMLDivElement>(null);
+  const [searchSelectedIndex, setSearchSelectedIndex] = useState(0);
+  // Refs for item row inputs: editItemRefs[rowIndex][fieldIndex]
+  // fieldIndex: 0=description, 1=quantity, 2=unitPrice, 3=discount
+  const editItemRefs = useRef<(HTMLInputElement | null)[][]>([]);
   const { data: allStockData } = useQuery({
     queryKey: ['stock-levels-cache'],
     queryFn: async () => {
@@ -263,6 +269,165 @@ export default function EditQuotationPage() {
   };
 
   const totals = calculateTotals();
+
+  // ── SAP-like Keyboard Navigation ──
+
+  // Reset search index when results change
+  useEffect(() => {
+    setSearchSelectedIndex(0);
+  }, [products]);
+
+  // Ensure editItemRefs array has correct size
+  useEffect(() => {
+    editItemRefs.current = items.map((_, i) => editItemRefs.current[i] || [null, null, null, null]);
+  }, [items]);
+
+  // Scroll a search result into view
+  const scrollSearchItemIntoView = useCallback((index: number, direction: 'up' | 'down') => {
+    setTimeout(() => {
+      const container = productListRef.current;
+      const item = container?.children[index] as HTMLElement;
+      if (item && container) {
+        const containerRect = container.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        if (direction === 'down' && itemRect.bottom > containerRect.bottom) {
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (direction === 'up' && itemRect.top < containerRect.top) {
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }, 0);
+  }, []);
+
+  // Select the highlighted product from search results
+  const selectHighlightedProduct = useCallback(() => {
+    if (!products || products.length === 0) return;
+    const clamped = Math.min(searchSelectedIndex, products.length - 1);
+    if (clamped < 0) return;
+    addProductAsItem(products[clamped]);
+  }, [products, searchSelectedIndex]);
+
+  // Search input keyboard handler
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (productSearch) {
+        setProductSearch('');
+        setSearchSelectedIndex(0);
+      }
+      return;
+    }
+
+    if (!products || products.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSearchSelectedIndex((prev) => {
+        const next = Math.min(prev + 1, products.length - 1);
+        scrollSearchItemIntoView(next, 'down');
+        return next;
+      });
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSearchSelectedIndex((prev) => {
+        const next = Math.max(prev - 1, 0);
+        scrollSearchItemIntoView(next, 'up');
+        return next;
+      });
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      selectHighlightedProduct();
+      return;
+    }
+  }, [products, productSearch, scrollSearchItemIntoView, selectHighlightedProduct]);
+
+  // Item row keyboard handler — Enter moves to next field/row, Ctrl+Delete removes row
+  const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
+    const maxFieldIndex = 3; // description, quantity, unitPrice, discount
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (fieldIndex < maxFieldIndex) {
+        editItemRefs.current[rowIndex]?.[fieldIndex + 1]?.focus();
+      } else {
+        if (rowIndex < items.length - 1) {
+          editItemRefs.current[rowIndex + 1]?.[0]?.focus();
+        } else {
+          searchInputRef.current?.focus();
+        }
+      }
+      return;
+    }
+
+    if ((e.key === 'Delete' || e.key === 'Backspace') && e.ctrlKey) {
+      e.preventDefault();
+      const itemId = items[rowIndex]?.id;
+      if (itemId) removeItem(itemId);
+      setTimeout(() => {
+        if (rowIndex > 0) {
+          editItemRefs.current[rowIndex - 1]?.[0]?.focus();
+        } else {
+          searchInputRef.current?.focus();
+        }
+      }, 50);
+      return;
+    }
+
+    if (e.key === 'ArrowDown' && e.altKey) {
+      e.preventDefault();
+      if (rowIndex < items.length - 1) {
+        editItemRefs.current[rowIndex + 1]?.[fieldIndex]?.focus();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp' && e.altKey) {
+      e.preventDefault();
+      if (rowIndex > 0) {
+        editItemRefs.current[rowIndex - 1]?.[fieldIndex]?.focus();
+      }
+      return;
+    }
+  }, [items]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
+
+      if (e.key === '/' && !isInput) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (e.key === 'F2') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (e.key === 'Insert') {
+        e.preventDefault();
+        addItem();
+        setTimeout(() => {
+          const lastRow = editItemRefs.current[items.length];
+          lastRow?.[0]?.focus();
+        }, 100);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [items.length]);
 
   const handleSubmit = () => {
     // Validation
@@ -481,29 +646,49 @@ export default function EditQuotationPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Line Items</h2>
             <button
-              onClick={addItem}
+              onClick={() => {
+                addItem();
+                setTimeout(() => {
+                  const lastRow = editItemRefs.current[items.length];
+                  lastRow?.[0]?.focus();
+                }, 100);
+              }}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               + Add Item
+              <kbd className="ml-2 px-1.5 py-0.5 bg-blue-500 border border-blue-400 rounded text-[10px] font-mono">Ins</kbd>
             </button>
           </div>
 
           {/* Product Search */}
           <div className="mb-4 relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Search Products
+              <span className="ml-2 text-xs text-gray-400 font-normal">
+                <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">/</kbd> or
+                <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono ml-1">F2</kbd> to focus
+              </span>
+            </label>
             <input
+              ref={searchInputRef}
               type="text"
               value={productSearch}
-              onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="Search by name, SKU, or barcode..."
+              onChange={(e) => { setProductSearch(e.target.value); setSearchSelectedIndex(0); }}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search by name, SKU, or barcode... (↑↓ navigate, Enter select)"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             {productSearch && products.length > 0 && (
-              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                {products.map((product: StockLevelItem) => (
+              <div ref={productListRef} className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {products.map((product: StockLevelItem, idx: number) => (
                   <button
                     key={product.product_id}
                     onClick={() => addProductAsItem(product)}
-                    className="w-full px-4 py-2 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                    className={`w-full px-4 py-2 text-left border-b border-gray-100 last:border-b-0 transition-colors ${
+                      idx === searchSelectedIndex
+                        ? 'bg-blue-100 border-l-4 border-l-blue-600'
+                        : 'hover:bg-gray-50'
+                    }`}
                   >
                     <div className="font-medium text-gray-900">{product.product_name}</div>
                     <div className="text-sm text-gray-500">
@@ -540,7 +725,7 @@ export default function EditQuotationPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {items.map((item) => {
+                  {items.map((item, rowIndex) => {
                     const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
                     const itemDiscount = new Decimal(item.discountAmount);
                     const taxableAmount = itemSubtotal.minus(itemDiscount);
@@ -550,15 +735,20 @@ export default function EditQuotationPage() {
                     const itemTotal = taxableAmount.plus(itemTax);
 
                     return (
-                      <tr key={item.id}>
+                      <tr key={item.id} className="focus-within:bg-blue-50/30">
                         <td className="px-4 py-3">
                           <input
+                            ref={(el) => {
+                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                              editItemRefs.current[rowIndex][0] = el;
+                            }}
                             type="text"
                             value={item.description}
                             onChange={(e) => updateItem(item.id, 'description', e.target.value)}
-                            className="w-full px-2 py-1 border border-gray-300 rounded"
+                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 0)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                             placeholder="Description"
-                            aria-label="Item description"
+                            aria-label={`Item ${rowIndex + 1} description`}
                           />
                           {item.sku && (
                             <div className="text-xs text-gray-500 mt-1">SKU: {item.sku}</div>
@@ -566,35 +756,50 @@ export default function EditQuotationPage() {
                         </td>
                         <td className="px-4 py-3">
                           <input
+                            ref={(el) => {
+                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                              editItemRefs.current[rowIndex][1] = el;
+                            }}
                             type="number"
                             value={item.quantity}
                             onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
-                            className="w-20 px-2 py-1 border border-gray-300 rounded"
+                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 1)}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                             min="0"
                             step="0.01"
-                            aria-label="Item quantity"
+                            aria-label={`Item ${rowIndex + 1} quantity`}
                           />
                         </td>
                         <td className="px-4 py-3">
                           <input
+                            ref={(el) => {
+                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                              editItemRefs.current[rowIndex][2] = el;
+                            }}
                             type="number"
                             value={item.unitPrice}
                             onChange={(e) => updateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                            className="w-24 px-2 py-1 border border-gray-300 rounded"
+                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 2)}
+                            className="w-24 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                             min="0"
                             step="0.01"
-                            aria-label="Unit price"
+                            aria-label={`Item ${rowIndex + 1} unit price`}
                           />
                         </td>
                         <td className="px-4 py-3">
                           <input
+                            ref={(el) => {
+                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                              editItemRefs.current[rowIndex][3] = el;
+                            }}
                             type="number"
                             value={item.discountAmount}
                             onChange={(e) => updateItem(item.id, 'discountAmount', parseFloat(e.target.value) || 0)}
-                            className="w-20 px-2 py-1 border border-gray-300 rounded"
+                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 3)}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                             min="0"
                             step="0.01"
-                            aria-label="Discount amount"
+                            aria-label={`Item ${rowIndex + 1} discount`}
                           />
                         </td>
                         <td className="px-4 py-3">
@@ -627,6 +832,7 @@ export default function EditQuotationPage() {
                           <button
                             onClick={() => removeItem(item.id)}
                             className="text-red-600 hover:text-red-800"
+                            title="Remove item (Ctrl+Delete)"
                           >
                             Remove
                           </button>
@@ -638,6 +844,21 @@ export default function EditQuotationPage() {
               </table>
             </div>
           )}
+
+          {/* Keyboard Shortcuts Legend */}
+          <div className="mt-3 bg-gray-50 rounded-lg px-4 py-3 border border-gray-200">
+            <div className="text-xs text-gray-500 font-medium mb-1.5">Keyboard Shortcuts</div>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">/</kbd> or <kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">F2</kbd> Focus search</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">↑</kbd><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">↓</kbd> Navigate results</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Enter</kbd> Select / Next field</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Tab</kbd> Next field</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Alt+↑↓</kbd> Navigate rows</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Ins</kbd> Add custom item</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Ctrl+Del</kbd> Remove row</span>
+              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Esc</kbd> Clear search</span>
+            </div>
+          </div>
 
           {/* Totals */}
           {items.length > 0 && (

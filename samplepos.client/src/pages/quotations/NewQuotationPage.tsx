@@ -3,7 +3,7 @@
  * Simple 3-step process: Customer → Items → Review
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -83,6 +83,12 @@ export default function NewQuotationPage() {
 
   // Pre-fetch all stock data once — filtering is instant in-memory
   const [productSearch, setProductSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const productListRef = useRef<HTMLDivElement>(null);
+  const [searchSelectedIndex, setSearchSelectedIndex] = useState(0);
+  // Refs for item row inputs: itemRefs[rowIndex][fieldIndex]
+  // fieldIndex: 0=description, 1=quantity, 2=unitPrice
+  const itemRefs = useRef<(HTMLInputElement | null)[][]>([]);
   const { data: allStockData } = useQuery({
     queryKey: ['stock-levels-cache'],
     queryFn: async () => {
@@ -218,6 +224,183 @@ export default function NewQuotationPage() {
       total: total.toNumber(),
     };
   };
+
+  // ── SAP-like Keyboard Navigation ──
+
+  // Reset search index when results change
+  useEffect(() => {
+    setSearchSelectedIndex(0);
+  }, [productsData]);
+
+  // Auto-focus search when entering Step 2
+  useEffect(() => {
+    if (step === 2) {
+      setTimeout(() => searchInputRef.current?.focus(), 100);
+    }
+  }, [step]);
+
+  // Ensure itemRefs array has correct size
+  useEffect(() => {
+    itemRefs.current = items.map((_, i) => itemRefs.current[i] || [null, null, null]);
+  }, [items]);
+
+  // Scroll a search result into view
+  const scrollSearchItemIntoView = useCallback((index: number, direction: 'up' | 'down') => {
+    setTimeout(() => {
+      const container = productListRef.current;
+      const item = container?.children[index] as HTMLElement;
+      if (item && container) {
+        const containerRect = container.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        if (direction === 'down' && itemRect.bottom > containerRect.bottom) {
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (direction === 'up' && itemRect.top < containerRect.top) {
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }, 0);
+  }, []);
+
+  // Select the highlighted product from search results
+  const selectHighlightedProduct = useCallback(() => {
+    if (!productsData || productsData.length === 0) return;
+    const clamped = Math.min(searchSelectedIndex, productsData.length - 1);
+    if (clamped < 0) return;
+    addProductToItems(productsData[clamped]);
+  }, [productsData, searchSelectedIndex]);
+
+  // Search input keyboard handler (ArrowDown/Up, Enter, Escape)
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (productSearch) {
+        setProductSearch('');
+        setSearchSelectedIndex(0);
+      }
+      return;
+    }
+
+    if (!productsData || productsData.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSearchSelectedIndex((prev) => {
+        const next = Math.min(prev + 1, productsData.length - 1);
+        scrollSearchItemIntoView(next, 'down');
+        return next;
+      });
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSearchSelectedIndex((prev) => {
+        const next = Math.max(prev - 1, 0);
+        scrollSearchItemIntoView(next, 'up');
+        return next;
+      });
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      selectHighlightedProduct();
+      return;
+    }
+  }, [productsData, productSearch, scrollSearchItemIntoView, selectHighlightedProduct]);
+
+  // Item row keyboard handler — Enter moves to next row, Ctrl+Delete removes row
+  const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Move to next field in same row, or first field of next row
+      if (fieldIndex < 2) {
+        // Move to next field in same row
+        itemRefs.current[rowIndex]?.[fieldIndex + 1]?.focus();
+      } else {
+        // On last field — move to next row's first editable field, or focus search to add more
+        if (rowIndex < items.length - 1) {
+          itemRefs.current[rowIndex + 1]?.[0]?.focus();
+        } else {
+          // Last row, last field — focus search to encourage adding more items
+          searchInputRef.current?.focus();
+        }
+      }
+      return;
+    }
+
+    // Ctrl+Delete or Ctrl+Backspace to remove current row
+    if ((e.key === 'Delete' || e.key === 'Backspace') && e.ctrlKey) {
+      e.preventDefault();
+      removeItem(rowIndex);
+      // Focus previous row or search
+      setTimeout(() => {
+        if (rowIndex > 0) {
+          itemRefs.current[rowIndex - 1]?.[0]?.focus();
+        } else {
+          searchInputRef.current?.focus();
+        }
+      }, 50);
+      return;
+    }
+
+    // Arrow Down: move to same field in next row
+    if (e.key === 'ArrowDown' && e.altKey) {
+      e.preventDefault();
+      if (rowIndex < items.length - 1) {
+        itemRefs.current[rowIndex + 1]?.[fieldIndex]?.focus();
+      }
+      return;
+    }
+
+    // Arrow Up: move to same field in previous row
+    if (e.key === 'ArrowUp' && e.altKey) {
+      e.preventDefault();
+      if (rowIndex > 0) {
+        itemRefs.current[rowIndex - 1]?.[fieldIndex]?.focus();
+      }
+      return;
+    }
+  }, [items.length]);
+
+  // Global keyboard shortcuts for Step 2
+  useEffect(() => {
+    if (step !== 2) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
+
+      // "/" to focus search (only when not in an input)
+      if (e.key === '/' && !isInput) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      // F2 to focus search (works even from inputs)
+      if (e.key === 'F2') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      // Insert to add custom item
+      if (e.key === 'Insert') {
+        e.preventDefault();
+        addItem();
+        // Focus the new item's description after React renders
+        setTimeout(() => {
+          const lastRow = itemRefs.current[items.length];
+          lastRow?.[0]?.focus();
+        }, 100);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [step, items.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -480,26 +663,36 @@ export default function NewQuotationPage() {
               </h2>
 
               {/* Product Search */}
-              <div className="mb-6">
+              <div className="mb-6 relative">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   🔍 Search Products
+                  <span className="ml-2 text-xs text-gray-400 font-normal">
+                    Press <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">/</kbd> or
+                    <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono ml-1">F2</kbd> to focus
+                  </span>
                 </label>
                 <input
+                  ref={searchInputRef}
                   type="text"
                   value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
+                  onChange={(e) => { setProductSearch(e.target.value); setSearchSelectedIndex(0); }}
+                  onKeyDown={handleSearchKeyDown}
                   className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-                  placeholder="Search by name, SKU, or barcode..."
+                  placeholder="Search by name, SKU, or barcode... (↑↓ navigate, Enter select)"
                   autoFocus
                 />
                 {productSearch && productsData && productsData.length > 0 && (
-                  <div className="mt-2 border border-gray-300 rounded-lg max-h-64 overflow-y-auto bg-white shadow-lg">
-                    {productsData.slice(0, 10).map((product: StockLevelItem) => (
+                  <div ref={productListRef} className="mt-2 border border-gray-300 rounded-lg max-h-64 overflow-y-auto bg-white shadow-lg absolute z-20 left-0 right-0">
+                    {productsData.slice(0, 10).map((product: StockLevelItem, idx: number) => (
                       <button
                         key={product.product_id}
                         type="button"
                         onClick={() => addProductToItems(product)}
-                        className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b last:border-b-0 transition-colors"
+                        className={`w-full px-4 py-3 text-left border-b last:border-b-0 transition-colors ${
+                          idx === searchSelectedIndex
+                            ? 'bg-blue-100 border-l-4 border-l-blue-600'
+                            : 'hover:bg-blue-50'
+                        }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
@@ -515,7 +708,9 @@ export default function NewQuotationPage() {
                               </span>
                             </div>
                           </div>
-                          <span className="text-blue-600 font-medium">+ Add</span>
+                          <span className="text-blue-600 font-medium text-xs">
+                            {idx === searchSelectedIndex ? '↵ Enter' : '+ Add'}
+                          </span>
                         </div>
                       </button>
                     ))}
@@ -529,10 +724,17 @@ export default function NewQuotationPage() {
                   <h3 className="text-lg font-semibold text-gray-900">Items ({items.length})</h3>
                   <button
                     type="button"
-                    onClick={addItem}
+                    onClick={() => {
+                      addItem();
+                      setTimeout(() => {
+                        const lastRow = itemRefs.current[items.length];
+                        lastRow?.[0]?.focus();
+                      }, 100);
+                    }}
                     className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium"
                   >
                     + Add Custom Item
+                    <kbd className="ml-2 px-1.5 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono text-gray-500">Ins</kbd>
                   </button>
                 </div>
 
@@ -547,17 +749,25 @@ export default function NewQuotationPage() {
                 ) : (
                   <div className="space-y-3">
                     {items.map((item, index) => (
-                      <div key={item.id} className="border border-gray-300 rounded-lg p-4 hover:border-blue-300">
+                      <div key={item.id} className="border border-gray-300 rounded-lg p-4 hover:border-blue-300 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-200">
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                          {/* Description */}
+                          {/* Row Number */}
                           <div className="sm:col-span-5">
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              <span className="inline-flex items-center justify-center w-5 h-5 bg-gray-200 text-gray-600 rounded text-[10px] font-bold mr-1">{index + 1}</span>
+                              Description
+                            </label>
                             <input
+                              ref={(el) => {
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null];
+                                itemRefs.current[index][0] = el;
+                              }}
                               type="text"
                               value={item.description}
                               onChange={(e) => updateItem(index, 'description', e.target.value)}
+                              onKeyDown={(e) => handleItemKeyDown(e, index, 0)}
                               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                              aria-label="Item description"
+                              aria-label={`Item ${index + 1} description`}
                               required
                             />
                           </div>
@@ -566,13 +776,18 @@ export default function NewQuotationPage() {
                           <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Quantity</label>
                             <input
+                              ref={(el) => {
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null];
+                                itemRefs.current[index][1] = el;
+                              }}
                               type="number"
                               value={item.quantity}
                               onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                              onKeyDown={(e) => handleItemKeyDown(e, index, 1)}
                               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                               min="0"
                               step="0.01"
-                              aria-label="Item quantity"
+                              aria-label={`Item ${index + 1} quantity`}
                               required
                             />
                           </div>
@@ -581,13 +796,18 @@ export default function NewQuotationPage() {
                           <div className="sm:col-span-2">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Unit Price</label>
                             <input
+                              ref={(el) => {
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null];
+                                itemRefs.current[index][2] = el;
+                              }}
                               type="number"
                               value={item.unitPrice}
                               onChange={(e) => updateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
+                              onKeyDown={(e) => handleItemKeyDown(e, index, 2)}
                               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                               min="0"
                               step="0.01"
-                              aria-label="Item unit price"
+                              aria-label={`Item ${index + 1} unit price`}
                               required
                             />
                           </div>
@@ -606,7 +826,7 @@ export default function NewQuotationPage() {
                               type="button"
                               onClick={() => removeItem(index)}
                               className="w-full px-2 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium"
-                              title="Remove item"
+                              title="Remove item (Ctrl+Delete)"
                             >
                               🗑️
                             </button>
@@ -673,6 +893,21 @@ export default function NewQuotationPage() {
                   </div>
                 </div>
               )}
+
+              {/* Keyboard Shortcuts Legend */}
+              <div className="bg-gray-50 rounded-lg px-4 py-3 mb-6 border border-gray-200">
+                <div className="text-xs text-gray-500 font-medium mb-1.5">Keyboard Shortcuts</div>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">/</kbd> or <kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">F2</kbd> Focus search</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">↑</kbd><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">↓</kbd> Navigate results</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Enter</kbd> Select / Next field</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Tab</kbd> Next field</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Alt+↑↓</kbd> Navigate rows</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Ins</kbd> Add custom item</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Ctrl+Del</kbd> Remove row</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Esc</kbd> Clear search</span>
+                </div>
+              </div>
 
               {/* Step 2 Actions */}
               <div className="flex justify-between pt-6 border-t">
