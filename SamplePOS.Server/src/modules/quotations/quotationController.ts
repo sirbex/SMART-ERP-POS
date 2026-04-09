@@ -124,6 +124,11 @@ export const quotationController = {
    */
   listQuotations: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
+
+    // Auto-expire overdue quotations on list load (SAP batch job equivalent)
+    // Fire-and-forget — don't block the list response
+    quotationService.expireOverdueQuotations(pool).catch(() => { /* non-critical */ });
+
     const filters = QuotationListFiltersSchema.parse({
       page: parseInt(req.query.page as string) || 1,
       limit: parseInt(req.query.limit as string) || 20,
@@ -194,5 +199,42 @@ export const quotationController = {
     const { id } = UuidParamSchema.parse(req.params);
     await quotationService.deleteQuotation(pool, id);
     res.json({ success: true, message: 'Quotation deleted successfully' });
+  }),
+
+  /**
+   * PUT /api/quotations/:id/items/decisions
+   * SAP-style item-level acceptance/rejection
+   */
+  updateItemDecisions: asyncHandler(async (req: Request, res: Response) => {
+    const pool: Pool = req.pool!;
+    const { id } = UuidParamSchema.parse(req.params);
+    const ItemDecisionSchema = z.object({
+      decisions: z.array(z.object({
+        itemId: z.string().uuid(),
+        status: z.enum(['ACCEPTED', 'REJECTED']),
+        rejectionReason: z.string().optional(),
+      })).min(1, 'At least one item decision is required'),
+    });
+    const { decisions } = ItemDecisionSchema.parse(req.body);
+    const items = await quotationService.updateItemDecisions(pool, id, decisions);
+    res.json({
+      success: true,
+      data: items,
+      message: `Updated ${decisions.length} item decision(s)`,
+    });
+  }),
+
+  /**
+   * POST /api/quotations/expire
+   * Auto-expire overdue quotations (SAP batch job equivalent)
+   */
+  expireOverdue: asyncHandler(async (req: Request, res: Response) => {
+    const pool: Pool = req.pool!;
+    const count = await quotationService.expireOverdueQuotations(pool);
+    res.json({
+      success: true,
+      data: { expiredCount: count },
+      message: count > 0 ? `Expired ${count} overdue quotation(s)` : 'No overdue quotations found',
+    });
   }),
 };

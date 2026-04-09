@@ -97,6 +97,25 @@ export const quotationApi = {
   },
 
   /**
+   * Update item-level decisions (SAP-style accept/reject per line)
+   */
+  async updateItemDecisions(
+    quotationId: string,
+    decisions: Array<{ itemId: string; status: 'ACCEPTED' | 'REJECTED'; rejectionReason?: string }>
+  ): Promise<unknown[]> {
+    const response = await apiClient.put(`/quotations/${quotationId}/items/decisions`, { decisions });
+    return response.data.data;
+  },
+
+  /**
+   * Expire overdue quotations (admin trigger)
+   */
+  async expireOverdue(): Promise<{ expiredCount: number }> {
+    const response = await apiClient.post('/quotations/expire');
+    return response.data.data;
+  },
+
+  /**
    * Load quote items to POS cart (helper for frontend)
    */
   async loadQuoteToPOS(quoteNumber: string): Promise<QuotationDetail> {

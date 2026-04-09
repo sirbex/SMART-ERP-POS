@@ -55,6 +55,7 @@ export interface QuotationDbRow {
   updated_at: Date;
   version: number;
   fulfillment_mode: 'RETAIL' | 'WHOLESALE';
+  content_hash: string | null;
 }
 
 export interface QuotationItemDbRow {
@@ -79,6 +80,9 @@ export interface QuotationItemDbRow {
   unit_cost: string | null;
   cost_total: string | null;
   product_type: string;
+  item_status: 'OPEN' | 'ACCEPTED' | 'REJECTED';
+  rejection_reason: string | null;
+  delivered_quantity: string;
   created_at: Date;
 }
 
@@ -125,6 +129,7 @@ export const quotationRepository = {
       internalNotes?: string | null;
       requiresApproval?: boolean;
       fulfillmentMode?: 'RETAIL' | 'WHOLESALE';
+      contentHash?: string | null;
     }
   ): Promise<QuotationDbRow> {
     const quoteNumber = await this.generateQuoteNumber(client);
@@ -135,10 +140,10 @@ export const quotationRepository = {
         customer_email, reference, description, subtotal, discount_amount,
         tax_amount, total_amount, valid_from, valid_until, created_by_id,
         assigned_to_id, terms_and_conditions, payment_terms, delivery_terms,
-        internal_notes, requires_approval, fulfillment_mode
+        internal_notes, requires_approval, fulfillment_mode, content_hash
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
       ) RETURNING *`,
       [
         quoteNumber,
@@ -163,6 +168,7 @@ export const quotationRepository = {
         data.internalNotes || null,
         data.requiresApproval || false,
         data.fulfillmentMode || 'RETAIL',
+        data.contentHash || null,
       ]
     );
 
@@ -618,5 +624,60 @@ export const quotationRepository = {
     }
 
     return { can: true };
+  },
+
+  /**
+   * Update item-level status (ACCEPTED / REJECTED)
+   * SAP-style per-line decision
+   */
+  async updateItemStatus(
+    client: PoolClient,
+    itemId: string,
+    status: 'OPEN' | 'ACCEPTED' | 'REJECTED',
+    rejectionReason?: string
+  ): Promise<QuotationItemDbRow> {
+    const result = await client.query<QuotationItemDbRow>(
+      `UPDATE quotation_items
+       SET item_status = $1,
+           rejection_reason = $2
+       WHERE id = $3
+       RETURNING *`,
+      [status, status === 'REJECTED' ? (rejectionReason || null) : null, itemId]
+    );
+    if (result.rows.length === 0) {
+      throw new Error('Quotation item not found');
+    }
+    return result.rows[0];
+  },
+
+  /**
+   * Batch update item statuses for a quotation
+   */
+  async updateItemStatuses(
+    client: PoolClient,
+    quotationId: string,
+    decisions: Array<{ itemId: string; status: 'ACCEPTED' | 'REJECTED'; rejectionReason?: string }>
+  ): Promise<QuotationItemDbRow[]> {
+    const results: QuotationItemDbRow[] = [];
+    for (const decision of decisions) {
+      const row = await this.updateItemStatus(client, decision.itemId, decision.status, decision.rejectionReason);
+      results.push(row);
+    }
+    return results;
+  },
+
+  /**
+   * Auto-expire overdue quotations (SAP batch job equivalent)
+   * Returns count of expired quotations
+   */
+  async expireOverdueQuotations(pool: Pool): Promise<number> {
+    const result = await pool.query(
+      `UPDATE quotations
+       SET status = 'EXPIRED', updated_at = NOW()
+       WHERE valid_until < CURRENT_DATE
+         AND status NOT IN ('CONVERTED', 'CANCELLED', 'EXPIRED')
+       RETURNING id`
+    );
+    return result.rowCount || 0;
   },
 };

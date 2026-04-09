@@ -9,16 +9,22 @@
  * BR-QUOTE-004: Quote items copied exactly to sale items
  * BR-QUOTE-005: Quote total must match sale total
  * BR-QUOTE-006: Both quick and standard quotes follow same conversion rules
+ * BR-QUOTE-011: GL entries must be posted on quotation→sale conversion
+ * BR-QUOTE-012: Duplicate content hash prevents double-creation
+ * BR-QUOTE-013: Credit limit checked before credit-sale conversion
+ * BR-QUOTE-014: Item-level acceptance/rejection (SAP-style)
  */
 
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
+import crypto from 'crypto';
 import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository.js';
 import { salesService } from '../sales/salesService.js';
 import { invoiceService } from '../invoices/invoiceService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
+import * as glEntryService from '../../services/glEntryService.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -88,6 +94,9 @@ export interface QuotationItem {
   unitCost: number | null;
   costTotal: number | null;
   productType: string;
+  itemStatus: 'OPEN' | 'ACCEPTED' | 'REJECTED';
+  rejectionReason: string | null;
+  deliveredQuantity: number;
   createdAt: Date;
 }
 
@@ -166,8 +175,28 @@ function normalizeQuotationItem(row: QuotationItemDbRow): QuotationItem {
     unitCost: row.unit_cost ? parseFloat(row.unit_cost) : null,
     costTotal: row.cost_total ? parseFloat(row.cost_total) : null,
     productType: row.product_type,
+    itemStatus: row.item_status || 'OPEN',
+    rejectionReason: row.rejection_reason || null,
+    deliveredQuantity: row.delivered_quantity ? parseFloat(row.delivered_quantity) : 0,
     createdAt: row.created_at,
   };
+}
+
+/**
+ * Compute a content hash for duplicate prevention (BR-QUOTE-012).
+ * Hash is based on customer + items (product, qty, price) so
+ * resubmitting the exact same quotation is blocked.
+ */
+function computeContentHash(
+  customerId: string | null | undefined,
+  customerName: string | null | undefined,
+  items: Array<{ productId?: string | null; description: string; quantity: number; unitPrice: number }>
+): string {
+  const sortedItems = [...items]
+    .sort((a, b) => (a.description || '').localeCompare(b.description || ''))
+    .map((i) => `${i.productId || ''}|${i.description}|${i.quantity}|${i.unitPrice}`);
+  const payload = `${customerId || customerName || 'walk-in'}::${sortedItems.join(';')}`;
+  return crypto.createHash('sha256').update(payload).digest('hex').substring(0, 64);
 }
 
 // ============================================================================
@@ -260,6 +289,24 @@ export const quotationService = {
 
       const totalAmount = subtotal.plus(taxAmount);
 
+      // BR-QUOTE-012: Duplicate prevention via content hash
+      const contentHash = computeContentHash(data.customerId, data.customerName, data.items);
+
+      // Check for existing OPEN quote with same content
+      const dupCheck = await client.query(
+        `SELECT id, quote_number FROM quotations
+         WHERE content_hash = $1
+           AND status NOT IN ('CONVERTED', 'CANCELLED')
+         LIMIT 1`,
+        [contentHash]
+      );
+      if (dupCheck.rows.length > 0) {
+        throw new Error(
+          `Duplicate quotation detected. An identical quotation ${dupCheck.rows[0].quote_number} already exists. ` +
+          `Please edit the existing quotation or cancel it first.`
+        );
+      }
+
       // Create quotation
       const quotation = await quotationRepository.createQuotation(client, {
         ...data,
@@ -267,6 +314,7 @@ export const quotationService = {
         discountAmount: 0, // Global discount handled separately if needed
         taxAmount: taxAmount.toNumber(),
         totalAmount: totalAmount.toNumber(),
+        contentHash,
       });
 
       // Create items
@@ -660,6 +708,28 @@ export const quotationService = {
         );
       }
 
+      // BR-QUOTE-013: Credit limit check for credit-sale conversions
+      if (data.paymentOption === 'none') {
+        const creditCheck = await client.query(
+          `SELECT credit_limit, COALESCE(balance, 0) as current_balance
+           FROM customers WHERE id = $1`,
+          [customerId]
+        );
+        if (creditCheck.rows.length > 0) {
+          const creditLimit = new Decimal(creditCheck.rows[0].credit_limit || 0);
+          const currentBalance = new Decimal(creditCheck.rows[0].current_balance || 0);
+          const newBalance = currentBalance.plus(totalAmount);
+          if (creditLimit.greaterThan(0) && newBalance.greaterThan(creditLimit)) {
+            throw new Error(
+              `Credit limit exceeded. Limit: ${creditLimit.toFixed(2)}, ` +
+              `Current balance: ${currentBalance.toFixed(2)}, ` +
+              `Quote total: ${totalAmount}. ` +
+              `New balance would be ${newBalance.toFixed(2)}.`
+            );
+          }
+        }
+      }
+
       // Log the values being used for audit trail
       console.log('Quote to Sale conversion - verified values:', {
         quoteNumber: quotation.quote_number,
@@ -728,9 +798,41 @@ export const quotationService = {
         );
       }
 
-      // TODO: GL posting for quotation→sale conversions should use
-      // glEntryService.recordSaleToGL() — same as salesService.createSale().
-      // Currently quotation-converted sales have no GL entries.
+      // BR-QUOTE-011: GL posting for quotation→sale conversion
+      // Same journal entries as regular POS sale (revenue, COGS, tax)
+      const paymentMethod: glEntryService.SaleData['paymentMethod'] =
+        data.paymentOption === 'none' ? 'CREDIT' : (data.depositMethod || 'CASH');
+      try {
+        await glEntryService.recordSaleToGL(
+          {
+            saleId: saleRecord.id,
+            saleNumber: saleRecord.sale_number,
+            saleDate: saleRecord.sale_date || new Date().toLocaleDateString('en-CA'),
+            totalAmount,
+            costAmount: totalCost,
+            paymentMethod,
+            amountPaid: data.depositAmount || (data.paymentOption === 'full' ? totalAmount : 0),
+            taxAmount: parseFloat(quotation.tax_amount) || 0,
+            customerId: customerId || undefined,
+            saleItems: saleItems.map((item) => ({
+              productType: item.productId?.startsWith('custom_')
+                ? ('service' as const)
+                : ('inventory' as const),
+              totalPrice: item.lineTotal,
+              unitCost: item.costPrice || 0,
+              quantity: item.quantity,
+            })),
+          },
+          pool
+        );
+      } catch (glError: unknown) {
+        console.error('GL posting failed for quote→sale conversion — transaction will rollback', {
+          saleId: saleRecord.id,
+          quoteNumber: quotation.quote_number,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+        throw glError;
+      }
 
       // Document Flow: Quotation → Sale
       await documentFlowService.linkDocuments(client, 'QUOTATION', quotation.id, 'SALE', saleRecord.id, 'CREATED_FROM');
@@ -928,5 +1030,63 @@ export const quotationService = {
       quotation: normalizeQuotation(quotation),
       items: createdItems.map(normalizeQuotationItem),
     };
+  },
+
+  /**
+   * BR-QUOTE-014: Update item-level acceptance/rejection (SAP-style)
+   * Allows accepting some lines and rejecting others on a quotation.
+   */
+  async updateItemDecisions(
+    pool: Pool,
+    quotationId: string,
+    decisions: Array<{ itemId: string; status: 'ACCEPTED' | 'REJECTED'; rejectionReason?: string }>
+  ): Promise<QuotationItem[]> {
+    return UnitOfWork.run(pool, async (client) => {
+      // Verify quotation is in a valid state for edits
+      const quoteResult = await client.query(
+        'SELECT status FROM quotations WHERE id = $1',
+        [quotationId]
+      );
+      if (quoteResult.rows.length === 0) {
+        throw new Error('Quotation not found');
+      }
+      const status = quoteResult.rows[0].status;
+      if (status === 'CONVERTED' || status === 'CANCELLED') {
+        throw new Error(`Cannot modify items on a ${status} quotation`);
+      }
+
+      // Verify all items belong to this quotation
+      for (const d of decisions) {
+        const itemCheck = await client.query(
+          'SELECT id FROM quotation_items WHERE id = $1 AND quotation_id = $2',
+          [d.itemId, quotationId]
+        );
+        if (itemCheck.rows.length === 0) {
+          throw new Error(`Item ${d.itemId} does not belong to quotation ${quotationId}`);
+        }
+      }
+
+      const rows = await quotationRepository.updateItemStatuses(client, quotationId, decisions);
+
+      // Log to status history
+      const acceptCount = decisions.filter(d => d.status === 'ACCEPTED').length;
+      const rejectCount = decisions.filter(d => d.status === 'REJECTED').length;
+      await quotationRepository.updateQuotationStatus(
+        client,
+        quotationId,
+        status, // Keep same status
+        `Item decisions: ${acceptCount} accepted, ${rejectCount} rejected`
+      );
+
+      return rows.map(normalizeQuotationItem);
+    });
+  },
+
+  /**
+   * Auto-expire overdue quotations (SAP batch job equivalent).
+   * Should be called periodically (e.g., daily cron or on list load).
+   */
+  async expireOverdueQuotations(pool: Pool): Promise<number> {
+    return quotationRepository.expireOverdueQuotations(pool);
   },
 };

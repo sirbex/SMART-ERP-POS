@@ -34,6 +34,7 @@ export function normalizeStatus(dbStatus: string): QuotationStatus {
 export type QuoteType = 'quick' | 'standard';
 export type QuoteItemType = 'product' | 'service' | 'custom';
 export type FulfillmentMode = 'RETAIL' | 'WHOLESALE';
+export type QuotationItemStatus = 'OPEN' | 'ACCEPTED' | 'REJECTED';
 
 // ============================================================================
 // MAIN TYPES
@@ -102,6 +103,9 @@ export interface QuotationItem {
   unitCost: number | null;
   costTotal: number | null;
   productType: string;
+  itemStatus: QuotationItemStatus;
+  rejectionReason: string | null;
+  deliveredQuantity: number;
   createdAt: Date;
 }
 
