@@ -535,6 +535,7 @@ export const quotationRepository = {
       discountAmount: number;
       taxAmount: number;
       totalAmount: number;
+      contentHash: string | null;
     }>
   ): Promise<QuotationDbRow> {
     const fields: string[] = [];
@@ -547,7 +548,8 @@ export const quotationRepository = {
       'reference', 'description', 'validFrom', 'validUntil', 'status',
       'termsAndConditions', 'paymentTerms', 'deliveryTerms',
       'internalNotes', 'rejectionReason', 'assignedToId', 'requiresApproval',
-      'subtotal', 'discountAmount', 'taxAmount', 'totalAmount'
+      'subtotal', 'discountAmount', 'taxAmount', 'totalAmount',
+      'contentHash'
     ];
 
     Object.entries(data).forEach(([key, value]) => {

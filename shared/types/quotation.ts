@@ -16,7 +16,7 @@
 // ============================================================================
 
 /** Active statuses a user can work with */
-export type QuotationStatus = 'OPEN' | 'CONVERTED' | 'CANCELLED';
+export type QuotationStatus = 'OPEN' | 'EXPIRED' | 'CONVERTED' | 'CANCELLED';
 
 /** Legacy statuses still in DB — treated as OPEN */
 export type QuotationDbStatus =
@@ -28,7 +28,8 @@ export type QuotationDbStatus =
 export function normalizeStatus(dbStatus: string): QuotationStatus {
   if (dbStatus === 'CONVERTED') return 'CONVERTED';
   if (dbStatus === 'CANCELLED') return 'CANCELLED';
-  return 'OPEN'; // DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED → OPEN
+  if (dbStatus === 'EXPIRED') return 'EXPIRED';
+  return 'OPEN'; // DRAFT, SENT, ACCEPTED, REJECTED → OPEN
 }
 
 export type QuoteType = 'quick' | 'standard';
@@ -210,6 +211,7 @@ export const getQuoteStatusBadge = (status: QuotationStatus | QuotationDbStatus 
   const normalized = normalizeStatus(status);
   switch (normalized) {
     case 'OPEN': return { label: 'Open', color: 'blue' };
+    case 'EXPIRED': return { label: 'Expired', color: 'red' };
     case 'CONVERTED': return { label: 'Converted', color: 'green' };
     case 'CANCELLED': return { label: 'Cancelled', color: 'gray' };
   }
@@ -220,7 +222,7 @@ export const isQuoteEditable = (status: QuotationStatus | QuotationDbStatus | st
 
 /**
  * Conversion rules (SIMPLIFIED):
- * - OPEN (any non-converted, non-cancelled status)
+ * - OPEN (any non-converted, non-cancelled, non-expired status)
  * - Not already linked to a sale
  * - Not expired
  */
@@ -229,7 +231,8 @@ export const isQuoteConvertible = (
   validUntil: string,
   convertedToSaleId?: string | null
 ): boolean => {
-  if (normalizeStatus(status) !== 'OPEN') return false;
+  const normalized = normalizeStatus(status);
+  if (normalized !== 'OPEN') return false;
   if (convertedToSaleId) return false;
   const today = new Date().toISOString().split('T')[0];
   return validUntil >= today;

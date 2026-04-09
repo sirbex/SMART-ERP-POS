@@ -397,7 +397,7 @@ export const quotationService = {
     await UnitOfWork.run(pool, async (client) => {
       // Get existing quotation
       const existing = await client.query(
-        'SELECT status FROM quotations WHERE id = $1',
+        'SELECT status, customer_id, customer_name FROM quotations WHERE id = $1',
         [id]
       );
 
@@ -463,11 +463,25 @@ export const quotationService = {
 
         const totalAmount = subtotal.plus(taxAmount);
 
-        // Update quotation totals
+        // Update quotation totals + recompute content hash (BR-QUOTE-012)
+        const customerId = (data as Record<string, unknown>).customerId as string | undefined || existing.rows[0].customer_id;
+        const customerName = (data as Record<string, unknown>).customerName as string | undefined || existing.rows[0].customer_name;
+        const newContentHash = computeContentHash(
+          customerId,
+          customerName,
+          itemsWithTotals.map(i => ({
+            productId: i.productId,
+            description: i.description,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+          }))
+        );
+
         await quotationRepository.updateQuotation(client, id, {
           subtotal: subtotal.toNumber(),
           taxAmount: taxAmount.toNumber(),
           totalAmount: totalAmount.toNumber(),
+          contentHash: newContentHash,
         });
 
         // Insert new items
@@ -762,7 +776,7 @@ export const quotationService = {
           new Decimal(totalAmount).minus(totalCost).toNumber(),
           totalAmount > 0 ? new Decimal(totalAmount).minus(totalCost).dividedBy(totalAmount).toNumber() : 0,
           data.paymentOption === 'none' ? 'CREDIT' : (data.depositMethod || 'CASH'),
-          data.depositAmount || 0,
+          data.paymentOption === 'full' ? totalAmount : (data.depositAmount || 0),
           0,
           data.cashierId,
           quotation.id,

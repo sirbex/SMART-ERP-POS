@@ -38,7 +38,7 @@ export default function QuotationsPage() {
 
   // Filter out CONVERTED/CANCELLED if ACTIVE filter selected
   const filteredQuotations = statusFilter === 'ACTIVE'
-    ? (data?.quotations || []).filter(q => q.status !== 'CONVERTED' && q.status !== 'CANCELLED')
+    ? (data?.quotations || []).filter(q => q.status !== 'CONVERTED' && q.status !== 'CANCELLED' && q.status !== 'EXPIRED')
     : (data?.quotations || []);
 
   const quotations = filteredQuotations.sort((a, b) => {
@@ -61,6 +61,7 @@ export default function QuotationsPage() {
     total: allQuotations.length,
     open: openQuotations.length,
     converted: allQuotations.filter(q => normalizeStatus(q.status) === 'CONVERTED').length,
+    expired: allQuotations.filter(q => normalizeStatus(q.status) === 'EXPIRED').length,
     cancelled: allQuotations.filter(q => normalizeStatus(q.status) === 'CANCELLED').length,
     totalValue: allQuotations.reduce((sum, q) => new Decimal(sum).plus(q.totalAmount).toNumber(), 0),
     openValue: openQuotations.reduce((sum, q) => new Decimal(sum).plus(q.totalAmount).toNumber(), 0),
@@ -96,7 +97,7 @@ export default function QuotationsPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
             <p className="text-sm text-gray-600">Open</p>
             <p className="text-2xl font-bold text-gray-900">{stats.open}</p>
@@ -105,6 +106,10 @@ export default function QuotationsPage() {
           <div className="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
             <p className="text-sm text-gray-600">Converted</p>
             <p className="text-2xl font-bold text-gray-900">{stats.converted}</p>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
+            <p className="text-sm text-gray-600">Expired</p>
+            <p className="text-2xl font-bold text-gray-900">{stats.expired}</p>
           </div>
           <div className="bg-white rounded-lg shadow p-4 border-l-4 border-gray-500">
             <p className="text-sm text-gray-600">Cancelled</p>
@@ -153,6 +158,7 @@ export default function QuotationsPage() {
                   >
                     <option value="ACTIVE">Open (Pending Action)</option>
                     <option value="ALL">All Status</option>
+                    <option value="EXPIRED">Expired</option>
                     <option value="CONVERTED">Converted</option>
                     <option value="CANCELLED">Cancelled</option>
                   </select>
