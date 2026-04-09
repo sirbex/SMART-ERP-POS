@@ -37,6 +37,7 @@ export interface CreditDebitNoteRecord {
     status: string;
     reason: string | null;
     notes: string | null;
+    returnsGoods: boolean;
     createdAt: string;
     updatedAt: string;
 }
@@ -208,6 +209,7 @@ export const creditDebitNoteRepository = {
             totalAmount: number;
             reason: string;
             notes: string | null;
+            returnsGoods?: boolean;
         }
     ): Promise<CreditDebitNoteRecord> {
         const uuidResult = await client.query('SELECT gen_random_uuid() as id');
@@ -220,13 +222,13 @@ export const creditDebitNoteRepository = {
         "InvoiceDate", "DueDate", "Subtotal", "TaxAmount", "TotalAmount",
         "AmountPaid", "OutstandingBalance", "Status", "PaymentTerms",
         "Notes", "CreatedAt", "UpdatedAt",
-        document_type, reference_invoice_id, reason
+        document_type, reference_invoice_id, reason, returns_goods
       ) VALUES (
         $1, $2, $3, $4, NULL,
         $5, $5, $6, $7, $8,
         0, $8, 'Draft', 0,
         $9, $10, $10,
-        $11, $12, $13
+        $11, $12, $13, $14
       ) RETURNING *`,
             [
                 noteId, data.invoiceNumber, data.customerId, data.customerName,
@@ -234,6 +236,7 @@ export const creditDebitNoteRepository = {
                 data.subtotal, data.taxAmount, data.totalAmount,
                 data.notes || null, now,
                 data.documentType, data.referenceInvoiceId, data.reason,
+                data.returnsGoods ?? false,
             ]
         );
 
@@ -252,6 +255,7 @@ export const creditDebitNoteRepository = {
             status: r.Status,
             reason: r.reason,
             notes: r.Notes,
+            returnsGoods: r.returns_goods ?? false,
             createdAt: r.CreatedAt,
             updatedAt: r.UpdatedAt,
         };
@@ -330,6 +334,7 @@ export const creditDebitNoteRepository = {
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
             status: r.Status, reason: r.reason, notes: r.Notes,
+            returnsGoods: r.returns_goods ?? false,
             createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
         };
     },
@@ -449,6 +454,7 @@ export const creditDebitNoteRepository = {
                 status: r.Status as string,
                 reason: r.reason as string | null,
                 notes: r.Notes as string | null,
+                returnsGoods: (r.returns_goods as boolean) ?? false,
                 createdAt: r.CreatedAt as string,
                 updatedAt: r.UpdatedAt as string,
             })),
@@ -475,6 +481,7 @@ export const creditDebitNoteRepository = {
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
             status: r.Status, reason: r.reason, notes: r.Notes,
+            returnsGoods: r.returns_goods ?? false,
             createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
         };
     },
@@ -506,6 +513,7 @@ export const creditDebitNoteRepository = {
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
             status: r.Status, reason: r.reason, notes: r.Notes,
+            returnsGoods: r.returns_goods ?? false,
             createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
         };
     },

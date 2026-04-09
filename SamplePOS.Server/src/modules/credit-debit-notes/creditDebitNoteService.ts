@@ -29,6 +29,7 @@ import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import { SYSTEM_USER_ID } from '../../utils/constants.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { recordMovement } from '../stock-movements/stockMovementRepository.js';
 import type {
     CreateCustomerCreditNote,
     CreateCustomerDebitNote,
@@ -103,6 +104,7 @@ export const creditDebitNoteService = {
                 totalAmount: total,
                 reason: input.reason,
                 notes: input.notes || null,
+                returnsGoods: input.returnsGoods ?? false,
             });
 
             // 5. Create line items
@@ -222,7 +224,7 @@ export const creditDebitNoteService = {
             };
 
             if (note.documentType === 'CREDIT_NOTE') {
-                await recordCustomerCreditNoteToGL(glData, pool);
+                await recordCustomerCreditNoteToGL(glData, pool, client);
                 // 3. Reduce outstanding balance on original invoice
                 await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
                     client,
@@ -230,8 +232,116 @@ export const creditDebitNoteService = {
                     note.totalAmount,
                     'CREDIT',
                 );
+
+                // 4. SAP: Inventory return — if returnsGoods flag is set, increase stock
+                //    Creates RETURN stock movements, updates batches + product_inventory,
+                //    and posts additional GL: DR Inventory (1300) / CR COGS (5000)
+                if (note.returnsGoods) {
+                    const lineItems = await creditDebitNoteRepository.getNoteLineItems(client, note.id);
+                    const productLines = lineItems.filter(li => li.productId && li.productId !== '');
+                    let inventoryCostTotal = Money.zero();
+
+                    for (const line of productLines) {
+                        // Find the most recent active batch for this product (FEFO order)
+                        const batchRes = await client.query(
+                            `SELECT id, cost_price, remaining_quantity
+                             FROM inventory_batches
+                             WHERE product_id = $1 AND status = 'ACTIVE'
+                             ORDER BY expiry_date ASC NULLS LAST, received_date DESC
+                             LIMIT 1`,
+                            [line.productId]
+                        );
+                        const batch = batchRes.rows[0] as { id: string; cost_price: string; remaining_quantity: string } | undefined;
+                        const unitCost = batch
+                            ? Money.toNumber(Money.parseDb(batch.cost_price))
+                            : line.unitPrice; // fallback: use note line price as cost proxy
+
+                        // Create RETURN stock movement (positive qty = goods IN)
+                        await recordMovement(client, {
+                            productId: line.productId,
+                            batchId: batch?.id ?? null,
+                            movementType: 'RETURN',
+                            quantity: line.quantity,
+                            unitCost,
+                            referenceType: 'CREDIT_NOTE',
+                            referenceId: note.id,
+                            notes: `Customer return: ${note.invoiceNumber} — ${line.productName} × ${line.quantity}`,
+                        });
+
+                        // Increase batch remaining_quantity (if batch found)
+                        if (batch) {
+                            await client.query(
+                                `UPDATE inventory_batches
+                                 SET remaining_quantity = remaining_quantity + $1,
+                                     status = CASE WHEN remaining_quantity + $1 > 0 THEN 'ACTIVE' ELSE status END,
+                                     updated_at = CURRENT_TIMESTAMP
+                                 WHERE id = $2`,
+                                [line.quantity, batch.id]
+                            );
+                        }
+
+                        // Recalculate product_inventory.quantity_on_hand from batches
+                        await client.query(
+                            `UPDATE product_inventory
+                             SET quantity_on_hand = COALESCE(
+                               (SELECT SUM(remaining_quantity) FROM inventory_batches
+                                WHERE product_id = $1 AND status != 'EXHAUSTED'), 0
+                             ), updated_at = CURRENT_TIMESTAMP
+                             WHERE product_id = $1`,
+                            [line.productId]
+                        );
+                        // Sync products.quantity_on_hand for backward compat
+                        await client.query(
+                            `UPDATE products SET quantity_on_hand = (
+                               SELECT quantity_on_hand FROM product_inventory WHERE product_id = $1
+                             ), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                            [line.productId]
+                        );
+
+                        // Accumulate cost for inventory GL reversal
+                        inventoryCostTotal = Money.add(
+                            inventoryCostTotal,
+                            Money.multiply(Money.parseDb(line.quantity), Money.parseDb(unitCost)),
+                        );
+                    }
+
+                    // Post inventory reversal GL: DR Inventory (1300) / CR COGS (5000)
+                    const costAmount = Money.toNumber(inventoryCostTotal);
+                    if (costAmount > 0) {
+                        await AccountingCore.createJournalEntry({
+                            entryDate: glData.noteDate,
+                            description: `Inventory return — customer CN ${note.invoiceNumber}`,
+                            referenceType: 'CREDIT_NOTE_RETURN',
+                            referenceId: note.id,
+                            referenceNumber: note.invoiceNumber,
+                            lines: [
+                                {
+                                    accountCode: '1300',
+                                    description: `Inventory increase — goods returned: ${note.invoiceNumber}`,
+                                    debitAmount: costAmount,
+                                    creditAmount: 0,
+                                },
+                                {
+                                    accountCode: '5000',
+                                    description: `COGS reversal — customer return: ${note.invoiceNumber}`,
+                                    debitAmount: 0,
+                                    creditAmount: costAmount,
+                                },
+                            ],
+                            userId: SYSTEM_USER_ID,
+                            idempotencyKey: `CREDIT_NOTE_RETURN-${note.id}`,
+                        }, undefined, client);
+                    }
+
+                    logger.info('Customer return inventory processed', {
+                        noteId: note.id,
+                        noteNumber: note.invoiceNumber,
+                        linesReturned: productLines.length,
+                        inventoryCost: costAmount,
+                    });
+                }
             } else {
-                await recordCustomerDebitNoteToGL(glData, pool);
+                await recordCustomerDebitNoteToGL(glData, pool, client);
                 // Debit note increases the AR on the customer — also adjust original invoice
                 await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
                     client,

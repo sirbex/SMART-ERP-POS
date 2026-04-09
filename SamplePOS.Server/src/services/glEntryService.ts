@@ -1950,6 +1950,7 @@ export interface CreditNoteGLData {
 export async function recordCustomerCreditNoteToGL(
   data: CreditNoteGLData,
   pool: pg.Pool = globalPool,
+  txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
     const lines: JournalLine[] = [];
@@ -1990,7 +1991,7 @@ export async function recordCustomerCreditNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CREDIT_NOTE-${data.noteId}`,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded customer credit note to GL', {
       noteId: data.noteId,
@@ -2014,6 +2015,7 @@ export async function recordCustomerCreditNoteToGL(
 export async function recordCustomerDebitNoteToGL(
   data: CreditNoteGLData,
   pool: pg.Pool = globalPool,
+  txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
     const lines: JournalLine[] = [];
@@ -2054,7 +2056,7 @@ export async function recordCustomerDebitNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DEBIT_NOTE-${data.noteId}`,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded customer debit note to GL', {
       noteId: data.noteId,
@@ -2078,6 +2080,7 @@ export async function recordCustomerDebitNoteToGL(
 export async function recordSupplierCreditNoteToGL(
   data: CreditNoteGLData,
   pool: pg.Pool = globalPool,
+  txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
     const lines: JournalLine[] = [];
@@ -2118,7 +2121,7 @@ export async function recordSupplierCreditNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_CREDIT_NOTE-${data.noteId}`,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded supplier credit note to GL', {
       noteId: data.noteId,
@@ -2147,6 +2150,7 @@ export async function recordSupplierCreditNoteToGL(
 export async function recordSupplierDebitNoteToGL(
   data: CreditNoteGLData,
   pool: pg.Pool = globalPool,
+  txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
     const lines: JournalLine[] = [];
@@ -2187,7 +2191,7 @@ export async function recordSupplierDebitNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_DEBIT_NOTE-${data.noteId}`,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded supplier debit note to GL', {
       noteId: data.noteId,

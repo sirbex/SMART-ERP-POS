@@ -25,6 +25,7 @@ export const CreateCustomerCreditNoteSchema = z.object({
     invoiceId: z.string().uuid('Invoice ID must be a valid UUID'),
     reason: z.string().min(1, 'Reason is required').max(500),
     noteType: z.enum(['FULL', 'PARTIAL', 'PRICE_CORRECTION']),
+    returnsGoods: z.boolean().optional().default(false),
     issueDate: z.string().optional(),
     lines: z.array(NoteLineItemSchema).min(1, 'At least one line item is required'),
     notes: z.string().max(1000).optional(),

@@ -560,6 +560,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
     const [invoiceId, setInvoiceId] = useState('');
     const [reason, setReason] = useState('');
     const [cnType, setCnType] = useState<'FULL' | 'PARTIAL' | 'PRICE_CORRECTION'>('PARTIAL');
+    const [returnsGoods, setReturnsGoods] = useState(false);
     const [additionalNotes, setAdditionalNotes] = useState('');
     const [lines, setLines] = useState<CreateNoteLineInput[]>([
         { productName: '', quantity: 1, unitPrice: 0, taxRate: 0 },
@@ -614,6 +615,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
                     invoiceId,
                     reason,
                     noteType: cnType,
+                    returnsGoods,
                     lines: lines.map(l => ({ ...l, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate) })),
                     notes: additionalNotes || undefined,
                 };
@@ -643,6 +645,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
     const resetForm = () => {
         setInvoiceId('');
         setReason('');
+        setReturnsGoods(false);
         setAdditionalNotes('');
         setLines([{ productName: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
         setInvoiceSearch('');
@@ -739,6 +742,20 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
                                 </SelectContent>
                             </Select>
                         </div>
+                    )}
+
+                    {/* Returns Goods checkbox (credit note only, not for price corrections) */}
+                    {noteType === 'CREDIT_NOTE' && cnType !== 'PRICE_CORRECTION' && (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={returnsGoods}
+                                onChange={e => setReturnsGoods(e.target.checked)}
+                                className="h-4 w-4 rounded border-gray-300"
+                            />
+                            <span className="text-sm font-medium">Customer returns goods</span>
+                            <span className="text-xs text-gray-500">(increases inventory, reverses COGS)</span>
+                        </label>
                     )}
 
                     {/* Line Items */}

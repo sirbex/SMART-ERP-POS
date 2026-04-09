@@ -86,6 +86,7 @@ export interface CreateCreditNoteRequest {
     invoiceId: string;
     reason: string;
     noteType: 'FULL' | 'PARTIAL' | 'PRICE_CORRECTION';
+    returnsGoods?: boolean;
     issueDate?: string;
     lines: CreateNoteLineInput[];
     notes?: string;

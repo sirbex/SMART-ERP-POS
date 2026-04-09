@@ -24,13 +24,16 @@ export type EntityType =
   | 'GOODS_RECEIPT'
   | 'RETURN_GRN'
   | 'SUPPLIER_INVOICE'
-  | 'SUPPLIER_PAYMENT';
+  | 'SUPPLIER_PAYMENT'
+  | 'SUPPLIER_CREDIT_NOTE'
+  | 'SUPPLIER_DEBIT_NOTE';
 
 export type RelationType =
   | 'CREATED_FROM'
   | 'FULFILLS'
   | 'ADJUSTS'
   | 'RETURNS'
+  | 'CREATES'
   | 'PAYS';
 
 export interface DocumentFlowRow {

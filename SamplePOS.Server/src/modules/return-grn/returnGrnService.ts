@@ -24,6 +24,10 @@ import * as glEntryService from '../../services/glEntryService.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import {
+    supplierCreditDebitNoteRepository,
+} from '../credit-debit-notes/creditDebitNoteRepository.js';
+import { recordSupplierCreditNoteToGL } from '../../services/glEntryService.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -274,27 +278,26 @@ export const returnGrnService = {
             }, new Decimal(0));
             const returnTotalNum = Money.toNumber(returnTotal);
 
-            if (returnTotalNum > 0) {
-                // Look up supplier name for GL description
-                // Handles both PO-linked and manual GRs (fallback through inventory_batches → PO → supplier)
-                const grResult = await client.query(
-                    `SELECT COALESCE(po.supplier_id, po2.supplier_id) AS supplier_id,
-                            COALESCE(s."CompanyName", s2."CompanyName") AS supplier_name,
-                            g.receipt_number AS gr_number
-                     FROM goods_receipts g
-                     LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
-                     LEFT JOIN suppliers s ON s."Id" = po.supplier_id
-                     LEFT JOIN inventory_batches ib_any ON ib_any.goods_receipt_id = g.id
-                     LEFT JOIN purchase_orders po2 ON po2.id = ib_any.purchase_order_id
-                     LEFT JOIN suppliers s2 ON s2."Id" = po2.supplier_id
-                     WHERE g.id = $1
-                     LIMIT 1`,
-                    [rgrn.grnId]
-                );
-                const supplierName = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
-                const supplierId = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
-                const originalGrNumber = grResult.rows[0]?.gr_number;
+            // Look up supplier name for GL description (hoisted for use in both step 5 and step 6)
+            const grResult = await client.query(
+                `SELECT COALESCE(po.supplier_id, po2.supplier_id) AS supplier_id,
+                        COALESCE(s."CompanyName", s2."CompanyName") AS supplier_name,
+                        g.receipt_number AS gr_number
+                 FROM goods_receipts g
+                 LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
+                 LEFT JOIN suppliers s ON s."Id" = po.supplier_id
+                 LEFT JOIN inventory_batches ib_any ON ib_any.goods_receipt_id = g.id
+                 LEFT JOIN purchase_orders po2 ON po2.id = ib_any.purchase_order_id
+                 LEFT JOIN suppliers s2 ON s2."Id" = po2.supplier_id
+                 WHERE g.id = $1
+                 LIMIT 1`,
+                [rgrn.grnId]
+            );
+            const supplierName = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
+            const supplierId = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
+            const originalGrNumber = grResult.rows[0]?.gr_number;
 
+            if (returnTotalNum > 0) {
                 await glEntryService.recordReturnGrnToGL(
                     {
                         returnGrnId: rgrnId,
@@ -317,6 +320,106 @@ export const returnGrnService = {
                 lineCount: lines.length,
                 glAmount: returnTotalNum,
             });
+
+            // 6. SAP MIRO: Auto-create & auto-post Supplier Credit Note
+            //    This gives accounting full product-level visibility of the return.
+            //    Linked via document flow: RETURN_GRN → SUPPLIER_CREDIT_NOTE
+            let supplierCreditNoteId: string | undefined;
+            try {
+                // Find the supplier invoice linked to the original GR (via document_flow or PO)
+                const siResult = await client.query(
+                    `SELECT si."Id" FROM supplier_invoices si
+                     WHERE si."PurchaseOrderId" = (
+                       SELECT purchase_order_id FROM goods_receipts WHERE id = $1
+                     )
+                     AND si.document_type = 'SUPPLIER_INVOICE'
+                     ORDER BY si."CreatedAt" DESC LIMIT 1`,
+                    [rgrn.grnId]
+                );
+                const referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
+
+                if (referenceInvoiceId) {
+                    // Generate SCN number
+                    const scnNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
+
+                    // Create the SCN header (DRAFT → will auto-post below)
+                    const scn = await supplierCreditDebitNoteRepository.createSupplierNote(client, {
+                        invoiceNumber: scnNumber,
+                        documentType: 'SUPPLIER_CREDIT_NOTE',
+                        referenceInvoiceId,
+                        supplierId: supplierId || rgrn.supplierId,
+                        issueDate: new Date().toLocaleDateString('en-CA'),
+                        subtotal: returnTotalNum,
+                        taxAmount: 0,
+                        totalAmount: returnTotalNum,
+                        reason: `Auto-generated from ${posted.returnGrnNumber}: ${rgrn.reason}`,
+                        notes: `Source: ${posted.returnGrnNumber} against ${originalGrNumber || rgrn.grnId}`,
+                        returnGrnId: rgrnId,
+                    });
+
+                    // Create line items with product detail
+                    await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
+                        client,
+                        scn.id,
+                        lines.map((line, idx) => ({
+                            productId: line.productId,
+                            productName: line.productName || `Product ${idx + 1}`,
+                            description: `Returned: ${line.baseQuantity} × ${line.unitCost} (${rgrn.reason})`,
+                            quantity: line.baseQuantity,
+                            unitCost: line.unitCost,
+                            taxRate: 0,
+                        })),
+                    );
+
+                    // Auto-post the SCN
+                    const postedScn = await supplierCreditDebitNoteRepository.postSupplierNote(client, scn.id);
+                    if (postedScn) {
+                        supplierCreditNoteId = postedScn.id;
+
+                        // Post SCN GL: DR AP (2100) / CR Purchase Returns (5010)
+                        await recordSupplierCreditNoteToGL({
+                            noteId: postedScn.id,
+                            noteNumber: postedScn.invoiceNumber,
+                            noteDate: new Date().toLocaleDateString('en-CA'),
+                            subtotal: returnTotalNum,
+                            taxAmount: 0,
+                            totalAmount: returnTotalNum,
+                            supplierId: supplierId || rgrn.supplierId,
+                            supplierName,
+                        }, undefined, client);
+
+                        // Reduce outstanding on original supplier invoice
+                        await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+                            client,
+                            referenceInvoiceId,
+                            returnTotalNum,
+                            'CREDIT',
+                        );
+
+                        // Document Flow: RETURN_GRN → SUPPLIER_CREDIT_NOTE
+                        await documentFlowService.linkDocuments(
+                            client, 'RETURN_GRN', rgrnId,
+                            'SUPPLIER_CREDIT_NOTE', postedScn.id, 'CREATES',
+                        );
+
+                        logger.info('Auto-created Supplier Credit Note from RGRN', {
+                            scnId: postedScn.id,
+                            scnNumber: postedScn.invoiceNumber,
+                            rgrnNumber: posted.returnGrnNumber,
+                            amount: returnTotalNum,
+                        });
+                    }
+                } else {
+                    logger.warn('No supplier invoice found for GR — Supplier Credit Note not auto-created', {
+                        rgrnId, grnId: rgrn.grnId,
+                    });
+                }
+            } catch (scnError: unknown) {
+                // Non-fatal: RGRN + GL are already committed, SCN is a convenience document
+                logger.error('Failed to auto-create Supplier Credit Note (non-fatal)', {
+                    rgrnId, error: scnError instanceof Error ? scnError.message : String(scnError),
+                });
+            }
 
             return posted;
         });
