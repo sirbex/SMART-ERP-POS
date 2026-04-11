@@ -50,6 +50,7 @@ export interface VoidSaleItemRecord {
   unitCost: string;
   totalPrice: string;
   profit: string;
+  discountAmount: string;
   uomId: string | null;
   productName: string;
   sku: string;
@@ -1094,6 +1095,7 @@ export const salesRepository = {
         si.unit_cost as "unitCost",
         si.total_price as "totalPrice",
         si.profit,
+        si.discount_amount as "discountAmount",
         si.uom_id as "uomId",
         p.name as "productName",
         p.sku

@@ -252,7 +252,7 @@ export const salesService = {
       } catch (sessionError: unknown) {
         if (sessionError instanceof BusinessError) throw sessionError;
         // Rollback savepoint to keep the TX usable even if the query failed
-        await client.query('ROLLBACK TO SAVEPOINT session_policy_check').catch(() => {});
+        await client.query('ROLLBACK TO SAVEPOINT session_policy_check').catch(() => { });
         // Non-blocking: settings fetch failure should not block sales
         logger.warn('Session policy check failed, proceeding without enforcement', {
           error: sessionError instanceof Error ? sessionError.message : String(sessionError),
@@ -2511,18 +2511,20 @@ export const salesService = {
           const totalPrice = Money.parseDb(item.totalPrice);
           const costOfGoods = unitCost.times(qty);
 
+          const itemDiscount = Money.parseDb(item.discountAmount ?? 0);
           const existing = voidPdsMap.get(item.productId);
           if (existing) {
             existing.unitsSold = existing.unitsSold.plus(qty);
             existing.revenue = existing.revenue.plus(totalPrice);
             existing.costOfGoods = existing.costOfGoods.plus(costOfGoods);
+            existing.discountGiven = existing.discountGiven.plus(itemDiscount);
           } else {
             voidPdsMap.set(item.productId, {
               category: voidCategoryMap.get(item.productId) || 'Uncategorized',
               unitsSold: qty,
               revenue: totalPrice,
               costOfGoods,
-              discountGiven: new Decimal(0),
+              discountGiven: itemDiscount,
             });
           }
 
