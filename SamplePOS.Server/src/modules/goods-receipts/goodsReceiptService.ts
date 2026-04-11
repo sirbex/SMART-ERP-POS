@@ -344,6 +344,12 @@ export const goodsReceiptService = {
 
       const { gr, items } = grResult;
 
+      // TIMESTAMPTZ columns return Date objects from pg driver — coerce to YYYY-MM-DD string
+      // The custom type parser only handles DATE (OID 1082), not TIMESTAMPTZ
+      if (gr.receivedDate && typeof gr.receivedDate !== 'string') {
+        gr.receivedDate = (gr.receivedDate as unknown as Date).toLocaleDateString('en-CA');
+      }
+
       // Lock the GR row to prevent double-finalization by concurrent requests
       await client.query(`SELECT id FROM goods_receipts WHERE id = $1 FOR UPDATE`, [id]);
 
