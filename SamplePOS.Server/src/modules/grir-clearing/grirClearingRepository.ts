@@ -108,7 +108,7 @@ export async function getOpenItems(
     offset?: number;
   } = {}
 ): Promise<{ rows: GrirOpenItemRow[]; total: number }> {
-  const conditions: string[] = [`gr.status = 'FINALIZED'`];
+  const conditions: string[] = [`gr.status = 'COMPLETED'`];
   const params: unknown[] = [];
   let idx = 0;
 
@@ -280,7 +280,7 @@ export async function searchClearingItems(
          ON si."PurchaseOrderId" = po.id
          AND si."Status" NOT IN ('CANCELLED')
          AND (si.deleted_at IS NULL)
-       WHERE gr.status = 'FINALIZED'
+       WHERE gr.status = 'COMPLETED'
          AND (
            po.order_number ILIKE $1
            OR gr.receipt_number ILIKE $1
@@ -315,7 +315,7 @@ export async function getMatchCandidates(
   options: { supplierId?: string; tolerancePercent?: number } = {}
 ): Promise<GrirMatchCandidateRow[]> {
   const conditions: string[] = [
-    `gr.status = 'FINALIZED'`,
+    `gr.status = 'COMPLETED'`,
     `si."Status" NOT IN ('CANCELLED')`,
     `si.deleted_at IS NULL`,
   ];
@@ -494,7 +494,7 @@ export async function getBalanceSummary(
          ON si."PurchaseOrderId" = po.id
          AND si."Status" NOT IN ('CANCELLED')
          AND (si.deleted_at IS NULL)
-       WHERE gr.status = 'FINALIZED'
+       WHERE gr.status = 'COMPLETED'
        GROUP BY gr.id, gr.purchase_order_id, gr.received_date,
                 si."Id", si."TotalAmount"
      )

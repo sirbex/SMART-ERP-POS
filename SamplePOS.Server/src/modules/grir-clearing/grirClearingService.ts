@@ -11,7 +11,7 @@
  *
  * 3-Way Match Flow:
  *   1. PO created  → No GL impact
- *   2. Goods Receipt finalized → DR Inventory (1300), CR GR/IR Clearing (2150)
+ *   2. Goods Receipt completed → DR Inventory (1300), CR GR/IR Clearing (2150)
  *   3. Supplier Invoice posted  → DR GR/IR Clearing (2150), CR AP (2100)
  *   4. Clear: amounts match → GR/IR Clearing (2150) nets to zero
  *   5. Variance → Posted to Price Variance (5020) per SAP standard
@@ -294,7 +294,7 @@ export async function clearItem(
     );
     if (grResult.rows.length === 0) throw new NotFoundError('Goods receipt not found');
     const gr = grResult.rows[0];
-    if (gr.status !== 'FINALIZED') throw new ValidationError('Goods receipt must be FINALIZED to clear');
+    if (gr.status !== 'COMPLETED') throw new ValidationError('Goods receipt must be COMPLETED to clear');
 
     // 2. Verify invoice exists and get amount
     const invResult = await client.query(
@@ -427,7 +427,7 @@ export async function clearItem(
  * SAP F.13 logic: exact amount matches first, then within tolerance.
  *
  * Rules:
- *   1. Only match FINALIZED GRs with non-CANCELLED invoices.
+ *   1. Only match COMPLETED GRs with non-CANCELLED invoices.
  *   2. Must share the same PO reference.
  *   3. Skip pairs already cleared.
  *   4. Post GL for each match (including variance).
