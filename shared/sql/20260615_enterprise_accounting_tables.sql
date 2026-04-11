@@ -108,7 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_tax_exempt_active ON tax_exemptions(is_active) WH
 -- 4. SEED: Retained Earnings Account (3100)
 -- ============================================================================
 
-INSERT INTO accounts ("Id", "AccountCode", "AccountName", "AccountType", "NormalBalance", "IsActive", "CreatedAt")
+INSERT INTO accounts ("Id", "AccountCode", "AccountName", "AccountType", "NormalBalance", "IsActive", "CreatedAt", "UpdatedAt", "Level", "CurrentBalance", "IsPostingAccount", "AllowAutomatedPosting")
 VALUES (
   gen_random_uuid(),
   '3100',
@@ -116,7 +116,7 @@ VALUES (
   'EQUITY',
   'CREDIT',
   true,
-  NOW()
+  NOW(), NOW(), 1, 0, true, true
 ) ON CONFLICT ("AccountCode") DO NOTHING;
 
 -- ============================================================================
@@ -135,7 +135,7 @@ ON CONFLICT (code) DO NOTHING;
 -- 6. SEED: Tax Receivable Account (1250) if missing
 -- ============================================================================
 
-INSERT INTO accounts ("Id", "AccountCode", "AccountName", "AccountType", "NormalBalance", "IsActive", "CreatedAt")
+INSERT INTO accounts ("Id", "AccountCode", "AccountName", "AccountType", "NormalBalance", "IsActive", "CreatedAt", "UpdatedAt", "Level", "CurrentBalance", "IsPostingAccount", "AllowAutomatedPosting")
 VALUES (
   gen_random_uuid(),
   '1250',
@@ -143,7 +143,7 @@ VALUES (
   'ASSET',
   'DEBIT',
   true,
-  NOW()
+  NOW(), NOW(), 1, 0, true, true
 ) ON CONFLICT ("AccountCode") DO NOTHING;
 
 COMMIT;
