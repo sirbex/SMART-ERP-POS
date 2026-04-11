@@ -1,7 +1,7 @@
 /**
  * Hook to check if the current user has a specific backend permission.
  *
- * Uses the session-embedded permissions from AuthContext (SAP/Odoo pattern).
+ * Uses the session-embedded permissions from AuthContext (ERP pattern).
  * Falls back to the legacy hardcoded role-permission mapping only if
  * the session permissions are empty (not yet loaded).
  *

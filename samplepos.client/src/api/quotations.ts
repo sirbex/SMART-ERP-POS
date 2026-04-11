@@ -97,7 +97,7 @@ export const quotationApi = {
   },
 
   /**
-   * Update item-level decisions (SAP-style accept/reject per line)
+   * Update item-level decisions (accept/reject per line)
    */
   async updateItemDecisions(
     quotationId: string,

@@ -405,9 +405,9 @@ export const hrService = {
             // 1. Create employee record
             const row = await employeeRepository.create(client, data);
 
-            // 2. Auto-create sub-ledger account under 2150 (Salaries Payable)
-            const nextSeq = await subledgerRepository.getNextSequence(client, '2150');
-            const accountCode = `2150-${String(nextSeq).padStart(3, '0')}`;
+            // 2. Auto-create sub-ledger account under 2400 (Salaries Payable)
+            const nextSeq = await subledgerRepository.getNextSequence(client, '2400');
+            const accountCode = `2400-${String(nextSeq).padStart(3, '0')}`;
             const accountName = `Salaries Payable - ${data.firstName} ${data.lastName}`;
 
             const account = await subledgerRepository.createAccount(client, {
@@ -415,7 +415,7 @@ export const hrService = {
                 name: accountName,
                 type: 'LIABILITY',
                 normalBalance: 'CREDIT',
-                parentCode: '2150',
+                parentCode: '2400',
                 level: 2,
             });
 
@@ -822,8 +822,8 @@ export const hrService = {
         const emp = await employeeRepository.getById(client, employeeId);
         if (!emp || emp.LedgerAccountId) return;
 
-        const nextSeq = await subledgerRepository.getNextSequence(client, '2150');
-        const accountCode = `2150-${String(nextSeq).padStart(3, '0')}`;
+        const nextSeq = await subledgerRepository.getNextSequence(client, '2400');
+        const accountCode = `2400-${String(nextSeq).padStart(3, '0')}`;
         const accountName = `Salaries Payable - ${firstName} ${lastName}`;
 
         const account = await subledgerRepository.createAccount(client, {
@@ -831,7 +831,7 @@ export const hrService = {
             name: accountName,
             type: 'LIABILITY',
             normalBalance: 'CREDIT',
-            parentCode: '2150',
+            parentCode: '2400',
             level: 2,
         });
 

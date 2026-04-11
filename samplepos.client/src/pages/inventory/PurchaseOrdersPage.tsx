@@ -60,7 +60,7 @@ interface POLineItem {
   quantity: string;
   unitCost: string;
   baseCost: string; // Base unit cost — needed for UOM cost recalculation
-  // SAP ME21N pattern: selected ordering UoM
+  // Selected ordering UoM
   selectedUomId?: string | null;
   selectedUomName?: string;
   conversionFactor?: string;
@@ -143,7 +143,7 @@ interface POItemRow {
   notes?: string;
 }
 
-// Spreadsheet-style Line Item Row with Tab/Enter navigation (SAP ME21N pattern)
+// Spreadsheet-style Line Item Row with Tab/Enter navigation
 function LineItemRow({
   item,
   index,
@@ -201,7 +201,7 @@ function LineItemRow({
     }
   };
 
-  // SAP pattern: show base unit equivalent below the UOM selector
+  // Show base unit equivalent below the UOM selector
   const factor = parseFloat(item.conversionFactor || '1');
   const showConversion = factor > 1;
 
@@ -239,7 +239,7 @@ function LineItemRow({
           disabled={disabled}
         />
       </td>
-      {/* SAP ME21N: Order Unit selector */}
+      {/* Order Unit selector */}
       <td className="px-2 py-2">
         <div className="flex flex-col gap-0.5">
           <UomSelector
@@ -443,7 +443,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     );
   }, []);
 
-  // SAP ME21N: UOM change updates cost and tracks conversion factor
+  // UOM change updates cost and tracks conversion factor
   const handleUomChange = useCallback((id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => {
     setLineItems((prev) =>
       prev.map((item) =>
@@ -747,7 +747,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   );
 }
 
-// ── Edit PO Modal (SAP ME22N pattern) ──
+// ── Edit PO Modal ──
 interface EditPOModalProps {
   po: PORow;
   onClose: () => void;
@@ -763,7 +763,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     return po.items.map((item: POItemRow) => {
       const cost = String(item.unit_price || item.unitCost || 0);
       const factor = Number(item.conversion_factor || item.conversionFactor || 1);
-      // SAP pattern: derive base cost from product_cost_price (from product_valuation),
+      // Derive base cost from product_cost_price (from product_valuation),
       // or fall back to dividing the displayed cost by the conversion factor.
       const productBaseCost = Number(item.product_cost_price || item.productCostPrice || 0);
       const derivedBaseCost = productBaseCost > 0
@@ -872,7 +872,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     setLineItems((prev) => prev.map((item) => item.id === id ? { ...item, [field]: value } : item));
   }, []);
 
-  // SAP ME22N: UOM change updates cost and tracks conversion factor
+  // UOM change updates cost and tracks conversion factor
   const handleUomChange = useCallback((id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => {
     setLineItems((prev) =>
       prev.map((item) =>
@@ -961,7 +961,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       />
 
       <form onSubmit={handleSubmit}>
-        {/* Header — SAP ME22N: Vendor is read-only, only items and delivery are editable */}
+        {/* Header — Vendor is read-only, only items and delivery are editable */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -1218,7 +1218,7 @@ export default function PurchaseOrdersPage() {
     }
   };
 
-  // Handle edit draft PO (SAP ME22N pattern) — loads full PO with items
+  // Handle edit draft PO — loads full PO with items
   const handleEditPO = async (po: PORow) => {
     try {
       const response = await api.purchaseOrders.getById(po.id);
@@ -1869,7 +1869,7 @@ export default function PurchaseOrdersPage() {
         />
       )}
 
-      {/* Edit PO Modal (SAP ME22N pattern) */}
+      {/* Edit PO Modal */}
       {editingPO && (
         <EditPOModal
           po={editingPO}

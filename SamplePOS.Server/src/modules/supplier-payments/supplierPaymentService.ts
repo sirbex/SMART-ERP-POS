@@ -308,6 +308,9 @@ export async function createSupplierPayment(
         return receiptData;
     });
 
+    // WHT (Withholding Tax) is available via the standalone WHT module API when needed.
+    // Odoo-style: simple direct payment without automatic WHT deduction.
+
     // ============================================================
     // GL POSTING: Record supplier payment to ledger
     // DR Accounts Payable (2100)  /  CR Cash or Bank

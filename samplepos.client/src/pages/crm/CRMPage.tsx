@@ -5,7 +5,7 @@
  *   - Pipeline kanban / Leads table (list views)
  *   - Click an opportunity card => OpportunityWorkspace (single-screen deal view)
  *
- * Workspace layout (SAP / Odoo pattern):
+ * Workspace layout (ERP pattern):
  *   Header bar: title, stage badge, value, probability, deadline, assigned, actions
  *   Left 40%:  Activity timeline (heartbeat of the deal)
  *   Right 60%: Opportunity details card
@@ -539,8 +539,8 @@ export default function CRMPage() {
                             key={v}
                             onClick={() => setView(v)}
                             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === v
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
                                 }`}
                         >
                             {v === 'pipeline' ? 'Pipeline' : 'Leads'}
@@ -556,7 +556,7 @@ export default function CRMPage() {
 }
 
 // ============================================================================
-// OPPORTUNITY WORKSPACE — Single-screen deal view (SAP/Odoo style)
+// OPPORTUNITY WORKSPACE — Single-screen deal view
 // ============================================================================
 
 function OpportunityWorkspace({
@@ -769,8 +769,8 @@ function OpportunityWorkspace({
                                                     })
                                                 }
                                                 className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 text-xs ${act.completed
-                                                        ? 'bg-green-500 border-green-500 text-white'
-                                                        : 'border-gray-300 hover:border-blue-500'
+                                                    ? 'bg-green-500 border-green-500 text-white'
+                                                    : 'border-gray-300 hover:border-blue-500'
                                                     }`}
                                             >
                                                 {act.completed && '\u2713'}

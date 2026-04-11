@@ -14,7 +14,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  /** Pre-loaded permission keys (SAP/Odoo pattern: session-embedded, no async race) */
+  /** Pre-loaded permission keys (session-embedded, no async race) */
   permissions: Set<string>;
   /** Force re-fetch permissions (e.g. after role change) */
   refreshPermissions: () => Promise<void>;
@@ -83,7 +83,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     // Initialize authentication state from localStorage
-    // SAP/Odoo pattern: load user + permissions BEFORE rendering routes
+    // ERP pattern: load user + permissions BEFORE rendering routes
     const initAuth = async () => {
       try {
         const token = localStorage.getItem('auth_token');
@@ -154,7 +154,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     localStorage.setItem('user', JSON.stringify(userData));
 
-    // SAP/Odoo pattern: fetch permissions BEFORE marking authenticated
+    // ERP pattern: fetch permissions BEFORE marking authenticated
     // This prevents the race where routes render with empty permissions
     const perms = await fetchPermissionKeys();
     if (perms.length > 0) {

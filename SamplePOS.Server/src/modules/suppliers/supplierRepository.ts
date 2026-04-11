@@ -332,6 +332,13 @@ export async function recalculateOutstandingBalance(
          AND gr.status = 'COMPLETED'
          AND (gri.is_bonus = false OR gri.is_bonus IS NULL)
      ),
+     return_total AS (
+       SELECT COALESCE(SUM(rl.line_total), 0) AS total
+       FROM return_grn_lines rl
+       JOIN return_grn rg ON rg.id = rl.rgrn_id
+       WHERE rg.supplier_id = $1
+         AND rg.status = 'POSTED'
+     ),
      payment_total AS (
        SELECT COALESCE(SUM("Amount"), 0) AS total
        FROM supplier_payments
@@ -339,7 +346,9 @@ export async function recalculateOutstandingBalance(
          AND "Status" = 'COMPLETED'
      )
      UPDATE suppliers
-     SET "OutstandingBalance" = (SELECT total FROM gr_total) - (SELECT total FROM payment_total),
+     SET "OutstandingBalance" = (SELECT total FROM gr_total)
+                              - (SELECT total FROM return_total)
+                              - (SELECT total FROM payment_total),
          "UpdatedAt" = NOW()
      WHERE "Id" = $1
      RETURNING "OutstandingBalance" as "outstandingBalance"`,

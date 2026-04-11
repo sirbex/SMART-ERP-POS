@@ -225,7 +225,7 @@ export default function NewQuotationPage() {
     };
   };
 
-  // ── SAP-like Keyboard Navigation ──
+  // ── Keyboard Navigation ──
 
   // Reset search index when results change
   useEffect(() => {
@@ -520,8 +520,8 @@ export default function NewQuotationPage() {
                     type="button"
                     onClick={() => setFulfillmentMode('RETAIL')}
                     className={`flex-1 py-3 px-4 rounded-lg border-2 font-semibold transition-colors ${fulfillmentMode === 'RETAIL'
-                        ? 'border-blue-600 bg-blue-50 text-blue-700'
-                        : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
+                      ? 'border-blue-600 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
                       }`}
                   >
                     🛒 Retail
@@ -531,8 +531,8 @@ export default function NewQuotationPage() {
                     type="button"
                     onClick={() => setFulfillmentMode('WHOLESALE')}
                     className={`flex-1 py-3 px-4 rounded-lg border-2 font-semibold transition-colors ${fulfillmentMode === 'WHOLESALE'
-                        ? 'border-orange-600 bg-orange-50 text-orange-700'
-                        : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
+                      ? 'border-orange-600 bg-orange-50 text-orange-700'
+                      : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400'
                       }`}
                   >
                     🏭 Wholesale
@@ -688,11 +688,10 @@ export default function NewQuotationPage() {
                         key={product.product_id}
                         type="button"
                         onClick={() => addProductToItems(product)}
-                        className={`w-full px-4 py-3 text-left border-b last:border-b-0 transition-colors ${
-                          idx === searchSelectedIndex
-                            ? 'bg-blue-100 border-l-4 border-l-blue-600'
-                            : 'hover:bg-blue-50'
-                        }`}
+                        className={`w-full px-4 py-3 text-left border-b last:border-b-0 transition-colors ${idx === searchSelectedIndex
+                          ? 'bg-blue-100 border-l-4 border-l-blue-600'
+                          : 'hover:bg-blue-50'
+                          }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>

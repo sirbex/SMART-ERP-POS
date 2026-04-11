@@ -139,7 +139,7 @@ export function useDeletePurchaseOrder() {
 }
 
 /**
- * Update draft purchase order (SAP ME22N pattern)
+ * Update draft purchase order
  */
 export function useUpdateDraftPO() {
   const queryClient = useQueryClient();

@@ -270,7 +270,7 @@ export default function EditQuotationPage() {
 
   const totals = calculateTotals();
 
-  // ── SAP-like Keyboard Navigation ──
+  // ── Keyboard Navigation ──
 
   // Reset search index when results change
   useEffect(() => {
@@ -684,11 +684,10 @@ export default function EditQuotationPage() {
                   <button
                     key={product.product_id}
                     onClick={() => addProductAsItem(product)}
-                    className={`w-full px-4 py-2 text-left border-b border-gray-100 last:border-b-0 transition-colors ${
-                      idx === searchSelectedIndex
-                        ? 'bg-blue-100 border-l-4 border-l-blue-600'
-                        : 'hover:bg-gray-50'
-                    }`}
+                    className={`w-full px-4 py-2 text-left border-b border-gray-100 last:border-b-0 transition-colors ${idx === searchSelectedIndex
+                      ? 'bg-blue-100 border-l-4 border-l-blue-600'
+                      : 'hover:bg-gray-50'
+                      }`}
                   >
                     <div className="font-medium text-gray-900">{product.product_name}</div>
                     <div className="text-sm text-gray-500">

@@ -19,6 +19,7 @@ import * as glEntryService from '../../services/glEntryService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
+import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 
 // Payment segment type (local definition)
 interface PaymentSegment {
@@ -256,6 +257,27 @@ export const paymentsService = {
         notes: input.notes || `Payment via ${input.paymentMethod}`,
         processedBy: input.processedBy || null,
       });
+
+      // ============================================================
+      // STATE TABLE: Update customer_balances (payment reduces balance)
+      // SAVEPOINT: prevents PG aborted-transaction if this fails
+      // ============================================================
+      try {
+        await client.query('SAVEPOINT payment_state_tables');
+        await stateTablesRepo.upsertCustomerBalance(client, {
+          customerId: input.customerId,
+          invoicedAmount: 0,
+          paidAmount: input.amount,
+          paymentDate: new Date().toLocaleDateString('en-CA'),
+        });
+      } catch (stateError: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT payment_state_tables');
+        logger.error('Customer balance state table update failed — will be healed by reconciliation', {
+          customerId: input.customerId,
+          amount: input.amount,
+          error: stateError instanceof Error ? stateError.message : String(stateError),
+        });
+      }
 
       return {
         newBalance: Money.toNumber(Money.max(0, newBalance)),

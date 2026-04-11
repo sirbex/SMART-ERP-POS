@@ -1,5 +1,5 @@
 /**
- * DocumentFlowModal — SAP-style Document Flow / Odoo Smart Buttons
+ * DocumentFlowModal — Document Flow / Smart Buttons
  *
  * Displays the full chain of linked documents for any entity.
  * Each node is clickable and navigates to the document.

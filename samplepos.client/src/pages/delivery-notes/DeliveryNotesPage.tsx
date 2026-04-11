@@ -18,7 +18,6 @@ import type {
   DeliveryNoteListItem,
   DeliveryNoteStatus,
   CreateDeliveryNoteLine,
-  PickListData,
 } from '../../api/deliveryNotes';
 import type { Quotation, QuotationItem } from '@shared/types/quotation';
 
@@ -61,7 +60,7 @@ export default function DeliveryNotesPage() {
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900">Wholesale Delivery Notes</h1>
           <p className="text-gray-600 mt-1">
-            SAP-style flow: Create DN → Pick Confirm → Post Goods Issue (PGI) → Invoice
+            Create DN → Pick Confirm → Post Goods Issue (PGI) → Invoice
           </p>
         </div>
 
@@ -784,7 +783,7 @@ function DeliveryNoteDetail({
           )}
         </div>
 
-        {/* SAP Flow Progress Bar */}
+        {/* Flow Progress Bar */}
         <div className="mb-6 bg-gray-50 rounded-lg p-4">
           <div className="flex items-center justify-between">
             {[
@@ -795,11 +794,10 @@ function DeliveryNoteDetail({
             ].map((step, i) => (
               <div key={step.label} className="flex items-center flex-1">
                 <div className="flex flex-col items-center">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                    step.done
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-300 text-gray-600'
-                  }`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${step.done
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gray-300 text-gray-600'
+                    }`}>
                     {step.done ? '✓' : i + 1}
                   </div>
                   <span className={`text-xs mt-1 font-medium ${step.done ? 'text-green-700' : 'text-gray-500'}`}>
@@ -885,7 +883,7 @@ function DeliveryNoteDetail({
             </button>
           )}
 
-          {/* DRAFT → Pick Confirm (SAP step 1) */}
+          {/* DRAFT → Pick Confirm (step 1) */}
           {dn.status === 'DRAFT' && (
             <>
               <button
@@ -924,7 +922,7 @@ function DeliveryNoteDetail({
             </>
           )}
 
-          {/* PICKED → Post Goods Issue (SAP step 2) */}
+          {/* PICKED → Post Goods Issue (step 2) */}
           {dn.status === 'PICKED' && (
             <button
               onClick={() => {
@@ -939,7 +937,7 @@ function DeliveryNoteDetail({
             </button>
           )}
 
-          {/* POSTED → Create Invoice (SAP billing step) */}
+          {/* POSTED → Create Invoice (billing step) */}
           {dn.status === 'POSTED' && !dn.invoiceId && (
             <button
               onClick={() => {

@@ -31,6 +31,7 @@ import {
   type ProductBatchRow,
   type ProductUomRow,
 } from '../../db/batchFetch.js';
+import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -184,6 +185,9 @@ export const salesService = {
       // Uses cashRegisterRepository.getSessionById (single source of truth).
       let validatedSessionId: string | null = null;
       try {
+        // Use SAVEPOINT so a missing column/table doesn't abort the whole TX
+        await client.query('SAVEPOINT session_policy_check');
+
         // Read policy inside the transaction (same client) for serialisation safety
         const policyRow = await client.query(
           `SELECT pos_session_policy FROM system_settings LIMIT 1`
@@ -243,8 +247,12 @@ export const salesService = {
           // Policy is DISABLED but session was provided — still link it
           validatedSessionId = input.cashRegisterSessionId;
         }
+
+        await client.query('RELEASE SAVEPOINT session_policy_check');
       } catch (sessionError: unknown) {
         if (sessionError instanceof BusinessError) throw sessionError;
+        // Rollback savepoint to keep the TX usable even if the query failed
+        await client.query('ROLLBACK TO SAVEPOINT session_policy_check').catch(() => {});
         // Non-blocking: settings fetch failure should not block sales
         logger.warn('Session policy check failed, proceeding without enforcement', {
           error: sessionError instanceof Error ? sessionError.message : String(sessionError),
@@ -1597,8 +1605,10 @@ export const salesService = {
       // ============================================================
       // SAP GLT0-EQUIVALENT: Atomically update daily summary rollup
       // Must happen INSIDE the transaction so totals stay in sync
+      // SAVEPOINT: prevents PG aborted-transaction if this fails
       // ============================================================
       try {
+        await client.query('SAVEPOINT daily_summary');
         const summaryDate = sale.saleDate || new Date().toLocaleDateString('en-CA');
         const isCredit = sale.paymentMethod === 'CREDIT';
         // pg returns NUMERIC as strings — must convert for numeric comparison
@@ -1616,11 +1626,102 @@ export const salesService = {
           isPartial
         );
       } catch (summaryError: unknown) {
-        // Non-blocking: summary drift can be healed by reconciliation
-        logger.warn('Daily summary rollup update failed — will be healed by reconciliation', {
+        await client.query('ROLLBACK TO SAVEPOINT daily_summary');
+        logger.error('Daily summary rollup update failed — will be healed by reconciliation', {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+        });
+      }
+
+      // ============================================================
+      // STATE TABLES: Product daily summary + Inventory balances
+      // Atomically maintained inside posting transaction (SAP pattern)
+      // Batch UPSERTs: 1 query per table instead of N per item (100M-scale)
+      // SAVEPOINT: prevents PG aborted-transaction if this fails
+      // ============================================================
+      try {
+        await client.query('SAVEPOINT state_tables');
+        const stateDate = sale.saleDate || new Date().toLocaleDateString('en-CA');
+
+        // Batch-fetch categories for all non-custom products
+        const productIdsForCategory = itemsWithCosts
+          .filter((it) => it.productId && !it.productId.startsWith('custom_'))
+          .map((it) => it.productId!);
+
+        const categoryMap = new Map<string, string>();
+        if (productIdsForCategory.length > 0) {
+          const catResult = await client.query(
+            `SELECT id, COALESCE(NULLIF(TRIM(category), ''), 'Uncategorized') as category
+             FROM products WHERE id = ANY($1)`,
+            [[...new Set(productIdsForCategory)]]
+          );
+          for (const row of catResult.rows) {
+            categoryMap.set(row.id, row.category);
+          }
+        }
+
+        // Pre-aggregate by productId to avoid ON CONFLICT self-collision
+        const pdsSummaryMap = new Map<string, { category: string; unitsSold: Decimal; revenue: Decimal; costOfGoods: Decimal; discountGiven: Decimal }>();
+        const invSummaryMap = new Map<string, Decimal>();
+
+        for (const item of itemsWithCosts) {
+          if (!item.productId || item.productId.startsWith('custom_')) continue;
+
+          const existing = pdsSummaryMap.get(item.productId);
+          const costOfGoods = new Decimal(item.costPrice || 0).times(item.quantity);
+          if (existing) {
+            existing.unitsSold = existing.unitsSold.plus(item.quantity);
+            existing.revenue = existing.revenue.plus(item.lineTotal);
+            existing.costOfGoods = existing.costOfGoods.plus(costOfGoods);
+            existing.discountGiven = existing.discountGiven.plus(item.discountAmount || 0);
+          } else {
+            pdsSummaryMap.set(item.productId, {
+              category: categoryMap.get(item.productId) || 'Uncategorized',
+              unitsSold: new Decimal(item.quantity),
+              revenue: new Decimal(item.lineTotal),
+              costOfGoods,
+              discountGiven: new Decimal(item.discountAmount || 0),
+            });
+          }
+
+          const invExisting = invSummaryMap.get(item.productId);
+          invSummaryMap.set(item.productId, (invExisting || new Decimal(0)).plus(item.quantity));
+        }
+
+        // 1 query: batch product daily summary
+        const pdsItems = Array.from(pdsSummaryMap.entries()).map(([productId, agg]) => ({
+          productId,
+          category: agg.category,
+          unitsSold: agg.unitsSold.toNumber(),
+          revenue: agg.revenue.toNumber(),
+          costOfGoods: agg.costOfGoods.toNumber(),
+          discountGiven: agg.discountGiven.toNumber(),
+        }));
+        await stateTablesRepo.batchUpsertProductDailySummary(client, stateDate, pdsItems);
+
+        // 1 query: batch inventory balances
+        const invItems = Array.from(invSummaryMap.entries()).map(([productId, qty]) => ({
+          productId,
+          quantity: qty.toNumber(),
+        }));
+        await stateTablesRepo.batchUpsertInventoryBalance(client, invItems, 'SOLD', stateDate);
+
+        // Customer balances for credit sales
+        if (sale.paymentMethod === 'CREDIT' && sale.customerId) {
+          await stateTablesRepo.upsertCustomerBalance(client, {
+            customerId: sale.customerId,
+            invoicedAmount: Money.toNumber(finalTotalAmount),
+            paidAmount: sale.amountPaid ?? 0,
+            invoiceDate: stateDate,
+          });
+        }
+      } catch (stateError: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT state_tables');
+        logger.error('State table update failed — will be healed by reconciliation', {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          error: stateError instanceof Error ? stateError.message : String(stateError),
         });
       }
 
@@ -2344,8 +2445,10 @@ export const salesService = {
       // ============================================================
       // SAP GLT0-EQUIVALENT: Atomically decrement daily summary rollup
       // Must happen INSIDE the transaction so totals stay in sync
+      // SAVEPOINT: prevents PG aborted-transaction if this fails
       // ============================================================
       try {
+        await client.query('SAVEPOINT void_daily_summary');
         const voidSaleDate = sale.sale_date instanceof Date
           ? sale.sale_date.toISOString().slice(0, 10)
           : String(sale.sale_date).slice(0, 10);
@@ -2364,10 +2467,102 @@ export const salesService = {
           isPartial
         );
       } catch (summaryError: unknown) {
-        logger.warn('Daily summary rollup decrement failed — will be healed by reconciliation', {
+        await client.query('ROLLBACK TO SAVEPOINT void_daily_summary');
+        logger.error('Daily summary rollup decrement failed — will be healed by reconciliation', {
           saleId,
           saleNumber: sale.sale_number,
           error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+        });
+      }
+
+      // ============================================================
+      // STATE TABLES: Reverse product daily summary + Inventory
+      // Batch UPSERTs: 1 query per table instead of N per item (100M-scale)
+      // SAVEPOINT: prevents PG aborted-transaction if this fails
+      // ============================================================
+      try {
+        await client.query('SAVEPOINT void_state_tables');
+        const voidDateStr = sale.sale_date instanceof Date
+          ? sale.sale_date.toISOString().slice(0, 10)
+          : String(sale.sale_date).slice(0, 10);
+
+        // Batch-fetch categories
+        const voidProductIds = saleItems.map((it: { productId: string }) => it.productId).filter(Boolean);
+        const voidCategoryMap = new Map<string, string>();
+        if (voidProductIds.length > 0) {
+          const catRes = await client.query(
+            `SELECT id, COALESCE(NULLIF(TRIM(category), ''), 'Uncategorized') as category
+             FROM products WHERE id = ANY($1)`,
+            [[...new Set(voidProductIds)]]
+          );
+          for (const row of catRes.rows) {
+            voidCategoryMap.set(row.id, row.category);
+          }
+        }
+
+        // Pre-aggregate by productId
+        const voidPdsMap = new Map<string, { category: string; unitsSold: Decimal; revenue: Decimal; costOfGoods: Decimal; discountGiven: Decimal }>();
+        const voidInvMap = new Map<string, Decimal>();
+
+        for (const item of saleItems) {
+          if (!item.productId) continue;
+          const qty = Money.parseDb(item.quantity);
+          const unitCost = Money.parseDb(item.unitCost);
+          const totalPrice = Money.parseDb(item.totalPrice);
+          const costOfGoods = unitCost.times(qty);
+
+          const existing = voidPdsMap.get(item.productId);
+          if (existing) {
+            existing.unitsSold = existing.unitsSold.plus(qty);
+            existing.revenue = existing.revenue.plus(totalPrice);
+            existing.costOfGoods = existing.costOfGoods.plus(costOfGoods);
+          } else {
+            voidPdsMap.set(item.productId, {
+              category: voidCategoryMap.get(item.productId) || 'Uncategorized',
+              unitsSold: qty,
+              revenue: totalPrice,
+              costOfGoods,
+              discountGiven: new Decimal(0),
+            });
+          }
+
+          const invExisting = voidInvMap.get(item.productId);
+          voidInvMap.set(item.productId, (invExisting || new Decimal(0)).plus(qty));
+        }
+
+        // 1 query: batch decrement product daily summary
+        const voidPdsItems = Array.from(voidPdsMap.entries()).map(([productId, agg]) => ({
+          productId,
+          category: agg.category,
+          unitsSold: agg.unitsSold.toNumber(),
+          revenue: agg.revenue.toNumber(),
+          costOfGoods: agg.costOfGoods.toNumber(),
+          discountGiven: agg.discountGiven.toNumber(),
+        }));
+        await stateTablesRepo.batchDecrementProductDailySummary(client, voidDateStr, voidPdsItems);
+
+        // 1 query: batch restore inventory (void = RECEIVED)
+        const voidInvItems = Array.from(voidInvMap.entries()).map(([productId, qty]) => ({
+          productId,
+          quantity: qty.toNumber(),
+        }));
+        await stateTablesRepo.batchUpsertInventoryBalance(client, voidInvItems, 'RECEIVED', voidDateStr);
+
+        // Reverse customer balance for credit sales
+        if (sale.payment_method === 'CREDIT' && sale.customer_id) {
+          await stateTablesRepo.upsertCustomerBalance(client, {
+            customerId: sale.customer_id,
+            invoicedAmount: -Money.parseDb(sale.total_amount).toNumber(),
+            paidAmount: -Money.parseDb(sale.amount_paid ?? 0).toNumber(),
+            invoiceDate: voidDateStr,
+          });
+        }
+      } catch (stateError: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT void_state_tables');
+        logger.error('State table void reversal failed — will be healed by reconciliation', {
+          saleId,
+          saleNumber: sale.sale_number,
+          error: stateError instanceof Error ? stateError.message : String(stateError),
         });
       }
 
@@ -2827,7 +3022,9 @@ export const salesService = {
 
         // SAP GLT0: Sale status changes from COMPLETED → REFUNDED,
         // so it no longer counts in COMPLETED summaries — decrement rollup
+        // SAVEPOINT: prevents PG aborted-transaction if this fails
         try {
+          await client.query('SAVEPOINT refund_daily_summary');
           const refundSaleDate = sale.sale_date instanceof Date
             ? sale.sale_date.toISOString().slice(0, 10)
             : String(sale.sale_date).slice(0, 10);
@@ -2846,7 +3043,8 @@ export const salesService = {
             isPartial
           );
         } catch (summaryError: unknown) {
-          logger.warn('Daily summary rollup decrement failed on full refund — will be healed by reconciliation', {
+          await client.query('ROLLBACK TO SAVEPOINT refund_daily_summary');
+          logger.error('Daily summary rollup decrement failed on full refund — will be healed by reconciliation', {
             saleId,
             saleNumber: sale.sale_number,
             error: summaryError instanceof Error ? summaryError.message : String(summaryError),

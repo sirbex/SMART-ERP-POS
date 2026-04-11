@@ -28,6 +28,7 @@ import {
     supplierCreditDebitNoteRepository,
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
 import { recordSupplierCreditNoteToGL } from '../../services/glEntryService.js';
+import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -313,7 +314,12 @@ export const returnGrnService = {
                 );
             }
 
-            logger.info('Return GRN posted — stock decreased, GL posted atomically', {
+            // 5b. Recalculate supplier balance (accounts for GR, returns, payments)
+            if (supplierId) {
+                await recalcSupplierBalance(client, supplierId);
+            }
+
+            logger.info('Return GRN posted — stock decreased, GL posted, supplier balance updated', {
                 rgrnId: posted.id,
                 rgrnNumber: posted.returnGrnNumber,
                 grnId: posted.grnId,

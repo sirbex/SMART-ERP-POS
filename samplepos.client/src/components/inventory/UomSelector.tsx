@@ -1,7 +1,7 @@
 /**
  * Reusable UoM Selector Component
  *
- * Follows the Odoo/SAP pattern for purchase UOM pricing:
+ * Follows the ERP pattern for purchase UOM pricing:
  * Unit cost = baseCost × conversionFactor (or costOverride if set).
  *
  * Cost is computed LOCALLY and synchronously via computeUnitCost(),
@@ -52,7 +52,7 @@ export function UomSelector({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  // Odoo/SAP pattern: when server UOM data loads with a pre-selected UOM,
+  // ERP pattern: when server UOM data loads with a pre-selected UOM,
   // ensure the parent's cost reflects baseCost × factor, computed locally.
   useEffect(() => {
     if (uoms.length === 0 || !selectedUomId) return;

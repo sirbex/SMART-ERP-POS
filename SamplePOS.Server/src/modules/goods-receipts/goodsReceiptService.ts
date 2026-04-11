@@ -21,6 +21,7 @@ import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppl
 import { batchFetchProducts } from '../../db/batchFetch.js';
 import logger from '../../utils/logger.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 import {
   InventoryBusinessRules,
   PurchaseOrderBusinessRules,
@@ -801,6 +802,50 @@ export const goodsReceiptService = {
       }
 
       // ============================================================
+      // STATE TABLES: Inventory balances + Supplier balances
+      // Atomically maintained inside posting transaction (SAP pattern)
+      // Batch UPSERTs: 1 query per table instead of N per item (100M-scale)
+      // SAVEPOINT: prevents PG aborted-transaction if this fails
+      // ============================================================
+      try {
+        await client.query('SAVEPOINT gr_state_tables');
+        const grDateStr = gr.receivedDate || new Date().toLocaleDateString('en-CA');
+
+        // Pre-aggregate by productId for batch UPSERT
+        const invMap = new Map<string, Decimal>();
+        for (const item of items) {
+          const receivedQty = Money.parseDb(item.receivedQuantity);
+          if (receivedQty.lte(0) || !item.productId) continue;
+          const existing = invMap.get(item.productId);
+          invMap.set(item.productId, (existing || new Decimal(0)).plus(receivedQty));
+        }
+
+        // 1 query: batch inventory balances
+        const invItems = Array.from(invMap.entries()).map(([productId, qty]) => ({
+          productId,
+          quantity: qty.toNumber(),
+        }));
+        await stateTablesRepo.batchUpsertInventoryBalance(client, invItems, 'RECEIVED', grDateStr);
+
+        // Supplier balances: increase invoiced amount
+        if (supplierId && totalAmount > 0) {
+          await stateTablesRepo.upsertSupplierBalance(client, {
+            supplierId,
+            invoicedAmount: totalAmount,
+            paidAmount: 0,
+            grDate: grDateStr,
+          });
+        }
+      } catch (stateError: unknown) {
+        await client.query('ROLLBACK TO SAVEPOINT gr_state_tables');
+        logger.error('State table update failed during GR — will be healed by reconciliation', {
+          grId: id,
+          grNumber,
+          error: stateError instanceof Error ? stateError.message : String(stateError),
+        });
+      }
+
+      // ============================================================
       // GL POSTING — INSIDE transaction (SAP LUW pattern)
       // DR Inventory (1300), CR Accounts Payable (2100)
       // Atomic: if GL fails, entire GR + inventory rollback together.
@@ -825,6 +870,9 @@ export const goodsReceiptService = {
           undefined, // pool — not needed when txClient is provided
           client,    // atomic: GL commits/rolls back with inventory
         );
+
+        // GR/IR Clearing (SAP 3-way matching) is available via the standalone
+        // GR/IR Clearing module API when needed. Odoo-style: AP is hit directly above.
       }
 
       return { alerts, warnings };

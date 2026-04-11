@@ -176,7 +176,7 @@ export const DialogFooter: React.FC<{ className?: string; children: React.ReactN
 // Basic Button replacement
 export const Button: React.FC<{
   onClick?: () => void | Promise<void>;
-  variant?: 'default' | 'outline' | 'destructive';
+  variant?: 'default' | 'outline' | 'destructive' | 'ghost';
   size?: string;
   className?: string;
   disabled?: boolean;
@@ -187,7 +187,8 @@ export const Button: React.FC<{
   const variantClasses = {
     default: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
     outline: 'border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-blue-500',
-    destructive: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500'
+    destructive: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+    ghost: 'text-gray-700 hover:bg-gray-100 focus:ring-gray-500'
   };
 
   return (

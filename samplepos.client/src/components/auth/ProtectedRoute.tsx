@@ -1,5 +1,5 @@
 /**
- * RBAC-Aware Protected Route Component (SAP/Odoo Pattern)
+ * RBAC-Aware Protected Route Component
  *
  * Permissions are loaded into AuthContext at login / session restore
  * and stored in localStorage — available SYNCHRONOUSLY, no async race.

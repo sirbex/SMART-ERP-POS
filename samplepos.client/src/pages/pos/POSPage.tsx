@@ -2050,7 +2050,7 @@ export default function POSPage() {
     }
 
     // Validate payment lines
-    // SAP-style: Allow 0 payment (full credit / "pay later") when customer is selected
+    // Allow 0 payment (full credit / "pay later") when customer is selected
     // The auto-credit logic below will create a CREDIT line for the full amount
     if (paymentLines.length === 0 && !selectedCustomer) {
       isSubmittingRef.current = false;

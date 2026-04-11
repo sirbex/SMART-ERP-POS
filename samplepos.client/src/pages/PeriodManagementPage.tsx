@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calendar, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, History, X } from 'lucide-react';
+import { Calendar, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, History, X, Plus } from 'lucide-react';
 
 // Auth helper for fetch calls
 const authHeaders = (): HeadersInit => {
@@ -61,6 +61,19 @@ const fetchPeriodHistory = async (year: number, month: number) => {
     return response.json();
 };
 
+const createSpecialPeriod = async ({ year, data }: { year: number; data: { name: string; startDate: string; endDate: string } }) => {
+    const response = await fetch(`/api/erp-accounting/period-control/${year}/special`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create special period');
+    }
+    return response.json();
+};
+
 interface Period {
     id: string;
     year: number;
@@ -99,6 +112,8 @@ export default function PeriodManagementPage() {
     const [closeNotes, setCloseNotes] = useState('');
     const [reopenReason, setReopenReason] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [showSpecialForm, setShowSpecialForm] = useState(false);
+    const [specialForm, setSpecialForm] = useState({ name: '', startDate: '', endDate: '' });
 
     // Queries
     const { data: periodsData, isLoading, refetch } = useQuery({
@@ -144,6 +159,19 @@ export default function PeriodManagementPage() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['accounting-periods'] });
             setShowLockModal(null);
+            setError(null);
+        },
+        onError: (err: Error) => {
+            setError(err.message);
+        }
+    });
+
+    const specialMutation = useMutation({
+        mutationFn: createSpecialPeriod,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['accounting-periods'] });
+            setShowSpecialForm(false);
+            setSpecialForm({ name: '', startDate: '', endDate: '' });
             setError(null);
         },
         onError: (err: Error) => {
@@ -211,8 +239,70 @@ export default function PeriodManagementPage() {
                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                         <span>Refresh</span>
                     </button>
+                    <button
+                        onClick={() => setShowSpecialForm(!showSpecialForm)}
+                        className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+                    >
+                        <Plus className="h-4 w-4" />
+                        <span>Special Period</span>
+                    </button>
                 </div>
             </div>
+
+            {/* Special Period Creation Form */}
+            {showSpecialForm && (
+                <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+                    <h3 className="font-semibold text-gray-900 mb-3">Create Special Period</h3>
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            specialMutation.mutate({
+                                year: selectedYear,
+                                data: { name: specialForm.name, startDate: specialForm.startDate, endDate: specialForm.endDate }
+                            });
+                        }}
+                        className="grid grid-cols-1 md:grid-cols-3 gap-4"
+                    >
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                            <input
+                                type="text"
+                                value={specialForm.name}
+                                onChange={(e) => setSpecialForm({ ...specialForm, name: e.target.value })}
+                                required
+                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                                placeholder="e.g., Year-End Closing"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                            <input
+                                type="date"
+                                value={specialForm.startDate}
+                                onChange={(e) => setSpecialForm({ ...specialForm, startDate: e.target.value })}
+                                required
+                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                            <input
+                                type="date"
+                                value={specialForm.endDate}
+                                onChange={(e) => setSpecialForm({ ...specialForm, endDate: e.target.value })}
+                                required
+                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                            />
+                        </div>
+                        <div className="md:col-span-3 flex justify-end gap-2">
+                            <button type="button" onClick={() => setShowSpecialForm(false)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                            <button type="submit" disabled={specialMutation.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                                {specialMutation.isPending ? 'Creating...' : 'Create'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
 
             {/* Period Grid */}
             {isLoading ? (

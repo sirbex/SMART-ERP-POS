@@ -741,7 +741,7 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'VOID_SALES_REPORT',
     label: 'Void Sales Report',
-    description: 'All voided/cancelled sales with reason analysis, GL reversal amounts, and operator tracking (SAP-style)',
+    description: 'All voided/cancelled sales with reason analysis, GL reversal amounts, and operator tracking',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Sales',
@@ -750,7 +750,7 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'REFUND_REPORT',
     label: 'Refund / Returns Report',
-    description: 'Credit memo register with full/partial refund breakdown, top refunded products, and GL posting details (SAP/Odoo-style)',
+    description: 'Credit memo register with full/partial refund breakdown, top refunded products, and GL posting details',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Sales',
@@ -772,6 +772,35 @@ interface ReportDataSummary {
   totalTransactions?: number;
   creditExtended?: number;
   businessInsights?: string | string[];
+  // Cash register session summary
+  openingFloat?: number;
+  expectedClosing?: number;
+  totalSales?: number;
+  totalCashOut?: number;
+  totalRefunds?: number;
+  actualClosing?: number;
+  variance?: number;
+  netCashFlow?: number;
+  // Cash register session history
+  totalSessions?: number;
+  openSessions?: number;
+  closedSessions?: number;
+  totalVariance?: number;
+  averageVariance?: number;
+  sessionsWithVariance?: number;
+  // Cash register movement breakdown
+  sessionCount?: number;
+  movementCount?: number;
+  // Profit & Loss
+  totalRevenue?: number;
+  totalCOGS?: number;
+  grossProfitMargin?: number;
+  totalExpenses?: number;
+  operatingProfit?: number;
+  netProfit?: number;
+  netProfitMargin?: number;
+  totalSupplierPayments?: number;
+  supplierPaymentCount?: number;
   [key: string]: unknown;
 }
 
@@ -820,6 +849,50 @@ interface ReportData {
   transactions?: Record<string, unknown>[];
   byCategory?: ReportDataCategoryRow[];
   payments?: SupplierPaymentRecord[];
+  // Void sales report
+  byReason?: Array<{ reason: string; count: number; totalAmount: number }>;
+  // Refund report
+  lineItems?: Array<Record<string, unknown>>;
+  topRefundedProducts?: Array<Record<string, unknown>>;
+  // Cash register session summary
+  session?: {
+    sessionNumber?: string;
+    registerName?: string;
+    cashierName?: string;
+    status?: string;
+    openedAt?: string;
+    closedAt?: string | null;
+  };
+  salesSummary?: {
+    totalTransactions?: number;
+    totalRevenue?: number;
+    totalProfit?: number;
+  };
+  sales?: Array<Record<string, unknown>>;
+  movements?: Array<Record<string, unknown>>;
+  // Cash register session history
+  sessions?: Array<Record<string, unknown>>;
+  // Cash register movement breakdown
+  totals?: {
+    totalCashIn?: number;
+    totalCashOut?: number;
+    totalSales?: number;
+    totalRefunds?: number;
+    netCashFlow?: number;
+    sessionCount?: number;
+    movementCount?: number;
+  };
+  byMovementType?: Record<string, { count: number; amount: number }>;
+  // Profit & Loss
+  parameters?: { startDate?: string; endDate?: string; [key: string]: unknown };
+  expenseBreakdown?: Array<{
+    accountCode: string;
+    accountName: string;
+    entryCount: number;
+    totalAmount: number;
+  }>;
+  // Cash register movement breakdown - daily
+  dailyBreakdown?: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }
 
@@ -2215,27 +2288,27 @@ export default function ReportsPage() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="flex justify-between py-2 border-b border-gray-100">
                       <span className="text-gray-600">Opening Float</span>
-                      <span className="font-semibold">{formatCurrency(reportData.summary.openingFloat)}</span>
+                      <span className="font-semibold">{formatCurrency(reportData.summary.openingFloat ?? 0)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-gray-100">
                       <span className="text-gray-600">Expected Closing</span>
-                      <span className="font-semibold">{formatCurrency(reportData.summary.expectedClosing)}</span>
+                      <span className="font-semibold">{formatCurrency(reportData.summary.expectedClosing ?? 0)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-gray-100">
                       <span className="text-gray-600">Cash Sales</span>
-                      <span className="font-semibold text-green-600">+ {formatCurrency(reportData.summary.totalSales)}</span>
+                      <span className="font-semibold text-green-600">+ {formatCurrency(reportData.summary.totalSales ?? 0)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-gray-100">
                       <span className="text-gray-600">Cash In</span>
-                      <span className="font-semibold text-green-600">+ {formatCurrency(reportData.summary.totalCashIn)}</span>
+                      <span className="font-semibold text-green-600">+ {formatCurrency(reportData.summary.totalCashIn ?? 0)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-gray-100">
                       <span className="text-gray-600">Cash Out</span>
-                      <span className="font-semibold text-red-600">- {formatCurrency(reportData.summary.totalCashOut)}</span>
+                      <span className="font-semibold text-red-600">- {formatCurrency(reportData.summary.totalCashOut ?? 0)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-gray-100">
                       <span className="text-gray-600">Refunds</span>
-                      <span className="font-semibold text-red-600">- {formatCurrency(reportData.summary.totalRefunds)}</span>
+                      <span className="font-semibold text-red-600">- {formatCurrency(reportData.summary.totalRefunds ?? 0)}</span>
                     </div>
                     {reportData.summary.actualClosing != null && (
                       <>
@@ -2253,7 +2326,7 @@ export default function ReportsPage() {
                     )}
                     <div className="flex justify-between py-2 col-span-2 bg-blue-50 px-3 rounded-lg">
                       <span className="font-semibold text-blue-900">Net Cash Flow</span>
-                      <span className="font-bold text-blue-900 text-lg">{formatCurrency(reportData.summary.netCashFlow)}</span>
+                      <span className="font-semibold text-blue-900 text-lg">{formatCurrency(reportData.summary.netCashFlow ?? 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -2273,11 +2346,11 @@ export default function ReportsPage() {
                       <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Transactions</div>
                     </div>
                     <div>
-                      <div className="text-2xl font-bold text-green-600">{formatCurrency(reportData.salesSummary.totalRevenue)}</div>
+                      <div className="text-2xl font-bold text-green-600">{formatCurrency(reportData.salesSummary.totalRevenue ?? 0)}</div>
                       <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Revenue</div>
                     </div>
                     <div>
-                      <div className="text-2xl font-bold text-blue-600">{formatCurrency(reportData.salesSummary.totalProfit)}</div>
+                      <div className="text-2xl font-bold text-blue-600">{formatCurrency(reportData.salesSummary.totalProfit ?? 0)}</div>
                       <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Profit</div>
                     </div>
                   </div>
@@ -2365,7 +2438,7 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* Cash Register Session History - SAP-style */}
+        {/* Cash Register Session History */}
         {reportData.reportType === 'CASH_REGISTER_SESSION_HISTORY' && reportData.sessions && (
           <div className="space-y-6">
             {/* Summary Cards */}
@@ -2522,7 +2595,7 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* Cash Register Movement Breakdown - SAP-style */}
+        {/* Cash Register Movement Breakdown */}
         {reportData.reportType === 'CASH_REGISTER_MOVEMENT_BREAKDOWN' && reportData.totals && (
           <div className="space-y-6">
             {/* Totals Overview Cards */}
@@ -2947,14 +3020,14 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* ═══════════ SAP-STYLE PROFIT & LOSS STATEMENT ═══════════ */}
+        {/* ═══════════ PROFIT & LOSS STATEMENT ═══════════ */}
         {reportData.reportType === 'PROFIT_LOSS' && reportData.summary && (
           <div className="space-y-6">
-            {/* ── Income Statement (SAP FI-CO Format) ── */}
+            {/* ── Income Statement ── */}
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-indigo-700 to-indigo-900 px-4 sm:px-6 py-4">
                 <h4 className="text-lg sm:text-xl font-bold text-white tracking-wide">Income Statement (P&L)</h4>
-                <p className="text-indigo-200 text-xs mt-1">SAP FI-CO Format • {reportData.parameters?.startDate} to {reportData.parameters?.endDate}</p>
+                <p className="text-indigo-200 text-xs mt-1">Financial Report • {reportData.parameters?.startDate} to {reportData.parameters?.endDate}</p>
               </div>
 
               <div className="divide-y divide-gray-100">
