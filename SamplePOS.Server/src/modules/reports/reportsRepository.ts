@@ -1196,7 +1196,7 @@ export const reportsRepository = {
     const query = `
       SELECT 
         ${dateGroup} as period,
-        SUM(s.subtotal - s.discount_amount) as revenue,
+        SUM(s.total_amount) as revenue,
         SUM(s.total_cost) as cost_of_goods_sold,
         SUM(s.profit) as gross_profit
       FROM sales s
@@ -1208,11 +1208,11 @@ export const reportsRepository = {
 
     const summaryQuery = `
       SELECT 
-        COALESCE(SUM(s.subtotal - s.discount_amount), 0) as total_revenue,
+        COALESCE(SUM(s.total_amount), 0) as total_revenue,
         COALESCE(SUM(s.total_cost), 0) as total_cogs,
         COALESCE(SUM(s.profit), 0) as gross_profit,
-        CASE WHEN SUM(s.subtotal - s.discount_amount) > 0
-          THEN ROUND((SUM(s.profit) / SUM(s.subtotal - s.discount_amount)) * 100, 2)
+        CASE WHEN SUM(s.total_amount) > 0
+          THEN ROUND((SUM(s.profit) / SUM(s.total_amount)) * 100, 2)
           ELSE 0
         END as gross_profit_margin
       FROM sales s

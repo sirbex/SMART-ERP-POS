@@ -321,12 +321,12 @@ export const salesController = {
     const pool = req.tenantPool || globalPool;
     const { startDate, endDate, groupBy } = SalesSummaryQuerySchema.parse(req.query);
 
-    const filters: { startDate?: string; endDate?: string; groupBy?: string; cashierId?: string } =
-      {};
+    // Summary shows store-wide totals (matching Reports page P&L/Sales).
+    // Individual sales list already filters by cashier via getSales().
+    const filters: { startDate?: string; endDate?: string; groupBy?: string } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
     if (groupBy) filters.groupBy = groupBy;
-    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
     const result = await salesService.getSalesSummary(pool, filters);
 
