@@ -59,14 +59,17 @@ export function UomSelector({
     // Only fire once per UOM selection to avoid infinite loops
     if (syncedUomRef.current === selectedUomId) return;
 
-    const selected = uoms.find(u => u.id === selectedUomId);
+    // Match by master uomId (uoms table PK) or product_uoms.id for backward compat
+    const selected = uoms.find(u => u.uomId === selectedUomId || u.id === selectedUomId);
     if (!selected) return;
 
     syncedUomRef.current = selectedUomId;
 
     // Cost = baseCost × factor (or costOverride if set)
+    // CRITICAL: Return selected.uomId (master uoms.id), NOT selected.id (product_uoms.id)
+    // purchase_order_items.uom_id FK references uoms(id)
     onChangeRef.current({
-      uomId: selectedUomId,
+      uomId: selected.uomId,
       newCost: computeUnitCost(baseCost, selected.conversionFactor, selected.costOverride),
       conversionFactor: String(selected.conversionFactor),
       uomName: selected.uomName,
@@ -92,12 +95,15 @@ export function UomSelector({
       return;
     }
 
-    const selected = uoms.find(u => u.id === value);
+    // Match by master uomId (uoms.id) or product_uoms.id for backward compat
+    const selected = uoms.find(u => u.uomId === value || u.id === value);
     if (!selected) return;
 
     // Cost = baseCost × factor (or costOverride if set)
+    // CRITICAL: Return selected.uomId (master uoms.id), NOT selected.id (product_uoms.id)
+    // purchase_order_items.uom_id FK references uoms(id)
     onChange({
-      uomId: value,
+      uomId: selected.uomId,
       newCost: computeUnitCost(baseCost, selected.conversionFactor, selected.costOverride),
       conversionFactor: String(selected.conversionFactor),
       uomName: selected.uomName,
@@ -115,7 +121,7 @@ export function UomSelector({
     >
       <option value="">Base UoM</option>
       {uoms.map((u) => (
-        <option key={u.id} value={u.id}>
+        <option key={u.uomId} value={u.uomId}>
           {u.uomSymbol || u.uomName} × {parseFloat(u.conversionFactor).toString()}
         </option>
       ))}
