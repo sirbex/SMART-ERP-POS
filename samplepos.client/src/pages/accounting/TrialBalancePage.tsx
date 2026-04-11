@@ -224,14 +224,14 @@ const TrialBalancePage = () => {
                   value={asOfDate}
                   onChange={handleDateChange}
                   placeholder="Select date"
-                  className="w-48"
+                  className="w-full sm:w-48"
                 />
               </div>
 
               <div className="space-y-2">
                 <Label>Options</Label>
                 <Select value={includeZeroBalances.toString()} onValueChange={(value) => setIncludeZeroBalances(value === 'true')}>
-                  <SelectTrigger className="w-48">
+                  <SelectTrigger className="w-full sm:w-48">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -262,7 +262,7 @@ const TrialBalancePage = () => {
         {trialBalance && (
           <Card className={`mb-6 ${trialBalance.totals.isBalanced ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   {trialBalance.totals?.isBalanced ? (
                     <TrendingUp className="h-6 w-6 text-green-600" />
@@ -281,7 +281,7 @@ const TrialBalancePage = () => {
                     </p>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-right w-full sm:w-auto">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-gray-500">Total Debits</p>
@@ -428,8 +428,8 @@ const TrialBalancePage = () => {
 
                 {/* Grand Totals */}
                 <div className="border-t-4 border-gray-300 pt-4">
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <table className="w-full">
+                  <div className="bg-gray-50 rounded-lg p-4 overflow-x-auto">
+                    <table className="w-full min-w-[400px]">
                       <thead>
                         <tr className="text-left">
                           <th className="pb-2 font-medium">Grand Totals</th>

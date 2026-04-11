@@ -387,7 +387,7 @@ const GeneralLedgerPage = () => {
                   />
                 </div>
                 <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                  <SelectTrigger className="w-64">
+                  <SelectTrigger className="w-full sm:w-64">
                     <SelectValue placeholder="Filter by account" />
                   </SelectTrigger>
                   <SelectContent>
@@ -412,7 +412,7 @@ const GeneralLedgerPage = () => {
                       setCurrentPage(1);
                     }}
                     placeholder="Select date"
-                    className="w-48"
+                    className="w-full sm:w-48"
                   />
                 </div>
 
@@ -425,7 +425,7 @@ const GeneralLedgerPage = () => {
                       setCurrentPage(1);
                     }}
                     placeholder="Select date"
-                    className="w-48"
+                    className="w-full sm:w-48"
                   />
                 </div>
 
@@ -648,7 +648,7 @@ const GeneralLedgerPage = () => {
 
             {selectedTransaction && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Transaction Number</Label>
                     <p className="font-mono">{selectedTransaction.transactionNumber}</p>

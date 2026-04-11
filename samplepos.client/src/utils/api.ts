@@ -534,6 +534,168 @@ export const api = {
       apiClient.get<ApiResponse>('reports/business-performance', { params }),
   },
 
+  // Advanced Accounting Modules
+  costCenters: {
+    list: (params?: { parent_id?: string }) =>
+      apiClient.get<ApiResponse>('cost-centers', { params }),
+    getById: (id: string) => apiClient.get<ApiResponse>(`cost-centers/${id}`),
+    create: (data: { code: string; name: string; description?: string; parentId?: string; managerId?: string }) =>
+      apiClient.post<ApiResponse>('cost-centers', data),
+    update: (id: string, data: { name?: string; description?: string; isActive?: boolean }) =>
+      apiClient.put<ApiResponse>(`cost-centers/${id}`, data),
+    getHierarchy: () => apiClient.get<ApiResponse>('cost-centers/hierarchy'),
+    getReport: (id: string, params?: { startDate?: string; endDate?: string }) =>
+      apiClient.get<ApiResponse>(`cost-centers/${id}/report`, { params }),
+    setBudget: (id: string, data: { periodId: string; budgetAmount: number }) =>
+      apiClient.post<ApiResponse>(`cost-centers/${id}/budget`, data),
+  },
+
+  periodControl: {
+    getByYear: (year: number) => apiClient.get<ApiResponse>(`period-control/${year}`),
+    openPeriod: (periodId: string) =>
+      apiClient.post<ApiResponse>(`period-control/${periodId}/open`),
+    closePeriod: (periodId: string) =>
+      apiClient.post<ApiResponse>(`period-control/${periodId}/close`),
+    createSpecial: (year: number, data: { name: string; startDate: string; endDate: string; periodType?: string }) =>
+      apiClient.post<ApiResponse>(`period-control/special/${year}`, data),
+    getStatus: (periodId: string) =>
+      apiClient.get<ApiResponse>(`period-control/${periodId}/status`),
+  },
+
+  grirClearing: {
+    getOpenItems: (params?: { supplierId?: string }) =>
+      apiClient.get<ApiResponse>('grir-clearing/open', { params }),
+    getBalance: () => apiClient.get<ApiResponse>('grir-clearing/balance'),
+    clearItem: (data: { grEntryId: string; invoiceEntryId: string; amount: number }) =>
+      apiClient.post<ApiResponse>('grir-clearing/clear', data),
+    autoMatch: () => apiClient.post<ApiResponse>('grir-clearing/auto-match'),
+  },
+
+  dunning: {
+    getLevels: () => apiClient.get<ApiResponse>('dunning/levels'),
+    createLevel: (data: { levelNumber: number; daysOverdue: number; feeAmount: number; letterTemplate: string; blockDelivery?: boolean }) =>
+      apiClient.post<ApiResponse>('dunning/levels', data),
+    analyze: (data: { asOfDate: string; customerId?: string }) =>
+      apiClient.post<ApiResponse>('dunning/analyze', data),
+    createRun: (data: { asOfDate: string; levelId: string; customerIds?: string[] }) =>
+      apiClient.post<ApiResponse>('dunning/runs', data),
+    getHistory: (customerId: string) =>
+      apiClient.get<ApiResponse>(`dunning/history/${customerId}`),
+  },
+
+  wht: {
+    getTypes: () => apiClient.get<ApiResponse>('withholding-tax/types'),
+    createType: (data: { code: string; name: string; rate: number; appliesToSuppliers?: boolean; appliesToCustomers?: boolean }) =>
+      apiClient.post<ApiResponse>('withholding-tax/types', data),
+    getBalance: (params?: { startDate?: string; endDate?: string }) =>
+      apiClient.get<ApiResponse>('withholding-tax/balance', { params }),
+    getCertificates: (params?: { supplierId?: string; startDate?: string; endDate?: string }) =>
+      apiClient.get<ApiResponse>('withholding-tax/certificates', { params }),
+  },
+
+  assets: {
+    getCategories: () => apiClient.get<ApiResponse>('assets/categories'),
+    createCategory: (data: {
+      code: string; name: string; usefulLifeMonths: number; depreciationMethod: string;
+      depreciationRate?: number; assetAccountCode?: string; depreciationAccountCode?: string; accumDepreciationAccountCode?: string;
+    }) =>
+      apiClient.post<ApiResponse>('assets/categories', data),
+    list: (params?: { categoryId?: string; status?: string }) =>
+      apiClient.get<ApiResponse>('assets', { params }),
+    getById: (id: string) => apiClient.get<ApiResponse>(`assets/${id}`),
+    create: (data: {
+      name: string; categoryId: string; acquisitionDate: string; acquisitionCost: number;
+      description?: string; salvageValue?: number; usefulLifeMonths?: number;
+      depreciationMethod?: string; depreciationStartDate?: string; paymentMethod?: string;
+      location?: string; serialNumber?: string;
+    }) =>
+      apiClient.post<ApiResponse>('assets', data),
+    runDepreciation: (data: { year: number; month: number }) =>
+      apiClient.post<ApiResponse>('assets/depreciation/run', data),
+    getSchedule: (assetId: string) =>
+      apiClient.get<ApiResponse>(`assets/${assetId}/schedule`),
+  },
+
+  jeApproval: {
+    getRules: () => apiClient.get<ApiResponse>('je-approval/rules'),
+    createRule: (data: { minAmount: number; requiredRole: string; description?: string }) =>
+      apiClient.post<ApiResponse>('je-approval/rules', data),
+    getPending: () => apiClient.get<ApiResponse>('je-approval/pending'),
+    approve: (entryId: string, data: { notes?: string }) =>
+      apiClient.post<ApiResponse>(`je-approval/${entryId}/approve`, data),
+    reject: (entryId: string, data: { reason: string }) =>
+      apiClient.post<ApiResponse>(`je-approval/${entryId}/reject`, data),
+  },
+
+  paymentProgram: {
+    list: () => apiClient.get<ApiResponse>('payment-program'),
+    create: (data: { runDate: string; paymentMethod?: string; supplierId?: string }) =>
+      apiClient.post<ApiResponse>('payment-program', data),
+    getById: (id: string) => apiClient.get<ApiResponse>(`payment-program/${id}`),
+    execute: (id: string) =>
+      apiClient.post<ApiResponse>(`payment-program/${id}/execute`),
+    getProposal: (id: string) =>
+      apiClient.get<ApiResponse>(`payment-program/${id}/proposal`),
+  },
+
+  currency: {
+    list: () => apiClient.get<ApiResponse>('currency/currencies'),
+    getConfig: () => apiClient.get<ApiResponse>('currency/config'),
+    updateConfig: (data: { functionalCurrency: string; reportingCurrency?: string; exchangeRateType?: string }) =>
+      apiClient.put<ApiResponse>('currency/config', data),
+    getRates: (params?: { fromCurrency?: string; date?: string }) =>
+      apiClient.get<ApiResponse>('currency/rates', { params }),
+    setRate: (data: { fromCurrency: string; toCurrency: string; rate: number; effectiveDate: string }) =>
+      apiClient.post<ApiResponse>('currency/rates', data),
+    convert: (params: { from: string; to: string; amount: number; date?: string }) =>
+      apiClient.get<ApiResponse>('currency/convert', { params }),
+  },
+
+  // ── Enterprise Accounting ─────────────────────────────────────────
+  enterprise: {
+    // Fiscal Year Close
+    fiscalYearStatus: (year: number) =>
+      apiClient.get<ApiResponse>(`enterprise-accounting/fiscal-year/status`, { params: { year } }),
+    closeFiscalYear: (data: { year: number; closingDate?: string }) =>
+      apiClient.post<ApiResponse>('enterprise-accounting/fiscal-year/close', data),
+
+    // Tax Engine
+    listTaxes: (scope?: string) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/taxes', { params: scope ? { scope } : undefined }),
+    computeTaxes: (data: { unitPrice: number; quantity: number; taxIds: string[] }) =>
+      apiClient.post<ApiResponse>('enterprise-accounting/taxes/compute', data),
+    productTaxes: (productId: string, params?: { customerId?: string; scope?: string }) =>
+      apiClient.get<ApiResponse>(`enterprise-accounting/taxes/product/${productId}`, { params }),
+
+    // GL Reconciliation
+    unreconciledItems: (accountCode: string, params?: { startDate?: string; endDate?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/reconciliation/unreconciled', { params: { accountCode, ...params } }),
+    reconcileEntries: (data: { entryIds: string[]; writeOffAmount?: number; writeOffAccountCode?: string }) =>
+      apiClient.post<ApiResponse>('enterprise-accounting/reconciliation/reconcile', data),
+    reconciliationSuggestions: (accountCode: string) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/reconciliation/suggestions', { params: { accountCode } }),
+    getLockDates: () =>
+      apiClient.get<ApiResponse>('enterprise-accounting/lock-dates'),
+    setLockDates: (data: { advisorLockDate?: string | null; hardLockDate?: string | null }) =>
+      apiClient.put<ApiResponse>('enterprise-accounting/lock-dates', data),
+
+    // Currency Revaluation
+    revaluationPreview: (date: string) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/revaluation/preview', { params: { date } }),
+    executeRevaluation: (data: { revaluationDate: string; autoReverse?: boolean }) =>
+      apiClient.post<ApiResponse>('enterprise-accounting/revaluation/execute', data),
+
+    // GL Integrity Audit
+    fullAudit: () =>
+      apiClient.get<ApiResponse>('enterprise-accounting/integrity/full-audit'),
+
+    // Aged Balances
+    agedReceivables: (asOfDate?: string) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/aging/receivables', { params: asOfDate ? { asOfDate } : undefined }),
+    agedPayables: (asOfDate?: string) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/aging/payables', { params: asOfDate ? { asOfDate } : undefined }),
+  },
+
   // Generic HTTP methods for backward compatibility
   get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) => apiClient.get<T>(url, config),
   post: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>

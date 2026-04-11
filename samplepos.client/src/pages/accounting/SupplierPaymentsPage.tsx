@@ -101,7 +101,7 @@ const safeParseFloat = (value: unknown): number => {
 };
 
 const SupplierPaymentsPage: React.FC = () => {
-    // Permission checks (SAP/Odoo pattern: hide actions user cannot perform)
+    // Permission checks (hide actions user cannot perform)
     const canCreatePayment = useCanAccess([], ['suppliers.create']);
     const canCreateBill = useCanAccess([], ['purchasing.create']);
 

@@ -235,7 +235,7 @@ const expenseApi = {
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
 
-    const response = await fetch(`${API_BASE}/by-category?${params}`, {
+    const response = await fetch(`${API_BASE}/reports/by-category?${params}`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
       }
@@ -256,7 +256,7 @@ const expenseApi = {
     total: number;
     count: number;
   }[]> => {
-    const response = await fetch(`${API_BASE}/by-month/${year}`, {
+    const response = await fetch(`${API_BASE}/reports/trends?year=${year}`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
       }

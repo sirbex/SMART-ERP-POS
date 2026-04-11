@@ -3,7 +3,9 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3, Calculator, TrendingUp, BookOpen, CreditCard, DollarSign,
   Building, Truck, FileText, Calendar, Scale, ClipboardCheck,
-  ChevronDown, ChevronRight, Home, ArrowLeft, Menu, X, Building2, FileMinus
+  ChevronDown, ChevronRight, Home, ArrowLeft, Menu, X, Building2, FileMinus,
+  Landmark, FileCheck, AlertTriangle, Receipt, Package, ShieldCheck, Banknote, Globe,
+  CalendarCheck, Percent, RefreshCw, Clock
 } from 'lucide-react';
 
 interface AccountingLayoutProps {
@@ -23,7 +25,7 @@ interface NavGroup {
 export default function AccountingLayout({ children }: AccountingLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Overview', 'ERP Controls']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Overview', 'ERP Controls', 'Advanced Accounting']));
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Grouped navigation items
@@ -95,6 +97,12 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
       name: 'Reports',
       items: [
         {
+          name: 'Balance Sheet',
+          path: '/accounting/balance-sheet',
+          icon: <Scale className="h-4 w-4" />,
+          description: 'Statement of financial position'
+        },
+        {
           name: 'Financial Statements',
           path: '/accounting/financial-statements',
           icon: <TrendingUp className="h-4 w-4" />,
@@ -134,6 +142,100 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           path: '/accounting/periods',
           icon: <Calendar className="h-4 w-4" />,
           description: 'Open, close, lock periods'
+        }
+      ]
+    },
+    {
+      name: 'Advanced Accounting',
+      items: [
+        {
+          name: 'Cost Centers',
+          path: '/accounting/cost-centers',
+          icon: <Landmark className="h-4 w-4" />,
+          description: 'Organizational cost allocation'
+        },
+        {
+          name: 'GR/IR Clearing',
+          path: '/accounting/grir-clearing',
+          icon: <FileCheck className="h-4 w-4" />,
+          description: 'Goods receipt & invoice matching'
+        },
+        {
+          name: 'Dunning',
+          path: '/accounting/dunning',
+          icon: <AlertTriangle className="h-4 w-4" />,
+          description: 'Overdue receivables management'
+        },
+        {
+          name: 'Withholding Tax',
+          path: '/accounting/withholding-tax',
+          icon: <Receipt className="h-4 w-4" />,
+          description: 'WHT types and compliance'
+        },
+        {
+          name: 'Asset Accounting',
+          path: '/accounting/assets',
+          icon: <Package className="h-4 w-4" />,
+          description: 'Fixed assets & depreciation'
+        },
+        {
+          name: 'JE Approval',
+          path: '/accounting/je-approval',
+          icon: <ShieldCheck className="h-4 w-4" />,
+          description: 'Journal entry approval workflow'
+        },
+        {
+          name: 'Payment Program',
+          path: '/accounting/payment-program',
+          icon: <Banknote className="h-4 w-4" />,
+          description: 'Automated payment runs'
+        },
+        {
+          name: 'Multi-Currency',
+          path: '/accounting/multi-currency',
+          icon: <Globe className="h-4 w-4" />,
+          description: 'Exchange rates & conversions'
+        }
+      ]
+    },
+    {
+      name: 'Enterprise Accounting',
+      items: [
+        {
+          name: 'Fiscal Year Close',
+          path: '/accounting/fiscal-year-close',
+          icon: <CalendarCheck className="h-4 w-4" />,
+          description: 'Year-end close & retained earnings'
+        },
+        {
+          name: 'GL Entry Matching',
+          path: '/accounting/gl-reconciliation',
+          icon: <Scale className="h-4 w-4" />,
+          description: 'Match & reconcile individual GL entries'
+        },
+        {
+          name: 'Tax Engine',
+          path: '/accounting/tax-engine',
+          icon: <Percent className="h-4 w-4" />,
+          description: 'Tax definitions & computation'
+        },
+        {
+          name: 'Currency Revaluation',
+          path: '/accounting/currency-revaluation',
+          icon: <RefreshCw className="h-4 w-4" />,
+          description: 'Period-end FX revaluation (see Multi-Currency for rates)'
+        },
+        {
+          name: 'GL Integrity Audit',
+          path: '/accounting/gl-integrity',
+          icon: <ShieldCheck className="h-4 w-4" />,
+          description: 'System-wide accounting audit'
+        },
+        {
+          name: 'Aged Balances',
+          path: '/accounting/aged-balances',
+          icon: <Clock className="h-4 w-4" />,
+          description: 'Aged receivables & payables (see Dunning for actions)'
         }
       ]
     }

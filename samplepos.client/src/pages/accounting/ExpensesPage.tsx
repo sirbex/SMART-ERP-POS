@@ -253,7 +253,7 @@ const ExpensesPage: React.FC = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div className="md:col-span-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -473,7 +473,7 @@ const ExpensesPage: React.FC = () => {
               </div>
 
               {/* Main Info */}
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center gap-1">
                     <FileText className="h-3 w-3" />
@@ -526,7 +526,7 @@ const ExpensesPage: React.FC = () => {
                     <CheckCircle className="h-4 w-4" />
                     Approval Information
                   </h4>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="text-xs text-green-700 uppercase tracking-wide">Approved By</label>
                       <p className="text-gray-900 font-medium">{selectedExpense.approvedByName || '-'}</p>
@@ -546,7 +546,7 @@ const ExpensesPage: React.FC = () => {
                     <XCircle className="h-4 w-4" />
                     Rejection Information
                   </h4>
-                  <div className="grid grid-cols-2 gap-4 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
                     <div className="space-y-1">
                       <label className="text-xs text-red-700 uppercase tracking-wide">Rejected By</label>
                       <p className="text-gray-900 font-medium">{selectedExpense.rejectedByName || '-'}</p>

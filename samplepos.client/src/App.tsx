@@ -74,13 +74,10 @@ const ChartOfAccountsPage = lazyWithRetry(() => import('./pages/accounting/Chart
 const GeneralLedgerPage = lazyWithRetry(() => import('./pages/accounting/GeneralLedgerPage'));
 const TrialBalancePage = lazyWithRetry(() => import('./pages/accounting/TrialBalancePage'));
 const FinancialStatementsPage = lazyWithRetry(() => import('./pages/accounting/FinancialStatementsPage'));
+const BalanceSheetPage = lazyWithRetry(() => import('./pages/accounting/BalanceSheetPage'));
 const AccountingIntegrationDashboard = lazyWithRetry(() => import('./pages/accounting/AccountingIntegrationDashboard'));
-const CustomerFinancialPage = lazyWithRetry(() => import('./pages/accounting/CustomerFinancialPage'));
-const InvoiceLedgerIntegrationPage = lazyWithRetry(() => import('./pages/accounting/InvoiceLedgerIntegrationPage'));
 const ExpensesPage = lazyWithRetry(() => import('./pages/accounting/ExpensesPage'));
 const ExpenseCategoriesPage = lazyWithRetry(() => import('./pages/accounting/ExpenseCategoriesPage'));
-const ComprehensiveInvoicesPage = lazyWithRetry(() => import('./pages/accounting/ComprehensiveInvoicesPage'));
-const CustomerPaymentsPage = lazyWithRetry(() => import('./pages/accounting/CustomerPaymentsPage'));
 const SupplierPaymentsPage = lazyWithRetry(() => import('./pages/accounting/SupplierPaymentsPage'));
 const CreditDebitNotesPage = lazyWithRetry(() => import('./pages/accounting/CreditDebitNotesPage'));
 const ProfitLossPage = lazyWithRetry(() => import('./pages/ProfitLossPage'));
@@ -88,6 +85,20 @@ const ReconciliationPage = lazyWithRetry(() => import('./pages/ReconciliationPag
 const JournalEntriesPage = lazyWithRetry(() => import('./pages/JournalEntriesPage'));
 const PeriodManagementPage = lazyWithRetry(() => import('./pages/PeriodManagementPage'));
 const BankingPage = lazyWithRetry(() => import('./pages/accounting/BankingPage'));
+const CostCentersPage = lazyWithRetry(() => import('./pages/accounting/CostCentersPage'));
+const GrirClearingPage = lazyWithRetry(() => import('./pages/accounting/GrirClearingPage'));
+const DunningPage = lazyWithRetry(() => import('./pages/accounting/DunningPage'));
+const WithholdingTaxPage = lazyWithRetry(() => import('./pages/accounting/WithholdingTaxPage'));
+const AssetAccountingPage = lazyWithRetry(() => import('./pages/accounting/AssetAccountingPage'));
+const JeApprovalPage = lazyWithRetry(() => import('./pages/accounting/JeApprovalPage'));
+const PaymentProgramPage = lazyWithRetry(() => import('./pages/accounting/PaymentProgramPage'));
+const MultiCurrencyPage = lazyWithRetry(() => import('./pages/accounting/MultiCurrencyPage'));
+const FiscalYearClosePage = lazyWithRetry(() => import('./pages/accounting/FiscalYearClosePage'));
+const GLReconciliationPage = lazyWithRetry(() => import('./pages/accounting/GLReconciliationPage'));
+const TaxEnginePage = lazyWithRetry(() => import('./pages/accounting/TaxEnginePage'));
+const CurrencyRevaluationPage = lazyWithRetry(() => import('./pages/accounting/CurrencyRevaluationPage'));
+const GLIntegrityPage = lazyWithRetry(() => import('./pages/accounting/GLIntegrityPage'));
+const AgedBalancePage = lazyWithRetry(() => import('./pages/accounting/AgedBalancePage'));
 const DeliveryPage = lazyWithRetry(() => import('./pages/delivery/DeliveryPage'));
 const DeliveryNotesPage = lazyWithRetry(() => import('./pages/delivery-notes/DeliveryNotesPage'));
 const ImportPage = lazyWithRetry(() => import('./pages/ImportPage'));
@@ -433,25 +444,18 @@ function App() {
                     }
                   />
                   <Route
-                    path="/accounting/customer-financial"
+                    path="/accounting/balance-sheet"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read', 'reports.financial_view']}>
                         <AccountingLayout>
-                          <CustomerFinancialPage />
+                          <BalanceSheetPage />
                         </AccountingLayout>
                       </ProtectedRoute>
                     }
                   />
-                  <Route
-                    path="/accounting/invoice-integration"
-                    element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
-                        <AccountingLayout>
-                          <InvoiceLedgerIntegrationPage />
-                        </AccountingLayout>
-                      </ProtectedRoute>
-                    }
-                  />
+                  {/* Removed duplicates — redirect to canonical pages */}
+                  <Route path="/accounting/customer-financial" element={<Navigate to="/accounting/aged-balances" replace />} />
+                  <Route path="/accounting/invoice-integration" element={<Navigate to="/accounting/general-ledger" replace />} />
                   <Route
                     path="/accounting/expenses"
                     element={
@@ -472,26 +476,8 @@ function App() {
                       </ProtectedRoute>
                     }
                   />
-                  <Route
-                    path="/accounting/invoices"
-                    element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
-                        <AccountingLayout>
-                          <ComprehensiveInvoicesPage />
-                        </AccountingLayout>
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/accounting/customer-payments"
-                    element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
-                        <AccountingLayout>
-                          <CustomerPaymentsPage />
-                        </AccountingLayout>
-                      </ProtectedRoute>
-                    }
-                  />
+                  <Route path="/accounting/invoices" element={<Navigate to="/accounting/aged-balances" replace />} />
+                  <Route path="/accounting/customer-payments" element={<Navigate to="/accounting/banking" replace />} />
                   <Route
                     path="/accounting/supplier-payments"
                     element={
@@ -558,6 +544,182 @@ function App() {
                       <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['banking.read']}>
                         <AccountingLayout>
                           <BankingPage />
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Advanced Accounting Modules */}
+                  <Route
+                    path="/accounting/cost-centers"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <CostCentersPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/period-control"
+                    element={<Navigate to="/accounting/periods" replace />}
+                  />
+                  <Route
+                    path="/accounting/grir-clearing"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <GrirClearingPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/dunning"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <DunningPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/withholding-tax"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <WithholdingTaxPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/assets"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <AssetAccountingPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/je-approval"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.post', 'accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <JeApprovalPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/payment-program"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <PaymentProgramPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/multi-currency"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <MultiCurrencyPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Enterprise Accounting */}
+                  <Route
+                    path="/accounting/fiscal-year-close"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <FiscalYearClosePage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/gl-reconciliation"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.reconcile', 'accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <GLReconciliationPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/tax-engine"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <TaxEnginePage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/currency-revaluation"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <CurrencyRevaluationPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/gl-integrity"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <GLIntegrityPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/aged-balances"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']}>
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <AgedBalancePage />
+                          </Suspense>
                         </AccountingLayout>
                       </ProtectedRoute>
                     }

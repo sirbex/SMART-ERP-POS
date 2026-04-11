@@ -142,8 +142,8 @@ const AccountingIntegrationDashboard: React.FC = () => {
   return (
     <div className="p-4 lg:p-6 space-y-6">
       {/* Quick Stats Bar */}
-      <div className="flex items-center justify-between">
-        <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-lg border flex-1 mr-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-lg border flex-1 w-full sm:w-auto sm:mr-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">

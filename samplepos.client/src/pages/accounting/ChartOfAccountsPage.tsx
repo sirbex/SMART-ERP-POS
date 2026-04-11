@@ -288,7 +288,7 @@ const ChartOfAccountsPage = () => {
 
               {/* Filters */}
               <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Filter by type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -302,7 +302,7 @@ const ChartOfAccountsPage = () => {
               </Select>
 
               <Select value={filterActive} onValueChange={setFilterActive}>
-                <SelectTrigger className="w-32">
+                <SelectTrigger className="w-full sm:w-32">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -336,7 +336,7 @@ const ChartOfAccountsPage = () => {
                   </DialogHeader>
 
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="accountNumber">Account Number *</Label>
                         <Input
@@ -559,7 +559,7 @@ const ChartOfAccountsPage = () => {
             </DialogHeader>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="edit-accountNumber">Account Number *</Label>
                   <Input
