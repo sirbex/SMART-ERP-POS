@@ -149,18 +149,20 @@ export async function getRevenueByCategory(
 ): Promise<RevenueByCategoryRow[]> {
   const db = dbPool || globalPool;
 
-  // product_daily_summary uses DATE (not TIMESTAMPTZ), so we use date bounds directly
+  // product_daily_summary uses DATE (not TIMESTAMPTZ), so we use date bounds directly.
+  // PDS stores revenue as pre-discount (lineTotal) and discount_given separately.
+  // Net revenue = revenue - discount_given; gross profit = net revenue - COGS.
   const query = `
     SELECT
       pds.category AS category_name,
       SUM(pds.transaction_count)::integer AS transaction_count,
       ROUND(SUM(pds.units_sold)::numeric, 2) AS units_sold,
-      ROUND(SUM(pds.revenue)::numeric, 2) AS total_revenue,
+      ROUND(SUM(pds.revenue - pds.discount_given)::numeric, 2) AS total_revenue,
       ROUND(SUM(pds.cost_of_goods)::numeric, 2) AS total_cogs,
-      ROUND(SUM(pds.gross_profit)::numeric, 2) AS gross_profit,
+      ROUND(SUM(pds.revenue - pds.discount_given - pds.cost_of_goods)::numeric, 2) AS gross_profit,
       CASE
-        WHEN SUM(pds.revenue) > 0
-        THEN ROUND(SUM(pds.gross_profit) / SUM(pds.revenue) * 100, 2)
+        WHEN SUM(pds.revenue - pds.discount_given) > 0
+        THEN ROUND(SUM(pds.revenue - pds.discount_given - pds.cost_of_goods) / SUM(pds.revenue - pds.discount_given) * 100, 2)
         ELSE 0
       END AS gross_margin_pct
     FROM product_daily_summary pds
