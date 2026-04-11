@@ -17,23 +17,23 @@ import Decimal from 'decimal.js';
 // ============================================================================
 
 export interface ProductDailySummaryUpsert {
-  businessDate: string;   // YYYY-MM-DD
-  productId: string;      // UUID
-  category: string;       // Product category (from products table)
-  unitsSold: number;      // Quantity sold (positive for sale, negative for void)
-  revenue: number;        // Line total (positive for sale, negative for void)
-  costOfGoods: number;    // Unit cost * quantity
-  discountGiven: number;  // Per-item discount
+    businessDate: string;   // YYYY-MM-DD
+    productId: string;      // UUID
+    category: string;       // Product category (from products table)
+    unitsSold: number;      // Quantity sold (positive for sale, negative for void)
+    revenue: number;        // Line total (positive for sale, negative for void)
+    costOfGoods: number;    // Unit cost * quantity
+    discountGiven: number;  // Per-item discount
 }
 
 export async function upsertProductDailySummary(
-  client: PoolClient,
-  data: ProductDailySummaryUpsert
+    client: PoolClient,
+    data: ProductDailySummaryUpsert
 ): Promise<void> {
-  const grossProfit = new Decimal(data.revenue).minus(data.costOfGoods);
+    const grossProfit = new Decimal(data.revenue).minus(data.costOfGoods);
 
-  await client.query(
-    `INSERT INTO product_daily_summary (
+    await client.query(
+        `INSERT INTO product_daily_summary (
         business_date, product_id, category,
         units_sold, revenue, cost_of_goods, gross_profit, discount_given,
         transaction_count, updated_at
@@ -46,17 +46,17 @@ export async function upsertProductDailySummary(
         discount_given    = product_daily_summary.discount_given + EXCLUDED.discount_given,
         transaction_count = product_daily_summary.transaction_count + 1,
         updated_at        = NOW()`,
-    [
-      data.businessDate,
-      data.productId,
-      data.category || 'Uncategorized',
-      new Decimal(data.unitsSold).toFixed(4),
-      new Decimal(data.revenue).toFixed(2),
-      new Decimal(data.costOfGoods).toFixed(2),
-      grossProfit.toFixed(2),
-      new Decimal(data.discountGiven).toFixed(2),
-    ]
-  );
+        [
+            data.businessDate,
+            data.productId,
+            data.category || 'Uncategorized',
+            new Decimal(data.unitsSold).toFixed(4),
+            new Decimal(data.revenue).toFixed(2),
+            new Decimal(data.costOfGoods).toFixed(2),
+            grossProfit.toFixed(2),
+            new Decimal(data.discountGiven).toFixed(2),
+        ]
+    );
 }
 
 /**
@@ -64,13 +64,13 @@ export async function upsertProductDailySummary(
  * Uses negative additive math — same UPSERT pattern but with negative values.
  */
 export async function decrementProductDailySummary(
-  client: PoolClient,
-  data: ProductDailySummaryUpsert
+    client: PoolClient,
+    data: ProductDailySummaryUpsert
 ): Promise<void> {
-  const grossProfit = new Decimal(data.revenue).minus(data.costOfGoods);
+    const grossProfit = new Decimal(data.revenue).minus(data.costOfGoods);
 
-  await client.query(
-    `UPDATE product_daily_summary SET
+    await client.query(
+        `UPDATE product_daily_summary SET
         units_sold        = units_sold - $3,
         revenue           = revenue - $4,
         cost_of_goods     = cost_of_goods - $5,
@@ -79,16 +79,16 @@ export async function decrementProductDailySummary(
         transaction_count = GREATEST(transaction_count - 1, 0),
         updated_at        = NOW()
      WHERE business_date = $1 AND product_id = $2`,
-    [
-      data.businessDate,
-      data.productId,
-      new Decimal(data.unitsSold).toFixed(4),
-      new Decimal(data.revenue).toFixed(2),
-      new Decimal(data.costOfGoods).toFixed(2),
-      grossProfit.toFixed(2),
-      new Decimal(data.discountGiven).toFixed(2),
-    ]
-  );
+        [
+            data.businessDate,
+            data.productId,
+            new Decimal(data.unitsSold).toFixed(4),
+            new Decimal(data.revenue).toFixed(2),
+            new Decimal(data.costOfGoods).toFixed(2),
+            grossProfit.toFixed(2),
+            new Decimal(data.discountGiven).toFixed(2),
+        ]
+    );
 }
 
 // ============================================================================
@@ -98,12 +98,12 @@ export async function decrementProductDailySummary(
 // ============================================================================
 
 export interface ProductDailySummaryBatchItem {
-  productId: string;
-  category: string;
-  unitsSold: number;
-  revenue: number;
-  costOfGoods: number;
-  discountGiven: number;
+    productId: string;
+    category: string;
+    unitsSold: number;
+    revenue: number;
+    costOfGoods: number;
+    discountGiven: number;
 }
 
 /**
@@ -111,33 +111,33 @@ export interface ProductDailySummaryBatchItem {
  * Items must be pre-aggregated by productId (no duplicate productIds allowed).
  */
 export async function batchUpsertProductDailySummary(
-  client: PoolClient,
-  businessDate: string,
-  items: ProductDailySummaryBatchItem[]
+    client: PoolClient,
+    businessDate: string,
+    items: ProductDailySummaryBatchItem[]
 ): Promise<void> {
-  if (items.length === 0) return;
+    if (items.length === 0) return;
 
-  const productIds: string[] = [];
-  const categories: string[] = [];
-  const unitsSoldArr: string[] = [];
-  const revenueArr: string[] = [];
-  const cogArr: string[] = [];
-  const gpArr: string[] = [];
-  const discountArr: string[] = [];
+    const productIds: string[] = [];
+    const categories: string[] = [];
+    const unitsSoldArr: string[] = [];
+    const revenueArr: string[] = [];
+    const cogArr: string[] = [];
+    const gpArr: string[] = [];
+    const discountArr: string[] = [];
 
-  for (const item of items) {
-    const gp = new Decimal(item.revenue).minus(item.costOfGoods);
-    productIds.push(item.productId);
-    categories.push(item.category || 'Uncategorized');
-    unitsSoldArr.push(new Decimal(item.unitsSold).toFixed(4));
-    revenueArr.push(new Decimal(item.revenue).toFixed(2));
-    cogArr.push(new Decimal(item.costOfGoods).toFixed(2));
-    gpArr.push(gp.toFixed(2));
-    discountArr.push(new Decimal(item.discountGiven).toFixed(2));
-  }
+    for (const item of items) {
+        const gp = new Decimal(item.revenue).minus(item.costOfGoods);
+        productIds.push(item.productId);
+        categories.push(item.category || 'Uncategorized');
+        unitsSoldArr.push(new Decimal(item.unitsSold).toFixed(4));
+        revenueArr.push(new Decimal(item.revenue).toFixed(2));
+        cogArr.push(new Decimal(item.costOfGoods).toFixed(2));
+        gpArr.push(gp.toFixed(2));
+        discountArr.push(new Decimal(item.discountGiven).toFixed(2));
+    }
 
-  await client.query(
-    `INSERT INTO product_daily_summary (
+    await client.query(
+        `INSERT INTO product_daily_summary (
         business_date, product_id, category,
         units_sold, revenue, cost_of_goods, gross_profit, discount_given,
         transaction_count, updated_at
@@ -160,8 +160,8 @@ export async function batchUpsertProductDailySummary(
         discount_given    = product_daily_summary.discount_given + EXCLUDED.discount_given,
         transaction_count = product_daily_summary.transaction_count + 1,
         updated_at        = NOW()`,
-    [businessDate, productIds, categories, unitsSoldArr, revenueArr, cogArr, gpArr, discountArr]
-  );
+        [businessDate, productIds, categories, unitsSoldArr, revenueArr, cogArr, gpArr, discountArr]
+    );
 }
 
 /**
@@ -170,31 +170,31 @@ export async function batchUpsertProductDailySummary(
  * Items must be pre-aggregated by productId.
  */
 export async function batchDecrementProductDailySummary(
-  client: PoolClient,
-  businessDate: string,
-  items: ProductDailySummaryBatchItem[]
+    client: PoolClient,
+    businessDate: string,
+    items: ProductDailySummaryBatchItem[]
 ): Promise<void> {
-  if (items.length === 0) return;
+    if (items.length === 0) return;
 
-  const productIds: string[] = [];
-  const unitsSoldArr: string[] = [];
-  const revenueArr: string[] = [];
-  const cogArr: string[] = [];
-  const gpArr: string[] = [];
-  const discountArr: string[] = [];
+    const productIds: string[] = [];
+    const unitsSoldArr: string[] = [];
+    const revenueArr: string[] = [];
+    const cogArr: string[] = [];
+    const gpArr: string[] = [];
+    const discountArr: string[] = [];
 
-  for (const item of items) {
-    const gp = new Decimal(item.revenue).minus(item.costOfGoods);
-    productIds.push(item.productId);
-    unitsSoldArr.push(new Decimal(item.unitsSold).toFixed(4));
-    revenueArr.push(new Decimal(item.revenue).toFixed(2));
-    cogArr.push(new Decimal(item.costOfGoods).toFixed(2));
-    gpArr.push(gp.toFixed(2));
-    discountArr.push(new Decimal(item.discountGiven).toFixed(2));
-  }
+    for (const item of items) {
+        const gp = new Decimal(item.revenue).minus(item.costOfGoods);
+        productIds.push(item.productId);
+        unitsSoldArr.push(new Decimal(item.unitsSold).toFixed(4));
+        revenueArr.push(new Decimal(item.revenue).toFixed(2));
+        cogArr.push(new Decimal(item.costOfGoods).toFixed(2));
+        gpArr.push(gp.toFixed(2));
+        discountArr.push(new Decimal(item.discountGiven).toFixed(2));
+    }
 
-  await client.query(
-    `UPDATE product_daily_summary AS pds SET
+    await client.query(
+        `UPDATE product_daily_summary AS pds SET
         units_sold        = pds.units_sold - v.units_sold,
         revenue           = pds.revenue - v.revenue,
         cost_of_goods     = pds.cost_of_goods - v.cog,
@@ -212,8 +212,8 @@ export async function batchDecrementProductDailySummary(
          unnest($7::numeric[]) AS discount
      ) AS v
      WHERE pds.business_date = $1::date AND pds.product_id = v.product_id`,
-    [businessDate, productIds, unitsSoldArr, revenueArr, cogArr, gpArr, discountArr]
-  );
+        [businessDate, productIds, unitsSoldArr, revenueArr, cogArr, gpArr, discountArr]
+    );
 }
 
 // ============================================================================
@@ -221,8 +221,8 @@ export async function batchDecrementProductDailySummary(
 // ============================================================================
 
 export interface InventoryBatchItem {
-  productId: string;
-  quantity: number;
+    productId: string;
+    quantity: number;
 }
 
 /**
@@ -230,47 +230,47 @@ export interface InventoryBatchItem {
  * Items must be pre-aggregated by productId.
  */
 export async function batchUpsertInventoryBalance(
-  client: PoolClient,
-  items: InventoryBatchItem[],
-  movementType: InventoryMovementType,
-  movementDate: string
+    client: PoolClient,
+    items: InventoryBatchItem[],
+    movementType: InventoryMovementType,
+    movementDate: string
 ): Promise<void> {
-  if (items.length === 0) return;
+    if (items.length === 0) return;
 
-  const productIds: string[] = [];
-  const qohDeltas: string[] = [];
-  const receivedDeltas: string[] = [];
-  const soldDeltas: string[] = [];
-  const adjustedDeltas: string[] = [];
+    const productIds: string[] = [];
+    const qohDeltas: string[] = [];
+    const receivedDeltas: string[] = [];
+    const soldDeltas: string[] = [];
+    const adjustedDeltas: string[] = [];
 
-  for (const item of items) {
-    const qty = new Decimal(item.quantity);
-    productIds.push(item.productId);
+    for (const item of items) {
+        const qty = new Decimal(item.quantity);
+        productIds.push(item.productId);
 
-    switch (movementType) {
-      case 'RECEIVED':
-        qohDeltas.push(qty.toFixed(4));
-        receivedDeltas.push(qty.toFixed(4));
-        soldDeltas.push('0');
-        adjustedDeltas.push('0');
-        break;
-      case 'SOLD':
-        qohDeltas.push(qty.times(-1).toFixed(4));
-        receivedDeltas.push('0');
-        soldDeltas.push(qty.toFixed(4));
-        adjustedDeltas.push('0');
-        break;
-      case 'ADJUSTED':
-        qohDeltas.push(qty.toFixed(4));
-        receivedDeltas.push('0');
-        soldDeltas.push('0');
-        adjustedDeltas.push(qty.toFixed(4));
-        break;
+        switch (movementType) {
+            case 'RECEIVED':
+                qohDeltas.push(qty.toFixed(4));
+                receivedDeltas.push(qty.toFixed(4));
+                soldDeltas.push('0');
+                adjustedDeltas.push('0');
+                break;
+            case 'SOLD':
+                qohDeltas.push(qty.times(-1).toFixed(4));
+                receivedDeltas.push('0');
+                soldDeltas.push(qty.toFixed(4));
+                adjustedDeltas.push('0');
+                break;
+            case 'ADJUSTED':
+                qohDeltas.push(qty.toFixed(4));
+                receivedDeltas.push('0');
+                soldDeltas.push('0');
+                adjustedDeltas.push(qty.toFixed(4));
+                break;
+        }
     }
-  }
 
-  await client.query(
-    `INSERT INTO inventory_balances (
+    await client.query(
+        `INSERT INTO inventory_balances (
         product_id, quantity_on_hand, total_received, total_sold,
         total_adjusted, last_movement_date, updated_at
      )
@@ -288,8 +288,8 @@ export async function batchUpsertInventoryBalance(
         total_adjusted     = inventory_balances.total_adjusted + EXCLUDED.total_adjusted,
         last_movement_date = EXCLUDED.last_movement_date,
         updated_at         = NOW()`,
-    [productIds, qohDeltas, receivedDeltas, soldDeltas, adjustedDeltas, movementDate]
-  );
+        [productIds, qohDeltas, receivedDeltas, soldDeltas, adjustedDeltas, movementDate]
+    );
 }
 
 // ============================================================================
@@ -297,21 +297,21 @@ export async function batchUpsertInventoryBalance(
 // ============================================================================
 
 export interface CustomerBalanceUpsert {
-  customerId: string;
-  invoicedAmount: number;   // Amount added to AR (positive for credit sale)
-  paidAmount: number;       // Amount paid (positive for payment)
-  invoiceDate?: string;     // YYYY-MM-DD (for credit sales)
-  paymentDate?: string;     // YYYY-MM-DD (for payments)
+    customerId: string;
+    invoicedAmount: number;   // Amount added to AR (positive for credit sale)
+    paidAmount: number;       // Amount paid (positive for payment)
+    invoiceDate?: string;     // YYYY-MM-DD (for credit sales)
+    paymentDate?: string;     // YYYY-MM-DD (for payments)
 }
 
 export async function upsertCustomerBalance(
-  client: PoolClient,
-  data: CustomerBalanceUpsert
+    client: PoolClient,
+    data: CustomerBalanceUpsert
 ): Promise<void> {
-  const balance = new Decimal(data.invoicedAmount).minus(data.paidAmount);
+    const balance = new Decimal(data.invoicedAmount).minus(data.paidAmount);
 
-  await client.query(
-    `INSERT INTO customer_balances (
+    await client.query(
+        `INSERT INTO customer_balances (
         customer_id, total_invoiced, total_paid, balance,
         last_invoice_date, last_payment_date, transaction_count, updated_at
      ) VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
@@ -323,15 +323,15 @@ export async function upsertCustomerBalance(
         last_payment_date = COALESCE(EXCLUDED.last_payment_date, customer_balances.last_payment_date),
         transaction_count = customer_balances.transaction_count + 1,
         updated_at        = NOW()`,
-    [
-      data.customerId,
-      new Decimal(data.invoicedAmount).toFixed(2),
-      new Decimal(data.paidAmount).toFixed(2),
-      balance.toFixed(2),
-      data.invoiceDate || null,
-      data.paymentDate || null,
-    ]
-  );
+        [
+            data.customerId,
+            new Decimal(data.invoicedAmount).toFixed(2),
+            new Decimal(data.paidAmount).toFixed(2),
+            balance.toFixed(2),
+            data.invoiceDate || null,
+            data.paymentDate || null,
+        ]
+    );
 }
 
 // ============================================================================
@@ -339,21 +339,21 @@ export async function upsertCustomerBalance(
 // ============================================================================
 
 export interface SupplierBalanceUpsert {
-  supplierId: string;
-  invoicedAmount: number;   // Amount added to AP (positive for GR)
-  paidAmount: number;       // Amount paid (positive for payment)
-  grDate?: string;          // YYYY-MM-DD
-  paymentDate?: string;     // YYYY-MM-DD
+    supplierId: string;
+    invoicedAmount: number;   // Amount added to AP (positive for GR)
+    paidAmount: number;       // Amount paid (positive for payment)
+    grDate?: string;          // YYYY-MM-DD
+    paymentDate?: string;     // YYYY-MM-DD
 }
 
 export async function upsertSupplierBalance(
-  client: PoolClient,
-  data: SupplierBalanceUpsert
+    client: PoolClient,
+    data: SupplierBalanceUpsert
 ): Promise<void> {
-  const balance = new Decimal(data.invoicedAmount).minus(data.paidAmount);
+    const balance = new Decimal(data.invoicedAmount).minus(data.paidAmount);
 
-  await client.query(
-    `INSERT INTO supplier_balances (
+    await client.query(
+        `INSERT INTO supplier_balances (
         supplier_id, total_invoiced, total_paid, balance,
         last_gr_date, last_payment_date, transaction_count, updated_at
      ) VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
@@ -365,15 +365,15 @@ export async function upsertSupplierBalance(
         last_payment_date = COALESCE(EXCLUDED.last_payment_date, supplier_balances.last_payment_date),
         transaction_count = supplier_balances.transaction_count + 1,
         updated_at        = NOW()`,
-    [
-      data.supplierId,
-      new Decimal(data.invoicedAmount).toFixed(2),
-      new Decimal(data.paidAmount).toFixed(2),
-      balance.toFixed(2),
-      data.grDate || null,
-      data.paymentDate || null,
-    ]
-  );
+        [
+            data.supplierId,
+            new Decimal(data.invoicedAmount).toFixed(2),
+            new Decimal(data.paidAmount).toFixed(2),
+            balance.toFixed(2),
+            data.grDate || null,
+            data.paymentDate || null,
+        ]
+    );
 }
 
 // ============================================================================
@@ -383,49 +383,49 @@ export async function upsertSupplierBalance(
 export type InventoryMovementType = 'RECEIVED' | 'SOLD' | 'ADJUSTED';
 
 export interface InventoryBalanceUpsert {
-  productId: string;
-  quantity: number;           // Always positive
-  movementType: InventoryMovementType;
-  movementDate: string;       // YYYY-MM-DD
+    productId: string;
+    quantity: number;           // Always positive
+    movementType: InventoryMovementType;
+    movementDate: string;       // YYYY-MM-DD
 }
 
 export async function upsertInventoryBalance(
-  client: PoolClient,
-  data: InventoryBalanceUpsert
+    client: PoolClient,
+    data: InventoryBalanceUpsert
 ): Promise<void> {
-  const qty = new Decimal(data.quantity);
+    const qty = new Decimal(data.quantity);
 
-  // Depending on movement type, update the appropriate running total
-  // and adjust quantity_on_hand accordingly
-  let qohDelta: string;
-  let receivedDelta: string;
-  let soldDelta: string;
-  let adjustedDelta: string;
+    // Depending on movement type, update the appropriate running total
+    // and adjust quantity_on_hand accordingly
+    let qohDelta: string;
+    let receivedDelta: string;
+    let soldDelta: string;
+    let adjustedDelta: string;
 
-  switch (data.movementType) {
-    case 'RECEIVED':
-      qohDelta = qty.toFixed(4);
-      receivedDelta = qty.toFixed(4);
-      soldDelta = '0';
-      adjustedDelta = '0';
-      break;
-    case 'SOLD':
-      qohDelta = qty.times(-1).toFixed(4);
-      receivedDelta = '0';
-      soldDelta = qty.toFixed(4);
-      adjustedDelta = '0';
-      break;
-    case 'ADJUSTED':
-      // Quantity can be positive (gain) or negative (loss) for adjustments
-      qohDelta = qty.toFixed(4);
-      receivedDelta = '0';
-      soldDelta = '0';
-      adjustedDelta = qty.toFixed(4);
-      break;
-  }
+    switch (data.movementType) {
+        case 'RECEIVED':
+            qohDelta = qty.toFixed(4);
+            receivedDelta = qty.toFixed(4);
+            soldDelta = '0';
+            adjustedDelta = '0';
+            break;
+        case 'SOLD':
+            qohDelta = qty.times(-1).toFixed(4);
+            receivedDelta = '0';
+            soldDelta = qty.toFixed(4);
+            adjustedDelta = '0';
+            break;
+        case 'ADJUSTED':
+            // Quantity can be positive (gain) or negative (loss) for adjustments
+            qohDelta = qty.toFixed(4);
+            receivedDelta = '0';
+            soldDelta = '0';
+            adjustedDelta = qty.toFixed(4);
+            break;
+    }
 
-  await client.query(
-    `INSERT INTO inventory_balances (
+    await client.query(
+        `INSERT INTO inventory_balances (
         product_id, quantity_on_hand, total_received, total_sold,
         total_adjusted, last_movement_date, updated_at
      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -436,13 +436,13 @@ export async function upsertInventoryBalance(
         total_adjusted     = inventory_balances.total_adjusted + EXCLUDED.total_adjusted,
         last_movement_date = EXCLUDED.last_movement_date,
         updated_at         = NOW()`,
-    [
-      data.productId,
-      qohDelta,
-      receivedDelta,
-      soldDelta,
-      adjustedDelta,
-      data.movementDate,
-    ]
-  );
+        [
+            data.productId,
+            qohDelta,
+            receivedDelta,
+            soldDelta,
+            adjustedDelta,
+            data.movementDate,
+        ]
+    );
 }

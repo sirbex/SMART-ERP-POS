@@ -884,7 +884,7 @@ interface ReportData {
   };
   byMovementType?: Record<string, { count: number; amount: number }>;
   // Profit & Loss
-  parameters?: { startDate?: string; endDate?: string; [key: string]: unknown };
+  parameters?: { startDate?: string; endDate?: string;[key: string]: unknown };
   expenseBreakdown?: Array<{
     accountCode: string;
     accountName: string;

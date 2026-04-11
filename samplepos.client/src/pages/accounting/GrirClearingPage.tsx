@@ -366,9 +366,8 @@ export default function GrirClearingPage() {
           </button>
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 ${
-              showFilters ? 'bg-gray-100' : ''
-            }`}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 ${showFilters ? 'bg-gray-100' : ''
+              }`}
           >
             <Filter className="h-4 w-4" /> Filters
             {showFilters ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -437,11 +436,10 @@ export default function GrirClearingPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              activeTab === tab
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === tab
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
+              }`}
           >
             {tab === 'worklist' && 'MR11 — Work List'}
             {tab === 'search' && `Search Results${searchItems.length > 0 ? ` (${searchItems.length})` : ''}`}
@@ -538,11 +536,10 @@ export default function GrirClearingPage() {
 
             {/* Variance preview */}
             {clearingModal.invoiceAmount != null && (
-              <div className={`rounded-lg p-4 ${
-                clearingModal.grAmount === clearingModal.invoiceAmount
+              <div className={`rounded-lg p-4 ${clearingModal.grAmount === clearingModal.invoiceAmount
                   ? 'bg-green-50 border border-green-200'
                   : 'bg-yellow-50 border border-yellow-200'
-              }`}>
+                }`}>
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">
                     {clearingModal.grAmount === clearingModal.invoiceAmount ? (
@@ -844,10 +841,10 @@ function DetailField({
   const colorCls = highlight === 'blue'
     ? 'text-blue-700'
     : highlight === 'green'
-    ? 'text-green-700'
-    : highlight === 'red'
-    ? 'text-red-700'
-    : 'text-gray-900';
+      ? 'text-green-700'
+      : highlight === 'red'
+        ? 'text-red-700'
+        : 'text-gray-900';
   return (
     <div>
       <div className="text-xs text-gray-500 mb-0.5">{label}</div>
@@ -928,9 +925,8 @@ function OpenItemsTable({
               <td className="px-4 py-3 text-sm text-right font-medium text-green-700">
                 {item.invoiceAmount != null ? fmt(item.invoiceAmount) : '—'}
               </td>
-              <td className={`px-4 py-3 text-sm text-right font-medium ${
-                item.variance != null && item.variance !== 0 ? 'text-red-600' : 'text-gray-400'
-              }`}>
+              <td className={`px-4 py-3 text-sm text-right font-medium ${item.variance != null && item.variance !== 0 ? 'text-red-600' : 'text-gray-400'
+                }`}>
                 {item.variance != null ? fmtDecimal(item.variance) : '—'}
               </td>
               <td className="px-4 py-3 text-sm text-center">

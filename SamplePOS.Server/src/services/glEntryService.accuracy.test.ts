@@ -16,681 +16,681 @@ type MockFn = (...args: unknown[]) => Promise<unknown>;
 let capturedEntries: JournalEntryRequest[] = [];
 
 jest.unstable_mockModule('./accountingCore.js', () => ({
-  AccountingCore: {
-    createJournalEntry: jest.fn<MockFn>(async (request: unknown) => {
-      capturedEntries.push(request as JournalEntryRequest);
-      return {
-        transactionId: 'txn-test-id',
-        transactionNumber: 'TXN-000001',
-        status: 'POSTED',
-        totalDebits: 0,
-        totalCredits: 0,
-      };
-    }),
-    reverseTransaction: jest.fn<MockFn>(async (request: unknown) => {
-      return {
-        transactionId: 'txn-reversal-id',
-        transactionNumber: 'TXN-000002',
-        status: 'POSTED',
-        totalDebits: 0,
-        totalCredits: 0,
-      };
-    }),
-  },
-  AccountingError: class extends Error {
-    constructor(msg: string, public readonly code: string) {
-      super(msg);
-      this.name = 'AccountingError';
-    }
-  },
+    AccountingCore: {
+        createJournalEntry: jest.fn<MockFn>(async (request: unknown) => {
+            capturedEntries.push(request as JournalEntryRequest);
+            return {
+                transactionId: 'txn-test-id',
+                transactionNumber: 'TXN-000001',
+                status: 'POSTED',
+                totalDebits: 0,
+                totalCredits: 0,
+            };
+        }),
+        reverseTransaction: jest.fn<MockFn>(async (request: unknown) => {
+            return {
+                transactionId: 'txn-reversal-id',
+                transactionNumber: 'TXN-000002',
+                status: 'POSTED',
+                totalDebits: 0,
+                totalCredits: 0,
+            };
+        }),
+    },
+    AccountingError: class extends Error {
+        constructor(msg: string, public readonly code: string) {
+            super(msg);
+            this.name = 'AccountingError';
+        }
+    },
 }));
 
 jest.unstable_mockModule('../db/pool.js', () => ({
-  pool: { query: jest.fn<MockFn>() },
-  default: { query: jest.fn<MockFn>() },
+    pool: { query: jest.fn<MockFn>() },
+    default: { query: jest.fn<MockFn>() },
 }));
 
 jest.unstable_mockModule('../utils/logger.js', () => ({
-  default: {
-    info: jest.fn<MockFn>(),
-    error: jest.fn<MockFn>(),
-    warn: jest.fn<MockFn>(),
-    debug: jest.fn<MockFn>(),
-  },
+    default: {
+        info: jest.fn<MockFn>(),
+        error: jest.fn<MockFn>(),
+        warn: jest.fn<MockFn>(),
+        debug: jest.fn<MockFn>(),
+    },
 }));
 
 jest.unstable_mockModule('../utils/constants.js', () => ({
-  SYSTEM_USER_ID: 'system-user',
+    SYSTEM_USER_ID: 'system-user',
 }));
 
 const {
-  recordSaleToGL,
-  recordCustomerPaymentToGL,
-  recordExpenseToGL,
-  recordGoodsReceiptToGL,
-  recordStockAdjustmentToGL,
-  recordOpeningStockToGL,
-  AccountCodes,
+    recordSaleToGL,
+    recordCustomerPaymentToGL,
+    recordExpenseToGL,
+    recordGoodsReceiptToGL,
+    recordStockAdjustmentToGL,
+    recordOpeningStockToGL,
+    AccountCodes,
 } = await import('./glEntryService.js');
 
 /** Helper: sum all debits from lines */
 function totalDebits(lines: JournalLine[]): number {
-  return lines.reduce((sum, l) => sum + l.debitAmount, 0);
+    return lines.reduce((sum, l) => sum + l.debitAmount, 0);
 }
 
 /** Helper: sum all credits from lines */
 function totalCredits(lines: JournalLine[]): number {
-  return lines.reduce((sum, l) => sum + l.creditAmount, 0);
+    return lines.reduce((sum, l) => sum + l.creditAmount, 0);
 }
 
 /** Helper: find line by account code */
 function findLine(lines: JournalLine[], code: string): JournalLine | undefined {
-  return lines.find(l => l.accountCode === code);
+    return lines.find(l => l.accountCode === code);
 }
 
 /** Helper: assert debits = credits within 0.001 tolerance */
 function assertBalanced(lines: JournalLine[]) {
-  const dr = totalDebits(lines);
-  const cr = totalCredits(lines);
-  expect(Math.abs(dr - cr)).toBeLessThan(0.001);
+    const dr = totalDebits(lines);
+    const cr = totalCredits(lines);
+    expect(Math.abs(dr - cr)).toBeLessThan(0.001);
 }
 
 describe('glEntryService — GL Posting Accuracy', () => {
-  beforeEach(() => {
-    capturedEntries = [];
-    jest.clearAllMocks();
-  });
-
-  // ========================================================================
-  // recordSaleToGL — Cash Sale (inventory only, no tax)
-  // ========================================================================
-  describe('recordSaleToGL — cash sale, inventory only', () => {
-    it('should post balanced DR Cash / CR Revenue / DR COGS / CR Inventory', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-1',
-        saleNumber: 'SALE-2026-0001',
-        saleDate: '2026-03-15',
-        totalAmount: 10000,
-        costAmount: 6000,
-        paymentMethod: 'CASH',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
-        ],
-      });
-
-      expect(capturedEntries).toHaveLength(1);
-      const lines = capturedEntries[0].lines;
-
-      // DR Cash 10000
-      const cashLine = findLine(lines, AccountCodes.CASH);
-      expect(cashLine).toBeDefined();
-      expect(cashLine!.debitAmount).toBe(10000);
-      expect(cashLine!.creditAmount).toBe(0);
-
-      // CR Sales Revenue 10000
-      const revLine = findLine(lines, AccountCodes.SALES_REVENUE);
-      expect(revLine).toBeDefined();
-      expect(revLine!.creditAmount).toBe(10000);
-
-      // DR COGS 6000
-      const cogsLine = findLine(lines, AccountCodes.COGS);
-      expect(cogsLine).toBeDefined();
-      expect(cogsLine!.debitAmount).toBe(6000);
-
-      // CR Inventory 6000
-      const invLine = findLine(lines, AccountCodes.INVENTORY);
-      expect(invLine).toBeDefined();
-      expect(invLine!.creditAmount).toBe(6000);
-
-      assertBalanced(lines);
+    beforeEach(() => {
+        capturedEntries = [];
+        jest.clearAllMocks();
     });
 
-    it('should use correct idempotency key', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-123',
-        saleNumber: 'SALE-2026-0005',
-        saleDate: '2026-03-15',
-        totalAmount: 5000,
-        costAmount: 3000,
-        paymentMethod: 'CASH',
-      });
+    // ========================================================================
+    // recordSaleToGL — Cash Sale (inventory only, no tax)
+    // ========================================================================
+    describe('recordSaleToGL — cash sale, inventory only', () => {
+        it('should post balanced DR Cash / CR Revenue / DR COGS / CR Inventory', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-1',
+                saleNumber: 'SALE-2026-0001',
+                saleDate: '2026-03-15',
+                totalAmount: 10000,
+                costAmount: 6000,
+                paymentMethod: 'CASH',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
+                ],
+            });
 
-      expect(capturedEntries[0].idempotencyKey).toBe('SALE-sale-123');
-      expect(capturedEntries[0].referenceType).toBe('SALE');
-    });
-  });
+            expect(capturedEntries).toHaveLength(1);
+            const lines = capturedEntries[0].lines;
 
-  // ========================================================================
-  // recordSaleToGL — Card Sale
-  // ========================================================================
-  describe('recordSaleToGL — card sale', () => {
-    it('should debit Credit Card Receipts (1020), not Cash', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-card',
-        saleNumber: 'SALE-2026-0010',
-        saleDate: '2026-03-15',
-        totalAmount: 5000,
-        costAmount: 3000,
-        paymentMethod: 'CARD',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 5000, unitCost: 3000, quantity: 1 },
-        ],
-      });
+            // DR Cash 10000
+            const cashLine = findLine(lines, AccountCodes.CASH);
+            expect(cashLine).toBeDefined();
+            expect(cashLine!.debitAmount).toBe(10000);
+            expect(cashLine!.creditAmount).toBe(0);
 
-      const lines = capturedEntries[0].lines;
-      const cardLine = findLine(lines, AccountCodes.CREDIT_CARD_RECEIPTS);
-      expect(cardLine).toBeDefined();
-      expect(cardLine!.debitAmount).toBe(5000);
-      assertBalanced(lines);
-    });
-  });
+            // CR Sales Revenue 10000
+            const revLine = findLine(lines, AccountCodes.SALES_REVENUE);
+            expect(revLine).toBeDefined();
+            expect(revLine!.creditAmount).toBe(10000);
 
-  // ========================================================================
-  // recordSaleToGL — Credit Sale with partial payment
-  // ========================================================================
-  describe('recordSaleToGL — credit sale, partial payment', () => {
-    it('should split debit between Cash and AR', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-credit',
-        saleNumber: 'SALE-2026-0020',
-        saleDate: '2026-03-15',
-        totalAmount: 10000,
-        costAmount: 6000,
-        paymentMethod: 'CREDIT',
-        amountPaid: 3000,
-        customerId: 'cust-1',
-        customerName: 'John',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
-        ],
-      });
+            // DR COGS 6000
+            const cogsLine = findLine(lines, AccountCodes.COGS);
+            expect(cogsLine).toBeDefined();
+            expect(cogsLine!.debitAmount).toBe(6000);
 
-      const lines = capturedEntries[0].lines;
+            // CR Inventory 6000
+            const invLine = findLine(lines, AccountCodes.INVENTORY);
+            expect(invLine).toBeDefined();
+            expect(invLine!.creditAmount).toBe(6000);
 
-      // DR Cash 3000 (amount paid)
-      const cashLine = findLine(lines, AccountCodes.CASH);
-      expect(cashLine).toBeDefined();
-      expect(cashLine!.debitAmount).toBe(3000);
+            assertBalanced(lines);
+        });
 
-      // DR AR 7000 (unpaid)
-      const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE);
-      expect(arLine).toBeDefined();
-      expect(arLine!.debitAmount).toBe(7000);
+        it('should use correct idempotency key', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-123',
+                saleNumber: 'SALE-2026-0005',
+                saleDate: '2026-03-15',
+                totalAmount: 5000,
+                costAmount: 3000,
+                paymentMethod: 'CASH',
+            });
 
-      // CR Revenue 10000
-      const revLine = findLine(lines, AccountCodes.SALES_REVENUE);
-      expect(revLine).toBeDefined();
-      expect(revLine!.creditAmount).toBe(10000);
-
-      assertBalanced(lines);
+            expect(capturedEntries[0].idempotencyKey).toBe('SALE-sale-123');
+            expect(capturedEntries[0].referenceType).toBe('SALE');
+        });
     });
 
-    it('should debit only AR when no payment made', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-zero-paid',
-        saleNumber: 'SALE-2026-0021',
-        saleDate: '2026-03-15',
-        totalAmount: 10000,
-        costAmount: 6000,
-        paymentMethod: 'CREDIT',
-        amountPaid: 0,
-        customerId: 'cust-1',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
-        ],
-      });
+    // ========================================================================
+    // recordSaleToGL — Card Sale
+    // ========================================================================
+    describe('recordSaleToGL — card sale', () => {
+        it('should debit Credit Card Receipts (1020), not Cash', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-card',
+                saleNumber: 'SALE-2026-0010',
+                saleDate: '2026-03-15',
+                totalAmount: 5000,
+                costAmount: 3000,
+                paymentMethod: 'CARD',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 5000, unitCost: 3000, quantity: 1 },
+                ],
+            });
 
-      const lines = capturedEntries[0].lines;
-
-      // No Cash line (amount paid = 0)
-      const cashLine = findLine(lines, AccountCodes.CASH);
-      expect(cashLine).toBeUndefined();
-
-      // DR AR 10000 (full amount)
-      const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE);
-      expect(arLine!.debitAmount).toBe(10000);
-
-      assertBalanced(lines);
-    });
-  });
-
-  // ========================================================================
-  // recordSaleToGL — Mixed inventory + service revenue
-  // ========================================================================
-  describe('recordSaleToGL — mixed inventory + service', () => {
-    it('should split revenue between 4000 and 4100', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-mixed',
-        saleNumber: 'SALE-2026-0030',
-        saleDate: '2026-03-15',
-        totalAmount: 15000,
-        costAmount: 5000,
-        paymentMethod: 'CASH',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 10000, unitCost: 5000, quantity: 2 },
-          { productType: 'service', totalPrice: 5000, unitCost: 0, quantity: 1 },
-        ],
-      });
-
-      const lines = capturedEntries[0].lines;
-
-      // DR Cash 15000
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(15000);
-
-      // CR Sales Revenue (4000) = 10000 (inventory)
-      expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
-
-      // CR Service Revenue (4100) = 5000 (service)
-      expect(findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount).toBe(5000);
-
-      // DR COGS 10000 (inventory cost: 2 × 5000)
-      expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(10000);
-
-      // CR Inventory 10000
-      expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(10000);
-
-      assertBalanced(lines);
+            const lines = capturedEntries[0].lines;
+            const cardLine = findLine(lines, AccountCodes.CREDIT_CARD_RECEIPTS);
+            expect(cardLine).toBeDefined();
+            expect(cardLine!.debitAmount).toBe(5000);
+            assertBalanced(lines);
+        });
     });
 
-    it('should NOT create COGS for service-only sale', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-service',
-        saleNumber: 'SALE-2026-0031',
-        saleDate: '2026-03-15',
-        totalAmount: 5000,
-        costAmount: 0,
-        paymentMethod: 'CASH',
-        saleItems: [
-          { productType: 'service', totalPrice: 5000, unitCost: 0, quantity: 1 },
-        ],
-      });
+    // ========================================================================
+    // recordSaleToGL — Credit Sale with partial payment
+    // ========================================================================
+    describe('recordSaleToGL — credit sale, partial payment', () => {
+        it('should split debit between Cash and AR', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-credit',
+                saleNumber: 'SALE-2026-0020',
+                saleDate: '2026-03-15',
+                totalAmount: 10000,
+                costAmount: 6000,
+                paymentMethod: 'CREDIT',
+                amountPaid: 3000,
+                customerId: 'cust-1',
+                customerName: 'John',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
+                ],
+            });
 
-      const lines = capturedEntries[0].lines;
+            const lines = capturedEntries[0].lines;
 
-      // No COGS or Inventory lines for service
-      expect(findLine(lines, AccountCodes.COGS)).toBeUndefined();
-      expect(findLine(lines, AccountCodes.INVENTORY)).toBeUndefined();
+            // DR Cash 3000 (amount paid)
+            const cashLine = findLine(lines, AccountCodes.CASH);
+            expect(cashLine).toBeDefined();
+            expect(cashLine!.debitAmount).toBe(3000);
 
-      // Only Cash and Service Revenue
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(5000);
-      expect(findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount).toBe(5000);
+            // DR AR 7000 (unpaid)
+            const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE);
+            expect(arLine).toBeDefined();
+            expect(arLine!.debitAmount).toBe(7000);
 
-      assertBalanced(lines);
-    });
-  });
+            // CR Revenue 10000
+            const revLine = findLine(lines, AccountCodes.SALES_REVENUE);
+            expect(revLine).toBeDefined();
+            expect(revLine!.creditAmount).toBe(10000);
 
-  // ========================================================================
-  // recordSaleToGL — With Tax
-  // ========================================================================
-  describe('recordSaleToGL — with tax', () => {
-    it('should post tax to Tax Payable (2300) and keep entry balanced', async () => {
-      // totalAmount is tax-inclusive (10000 revenue + 1800 tax = 11800)
-      // saleItems totalPrice is the PRE-TAX revenue amount
-      await recordSaleToGL({
-        saleId: 'sale-tax',
-        saleNumber: 'SALE-2026-0040',
-        saleDate: '2026-03-15',
-        totalAmount: 11800,
-        costAmount: 6000,
-        paymentMethod: 'CASH',
-        taxAmount: 1800,
-        saleItems: [
-          { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
-        ],
-      });
+            assertBalanced(lines);
+        });
 
-      const lines = capturedEntries[0].lines;
+        it('should debit only AR when no payment made', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-zero-paid',
+                saleNumber: 'SALE-2026-0021',
+                saleDate: '2026-03-15',
+                totalAmount: 10000,
+                costAmount: 6000,
+                paymentMethod: 'CREDIT',
+                amountPaid: 0,
+                customerId: 'cust-1',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
+                ],
+            });
 
-      // DR Cash 11800 (tax-inclusive total)
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(11800);
+            const lines = capturedEntries[0].lines;
 
-      // CR Revenue 10000 (pre-tax)
-      expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
+            // No Cash line (amount paid = 0)
+            const cashLine = findLine(lines, AccountCodes.CASH);
+            expect(cashLine).toBeUndefined();
 
-      // CR Tax Payable 1800
-      const taxLine = findLine(lines, AccountCodes.TAX_PAYABLE);
-      expect(taxLine).toBeDefined();
-      expect(taxLine!.creditAmount).toBe(1800);
+            // DR AR 10000 (full amount)
+            const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE);
+            expect(arLine!.debitAmount).toBe(10000);
 
-      // DR COGS 6000, CR Inventory 6000
-      expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(6000);
-      expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(6000);
-
-      assertBalanced(lines);
-    });
-  });
-
-  // ========================================================================
-  // recordSaleToGL — Discount allocation precision
-  // ========================================================================
-  describe('recordSaleToGL — discount allocation', () => {
-    it('should allocate discount proportionally and remain balanced', async () => {
-      // Line totals: inv=7000, svc=3000 (gross=10000)
-      // Actual sale total = 9000 (discount = 1000)
-      // Inv discount = 7000 * (1000/10000) = 700 → net inv = 6300
-      // Svc discount = 3000 * (1000/10000) = 300 → net svc = 2700
-      await recordSaleToGL({
-        saleId: 'sale-discount',
-        saleNumber: 'SALE-2026-0050',
-        saleDate: '2026-03-15',
-        totalAmount: 9000,
-        costAmount: 4000,
-        paymentMethod: 'CASH',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 7000, unitCost: 2000, quantity: 2 },
-          { productType: 'service', totalPrice: 3000, unitCost: 0, quantity: 1 },
-        ],
-      });
-
-      const lines = capturedEntries[0].lines;
-
-      // Cash DR = 9000 (post-discount total)
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(9000);
-
-      // Revenue should sum to 9000 (after discount allocation)
-      const invRev = findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount;
-      const svcRev = findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount;
-      expect(invRev + svcRev).toBeCloseTo(9000, 0);
-
-      assertBalanced(lines);
+            assertBalanced(lines);
+        });
     });
 
-    it('should handle odd-number discount — documents rounding edge case', async () => {
-      // PRECISION EDGE CASE:
-      // Line totals: inv=5000, svc=5000 (gross=10000), totalAmount=9999 → discount=1
-      // Each revenue line gets 0.5 discount → Money.round(4999.5, 0dp) = 5000 (ROUND_HALF_UP)
-      // Both round UP → total credited revenue = 10000, but Cash DR = 9999
-      // This 1 UGX imbalance would be REJECTED by AccountingCore (tolerance=0.001)
-      //
-      // In production, this scenario is extremely unlikely (1 UGX discount on 10000 UGX)
-      // but documents the proportional-rounding risk with integer-only currencies.
-      await recordSaleToGL({
-        saleId: 'sale-odd-discount',
-        saleNumber: 'SALE-2026-0051',
-        saleDate: '2026-03-15',
-        totalAmount: 9999,
-        costAmount: 3000,
-        paymentMethod: 'CASH',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 5000, unitCost: 3000, quantity: 1 },
-          { productType: 'service', totalPrice: 5000, unitCost: 0, quantity: 1 },
-        ],
-      });
+    // ========================================================================
+    // recordSaleToGL — Mixed inventory + service revenue
+    // ========================================================================
+    describe('recordSaleToGL — mixed inventory + service', () => {
+        it('should split revenue between 4000 and 4100', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-mixed',
+                saleNumber: 'SALE-2026-0030',
+                saleDate: '2026-03-15',
+                totalAmount: 15000,
+                costAmount: 5000,
+                paymentMethod: 'CASH',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 10000, unitCost: 5000, quantity: 2 },
+                    { productType: 'service', totalPrice: 5000, unitCost: 0, quantity: 1 },
+                ],
+            });
 
-      const lines = capturedEntries[0].lines;
-      const dr = totalDebits(lines);
-      const cr = totalCredits(lines);
-      // Known: may be off by up to 1 UGX due to ROUND_HALF_UP on both lines
-      expect(Math.abs(dr - cr)).toBeLessThanOrEqual(1);
-    });
-  });
+            const lines = capturedEntries[0].lines;
 
-  // ========================================================================
-  // recordSaleToGL — Deposit sale
-  // ========================================================================
-  describe('recordSaleToGL — deposit sale', () => {
-    it('should debit AR (not Cash) for deposit sale', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-deposit',
-        saleNumber: 'SALE-2026-0060',
-        saleDate: '2026-03-15',
-        totalAmount: 8000,
-        costAmount: 5000,
-        paymentMethod: 'DEPOSIT',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 8000, unitCost: 5000, quantity: 1 },
-        ],
-      });
+            // DR Cash 15000
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(15000);
 
-      const lines = capturedEntries[0].lines;
+            // CR Sales Revenue (4000) = 10000 (inventory)
+            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
 
-      // AR debited (deposit application clears it later)
-      expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.debitAmount).toBe(8000);
+            // CR Service Revenue (4100) = 5000 (service)
+            expect(findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount).toBe(5000);
 
-      // No Cash debit
-      expect(findLine(lines, AccountCodes.CASH)).toBeUndefined();
+            // DR COGS 10000 (inventory cost: 2 × 5000)
+            expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(10000);
 
-      assertBalanced(lines);
-    });
-  });
+            // CR Inventory 10000
+            expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(10000);
 
-  // ========================================================================
-  // recordCustomerPaymentToGL
-  // ========================================================================
-  describe('recordCustomerPaymentToGL', () => {
-    it('should DR Cash / CR AR when reducesAR=true', async () => {
-      await recordCustomerPaymentToGL({
-        paymentId: 'pay-1',
-        paymentNumber: 'PMT-001',
-        paymentDate: '2026-03-15',
-        amount: 5000,
-        paymentMethod: 'CASH',
-        customerId: 'cust-1',
-        customerName: 'John',
-        reducesAR: true,
-      });
+            assertBalanced(lines);
+        });
 
-      const lines = capturedEntries[0].lines;
+        it('should NOT create COGS for service-only sale', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-service',
+                saleNumber: 'SALE-2026-0031',
+                saleDate: '2026-03-15',
+                totalAmount: 5000,
+                costAmount: 0,
+                paymentMethod: 'CASH',
+                saleItems: [
+                    { productType: 'service', totalPrice: 5000, unitCost: 0, quantity: 1 },
+                ],
+            });
 
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(5000);
-      expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(5000);
-      assertBalanced(lines);
+            const lines = capturedEntries[0].lines;
+
+            // No COGS or Inventory lines for service
+            expect(findLine(lines, AccountCodes.COGS)).toBeUndefined();
+            expect(findLine(lines, AccountCodes.INVENTORY)).toBeUndefined();
+
+            // Only Cash and Service Revenue
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(5000);
+            expect(findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount).toBe(5000);
+
+            assertBalanced(lines);
+        });
     });
 
-    it('should DR Cash / CR Customer Deposits when reducesAR=false', async () => {
-      await recordCustomerPaymentToGL({
-        paymentId: 'pay-2',
-        paymentNumber: 'PMT-002',
-        paymentDate: '2026-03-15',
-        amount: 3000,
-        paymentMethod: 'CASH',
-        customerId: 'cust-1',
-        customerName: 'John',
-        reducesAR: false,
-      });
+    // ========================================================================
+    // recordSaleToGL — With Tax
+    // ========================================================================
+    describe('recordSaleToGL — with tax', () => {
+        it('should post tax to Tax Payable (2300) and keep entry balanced', async () => {
+            // totalAmount is tax-inclusive (10000 revenue + 1800 tax = 11800)
+            // saleItems totalPrice is the PRE-TAX revenue amount
+            await recordSaleToGL({
+                saleId: 'sale-tax',
+                saleNumber: 'SALE-2026-0040',
+                saleDate: '2026-03-15',
+                totalAmount: 11800,
+                costAmount: 6000,
+                paymentMethod: 'CASH',
+                taxAmount: 1800,
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 10000, unitCost: 6000, quantity: 1 },
+                ],
+            });
 
-      const lines = capturedEntries[0].lines;
+            const lines = capturedEntries[0].lines;
 
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(3000);
-      expect(findLine(lines, AccountCodes.CUSTOMER_DEPOSITS)!.creditAmount).toBe(3000);
-      assertBalanced(lines);
-    });
-  });
+            // DR Cash 11800 (tax-inclusive total)
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(11800);
 
-  // ========================================================================
-  // recordGoodsReceiptToGL
-  // ========================================================================
-  describe('recordGoodsReceiptToGL', () => {
-    it('should DR Inventory / CR AP', async () => {
-      await recordGoodsReceiptToGL({
-        grId: 'gr-1',
-        grNumber: 'GR-2026-0001',
-        grDate: '2026-03-15',
-        totalAmount: 50000,
-        supplierId: 'sup-1',
-        supplierName: 'Acme Corp',
-      });
+            // CR Revenue 10000 (pre-tax)
+            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
 
-      const lines = capturedEntries[0].lines;
+            // CR Tax Payable 1800
+            const taxLine = findLine(lines, AccountCodes.TAX_PAYABLE);
+            expect(taxLine).toBeDefined();
+            expect(taxLine!.creditAmount).toBe(1800);
 
-      expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(50000);
-      expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.creditAmount).toBe(50000);
-      assertBalanced(lines);
-    });
-  });
+            // DR COGS 6000, CR Inventory 6000
+            expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(6000);
+            expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(6000);
 
-  // ========================================================================
-  // recordStockAdjustmentToGL
-  // ========================================================================
-  describe('recordStockAdjustmentToGL', () => {
-    it('INCREASE: should DR Inventory / CR Other Income', async () => {
-      await recordStockAdjustmentToGL({
-        adjustmentId: 'adj-1',
-        adjustmentNumber: 'ADJ-001',
-        adjustmentDate: '2026-03-15',
-        adjustmentType: 'INCREASE',
-        totalValue: 2000,
-        reason: 'Count surplus',
-      });
-
-      const lines = capturedEntries[0].lines;
-
-      expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(2000);
-      expect(findLine(lines, AccountCodes.OTHER_INCOME)!.creditAmount).toBe(2000);
-      assertBalanced(lines);
+            assertBalanced(lines);
+        });
     });
 
-    it('DECREASE: should DR General Expense / CR Inventory', async () => {
-      await recordStockAdjustmentToGL({
-        adjustmentId: 'adj-2',
-        adjustmentNumber: 'ADJ-002',
-        adjustmentDate: '2026-03-15',
-        adjustmentType: 'DECREASE',
-        totalValue: 1500,
-        reason: 'Count shortage',
-      });
+    // ========================================================================
+    // recordSaleToGL — Discount allocation precision
+    // ========================================================================
+    describe('recordSaleToGL — discount allocation', () => {
+        it('should allocate discount proportionally and remain balanced', async () => {
+            // Line totals: inv=7000, svc=3000 (gross=10000)
+            // Actual sale total = 9000 (discount = 1000)
+            // Inv discount = 7000 * (1000/10000) = 700 → net inv = 6300
+            // Svc discount = 3000 * (1000/10000) = 300 → net svc = 2700
+            await recordSaleToGL({
+                saleId: 'sale-discount',
+                saleNumber: 'SALE-2026-0050',
+                saleDate: '2026-03-15',
+                totalAmount: 9000,
+                costAmount: 4000,
+                paymentMethod: 'CASH',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 7000, unitCost: 2000, quantity: 2 },
+                    { productType: 'service', totalPrice: 3000, unitCost: 0, quantity: 1 },
+                ],
+            });
 
-      const lines = capturedEntries[0].lines;
+            const lines = capturedEntries[0].lines;
 
-      expect(findLine(lines, AccountCodes.GENERAL_EXPENSE)!.debitAmount).toBe(1500);
-      expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(1500);
-      assertBalanced(lines);
-    });
-  });
+            // Cash DR = 9000 (post-discount total)
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(9000);
 
-  // ========================================================================
-  // recordOpeningStockToGL
-  // ========================================================================
-  describe('recordOpeningStockToGL', () => {
-    it('should DR Inventory / CR Opening Balance Equity for positive value', async () => {
-      await recordOpeningStockToGL({
-        movementId: 'mv-1',
-        movementNumber: 'MV-001',
-        productId: 'prod-1',
-        productName: 'Widget',
-        batchNumber: 'BATCH-001',
-        movementValue: 10000,
-        movementDate: '2026-01-01',
-      });
+            // Revenue should sum to 9000 (after discount allocation)
+            const invRev = findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount;
+            const svcRev = findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount;
+            expect(invRev + svcRev).toBeCloseTo(9000, 0);
 
-      const lines = capturedEntries[0].lines;
+            assertBalanced(lines);
+        });
 
-      expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(10000);
-      expect(findLine(lines, AccountCodes.OPENING_BALANCE_EQUITY)!.creditAmount).toBe(10000);
-      assertBalanced(lines);
-    });
+        it('should handle odd-number discount — documents rounding edge case', async () => {
+            // PRECISION EDGE CASE:
+            // Line totals: inv=5000, svc=5000 (gross=10000), totalAmount=9999 → discount=1
+            // Each revenue line gets 0.5 discount → Money.round(4999.5, 0dp) = 5000 (ROUND_HALF_UP)
+            // Both round UP → total credited revenue = 10000, but Cash DR = 9999
+            // This 1 UGX imbalance would be REJECTED by AccountingCore (tolerance=0.001)
+            //
+            // In production, this scenario is extremely unlikely (1 UGX discount on 10000 UGX)
+            // but documents the proportional-rounding risk with integer-only currencies.
+            await recordSaleToGL({
+                saleId: 'sale-odd-discount',
+                saleNumber: 'SALE-2026-0051',
+                saleDate: '2026-03-15',
+                totalAmount: 9999,
+                costAmount: 3000,
+                paymentMethod: 'CASH',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 5000, unitCost: 3000, quantity: 1 },
+                    { productType: 'service', totalPrice: 5000, unitCost: 0, quantity: 1 },
+                ],
+            });
 
-    it('should reverse (DR OBE / CR Inventory) for negative value', async () => {
-      await recordOpeningStockToGL({
-        movementId: 'mv-2',
-        movementNumber: 'MV-002',
-        productId: 'prod-2',
-        productName: 'Gadget',
-        batchNumber: 'BATCH-002',
-        movementValue: -5000,
-        movementDate: '2026-01-01',
-      });
-
-      const lines = capturedEntries[0].lines;
-
-      expect(findLine(lines, AccountCodes.OPENING_BALANCE_EQUITY)!.debitAmount).toBe(5000);
-      expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(5000);
-      assertBalanced(lines);
-    });
-
-    it('should skip posting when value is zero', async () => {
-      await recordOpeningStockToGL({
-        movementId: 'mv-3',
-        movementNumber: 'MV-003',
-        productId: 'prod-3',
-        productName: 'Nothing',
-        batchNumber: 'BATCH-003',
-        movementValue: 0,
-        movementDate: '2026-01-01',
-      });
-
-      expect(capturedEntries).toHaveLength(0);
+            const lines = capturedEntries[0].lines;
+            const dr = totalDebits(lines);
+            const cr = totalCredits(lines);
+            // Known: may be off by up to 1 UGX due to ROUND_HALF_UP on both lines
+            expect(Math.abs(dr - cr)).toBeLessThanOrEqual(1);
+        });
     });
 
-    it('should use deterministic idempotency key', async () => {
-      await recordOpeningStockToGL({
-        movementId: 'mv-4',
-        movementNumber: 'MV-004',
-        productId: 'prod-4',
-        productName: 'Keyed',
-        batchNumber: 'BATCH-004',
-        movementValue: 1000,
-        movementDate: '2026-01-01',
-      });
+    // ========================================================================
+    // recordSaleToGL — Deposit sale
+    // ========================================================================
+    describe('recordSaleToGL — deposit sale', () => {
+        it('should debit AR (not Cash) for deposit sale', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-deposit',
+                saleNumber: 'SALE-2026-0060',
+                saleDate: '2026-03-15',
+                totalAmount: 8000,
+                costAmount: 5000,
+                paymentMethod: 'DEPOSIT',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 8000, unitCost: 5000, quantity: 1 },
+                ],
+            });
 
-      expect(capturedEntries[0].idempotencyKey).toBe('OPENING_STOCK-prod-4-BATCH-004');
-    });
-  });
+            const lines = capturedEntries[0].lines;
 
-  // ========================================================================
-  // recordExpenseToGL
-  // ========================================================================
-  describe('recordExpenseToGL', () => {
-    it('should DR Expense account / CR Cash', async () => {
-      await recordExpenseToGL({
-        expenseId: 'exp-1',
-        expenseNumber: 'EXP-001',
-        expenseDate: '2026-03-15',
-        amount: 3000,
-        categoryCode: 'RENT',
-        categoryName: 'Rent',
-        description: 'Office rent',
-        paymentMethod: 'CASH',
-      });
+            // AR debited (deposit application clears it later)
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.debitAmount).toBe(8000);
 
-      const lines = capturedEntries[0].lines;
+            // No Cash debit
+            expect(findLine(lines, AccountCodes.CASH)).toBeUndefined();
 
-      expect(findLine(lines, AccountCodes.RENT)!.debitAmount).toBe(3000);
-      expect(findLine(lines, AccountCodes.CASH)!.creditAmount).toBe(3000);
-      assertBalanced(lines);
+            assertBalanced(lines);
+        });
     });
 
-    it('should CR Checking Account for BANK_TRANSFER payment', async () => {
-      await recordExpenseToGL({
-        expenseId: 'exp-2',
-        expenseNumber: 'EXP-002',
-        expenseDate: '2026-03-15',
-        amount: 5000,
-        categoryCode: 'UTILITIES',
-        categoryName: 'Utilities',
-        description: 'Electric bill',
-        paymentMethod: 'BANK_TRANSFER',
-      });
+    // ========================================================================
+    // recordCustomerPaymentToGL
+    // ========================================================================
+    describe('recordCustomerPaymentToGL', () => {
+        it('should DR Cash / CR AR when reducesAR=true', async () => {
+            await recordCustomerPaymentToGL({
+                paymentId: 'pay-1',
+                paymentNumber: 'PMT-001',
+                paymentDate: '2026-03-15',
+                amount: 5000,
+                paymentMethod: 'CASH',
+                customerId: 'cust-1',
+                customerName: 'John',
+                reducesAR: true,
+            });
 
-      const lines = capturedEntries[0].lines;
+            const lines = capturedEntries[0].lines;
 
-      expect(findLine(lines, AccountCodes.UTILITIES)!.debitAmount).toBe(5000);
-      expect(findLine(lines, AccountCodes.CHECKING_ACCOUNT)!.creditAmount).toBe(5000);
-      assertBalanced(lines);
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(5000);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(5000);
+            assertBalanced(lines);
+        });
+
+        it('should DR Cash / CR Customer Deposits when reducesAR=false', async () => {
+            await recordCustomerPaymentToGL({
+                paymentId: 'pay-2',
+                paymentNumber: 'PMT-002',
+                paymentDate: '2026-03-15',
+                amount: 3000,
+                paymentMethod: 'CASH',
+                customerId: 'cust-1',
+                customerName: 'John',
+                reducesAR: false,
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(3000);
+            expect(findLine(lines, AccountCodes.CUSTOMER_DEPOSITS)!.creditAmount).toBe(3000);
+            assertBalanced(lines);
+        });
     });
-  });
 
-  // ========================================================================
-  // Large-Scale Precision Tests
-  // ========================================================================
-  describe('large sale amounts — precision', () => {
-    it('should handle 100M UGX sale without precision loss', async () => {
-      await recordSaleToGL({
-        saleId: 'sale-huge',
-        saleNumber: 'SALE-2026-9999',
-        saleDate: '2026-03-15',
-        totalAmount: 100000000,
-        costAmount: 60000000,
-        paymentMethod: 'CASH',
-        saleItems: [
-          { productType: 'inventory', totalPrice: 100000000, unitCost: 60000000, quantity: 1 },
-        ],
-      });
+    // ========================================================================
+    // recordGoodsReceiptToGL
+    // ========================================================================
+    describe('recordGoodsReceiptToGL', () => {
+        it('should DR Inventory / CR AP', async () => {
+            await recordGoodsReceiptToGL({
+                grId: 'gr-1',
+                grNumber: 'GR-2026-0001',
+                grDate: '2026-03-15',
+                totalAmount: 50000,
+                supplierId: 'sup-1',
+                supplierName: 'Acme Corp',
+            });
 
-      const lines = capturedEntries[0].lines;
-      expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(100000000);
-      expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(100000000);
-      assertBalanced(lines);
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(50000);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.creditAmount).toBe(50000);
+            assertBalanced(lines);
+        });
     });
-  });
+
+    // ========================================================================
+    // recordStockAdjustmentToGL
+    // ========================================================================
+    describe('recordStockAdjustmentToGL', () => {
+        it('INCREASE: should DR Inventory / CR Other Income', async () => {
+            await recordStockAdjustmentToGL({
+                adjustmentId: 'adj-1',
+                adjustmentNumber: 'ADJ-001',
+                adjustmentDate: '2026-03-15',
+                adjustmentType: 'INCREASE',
+                totalValue: 2000,
+                reason: 'Count surplus',
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(2000);
+            expect(findLine(lines, AccountCodes.OTHER_INCOME)!.creditAmount).toBe(2000);
+            assertBalanced(lines);
+        });
+
+        it('DECREASE: should DR General Expense / CR Inventory', async () => {
+            await recordStockAdjustmentToGL({
+                adjustmentId: 'adj-2',
+                adjustmentNumber: 'ADJ-002',
+                adjustmentDate: '2026-03-15',
+                adjustmentType: 'DECREASE',
+                totalValue: 1500,
+                reason: 'Count shortage',
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.GENERAL_EXPENSE)!.debitAmount).toBe(1500);
+            expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(1500);
+            assertBalanced(lines);
+        });
+    });
+
+    // ========================================================================
+    // recordOpeningStockToGL
+    // ========================================================================
+    describe('recordOpeningStockToGL', () => {
+        it('should DR Inventory / CR Opening Balance Equity for positive value', async () => {
+            await recordOpeningStockToGL({
+                movementId: 'mv-1',
+                movementNumber: 'MV-001',
+                productId: 'prod-1',
+                productName: 'Widget',
+                batchNumber: 'BATCH-001',
+                movementValue: 10000,
+                movementDate: '2026-01-01',
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(10000);
+            expect(findLine(lines, AccountCodes.OPENING_BALANCE_EQUITY)!.creditAmount).toBe(10000);
+            assertBalanced(lines);
+        });
+
+        it('should reverse (DR OBE / CR Inventory) for negative value', async () => {
+            await recordOpeningStockToGL({
+                movementId: 'mv-2',
+                movementNumber: 'MV-002',
+                productId: 'prod-2',
+                productName: 'Gadget',
+                batchNumber: 'BATCH-002',
+                movementValue: -5000,
+                movementDate: '2026-01-01',
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.OPENING_BALANCE_EQUITY)!.debitAmount).toBe(5000);
+            expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(5000);
+            assertBalanced(lines);
+        });
+
+        it('should skip posting when value is zero', async () => {
+            await recordOpeningStockToGL({
+                movementId: 'mv-3',
+                movementNumber: 'MV-003',
+                productId: 'prod-3',
+                productName: 'Nothing',
+                batchNumber: 'BATCH-003',
+                movementValue: 0,
+                movementDate: '2026-01-01',
+            });
+
+            expect(capturedEntries).toHaveLength(0);
+        });
+
+        it('should use deterministic idempotency key', async () => {
+            await recordOpeningStockToGL({
+                movementId: 'mv-4',
+                movementNumber: 'MV-004',
+                productId: 'prod-4',
+                productName: 'Keyed',
+                batchNumber: 'BATCH-004',
+                movementValue: 1000,
+                movementDate: '2026-01-01',
+            });
+
+            expect(capturedEntries[0].idempotencyKey).toBe('OPENING_STOCK-prod-4-BATCH-004');
+        });
+    });
+
+    // ========================================================================
+    // recordExpenseToGL
+    // ========================================================================
+    describe('recordExpenseToGL', () => {
+        it('should DR Expense account / CR Cash', async () => {
+            await recordExpenseToGL({
+                expenseId: 'exp-1',
+                expenseNumber: 'EXP-001',
+                expenseDate: '2026-03-15',
+                amount: 3000,
+                categoryCode: 'RENT',
+                categoryName: 'Rent',
+                description: 'Office rent',
+                paymentMethod: 'CASH',
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.RENT)!.debitAmount).toBe(3000);
+            expect(findLine(lines, AccountCodes.CASH)!.creditAmount).toBe(3000);
+            assertBalanced(lines);
+        });
+
+        it('should CR Checking Account for BANK_TRANSFER payment', async () => {
+            await recordExpenseToGL({
+                expenseId: 'exp-2',
+                expenseNumber: 'EXP-002',
+                expenseDate: '2026-03-15',
+                amount: 5000,
+                categoryCode: 'UTILITIES',
+                categoryName: 'Utilities',
+                description: 'Electric bill',
+                paymentMethod: 'BANK_TRANSFER',
+            });
+
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.UTILITIES)!.debitAmount).toBe(5000);
+            expect(findLine(lines, AccountCodes.CHECKING_ACCOUNT)!.creditAmount).toBe(5000);
+            assertBalanced(lines);
+        });
+    });
+
+    // ========================================================================
+    // Large-Scale Precision Tests
+    // ========================================================================
+    describe('large sale amounts — precision', () => {
+        it('should handle 100M UGX sale without precision loss', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-huge',
+                saleNumber: 'SALE-2026-9999',
+                saleDate: '2026-03-15',
+                totalAmount: 100000000,
+                costAmount: 60000000,
+                paymentMethod: 'CASH',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 100000000, unitCost: 60000000, quantity: 1 },
+                ],
+            });
+
+            const lines = capturedEntries[0].lines;
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(100000000);
+            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(100000000);
+            assertBalanced(lines);
+        });
+    });
 });
