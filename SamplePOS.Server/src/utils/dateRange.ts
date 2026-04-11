@@ -64,3 +64,24 @@ function tzOffsetMs(year: number, month: number, day: number, tz: string): numbe
   const tzStr = ref.toLocaleString('en-US', { timeZone: tz });
   return new Date(tzStr).getTime() - new Date(utcStr).getTime();
 }
+
+/**
+ * Return today's date as 'YYYY-MM-DD' in the business timezone.
+ *
+ * Fixes the classic bug where `new Date().toLocaleDateString('en-CA')` or
+ * `.toISOString().slice(0,10)` returns the UTC date, causing sales made
+ * between midnight and 03:00 EAT (21:00–00:00 UTC) to land on the wrong day.
+ */
+export function getBusinessDate(tz: string = BUSINESS_TIMEZONE): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const y = parts.find(p => p.type === 'year')!.value;
+  const m = parts.find(p => p.type === 'month')!.value;
+  const d = parts.find(p => p.type === 'day')!.value;
+  return `${y}-${m}-${d}`;
+}

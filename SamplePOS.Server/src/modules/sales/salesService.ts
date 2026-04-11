@@ -24,6 +24,7 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -848,7 +849,7 @@ export const salesService = {
           {
             saleId: sale.id,
             saleNumber: sale.saleNumber,
-            saleDate: sale.saleDate || new Date().toLocaleDateString('en-CA'),
+            saleDate: sale.saleDate || getBusinessDate(),
             totalAmount: sale.totalAmount,
             costAmount: sale.totalCost || 0,
             paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
@@ -1609,7 +1610,7 @@ export const salesService = {
       // ============================================================
       try {
         await client.query('SAVEPOINT daily_summary');
-        const summaryDate = sale.saleDate || new Date().toLocaleDateString('en-CA');
+        const summaryDate = sale.saleDate || getBusinessDate();
         const isCredit = sale.paymentMethod === 'CREDIT';
         // pg returns NUMERIC as strings — must convert for numeric comparison
         const paidNum = parseFloat(String(sale.amountPaid ?? 0));
@@ -1642,7 +1643,7 @@ export const salesService = {
       // ============================================================
       try {
         await client.query('SAVEPOINT state_tables');
-        const stateDate = sale.saleDate || new Date().toLocaleDateString('en-CA');
+        const stateDate = sale.saleDate || getBusinessDate();
 
         // Batch-fetch categories for all non-custom products
         const productIdsForCategory = itemsWithCosts
@@ -1737,7 +1738,7 @@ export const salesService = {
       // retry the payments that actually failed (not already-committed ones).
       // ============================================================
       {
-        const saleDateStr = sale.saleDate || new Date().toLocaleDateString('en-CA');
+        const saleDateStr = sale.saleDate || getBusinessDate();
 
         // Build the full list of non-cash payments that need bank transactions
         const paymentLinesToProcess = input.paymentLines || [];
@@ -2428,7 +2429,7 @@ export const salesService = {
           {
             saleId,
             saleNumber: sale.sale_number,
-            voidDate: new Date().toLocaleDateString('en-CA'),
+            voidDate: getBusinessDate(),
             voidReason: voidReason || 'No reason provided',
           },
           pool
@@ -2764,7 +2765,7 @@ export const salesService = {
 
       const refundData: CreateRefundData = {
         saleId,
-        refundDate: input.refundDate || new Date().toLocaleDateString('en-CA'),
+        refundDate: input.refundDate || getBusinessDate(),
         reason: input.reason.trim(),
         totalAmount: refundTotalAmount.toFixed(2),
         totalCost: refundTotalCost.toFixed(2),
@@ -2988,7 +2989,7 @@ export const salesService = {
           refundNumber: refund.refundNumber,
           saleId,
           saleNumber: sale.sale_number,
-          refundDate: input.refundDate || new Date().toLocaleDateString('en-CA'),
+          refundDate: input.refundDate || getBusinessDate(),
           reason: input.reason,
           totalAmount: refundTotalAmount.toNumber(),
           totalCost: refundTotalCost.toNumber(),

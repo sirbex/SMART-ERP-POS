@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { BusinessError } from '../../middleware/errorHandler.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 export interface SaleRecord {
   id: string;
@@ -228,7 +229,7 @@ export const salesRepository = {
     let result;
     try {
       // Period enforcement (replaces trg_enforce_period_sales)
-      await checkAccountingPeriodOpen(pool, data.saleDate ?? new Date().toISOString().slice(0, 10));
+      await checkAccountingPeriodOpen(pool, data.saleDate ?? getBusinessDate());
 
       result = await pool.query(
         `INSERT INTO sales (
@@ -259,7 +260,7 @@ export const salesRepository = {
         [
           saleNumber,
           data.customerId,
-          data.saleDate || new Date().toLocaleDateString('en-CA'), // Use YYYY-MM-DD string format, no Date object conversion
+          data.saleDate || getBusinessDate(), // YYYY-MM-DD in Africa/Kampala timezone
           subtotal.toFixed(2), // $4 — string for PostgreSQL NUMERIC (bank-grade precision)
           taxAmount.toFixed(2), // $5
           discountAmount.toFixed(2), // $6
