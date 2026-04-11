@@ -86,8 +86,8 @@ SQL_FILES=$(echo "$STAGED_FILES" | grep -E "\.sql$" || true)
 if [ ! -z "$SQL_FILES" ]; then
   echo "🗄️  Checking SQL migration files for dangerous operations..."
   
-  # Check for dangerous schema operations
-  DANGEROUS_OPS=$(git diff --cached | grep -iE "(DROP TABLE|DROP COLUMN|ALTER TABLE.*DROP|TRUNCATE TABLE|DELETE FROM.*WHERE)" || true)
+  # Check for dangerous schema operations (only in SQL files)
+  DANGEROUS_OPS=$(git diff --cached -- $SQL_FILES | grep -iE "(DROP TABLE|DROP COLUMN|ALTER TABLE.*DROP|TRUNCATE TABLE|DELETE FROM.*WHERE)" || true)
   if [ ! -z "$DANGEROUS_OPS" ]; then
     echo "⚠️  WARNING: Dangerous database operations detected!"
     echo ""

@@ -54,6 +54,16 @@ import { creditDebitNoteRoutes } from './modules/credit-debit-notes/creditDebitN
 import { returnGrnRoutes } from './modules/return-grn/returnGrnRoutes.js';
 import { documentFlowRoutes } from './modules/document-flow/documentFlowRoutes.js';
 import { pricingEngineRoutes } from './modules/pricing/pricingRoutes.js';
+import { costCenterRoutes } from './modules/cost-centers/costCenterRoutes.js';
+import { periodControlRoutes } from './modules/period-control/periodControlRoutes.js';
+import { grirClearingRoutes } from './modules/grir-clearing/grirClearingRoutes.js';
+import { dunningRoutes } from './modules/dunning/dunningRoutes.js';
+import { whtRoutes } from './modules/withholding-tax/whtRoutes.js';
+import { assetRoutes } from './modules/asset-accounting/assetRoutes.js';
+import { jeApprovalRoutes } from './modules/je-approval/jeApprovalRoutes.js';
+import { paymentProgramRoutes } from './modules/payment-program/paymentProgramRoutes.js';
+import { currencyRoutes } from './modules/multi-currency/currencyRoutes.js';
+import { enterpriseAccountingRoutes } from './modules/accounting/enterpriseAccountingRoutes.js';
 import pool from './db/pool.js';
 import { auditContextMiddleware } from './middleware/auditContext.js';
 import { createRbacRoutes, initializeRbacMiddleware } from './rbac/index.js';
@@ -323,6 +333,17 @@ app.use('/api/crm', crmRoutes);
 app.use('/api/pricing', pricingEngineRoutes);
 app.use('/api/hr', hrRoutes);
 console.log('  HR & Payroll module loaded');
+// SAP-gap feature modules
+app.use('/api/cost-centers', costCenterRoutes);
+app.use('/api/period-control', periodControlRoutes);
+app.use('/api/grir-clearing', grirClearingRoutes);
+app.use('/api/dunning', dunningRoutes);
+app.use('/api/withholding-tax', whtRoutes);
+app.use('/api/assets', assetRoutes);
+app.use('/api/je-approval', jeApprovalRoutes);
+app.use('/api/payment-program', paymentProgramRoutes);
+app.use('/api/currency', currencyRoutes);
+app.use('/api/enterprise-accounting', enterpriseAccountingRoutes); // Enterprise-grade accounting features
 // Accounting routes moved above for better priority
 
 // ============================================================

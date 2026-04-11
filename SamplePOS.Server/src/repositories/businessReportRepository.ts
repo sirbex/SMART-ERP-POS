@@ -139,8 +139,8 @@ export async function getMoneyIn(
 
 // ---------------------------------------------------------------------------
 // Section 2 — Revenue by Product Category
-// Reads from GL revenue accounts (4000, 4100) → links back through
-// ledger_transactions.ReferenceNumber = sales.sale_number → sale_items → products.category
+// Reads from product_daily_summary state table (maintained at write-time).
+// SAP pattern: "Reports read reality (state tables), not transaction tables."
 // ---------------------------------------------------------------------------
 
 export async function getRevenueByCategory(
@@ -149,99 +149,32 @@ export async function getRevenueByCategory(
 ): Promise<RevenueByCategoryRow[]> {
   const db = dbPool || globalPool;
 
-  // Revenue comes from CR entries on accounts 4xxx (REVENUE type).
-  // We link transactions to sales to get product category breakdown.
-  // COGS is from DR entries on account 5000 in the SAME transaction.
+  // product_daily_summary uses DATE (not TIMESTAMPTZ), so we use date bounds directly
   const query = `
-    WITH sale_revenue AS (
-      -- Total revenue per sale transaction from GL
-      SELECT
-        lt."ReferenceNumber" AS sale_number,
-        ROUND(COALESCE(SUM(le."CreditAmount"), 0)::numeric, 2) AS gl_revenue
-      FROM ledger_entries le
-      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-      JOIN accounts a ON a."Id" = le."AccountId"
-      WHERE lt."ReferenceType" = 'SALE'
-        AND lt."Status" = 'POSTED'
-        AND a."AccountType" = 'REVENUE'
-        AND le."CreditAmount" > 0
-        ${dateClause(1)}
-      GROUP BY lt."ReferenceNumber"
-    ),
-    sale_cogs AS (
-      -- Total COGS per sale transaction from GL (DR on 5000)
-      SELECT
-        lt."ReferenceNumber" AS sale_number,
-        ROUND(COALESCE(SUM(le."DebitAmount"), 0)::numeric, 2) AS gl_cogs
-      FROM ledger_entries le
-      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-      JOIN accounts a ON a."Id" = le."AccountId"
-      WHERE lt."ReferenceType" = 'SALE'
-        AND lt."Status" = 'POSTED'
-        AND a."AccountCode" = '5000'
-        AND le."DebitAmount" > 0
-        ${dateClause(1)}
-      GROUP BY lt."ReferenceNumber"
-    ),
-    item_weights AS (
-      -- Per-category weight within each sale (for proportional allocation)
-      SELECT
-        s.sale_number,
-        COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') AS category_name,
-        COUNT(DISTINCT s.id)::integer AS txn_fragment,
-        ROUND(SUM(si.quantity)::numeric, 2) AS units_sold,
-        ROUND(SUM(si.total_price)::numeric, 2) AS line_revenue
-      FROM sales s
-      JOIN sale_items si ON si.sale_id = s.id
-      LEFT JOIN products p ON p.id = si.product_id
-      WHERE s.status = 'COMPLETED'
-        AND ($1::timestamptz IS NULL OR s.sale_date >= $1::timestamptz)
-        AND ($2::timestamptz IS NULL OR s.sale_date < $2::timestamptz)
-      GROUP BY s.sale_number, category_name
-    ),
-    allocated AS (
-      SELECT
-        iw.category_name,
-        iw.txn_fragment,
-        iw.units_sold,
-        -- Allocate GL revenue proportionally by line_revenue weight
-        CASE
-          WHEN sale_total.total_line > 0
-          THEN ROUND(sr.gl_revenue * (iw.line_revenue / sale_total.total_line), 2)
-          ELSE 0
-        END AS allocated_revenue,
-        CASE
-          WHEN sale_total.total_line > 0
-          THEN ROUND(COALESCE(sc.gl_cogs, 0) * (iw.line_revenue / sale_total.total_line), 2)
-          ELSE 0
-        END AS allocated_cogs
-      FROM item_weights iw
-      JOIN sale_revenue sr ON sr.sale_number = iw.sale_number
-      LEFT JOIN sale_cogs sc ON sc.sale_number = iw.sale_number
-      JOIN LATERAL (
-        SELECT SUM(iw2.line_revenue) AS total_line
-        FROM item_weights iw2
-        WHERE iw2.sale_number = iw.sale_number
-      ) sale_total ON true
-    )
     SELECT
-      category_name,
-      SUM(txn_fragment)::integer AS transaction_count,
-      ROUND(SUM(units_sold)::numeric, 2) AS units_sold,
-      ROUND(SUM(allocated_revenue)::numeric, 2) AS total_revenue,
-      ROUND(SUM(allocated_cogs)::numeric, 2) AS total_cogs,
-      ROUND(SUM(allocated_revenue) - SUM(allocated_cogs), 2) AS gross_profit,
+      pds.category AS category_name,
+      SUM(pds.transaction_count)::integer AS transaction_count,
+      ROUND(SUM(pds.units_sold)::numeric, 2) AS units_sold,
+      ROUND(SUM(pds.revenue)::numeric, 2) AS total_revenue,
+      ROUND(SUM(pds.cost_of_goods)::numeric, 2) AS total_cogs,
+      ROUND(SUM(pds.gross_profit)::numeric, 2) AS gross_profit,
       CASE
-        WHEN SUM(allocated_revenue) > 0
-        THEN ROUND((SUM(allocated_revenue) - SUM(allocated_cogs)) / SUM(allocated_revenue) * 100, 2)
+        WHEN SUM(pds.revenue) > 0
+        THEN ROUND(SUM(pds.gross_profit) / SUM(pds.revenue) * 100, 2)
         ELSE 0
       END AS gross_margin_pct
-    FROM allocated
-    GROUP BY category_name
+    FROM product_daily_summary pds
+    WHERE ($1::date IS NULL OR pds.business_date >= $1::date)
+      AND ($2::date IS NULL OR pds.business_date <= $2::date)
+    GROUP BY pds.category
     ORDER BY total_revenue DESC
   `;
 
-  const result = await db.query(query, dateParams(filters));
+  // Convert TIMESTAMPTZ-style date params to plain DATE bounds
+  const startDate = filters.startDate || null;
+  const endDate = filters.endDate || null;
+
+  const result = await db.query(query, [startDate, endDate]);
   return result.rows;
 }
 

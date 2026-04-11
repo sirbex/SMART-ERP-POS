@@ -87,6 +87,23 @@ export const AccountCodes = {
   // Returns & Allowances
   SALES_RETURNS: '4010',
   PURCHASE_RETURNS: '5010',
+
+  // GR/IR Clearing
+  GRIR_CLEARING: '2150',
+
+  // Price Variance (GR/IR mismatch — SAP account 393000)
+  PRICE_VARIANCE: '5020',
+
+  // Withholding Tax
+  WHT_PAYABLE: '2350',
+
+  // Fixed Assets
+  FIXED_ASSETS: '1500',
+  ACCUMULATED_DEPRECIATION: '1550',
+
+  // Foreign Exchange
+  REALIZED_FX_GAIN_LOSS: '4300',
+  UNREALIZED_FX_GAIN_LOSS: '4310',
 };
 
 // =============================================================================
@@ -687,6 +704,9 @@ export interface GoodsReceiptData {
  * Journal entry for receiving inventory:
  *   DR Inventory (1300)        totalAmount
  *   CR Accounts Payable (2100) totalAmount
+ *
+ * Odoo-style: direct AP posting. SAP 3-way matching (GR/IR Clearing)
+ * is available via the standalone GR/IR Clearing module API when needed.
  */
 export async function recordGoodsReceiptToGL(
   gr: GoodsReceiptData,
@@ -694,7 +714,8 @@ export async function recordGoodsReceiptToGL(
   txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
-    // Use AccountingCore for audit-safe, idempotent journal entry creation
+    // Odoo-style: GR posts directly to AP. No clearing account.
+    // SAP 3-way matching (GR/IR Clearing 2150) is available via the GR/IR Clearing module API when needed.
     await AccountingCore.createJournalEntry({
       entryDate: gr.grDate,
       description: `Goods Receipt: ${gr.grNumber} from ${gr.supplierName}`,
@@ -712,7 +733,7 @@ export async function recordGoodsReceiptToGL(
         },
         {
           accountCode: AccountCodes.ACCOUNTS_PAYABLE,
-          description: `Payable to ${gr.supplierName}`,
+          description: `Payable to ${gr.supplierName}: ${gr.grNumber}`,
           debitAmount: 0,
           creditAmount: gr.totalAmount,
           entityType: 'supplier',

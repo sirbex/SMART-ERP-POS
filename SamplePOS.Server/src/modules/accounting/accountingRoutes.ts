@@ -775,33 +775,38 @@ router.get(
       totalFinancingCashFlow
     ).toNumber();
 
-    // Get beginning cash balance from ledger entries (before the period)
+    // Get beginning cash balance from gl_period_balances (before the period)
+    const [bStartYear, bStartMonth] = startDate.split('-').map(Number);
+    // "Before start" = up to the period just before startMonth
+    const bPrevMonth = bStartMonth === 1 ? 12 : bStartMonth - 1;
+    const bPrevYear = bStartMonth === 1 ? bStartYear - 1 : bStartYear;
     const beginningResult = await pool.query(
       `
       SELECT 
-    COALESCE(SUM("DebitAmount"), 0) - COALESCE(SUM("CreditAmount"), 0) as beginning_balance
-      FROM ledger_entries le
-      JOIN accounts a ON a."Id" = le."AccountId"
+        COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0) as beginning_balance
+      FROM gl_period_balances gpb
+      JOIN accounts a ON a."Id" = gpb.account_id
       WHERE a."AccountCode" IN ('1010', '1020', '1030')
-    AND le."EntryDate" < $1
-    `,
-      [startDate]
+        AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
+      `,
+      [bPrevYear, bPrevMonth]
     );
     const beginningCashBalance = Money.parseDb(
       beginningResult.rows[0]?.beginning_balance
     ).toNumber();
 
-    // Calculate ending balance from ledger entries (through end of period)
+    // Calculate ending balance from gl_period_balances (through end of period)
+    const [eEndYear, eEndMonth] = endDate.split('-').map(Number);
     const endingResult = await pool.query(
       `
       SELECT 
-    COALESCE(SUM("DebitAmount"), 0) - COALESCE(SUM("CreditAmount"), 0) as ending_balance
-      FROM ledger_entries le
-      JOIN accounts a ON a."Id" = le."AccountId"
+        COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0) as ending_balance
+      FROM gl_period_balances gpb
+      JOIN accounts a ON a."Id" = gpb.account_id
       WHERE a."AccountCode" IN ('1010', '1020', '1030')
-    AND le."EntryDate" <= $1
-    `,
-      [endDate + ' 23:59:59']
+        AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
+      `,
+      [eEndYear, eEndMonth]
     );
     const endingCashBalance = Money.parseDb(endingResult.rows[0]?.ending_balance).toNumber();
 
@@ -866,19 +871,17 @@ router.get(
     WHERE "IsActive" = true
     GROUP BY "AccountType"
       `),
-      // Trial balance totals from ledger_entries (where actual data lives)
+      // Trial balance totals from gl_period_balances (fast totals table)
       pool.query(`
     SELECT 
-      COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
-      COALESCE(SUM(le."CreditAmount"), 0) as total_credits
-    FROM ledger_entries le
-    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-    WHERE lt."Status" = 'POSTED'
+      COALESCE(SUM(gpb.debit_total), 0) as total_debits,
+      COALESCE(SUM(gpb.credit_total), 0) as total_credits
+    FROM gl_period_balances gpb
       `),
-      // Sales summary (last 30 days)
+      // Sales summary (last 30 days) — fallback to sales table
       pool.query(`
     SELECT 
-      COUNT(*) as total_sales,
+      COUNT(*)::integer as total_sales,
       COALESCE(SUM(total_amount), 0) as total_revenue,
       COALESCE(SUM(total_cost), 0) as total_cogs,
       COALESCE(SUM(profit), 0) as total_profit
@@ -886,7 +889,7 @@ router.get(
     WHERE sale_date >= CURRENT_DATE - INTERVAL '30 days'
       AND status = 'COMPLETED'
       `),
-      // Accounts receivable (customers with balance)
+      // Accounts receivable — from customers with positive balance
       pool.query(`
     SELECT 
       COUNT(*) as customer_count,
@@ -894,13 +897,14 @@ router.get(
     FROM customers
     WHERE balance > 0
       `),
-      // Accounts payable (suppliers - using OutstandingBalance from suppliers table)
+      // Accounts payable — from GL account 2100 balance
       pool.query(`
     SELECT 
-      COUNT(*) as supplier_count,
-      COALESCE(SUM("OutstandingBalance"), 0) as total_payables
-    FROM suppliers
-    WHERE "IsActive" = true
+      0 as supplier_count,
+      COALESCE(SUM(gpb.credit_total) - SUM(gpb.debit_total), 0) as total_payables
+    FROM gl_period_balances gpb
+    JOIN accounts a ON a."Id" = gpb.account_id
+    WHERE a."AccountCode" = '2100'
       `),
       // Recent ledger transactions count (where actual data lives)
       pool.query(`

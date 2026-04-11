@@ -229,6 +229,7 @@ export class AccountingCore {
     }
 
     /**
+    /**
      * Lock a financial period
      * Prevents any new transactions in that period
      */
@@ -395,45 +396,45 @@ export class AccountingCore {
         // If caller provided a transactional client, execute directly (atomic with caller).
         // Otherwise, start our own UnitOfWork transaction (backward compatible).
         const doWork = async (client: pg.PoolClient): Promise<JournalEntryResult> => {
-                // 3. Check idempotency - return existing if already processed
-                const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
-                if (idempotencyCheck.exists) {
-                    // Fetch and return existing transaction (idempotent behavior)
-                    const existing = await this.getTransaction(idempotencyCheck.transactionId!, dbPool);
-                    if (existing) {
-                        logger.info('Idempotent request - returning existing transaction', {
-                            idempotencyKey: request.idempotencyKey,
-                            existingTransactionId: idempotencyCheck.transactionId,
-                        });
-                        return existing;
-                    }
-
-                    throw new IdempotencyConflictError(
-                        request.idempotencyKey,
-                        idempotencyCheck.transactionId!
-                    );
+            // 3. Check idempotency - return existing if already processed
+            const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
+            if (idempotencyCheck.exists) {
+                // Fetch and return existing transaction (idempotent behavior)
+                const existing = await this.getTransaction(idempotencyCheck.transactionId!, dbPool);
+                if (existing) {
+                    logger.info('Idempotent request - returning existing transaction', {
+                        idempotencyKey: request.idempotencyKey,
+                        existingTransactionId: idempotencyCheck.transactionId,
+                    });
+                    return existing;
                 }
 
-                // 4. Check period is open
-                const periodOpen = await this.isPeriodOpen(client, request.entryDate);
-                if (!periodOpen) {
-                    const periodStatus = await this.getPeriodStatus(client, request.entryDate);
-                    throw new PeriodLockedError(request.entryDate, periodStatus || 'UNKNOWN');
-                }
+                throw new IdempotencyConflictError(
+                    request.idempotencyKey,
+                    idempotencyCheck.transactionId!
+                );
+            }
 
-                // 5. Generate transaction number (deterministic based on count)
-                const countResult = await client.query(`
+            // 4. Check period is open
+            const periodOpen = await this.isPeriodOpen(client, request.entryDate);
+            if (!periodOpen) {
+                const periodStatus = await this.getPeriodStatus(client, request.entryDate);
+                throw new PeriodLockedError(request.entryDate, periodStatus || 'UNKNOWN');
+            }
+
+            // 5. Generate transaction number (deterministic based on count)
+            const countResult = await client.query(`
         SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER)), 0) + 1 as next_num 
         FROM ledger_transactions
         WHERE "TransactionNumber" LIKE 'TXN-%'
       `);
-                const nextNum = parseInt(countResult.rows[0].next_num);
-                const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
-                const transactionId = uuidv4();
+            const nextNum = parseInt(countResult.rows[0].next_num);
+            const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
+            const transactionId = uuidv4();
 
-                // 6. Create transaction header
-                await client.query(
-                    `
+            // 6. Create transaction header
+            await client.query(
+                `
         INSERT INTO ledger_transactions (
           "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
           "ReferenceId", "ReferenceNumber", "Description",
@@ -441,119 +442,148 @@ export class AccountingCore {
           "IdempotencyKey", "CreatedBy", "CreatedAt", "UpdatedAt", "IsReversed"
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED', $10, $11, NOW(), NOW(), FALSE)
       `,
-                    [
-                        transactionId,
-                        transactionNumber,
-                        request.entryDate,
-                        request.referenceType,
-                        request.referenceId,
-                        request.referenceNumber,
-                        request.description,
-                        validation.totalDebits,
-                        validation.totalCredits,
-                        request.idempotencyKey,
-                        request.userId,
-                    ]
-                );
+                [
+                    transactionId,
+                    transactionNumber,
+                    request.entryDate,
+                    request.referenceType,
+                    request.referenceId,
+                    request.referenceNumber,
+                    request.description,
+                    validation.totalDebits,
+                    validation.totalCredits,
+                    request.idempotencyKey,
+                    request.userId,
+                ]
+            );
 
-                // 7. Create ledger entries
-                let lineNumber = 1;
-                for (const line of request.lines) {
-                    // Resolve account
-                    const accountResult = await client.query(
-                        `
+            // 7. Create ledger entries
+            let lineNumber = 1;
+            for (const line of request.lines) {
+                // Resolve account
+                const accountResult = await client.query(
+                    `
           SELECT "Id", "AccountName", "NormalBalance"
           FROM accounts 
           WHERE "AccountCode" = $1 AND "IsActive" = true
         `,
-                        [line.accountCode]
-                    );
+                    [line.accountCode]
+                );
 
-                    if (accountResult.rows.length === 0) {
-                        throw new AccountNotFoundError(line.accountCode);
-                    }
+                if (accountResult.rows.length === 0) {
+                    throw new AccountNotFoundError(line.accountCode);
+                }
 
-                    const account = accountResult.rows[0];
-                    const entryId = uuidv4();
-                    const entryType = line.debitAmount > 0 ? 'DEBIT' : 'CREDIT';
-                    const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
+                const account = accountResult.rows[0];
+                const entryId = uuidv4();
+                const entryType = line.debitAmount > 0 ? 'DEBIT' : 'CREDIT';
+                const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
 
-                    await client.query(
-                        `
+                await client.query(
+                    `
           INSERT INTO ledger_entries (
             "Id", "TransactionId", "AccountId", "EntryType", "Amount",
             "DebitAmount", "CreditAmount", "Description", "LineNumber",
             "EntityType", "EntityId", "CreatedAt"
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
         `,
-                        [
-                            entryId,
-                            transactionId,
-                            account.Id,
-                            entryType,
-                            amount,
-                            line.debitAmount,
-                            line.creditAmount,
-                            line.description,
-                            lineNumber++,
-                            line.entityType || null,
-                            line.entityId || null,
-                        ]
-                    );
+                    [
+                        entryId,
+                        transactionId,
+                        account.Id,
+                        entryType,
+                        amount,
+                        line.debitAmount,
+                        line.creditAmount,
+                        line.description,
+                        lineNumber++,
+                        line.entityType || null,
+                        line.entityId || null,
+                    ]
+                );
 
-                    // 8. Update account running balance
-                    const balanceChange =
-                        account.NormalBalance === 'DEBIT'
-                            ? Money.subtract(line.debitAmount, line.creditAmount).toNumber()
-                            : Money.subtract(line.creditAmount, line.debitAmount).toNumber();
+                // 8. Update account running balance
+                const balanceChange =
+                    account.NormalBalance === 'DEBIT'
+                        ? Money.subtract(line.debitAmount, line.creditAmount).toNumber()
+                        : Money.subtract(line.creditAmount, line.debitAmount).toNumber();
 
-                    await client.query(
-                        `
+                await client.query(
+                    `
           UPDATE accounts
           SET "CurrentBalance" = "CurrentBalance" + $2,
               "UpdatedAt" = NOW()
           WHERE "Id" = $1
         `,
-                        [account.Id, balanceChange]
-                    );
-                }
+                    [account.Id, balanceChange]
+                );
 
-                // 9. Create audit log entry
-                await client.query(
-                    `
+                // 8b. UPSERT gl_period_balances (SAP FAGLFLEXT pattern)
+                //     Runs inside the SAME transaction — atomic with ledger entry.
+                //     Defense-in-depth: isPeriodOpen() already gates this function,
+                //     but the WHERE clause below provides a DB-level safety net.
+                const entryYear = parseInt(request.entryDate.substring(0, 4), 10);
+                const entryMonth = parseInt(request.entryDate.substring(5, 7), 10);
+
+                const upsertResult = await client.query(
+                    `INSERT INTO gl_period_balances
+                        (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+                     SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
+                     WHERE NOT EXISTS (
+                       SELECT 1 FROM financial_periods
+                       WHERE period_year = $2 AND period_month = $3
+                         AND "Status" IN ('CLOSED', 'LOCKED')
+                     )
+                     ON CONFLICT (account_id, fiscal_year, fiscal_period)
+                     DO UPDATE SET
+                        debit_total     = gl_period_balances.debit_total   + EXCLUDED.debit_total,
+                        credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
+                        running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
+                        last_updated    = NOW()`,
+                    [account.Id, entryYear, entryMonth, line.debitAmount, line.creditAmount]
+                );
+
+                if (upsertResult.rowCount === 0) {
+                    throw new PeriodLockedError(request.entryDate, 'LOCKED');
+                }
+            }
+
+            // 9. Create audit log entry
+            await client.query(
+                `
         INSERT INTO audit_log (id, action, entity_type, entity_id, user_id, action_details)
         VALUES ($1, 'CREATE', 'SYSTEM', $2, $3, $4)
       `,
-                    [
-                        uuidv4(),
-                        transactionId,
-                        request.userId,
-                        JSON.stringify({
-                            transactionNumber,
-                            referenceType: request.referenceType,
-                            referenceNumber: request.referenceNumber,
-                            totalDebits: validation.totalDebits,
-                            totalCredits: validation.totalCredits,
-                            lineCount: request.lines.length,
-                        }),
-                    ]
-                );
-
-                logger.info('Journal entry created', {
+                [
+                    uuidv4(),
                     transactionId,
-                    transactionNumber,
-                    referenceNumber: request.referenceNumber,
-                    totalDebits: validation.totalDebits,
-                    totalCredits: validation.totalCredits,
-                });
+                    request.userId,
+                    JSON.stringify({
+                        transactionNumber,
+                        referenceType: request.referenceType,
+                        referenceNumber: request.referenceNumber,
+                        totalDebits: validation.totalDebits,
+                        totalCredits: validation.totalCredits,
+                        lineCount: request.lines.length,
+                    }),
+                ]
+            );
 
-                return {
-                    transactionId,
-                    transactionNumber,
-                    status: 'POSTED',
-                    totalDebits: validation.totalDebits,
-                    totalCredits: validation.totalCredits,
-                };
+            logger.info('Journal entry created', {
+                transactionId,
+                transactionNumber,
+                referenceNumber: request.referenceNumber,
+                totalDebits: validation.totalDebits,
+                totalCredits: validation.totalCredits,
+            });
+
+            return {
+                transactionId,
+                transactionNumber,
+                status: 'POSTED',
+                totalDebits: validation.totalDebits,
+                totalCredits: validation.totalCredits,
+            };
         };
 
         try {
@@ -743,6 +773,34 @@ export class AccountingCore {
         `,
                         [account.Id, balanceChange]
                     );
+
+                    // UPSERT gl_period_balances (SAP FAGLFLEXT) — reversal uses reversalDate
+                    //     Defense-in-depth: isPeriodOpen() already gates this function,
+                    //     but the WHERE clause below provides a DB-level safety net.
+                    const revYear = parseInt(request.reversalDate.substring(0, 4), 10);
+                    const revMonth = parseInt(request.reversalDate.substring(5, 7), 10);
+
+                    const revUpsertResult = await client.query(
+                        `INSERT INTO gl_period_balances
+                            (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+                         SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
+                         WHERE NOT EXISTS (
+                           SELECT 1 FROM financial_periods
+                           WHERE period_year = $2 AND period_month = $3
+                             AND "Status" IN ('CLOSED', 'LOCKED')
+                         )
+                         ON CONFLICT (account_id, fiscal_year, fiscal_period)
+                         DO UPDATE SET
+                            debit_total     = gl_period_balances.debit_total   + EXCLUDED.debit_total,
+                            credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
+                            running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
+                            last_updated    = NOW()`,
+                        [account.Id, revYear, revMonth, line.debitAmount, line.creditAmount]
+                    );
+
+                    if (revUpsertResult.rowCount === 0) {
+                        throw new PeriodLockedError(request.reversalDate, 'LOCKED');
+                    }
                 }
 
                 // 9. Mark original as reversed (but don't delete!)

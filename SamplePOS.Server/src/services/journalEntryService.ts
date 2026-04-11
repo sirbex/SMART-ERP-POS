@@ -316,6 +316,9 @@ export class JournalEntryService {
         this.pool
       );
 
+      // JE Approval (SAP parking/approval workflow) is available via the
+      // standalone JE Approval module API when needed. Odoo-style: post directly.
+
       logger.info('Manual journal entry posted to GL', {
         entryId,
         entryNumber,

@@ -692,56 +692,35 @@ export async function getTrialBalance(
 }> {
   const pool = dbPool || globalPool;
   try {
-    // Get all account balances calculated from ledger entries up to asOfDate
-    // netBalance is calculated from debits and credits, respecting normalBalance type
+    // SAP FAGLFLEXT pattern: read from pre-aggregated gl_period_balances
+    const year = parseInt(asOfDate.substring(0, 4), 10);
+    const month = parseInt(asOfDate.substring(5, 7), 10);
+
     const query = `
-      WITH account_activity AS (
-        SELECT 
-          a."Id" as "accountId",
-          a."AccountCode" as "accountCode",
-          a."AccountName" as "accountName",
-          a."AccountType" as "accountType",
-          a."NormalBalance" as "normalBalance",
-          COALESCE((
-            SELECT SUM(le."DebitAmount")
-            FROM ledger_entries le
-            JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-            WHERE le."AccountId" = a."Id"
-              AND lt."Status" = 'POSTED'
-              AND DATE(lt."TransactionDate") <= $1
-          ), 0) as "debitBalance",
-          COALESCE((
-            SELECT SUM(le."CreditAmount")
-            FROM ledger_entries le
-            JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-            WHERE le."AccountId" = a."Id"
-              AND lt."Status" = 'POSTED'
-              AND DATE(lt."TransactionDate") <= $1
-          ), 0) as "creditBalance"
-        FROM accounts a
-        WHERE a."IsActive" = true
-      )
       SELECT 
-        "accountId",
-        "accountCode",
-        "accountName",
-        "accountType",
-        "normalBalance",
-        "debitBalance",
-        "creditBalance",
-        -- Calculate net balance based on normal balance type
-        -- DEBIT-normal (Asset, Expense): Debits - Credits
-        -- CREDIT-normal (Liability, Equity, Revenue): Credits - Debits
+        a."Id"             as "accountId",
+        a."AccountCode"    as "accountCode",
+        a."AccountName"    as "accountName",
+        a."AccountType"    as "accountType",
+        a."NormalBalance"  as "normalBalance",
+        COALESCE(SUM(gpb.debit_total),  0) as "debitBalance",
+        COALESCE(SUM(gpb.credit_total), 0) as "creditBalance",
         CASE 
-          WHEN "normalBalance" = 'DEBIT' THEN "debitBalance" - "creditBalance"
-          ELSE "creditBalance" - "debitBalance"
+          WHEN a."NormalBalance" = 'DEBIT'
+            THEN COALESCE(SUM(gpb.debit_total),  0) - COALESCE(SUM(gpb.credit_total), 0)
+            ELSE COALESCE(SUM(gpb.credit_total), 0) - COALESCE(SUM(gpb.debit_total),  0)
         END as "netBalance"
-      FROM account_activity
-      ${includeZeroBalances ? '' : 'WHERE ("debitBalance" != 0 OR "creditBalance" != 0)'}
+      FROM accounts a
+      LEFT JOIN gl_period_balances gpb
+        ON gpb.account_id = a."Id"
+       AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
+      WHERE a."IsActive" = true
+      GROUP BY a."Id", a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
+      ${includeZeroBalances ? '' : 'HAVING COALESCE(SUM(gpb.debit_total), 0) != 0 OR COALESCE(SUM(gpb.credit_total), 0) != 0'}
       ORDER BY "accountCode"
     `;
 
-    const result = await pool.query(query, [asOfDate]);
+    const result = await pool.query(query, [year, month]);
     const accounts = result.rows.map((row) => ({
       ...row,
       debitBalance: Money.parseDb(row.debitBalance).toNumber(),
@@ -784,6 +763,14 @@ export async function getTrialBalance(
 /**
  * Generate Balance Sheet from actual account balances
  * Balance Sheet: Assets = Liabilities + Equity
+ *
+ * SAP/Odoo-style account classification:
+ *   1000–1499  Current Assets  (Cash, AR, Inventory, Prepaid)
+ *   1500–1999  Non-Current Assets (Fixed Assets, Accumulated Depreciation)
+ *   2000–2999  Current Liabilities (AP, Customer Deposits, Tax Payable)
+ *   3000–3999  Equity (Owner's Equity, Opening Balance Equity, Retained Earnings)
+ *   4000–4999  Revenue  → flows into Retained Earnings
+ *   5000–6999  Expenses → flows into Retained Earnings
  */
 export async function getBalanceSheet(
   asOfDate: string,
@@ -797,6 +784,7 @@ export async function getBalanceSheet(
     fixedAssets: { accountCode: string; accountName: string; amount: number }[];
     totalCurrentAssets: number;
     totalFixedAssets: number;
+    totalOtherAssets: number;
     totalAssets: number;
   };
   liabilities: {
@@ -812,118 +800,145 @@ export async function getBalanceSheet(
     totalEquity: number;
   };
   totalLiabilitiesAndEquity: number;
+  isBalanced: boolean;
 }> {
   const pool = dbPool || globalPool;
   try {
-    // Get account balances from ledger_entries (database-driven)
+    // Parse asOfDate to fiscal year/month for gl_period_balances lookup
+    const [yearStr, monthStr] = asOfDate.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+
+    // Get account balances from gl_period_balances (SAP totals table)
+    // Use uniform debit-perspective raw balance: SUM(debits) - SUM(credits)
+    // Then apply sign convention per AccountType in code to handle contra accounts
+    // correctly (e.g., Accumulated Depreciation is ASSET type with CREDIT normal
+    // balance — raw balance is negative, which correctly reduces total assets).
     const query = `
-      WITH account_balances AS (
-        SELECT 
-          a."AccountCode" as account_code,
-          a."AccountName" as account_name,
-          a."AccountType" as account_type,
-          a."NormalBalance" as normal_balance,
-          COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
-          COALESCE(SUM(le."CreditAmount"), 0) as total_credits
-        FROM accounts a
-        LEFT JOIN ledger_entries le ON a."Id" = le."AccountId"
-        LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id" 
-          AND lt."Status" = 'POSTED'
-          AND DATE(lt."TransactionDate") <= $1
-        WHERE a."IsActive" = true 
-          AND a."IsPostingAccount" = true
-        GROUP BY a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
-      )
       SELECT 
-        account_code as "accountCode",
-        account_name as "accountName",
-        account_type as "accountType",
-        CASE 
-          WHEN normal_balance = 'DEBIT' THEN total_debits - total_credits
-          ELSE total_credits - total_debits
-        END as balance
-      FROM account_balances
-      WHERE total_debits != 0 OR total_credits != 0
-      ORDER BY account_type, account_code
+        a."AccountCode" as "accountCode",
+        a."AccountName" as "accountName",
+        a."AccountType" as "accountType",
+        a."NormalBalance" as "normalBalance",
+        COALESCE(SUM(gpb.debit_total), 0) as total_debits,
+        COALESCE(SUM(gpb.credit_total), 0) as total_credits,
+        COALESCE(SUM(gpb.debit_total), 0)
+          - COALESCE(SUM(gpb.credit_total), 0) as raw_balance
+      FROM accounts a
+      LEFT JOIN gl_period_balances gpb 
+        ON gpb.account_id = a."Id"
+        AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
+      WHERE a."IsActive" = true 
+        AND a."IsPostingAccount" = true
+      GROUP BY a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
+      HAVING COALESCE(SUM(gpb.debit_total), 0) != 0 
+          OR COALESCE(SUM(gpb.credit_total), 0) != 0
+      ORDER BY a."AccountType", a."AccountCode"
     `;
 
-    const result = await pool.query(query, [asOfDate]);
+    const result = await pool.query(query, [year, month]);
 
-    const assets: { accountCode: string; accountName: string; amount: number }[] = [];
-    const liabilities: { accountCode: string; accountName: string; amount: number }[] = [];
+    // SAP/Odoo account classification by code range
+    const currentAssets: { accountCode: string; accountName: string; amount: number }[] = [];
+    const fixedAssets: { accountCode: string; accountName: string; amount: number }[] = [];
+    const currentLiabilities: { accountCode: string; accountName: string; amount: number }[] = [];
+    const longTermLiabilities: { accountCode: string; accountName: string; amount: number }[] = [];
     const equityItems: { accountCode: string; accountName: string; amount: number }[] = [];
-    let retainedEarnings = 0;
+    let retainedEarnings = new Decimal(0);
 
-    // Categorize accounts
+    // Categorize accounts using code-range classification
+    // Sign convention (SAP/Odoo standard):
+    //   ASSET, EXPENSE   → use raw_balance directly (debit-normal = positive)
+    //                       contra-assets (e.g. Accum Depreciation) naturally negative
+    //   LIABILITY, EQUITY, REVENUE → negate raw_balance (credit-normal = positive)
     for (const row of result.rows) {
-      const balance = parseFloat(row.balance) || 0;
-      const item = {
-        accountCode: row.accountCode,
-        accountName: row.accountName,
-        amount: balance,
-      };
+      const rawBalance = new Decimal(row.raw_balance || 0);
+      const code = parseInt(row.accountCode, 10);
 
       if (row.accountType === 'ASSET') {
-        assets.push(item);
+        // raw_balance used directly: normal assets positive, contra-assets negative
+        const item = {
+          accountCode: row.accountCode as string,
+          accountName: row.accountName as string,
+          amount: rawBalance.toNumber(),
+        };
+        // 1000–1499 = Current Assets, 1500+ = Fixed/Non-Current
+        if (code < 1500) {
+          currentAssets.push(item);
+        } else {
+          fixedAssets.push(item);
+        }
       } else if (row.accountType === 'LIABILITY') {
-        liabilities.push(item);
+        // Negate: credit-normal liabilities show as positive
+        const item = {
+          accountCode: row.accountCode as string,
+          accountName: row.accountName as string,
+          amount: rawBalance.times(-1).toNumber(),
+        };
+        // 2000–2499 = Current Liabilities, 2500+ = Long-term
+        if (code < 2500) {
+          currentLiabilities.push(item);
+        } else {
+          longTermLiabilities.push(item);
+        }
       } else if (row.accountType === 'EQUITY') {
-        equityItems.push(item);
+        // Negate: credit-normal equity shows as positive
+        equityItems.push({
+          accountCode: row.accountCode as string,
+          accountName: row.accountName as string,
+          amount: rawBalance.times(-1).toNumber(),
+        });
       } else if (row.accountType === 'REVENUE') {
-        // Revenue increases retained earnings
-        retainedEarnings = new Decimal(retainedEarnings).plus(balance).toNumber();
+        // Revenue: negate raw_balance → positive when credits > debits
+        retainedEarnings = retainedEarnings.plus(rawBalance.times(-1));
       } else if (row.accountType === 'EXPENSE') {
-        // Expenses decrease retained earnings
-        retainedEarnings = new Decimal(retainedEarnings).minus(balance).toNumber();
+        // Expenses: raw_balance is positive when debits > credits → reduces retained earnings
+        retainedEarnings = retainedEarnings.minus(rawBalance);
       }
     }
 
-    // Calculate totals (simplified - in real world would separate current/non-current)
-    const totalAssets = assets.reduce((sum, a) => sum.plus(a.amount), new Decimal(0)).toNumber();
-    const totalLiabilities = liabilities
-      .reduce((sum, l) => sum.plus(l.amount), new Decimal(0))
-      .toNumber();
-    const equityTotal = equityItems
-      .reduce((sum, e) => sum.plus(e.amount), new Decimal(0))
-      .toNumber();
-    const totalEquity = new Decimal(equityTotal).plus(retainedEarnings).toNumber();
+    // Calculate totals using Decimal for precision
+    const totalCurrentAssets = currentAssets.reduce((sum, a) => sum.plus(a.amount), new Decimal(0));
+    const totalFixedAssets = fixedAssets.reduce((sum, a) => sum.plus(a.amount), new Decimal(0));
+    const totalAssets = totalCurrentAssets.plus(totalFixedAssets);
+
+    const totalCurrentLiabilities = currentLiabilities.reduce((sum, l) => sum.plus(l.amount), new Decimal(0));
+    const totalLongTermLiabilities = longTermLiabilities.reduce((sum, l) => sum.plus(l.amount), new Decimal(0));
+    const totalLiabilities = totalCurrentLiabilities.plus(totalLongTermLiabilities);
+
+    const equitySubtotal = equityItems.reduce((sum, e) => sum.plus(e.amount), new Decimal(0));
+    const totalEquity = equitySubtotal.plus(retainedEarnings);
+    const totalLiabilitiesAndEquity = totalLiabilities.plus(totalEquity);
+
+    // Accounting equation check: Assets = Liabilities + Equity
+    const isBalanced = totalAssets.minus(totalLiabilitiesAndEquity).abs().lessThan(0.01);
 
     return {
       companyName: 'SMART ERP',
       reportDate: asOfDate,
       generatedAt: new Date().toISOString(),
       assets: {
-        currentAssets: assets.filter((a) => a.accountCode.startsWith('1')),
-        fixedAssets: assets.filter((a) => !a.accountCode.startsWith('1')),
-        totalCurrentAssets: assets
-          .filter((a) => a.accountCode.startsWith('1'))
-          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0))
-          .toNumber(),
-        totalFixedAssets: assets
-          .filter((a) => !a.accountCode.startsWith('1'))
-          .reduce((sum, a) => sum.plus(a.amount), new Decimal(0))
-          .toNumber(),
-        totalAssets,
+        currentAssets,
+        fixedAssets,
+        totalCurrentAssets: totalCurrentAssets.toNumber(),
+        totalFixedAssets: totalFixedAssets.toNumber(),
+        totalOtherAssets: 0,
+        totalAssets: totalAssets.toNumber(),
       },
       liabilities: {
-        currentLiabilities: liabilities.filter((l) => l.accountCode.startsWith('2')),
-        longTermLiabilities: liabilities.filter((l) => !l.accountCode.startsWith('2')),
-        totalCurrentLiabilities: liabilities
-          .filter((l) => l.accountCode.startsWith('2'))
-          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0))
-          .toNumber(),
-        totalLongTermLiabilities: liabilities
-          .filter((l) => !l.accountCode.startsWith('2'))
-          .reduce((sum, l) => sum.plus(l.amount), new Decimal(0))
-          .toNumber(),
-        totalLiabilities,
+        currentLiabilities,
+        longTermLiabilities,
+        totalCurrentLiabilities: totalCurrentLiabilities.toNumber(),
+        totalLongTermLiabilities: totalLongTermLiabilities.toNumber(),
+        totalLiabilities: totalLiabilities.toNumber(),
       },
       equity: {
         items: equityItems,
-        retainedEarnings,
-        totalEquity,
+        retainedEarnings: retainedEarnings.toNumber(),
+        totalEquity: totalEquity.toNumber(),
       },
-      totalLiabilitiesAndEquity: new Decimal(totalLiabilities).plus(totalEquity).toNumber(),
+      totalLiabilitiesAndEquity: totalLiabilitiesAndEquity.toNumber(),
+      isBalanced,
     };
   } catch (error) {
     logger.error('Error generating balance sheet', { error, asOfDate });
@@ -968,41 +983,43 @@ export async function getIncomeStatement(
 }> {
   const pool = dbPool || globalPool;
   try {
-    // Get revenue and expense account balances for the period from ledger_entries
+    // Parse date range to fiscal year/month for gl_period_balances lookup
+    const [startYearStr, startMonthStr] = startDate.split('-');
+    const [endYearStr, endMonthStr] = endDate.split('-');
+    const startYear = parseInt(startYearStr, 10);
+    const startMonth = parseInt(startMonthStr, 10);
+    const endYear = parseInt(endYearStr, 10);
+    const endMonth = parseInt(endMonthStr, 10);
+
+    // Get revenue and expense account balances for the period from gl_period_balances
     const query = `
-      WITH period_balances AS (
-        SELECT 
-          a."AccountCode" as account_code,
-          a."AccountName" as account_name,
-          a."AccountType" as account_type,
-          a."NormalBalance" as normal_balance,
-          COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
-          COALESCE(SUM(le."CreditAmount"), 0) as total_credits
-        FROM accounts a
-        LEFT JOIN ledger_entries le ON a."Id" = le."AccountId"
-        LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id" 
-          AND lt."Status" = 'POSTED'
-          AND DATE(lt."TransactionDate") >= $1
-          AND DATE(lt."TransactionDate") <= $2
-        WHERE a."IsActive" = true 
-          AND a."IsPostingAccount" = true
-          AND a."AccountType" IN ('REVENUE', 'EXPENSE')
-        GROUP BY a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
-      )
       SELECT 
-        account_code as "accountCode",
-        account_name as "accountName",
-        account_type as "accountType",
+        a."AccountCode" as "accountCode",
+        a."AccountName" as "accountName",
+        a."AccountType" as "accountType",
+        a."NormalBalance" as "normalBalance",
         CASE 
-          WHEN normal_balance = 'CREDIT' THEN total_credits - total_debits
-          ELSE total_debits - total_credits
+          WHEN a."NormalBalance" = 'CREDIT' 
+            THEN COALESCE(SUM(gpb.credit_total), 0) - COALESCE(SUM(gpb.debit_total), 0)
+          ELSE 
+            COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0)
         END as balance
-      FROM period_balances
-      WHERE total_debits != 0 OR total_credits != 0
-      ORDER BY account_code
+      FROM accounts a
+      LEFT JOIN gl_period_balances gpb 
+        ON gpb.account_id = a."Id"
+        AND (gpb.fiscal_year > $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period >= $2))
+        AND (gpb.fiscal_year < $3 OR (gpb.fiscal_year = $3 AND gpb.fiscal_period <= $4))
+        AND gpb.fiscal_period > 0
+      WHERE a."IsActive" = true 
+        AND a."IsPostingAccount" = true
+        AND a."AccountType" IN ('REVENUE', 'EXPENSE')
+      GROUP BY a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
+      HAVING COALESCE(SUM(gpb.debit_total), 0) != 0 
+          OR COALESCE(SUM(gpb.credit_total), 0) != 0
+      ORDER BY a."AccountCode"
     `;
 
-    const result = await pool.query(query, [startDate, endDate]);
+    const result = await pool.query(query, [startYear, startMonth, endYear, endMonth]);
 
     const revenue: { accountCode: string; accountName: string; amount: number }[] = [];
     const cogs: { accountCode: string; accountName: string; amount: number }[] = [];
@@ -1010,10 +1027,10 @@ export async function getIncomeStatement(
     const otherExpenses: { accountCode: string; accountName: string; amount: number }[] = [];
 
     for (const row of result.rows) {
-      const balance = parseFloat(row.balance) || 0;
+      const balance = new Decimal(row.balance || 0).toNumber();
       const item = {
-        accountCode: row.accountCode,
-        accountName: row.accountName,
+        accountCode: row.accountCode as string,
+        accountName: row.accountName as string,
         amount: balance,
       };
 

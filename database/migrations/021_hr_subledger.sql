@@ -1,6 +1,7 @@
 -- =============================================================================
 -- HR Sub-Ledger Upgrade Migration
--- 1. Create 2150 "Salaries Payable" header account (parent for employee sub-accounts)
+-- 1. Create 2400 "Salaries Payable" header account (parent for employee sub-accounts)
+--    NOTE: 2150 is reserved for GR/IR Clearing (SAP standard)
 -- 2. Add LedgerAccountId column to employees table
 -- =============================================================================
 
@@ -10,10 +11,10 @@ INSERT INTO accounts (
   "ParentAccountId", "Level", "IsPostingAccount", "IsActive", "CurrentBalance",
   "CreatedAt", "UpdatedAt", "AllowAutomatedPosting"
 )
-SELECT gen_random_uuid(), '2150', 'Salaries Payable', 'LIABILITY', 'CREDIT',
+SELECT gen_random_uuid(), '2400', 'Salaries Payable', 'LIABILITY', 'CREDIT',
        (SELECT "Id" FROM accounts WHERE "AccountCode" = '2000'), 1, false,
        true, 0, NOW(), NOW(), true
-WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE "AccountCode" = '2150');
+WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE "AccountCode" = '2400');
 
 -- 2. Add LedgerAccountId to employees (FK to accounts)
 DO $$
