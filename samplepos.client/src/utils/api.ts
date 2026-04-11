@@ -563,12 +563,23 @@ export const api = {
   },
 
   grirClearing: {
-    getOpenItems: (params?: { supplierId?: string }) =>
+    getOpenItems: (params?: { supplierId?: string; poNumber?: string; grNumber?: string; status?: string; dateFrom?: string; dateTo?: string; page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>('grir-clearing/open', { params }),
+    search: (q: string) =>
+      apiClient.get<ApiResponse>('grir-clearing/search', { params: { q } }),
     getBalance: () => apiClient.get<ApiResponse>('grir-clearing/balance'),
-    clearItem: (data: { grEntryId: string; invoiceEntryId: string; amount: number }) =>
+    getMatchCandidates: (params?: { supplierId?: string }) =>
+      apiClient.get<ApiResponse>('grir-clearing/match-candidates', { params }),
+    getGrItems: (grId: string) =>
+      apiClient.get<ApiResponse>(`grir-clearing/gr/${grId}/items`),
+    getHistory: (poId: string) =>
+      apiClient.get<ApiResponse>(`grir-clearing/history/${poId}`),
+    getStatus: (poId: string) =>
+      apiClient.get<ApiResponse>(`grir-clearing/${poId}`),
+    clearItem: (data: { grId: string; invoiceId: string; date?: string }) =>
       apiClient.post<ApiResponse>('grir-clearing/clear', data),
-    autoMatch: () => apiClient.post<ApiResponse>('grir-clearing/auto-match'),
+    autoMatch: (data?: { supplierId?: string; tolerancePercent?: number }) =>
+      apiClient.post<ApiResponse>('grir-clearing/auto-match', data),
   },
 
   dunning: {

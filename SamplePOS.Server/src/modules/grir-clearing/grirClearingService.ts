@@ -1,14 +1,24 @@
 /**
  * GR/IR Clearing Service
- * 
- * SAP-style Goods Receipt / Invoice Receipt clearing account for 3-way matching.
- * 
- * Flow:
- *   1. PO created → No GL impact yet
- *   2. Goods Receipt → DR Inventory, CR GR/IR Clearing (2150)
- *   3. Invoice Receipt → DR GR/IR Clearing (2150), CR Accounts Payable (2100)
- *   4. When matched → GR/IR Clearing nets to zero (balanced)
- *   5. Variance → Automatically posted to price variance account
+ *
+ * SAP-style Goods Receipt / Invoice Receipt clearing account management.
+ *
+ * SAP Transactions Modelled:
+ *   MR11  — GR/IR Account Maintenance (open items work list)
+ *   F.13  — Automatic Clearing (auto-match GR↔Invoice)
+ *   MR11N — Manual Clearing (match a specific GR to a specific invoice)
+ *   FBL3N — Clearing Account Line Items (drill-down)
+ *
+ * 3-Way Match Flow:
+ *   1. PO created  → No GL impact
+ *   2. Goods Receipt finalized → DR Inventory (1300), CR GR/IR Clearing (2150)
+ *   3. Supplier Invoice posted  → DR GR/IR Clearing (2150), CR AP (2100)
+ *   4. Clear: amounts match → GR/IR Clearing (2150) nets to zero
+ *   5. Variance → Posted to Price Variance (5020) per SAP standard
+ *
+ * Write-Off (SAP MR11):
+ *   Small remaining balances can be written off to a configurable
+ *   expense account (default: 5020 Price Variance).
  */
 
 import { pool as globalPool } from '../../db/pool.js';
@@ -17,8 +27,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { Money } from '../../utils/money.js';
 import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
-import { NotFoundError } from '../../middleware/errorHandler.js';
+import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import * as repo from './grirClearingRepository.js';
 
 const GRIR_CLEARING_ACCOUNT = '2150';
 
@@ -40,331 +51,569 @@ export interface GrirRecord {
   createdAt: string;
 }
 
-// =============================================================================
-// SERVICE METHODS
-// =============================================================================
-
-/**
- * Record a Goods Receipt against a PO in the GR/IR clearing account.
- * GL: DR Inventory (1300), CR GR/IR Clearing (2150)
- */
-export const recordGoodsReceipt = async (
-  data: {
-    purchaseOrderId: string;
-    goodsReceiptId: string;
-    amount: number;
-    date: string;
-    userId: string;
-    description?: string;
-  },
-  client: pg.PoolClient
-): Promise<GrirRecord> => {
-  // Create or update GR/IR clearing record (data tracking only).
-  // GL posting (DR Inventory, CR GR/IR Clearing) is handled by glEntryService.recordGoodsReceiptToGL()
-  // which is called from the GR finalization workflow. We only track the clearing state here.
-  const existingResult = await client.query(
-    `SELECT * FROM grir_clearing WHERE purchase_order_id = $1`,
-    [data.purchaseOrderId]
-  );
-
-  let record: GrirRecord;
-
-  if (existingResult.rows.length > 0) {
-    // Update existing
-    const result = await client.query(
-      `UPDATE grir_clearing
-       SET goods_receipt_id = $1, gr_amount = $2,
-           status = CASE 
-             WHEN invoice_amount IS NOT NULL THEN 'PARTIALLY_MATCHED'
-             ELSE 'OPEN'
-           END,
-           updated_at = NOW()
-       WHERE purchase_order_id = $3
-       RETURNING *`,
-      [data.goodsReceiptId, data.amount, data.purchaseOrderId]
-    );
-    record = normalizeGrir(result.rows[0]);
-  } else {
-    // Fetch PO amount
-    const poResult = await client.query(
-      `SELECT total_amount FROM purchase_orders WHERE id = $1`,
-      [data.purchaseOrderId]
-    );
-    const poAmount = poResult.rows[0] ? Number(poResult.rows[0].total_amount) : data.amount;
-
-    const result = await client.query(
-      `INSERT INTO grir_clearing (id, purchase_order_id, goods_receipt_id, po_amount, gr_amount, status)
-       VALUES ($1, $2, $3, $4, $5, 'OPEN')
-       RETURNING *`,
-      [uuidv4(), data.purchaseOrderId, data.goodsReceiptId, poAmount, data.amount]
-    );
-    record = normalizeGrir(result.rows[0]);
-  }
-
-  logger.info('GR/IR clearing - goods receipt recorded', { purchaseOrderId: data.purchaseOrderId, amount: data.amount });
-  return record;
-};
-
-/**
- * Record an Invoice Receipt against a PO in the GR/IR clearing account.
- * GL: DR GR/IR Clearing (2150), CR Accounts Payable (2100)
- */
-export const recordInvoiceReceipt = async (
-  data: {
-    purchaseOrderId: string;
-    invoiceId: string;
-    amount: number;
-    date: string;
-    userId: string;
-    description?: string;
-  },
-  client: pg.PoolClient
-): Promise<GrirRecord> => {
-  const existing = await client.query(
-    `SELECT * FROM grir_clearing WHERE purchase_order_id = $1`,
-    [data.purchaseOrderId]
-  );
-
-  if (existing.rows.length === 0) {
-    throw new NotFoundError('GR/IR clearing record for this PO');
-  }
-
-  // Calculate variance
-  const grAmount = existing.rows[0].gr_amount ? Number(existing.rows[0].gr_amount) : 0;
-  const variance = Money.toNumber(Money.subtract(data.amount, grAmount));
-
-  const status = Math.abs(variance) < 0.01 ? 'MATCHED' : 'VARIANCE';
-
-  const result = await client.query(
-    `UPDATE grir_clearing
-     SET invoice_id = $1, invoice_amount = $2, variance = $3,
-         status = $4, matched_at = CASE WHEN $4 = 'MATCHED' THEN NOW() ELSE NULL END,
-         updated_at = NOW()
-     WHERE purchase_order_id = $5
-     RETURNING *`,
-    [data.invoiceId, data.amount, variance, status, data.purchaseOrderId]
-  );
-
-  // Post GL: DR GR/IR Clearing (GR amount), CR AP (invoice amount)
-  // If variance exists, post difference to Price Variance account (SAP standard)
-  const lines: JournalLine[] = [
-    {
-      accountCode: GRIR_CLEARING_ACCOUNT,
-      description: data.description || `Invoice for PO ${data.purchaseOrderId}`,
-      debitAmount: grAmount,
-      creditAmount: 0,
-      entityType: 'INVOICE',
-      entityId: data.invoiceId,
-    },
-    {
-      accountCode: AccountCodes.ACCOUNTS_PAYABLE,
-      description: data.description || `AP for invoice ${data.invoiceId}`,
-      debitAmount: 0,
-      creditAmount: data.amount,
-      entityType: 'INVOICE',
-      entityId: data.invoiceId,
-    },
-  ];
-
-  // Post price variance if invoice amount differs from GR amount
-  // Positive variance = invoice > GR → additional cost (debit Price Variance)
-  // Negative variance = invoice < GR → cost reduction (credit Price Variance)
-  if (Math.abs(variance) >= 0.01) {
-    if (variance > 0) {
-      lines.push({
-        accountCode: AccountCodes.PRICE_VARIANCE,
-        description: `Price variance on PO ${data.purchaseOrderId} (invoice > GR)`,
-        debitAmount: Math.abs(variance),
-        creditAmount: 0,
-        entityType: 'INVOICE',
-        entityId: data.invoiceId,
-      });
-    } else {
-      lines.push({
-        accountCode: AccountCodes.PRICE_VARIANCE,
-        description: `Price variance on PO ${data.purchaseOrderId} (invoice < GR)`,
-        debitAmount: 0,
-        creditAmount: Math.abs(variance),
-        entityType: 'INVOICE',
-        entityId: data.invoiceId,
-      });
-    }
-  }
-
-  await AccountingCore.createJournalEntry({
-    entryDate: data.date,
-    description: `Invoice Receipt - GR/IR Clearing for PO ${data.purchaseOrderId}`,
-    referenceType: 'INVOICE',
-    referenceId: data.invoiceId,
-    referenceNumber: `GRIR-INV-${data.invoiceId.slice(0, 8)}`,
-    lines,
-    userId: data.userId,
-    idempotencyKey: `GRIR-INV-${data.invoiceId}`,
-  }, undefined, client);
-
-  logger.info('GR/IR clearing - invoice recorded', {
-    purchaseOrderId: data.purchaseOrderId,
-    amount: data.amount,
-    variance,
-    status,
-  });
-
-  return normalizeGrir(result.rows[0]);
-};
-
-/**
- * Get GR/IR clearing status for a PO
- */
-export const getGrirStatus = async (
-  purchaseOrderId: string,
-  pool?: pg.Pool
-): Promise<GrirRecord | null> => {
-  const dbPool = pool || globalPool;
-  const result = await dbPool.query(
-    `SELECT * FROM grir_clearing WHERE purchase_order_id = $1`,
-    [purchaseOrderId]
-  );
-  return result.rows[0] ? normalizeGrir(result.rows[0]) : null;
-};
-
-// =============================================================================
-// ODOO-STYLE OPEN ITEMS VIEW
-// Queries real goods_receipts + purchase_orders + supplier_invoices to show
-// GRs that haven't been fully matched with invoices.
-// =============================================================================
-
 export interface GrirOpenItem {
   id: string;
-  poNumber: string | null;
-  supplierName: string | null;
-  supplierId: string | null;
+  grNumber: string;
   grDate: string | null;
+  poId: string;
+  poNumber: string;
+  poStatus: string;
+  supplierId: string;
+  supplierName: string;
+  supplierCode: string;
   grAmount: number;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
   invoiceDate: string | null;
   invoiceAmount: number | null;
-  daysDifference: number | null;
-  status: string;
+  invoiceStatus: string | null;
+  daysSinceGr: number | null;
+  clearingStatus: string;
+  variance: number | null;
+}
+
+export interface ClearingBalanceSummary {
+  totalGrValue: number;
+  totalInvoicedValue: number;
+  clearingBalance: number;
+  outstandingCount: number;
+  partiallyMatchedCount: number;
+  fullyMatchedCount: number;
+  varianceCount: number;
+  oldestUnmatchedDays: number | null;
+  avgClearingDays: number | null;
+}
+
+export interface MatchCandidate {
+  grId: string;
+  grNumber: string;
+  grDate: string | null;
+  poId: string;
+  poNumber: string;
+  supplierId: string;
+  supplierName: string;
+  grAmount: number;
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceDate: string | null;
+  invoiceAmount: number;
+  amountDiff: number;
+  isExactMatch: boolean;
+}
+
+export interface ClearResult {
+  clearingRecord: GrirRecord;
+  variancePosted: boolean;
+  varianceAmount: number;
+}
+
+export interface AutoMatchResult {
+  matched: number;
+  withVariance: number;
+  skipped: number;
+  details: Array<{
+    grNumber: string;
+    invoiceNumber: string;
+    grAmount: number;
+    invoiceAmount: number;
+    variance: number;
+    status: string;
+  }>;
+}
+
+// =============================================================================
+// OPEN ITEMS — SAP MR11 Work List
+// =============================================================================
+
+/**
+ * Get open GR/IR clearing items with full filtering.
+ * SAP equivalent: MR11 → Display GR/IR clearing items
+ */
+export async function getOpenClearingItems(
+  filters: {
+    supplierId?: string;
+    poNumber?: string;
+    grNumber?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    page?: number;
+    limit?: number;
+  } = {},
+  pool?: pg.Pool
+): Promise<{ data: GrirOpenItem[]; total: number; page: number; limit: number; totalPages: number }> {
+  const dbPool = pool || globalPool;
+  const page = filters.page || 1;
+  const limit = filters.limit || 50;
+  const offset = (page - 1) * limit;
+
+  const { rows, total } = await repo.getOpenItems(dbPool, {
+    ...filters,
+    limit,
+    offset,
+  });
+
+  return {
+    data: rows.map(normalizeOpenItem),
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
 }
 
 /**
- * Get all goods receipts with their matching invoice status.
- * Odoo-style: queries real GR/PO/invoice data, not the grir_clearing table.
- * Links via PurchaseOrderId (both GR and Invoice reference the same PO).
+ * SAP F4 search — find clearing items by PO/GR/supplier/invoice number.
  */
-export const getOpenClearingItems = async (
-  supplierId?: string,
+export async function searchClearingItems(
+  query: string,
   pool?: pg.Pool
-): Promise<GrirOpenItem[]> => {
-  const dbPool = pool || globalPool;
-  const params: unknown[] = [];
-  let supplierFilter = '';
-  if (supplierId) {
-    params.push(supplierId);
-    supplierFilter = `AND po.supplier_id = $${params.length}`;
+): Promise<GrirOpenItem[]> {
+  if (!query || query.trim().length < 2) {
+    return [];
   }
+  const dbPool = pool || globalPool;
+  const rows = await repo.searchClearingItems(dbPool, query.trim(), 20);
+  return rows.map(normalizeOpenItem);
+}
 
-  const result = await dbPool.query(
-    `SELECT
-       gr.id,
-       po.order_number as po_number,
-       s."CompanyName" as supplier_name,
-       po.supplier_id,
-       gr.received_date::date::text as gr_date,
-       COALESCE(gr.total_value, 0) as gr_amount,
-       si."InvoiceDate"::date::text as invoice_date,
-       si."TotalAmount" as invoice_amount,
-       si."Status" as invoice_status,
-       gr.status as gr_status,
-       CASE WHEN si."InvoiceDate" IS NOT NULL AND gr.received_date IS NOT NULL
-            THEN EXTRACT(DAY FROM (si."InvoiceDate"::timestamp - gr.received_date::timestamp))::int
-            ELSE NULL
-       END as days_difference
-     FROM goods_receipts gr
-     LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
-     LEFT JOIN suppliers s ON po.supplier_id = s."Id"
-     LEFT JOIN supplier_invoices si ON si."PurchaseOrderId" = gr.purchase_order_id
-       AND si.deleted_at IS NULL
-     WHERE gr.status = 'COMPLETED'
-     ${supplierFilter}
-     ORDER BY gr.received_date DESC`,
-    params
-  );
-
-  return result.rows.map((row) => {
-    const grAmt = Number(row.gr_amount || 0);
-    const invAmt = row.invoice_amount != null ? Number(row.invoice_amount) : null;
-    let status = 'UNMATCHED';
-    if (invAmt != null) {
-      const variance = Math.abs(grAmt - invAmt);
-      if (variance < 0.01) status = 'MATCHED';
-      else status = 'VARIANCE';
-    }
-
-    return {
-      id: row.id,
-      poNumber: row.po_number || null,
-      supplierName: row.supplier_name || null,
-      supplierId: row.supplier_id || null,
-      grDate: row.gr_date ? String(row.gr_date).split('T')[0] : null,
-      grAmount: grAmt,
-      invoiceDate: row.invoice_date ? String(row.invoice_date).split('T')[0] : null,
-      invoiceAmount: invAmt,
-      daysDifference: row.days_difference != null ? Number(row.days_difference) : null,
-      status,
-    };
-  });
-};
+// =============================================================================
+// BALANCE SUMMARY — SAP FBL3N account 2150
+// =============================================================================
 
 /**
- * Get clearing summary — how many GRs are unmatched, total unmatched value, oldest.
- * Odoo-style: derived from real GR/invoice data via PO links.
+ * Get clearing account balance summary.
  */
-export const getClearingBalance = async (
+export async function getClearingBalance(
   pool?: pg.Pool
-): Promise<{ clearingBalance: number; outstandingItems: number; oldestItemDays: number | null }> => {
+): Promise<ClearingBalanceSummary> {
   const dbPool = pool || globalPool;
-
-  // All completed GRs that don't have a fully matching invoice (linked via PO)
-  const result = await dbPool.query(
-    `SELECT
-       COUNT(*) as outstanding_items,
-       COALESCE(SUM(gr.total_value), 0) as total_gr_amount,
-       COALESCE(SUM(CASE WHEN si."Id" IS NOT NULL THEN si."TotalAmount" ELSE 0 END), 0) as total_inv_amount,
-       MAX(EXTRACT(DAY FROM (NOW() - gr.received_date))) as oldest_days
-     FROM goods_receipts gr
-     LEFT JOIN supplier_invoices si ON si."PurchaseOrderId" = gr.purchase_order_id
-       AND si.deleted_at IS NULL
-     WHERE gr.status = 'COMPLETED'
-       AND (si."Id" IS NULL OR ABS(gr.total_value - si."TotalAmount") > 0.01)`
-  );
-
-  const row = result.rows[0];
-  const totalGr = Number(row.total_gr_amount || 0);
-  const totalInv = Number(row.total_inv_amount || 0);
+  const row = await repo.getBalanceSummary(dbPool);
 
   return {
-    clearingBalance: totalGr - totalInv,
-    outstandingItems: parseInt(row.outstanding_items || '0'),
-    oldestItemDays: row.oldest_days != null ? Math.floor(Number(row.oldest_days)) : null,
+    totalGrValue: Money.toNumber(Money.parseDb(row.total_gr_value)),
+    totalInvoicedValue: Money.toNumber(Money.parseDb(row.total_invoiced_value)),
+    clearingBalance: Money.toNumber(Money.parseDb(row.clearing_balance)),
+    outstandingCount: parseInt(row.outstanding_count, 10),
+    partiallyMatchedCount: parseInt(row.partially_matched_count, 10),
+    fullyMatchedCount: parseInt(row.fully_matched_count, 10),
+    varianceCount: parseInt(row.variance_count, 10),
+    oldestUnmatchedDays: row.oldest_unmatched_days != null
+      ? Math.floor(Number(row.oldest_unmatched_days))
+      : null,
+    avgClearingDays: row.avg_clearing_days != null
+      ? Math.round(Number(row.avg_clearing_days))
+      : null,
   };
-};
+}
 
 // =============================================================================
-// NORMALIZER
+// GR ITEM DRILL-DOWN — SAP 3-way match detail
 // =============================================================================
 
-function normalizeGrir(row: Record<string, unknown>): GrirRecord {
+/**
+ * Get line-item details for a GR, comparing quantities and prices
+ * against the original PO (SAP ME23N style).
+ */
+export async function getGrItemDetails(
+  goodsReceiptId: string,
+  pool?: pg.Pool
+): Promise<Array<{
+  productId: string;
+  productName: string;
+  sku: string;
+  receivedQuantity: number;
+  costPrice: number;
+  lineTotal: number;
+  poUnitPrice: number;
+  poQuantity: number;
+  priceVariance: number;
+  quantityVariance: number;
+}>> {
+  const dbPool = pool || globalPool;
+  const rows = await repo.getGrItemDetails(dbPool, goodsReceiptId);
+
+  return rows.map((r) => ({
+    productId: r.product_id,
+    productName: r.product_name,
+    sku: r.sku,
+    receivedQuantity: Money.toNumber(Money.parseDb(r.received_quantity)),
+    costPrice: Money.toNumber(Money.parseDb(r.cost_price)),
+    lineTotal: Money.toNumber(Money.parseDb(r.line_total)),
+    poUnitPrice: Money.toNumber(Money.parseDb(r.po_unit_price)),
+    poQuantity: Money.toNumber(Money.parseDb(r.po_quantity)),
+    priceVariance: Money.toNumber(Money.parseDb(r.price_variance)),
+    quantityVariance: Money.toNumber(Money.parseDb(r.quantity_variance)),
+  }));
+}
+
+// =============================================================================
+// MANUAL CLEARING — SAP MR11N
+// =============================================================================
+
+/**
+ * Manually clear a GR against an invoice.
+ *
+ * GL Posting:
+ *   DR GR/IR Clearing 2150 (GR amount — reverses the credit from GR posting)
+ *   CR Accounts Payable 2100 (invoice amount)
+ *   DR/CR Price Variance 5020 (difference, if any)
+ *
+ * SAP Reference: Transaction MR11N — the user picks a GR and an invoice,
+ * confirms the amounts, and the system clears and posts the variance.
+ */
+export async function clearItem(
+  data: {
+    grId: string;
+    invoiceId: string;
+    userId: string;
+    date?: string;
+  },
+  pool?: pg.Pool
+): Promise<ClearResult> {
+  const dbPool = pool || globalPool;
+  const client = await dbPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // 1. Verify GR exists and get amount
+    const grResult = await client.query(
+      `SELECT gr.id, gr.receipt_number, gr.purchase_order_id, gr.status,
+              po.order_number AS po_number,
+              po.total_amount AS po_total,
+              COALESCE(items.total, 0) AS gr_total
+       FROM goods_receipts gr
+       JOIN purchase_orders po ON gr.purchase_order_id = po.id
+       LEFT JOIN (
+         SELECT goods_receipt_id, SUM(received_quantity * cost_price) AS total
+         FROM goods_receipt_items GROUP BY goods_receipt_id
+       ) items ON items.goods_receipt_id = gr.id
+       WHERE gr.id = $1`,
+      [data.grId]
+    );
+    if (grResult.rows.length === 0) throw new NotFoundError('Goods receipt not found');
+    const gr = grResult.rows[0];
+    if (gr.status !== 'FINALIZED') throw new ValidationError('Goods receipt must be FINALIZED to clear');
+
+    // 2. Verify invoice exists and get amount
+    const invResult = await client.query(
+      `SELECT "Id", "SupplierInvoiceNumber", "TotalAmount", "Status", "PurchaseOrderId"
+       FROM supplier_invoices
+       WHERE "Id" = $1 AND deleted_at IS NULL`,
+      [data.invoiceId]
+    );
+    if (invResult.rows.length === 0) throw new NotFoundError('Supplier invoice not found');
+    const inv = invResult.rows[0];
+    if (inv.Status === 'CANCELLED') throw new ValidationError('Cannot clear against a cancelled invoice');
+
+    // 3. Check not already cleared
+    const existing = await repo.findClearingRecord(client, { grId: data.grId, invoiceId: data.invoiceId });
+    if (existing && (existing.status === 'MATCHED' || existing.status === 'VARIANCE')) {
+      throw new ConflictError('This GR-Invoice pair is already cleared');
+    }
+
+    // 4. Calculate amounts and variance
+    const grAmount = Money.toNumber(Money.parseDb(String(gr.gr_total)));
+    const invoiceAmount = Money.toNumber(Money.parseDb(String(inv.TotalAmount)));
+    const poAmount = Money.toNumber(Money.parseDb(String(gr.po_total)));
+    const variance = Money.toNumber(Money.subtract(grAmount, invoiceAmount));
+    const isExactMatch = Math.abs(variance) < 0.01;
+    const status = isExactMatch ? 'MATCHED' : 'VARIANCE';
+
+    // 5. Create clearing record
+    const clearingRecord = await repo.createClearingRecord(client, {
+      id: existing?.id || uuidv4(),
+      purchaseOrderId: gr.purchase_order_id,
+      goodsReceiptId: data.grId,
+      invoiceId: data.invoiceId,
+      poAmount,
+      grAmount,
+      invoiceAmount,
+      variance,
+      status,
+    });
+
+    // 6. Post GL entries — SAP standard clearing journal
+    const entryDate = data.date || new Date().toISOString().split('T')[0];
+    const lines: JournalLine[] = [
+      // Debit GR/IR Clearing (reverses the credit from GR posting)
+      {
+        accountCode: GRIR_CLEARING_ACCOUNT,
+        description: `GR/IR Clear: ${gr.receipt_number} ↔ ${inv.SupplierInvoiceNumber || data.invoiceId.slice(0, 8)}`,
+        debitAmount: grAmount,
+        creditAmount: 0,
+        entityType: 'GRIR_CLEARING',
+        entityId: clearingRecord.id,
+      },
+      // Credit AP (recognise the payable from the invoice)
+      {
+        accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+        description: `AP: Invoice ${inv.SupplierInvoiceNumber || data.invoiceId.slice(0, 8)} for ${gr.po_number}`,
+        debitAmount: 0,
+        creditAmount: invoiceAmount,
+        entityType: 'GRIR_CLEARING',
+        entityId: clearingRecord.id,
+      },
+    ];
+
+    // Price variance line (SAP posts to account 5020)
+    if (!isExactMatch) {
+      const absVariance = Math.abs(variance);
+      if (variance > 0) {
+        // GR > Invoice → credit Price Variance (cost reduction)
+        lines.push({
+          accountCode: AccountCodes.PRICE_VARIANCE,
+          description: `Price variance (GR > Invoice) on ${gr.po_number}: ${variance.toFixed(2)}`,
+          debitAmount: 0,
+          creditAmount: absVariance,
+          entityType: 'GRIR_CLEARING',
+          entityId: clearingRecord.id,
+        });
+      } else {
+        // Invoice > GR → debit Price Variance (additional cost)
+        lines.push({
+          accountCode: AccountCodes.PRICE_VARIANCE,
+          description: `Price variance (Invoice > GR) on ${gr.po_number}: ${Math.abs(variance).toFixed(2)}`,
+          debitAmount: absVariance,
+          creditAmount: 0,
+          entityType: 'GRIR_CLEARING',
+          entityId: clearingRecord.id,
+        });
+      }
+    }
+
+    await AccountingCore.createJournalEntry({
+      entryDate,
+      description: `GR/IR Clearing: ${gr.receipt_number} ↔ ${inv.SupplierInvoiceNumber || 'INV'}`,
+      referenceType: 'GRIR_CLEARING',
+      referenceId: clearingRecord.id,
+      referenceNumber: `GRIR-${gr.receipt_number}`,
+      lines,
+      userId: data.userId,
+      idempotencyKey: `GRIR-CLEAR-${data.grId}-${data.invoiceId}`,
+    }, undefined, client);
+
+    await client.query('COMMIT');
+
+    logger.info('GR/IR manual clearing completed', {
+      grId: data.grId,
+      invoiceId: data.invoiceId,
+      grAmount,
+      invoiceAmount,
+      variance,
+      status,
+    });
+
+    return {
+      clearingRecord: normalizeClearingRow(clearingRecord),
+      variancePosted: !isExactMatch,
+      varianceAmount: variance,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// =============================================================================
+// AUTO-MATCH — SAP F.13 Automatic Clearing
+// =============================================================================
+
+/**
+ * Automatically match GRs to invoices on the same PO.
+ * SAP F.13 logic: exact amount matches first, then within tolerance.
+ *
+ * Rules:
+ *   1. Only match FINALIZED GRs with non-CANCELLED invoices.
+ *   2. Must share the same PO reference.
+ *   3. Skip pairs already cleared.
+ *   4. Post GL for each match (including variance).
+ */
+export async function autoMatch(
+  options: {
+    supplierId?: string;
+    tolerancePercent?: number;
+    userId: string;
+  },
+  pool?: pg.Pool
+): Promise<AutoMatchResult> {
+  const dbPool = pool || globalPool;
+  const tolerancePct = options.tolerancePercent ?? 5; // SAP default: 5% tolerance
+
+  // Get unmatched candidates
+  const candidates = await repo.getMatchCandidates(dbPool, {
+    supplierId: options.supplierId,
+    tolerancePercent: tolerancePct,
+  });
+
+  const result: AutoMatchResult = {
+    matched: 0,
+    withVariance: 0,
+    skipped: 0,
+    details: [],
+  };
+
+  for (const candidate of candidates) {
+    const grAmount = Money.toNumber(Money.parseDb(candidate.gr_line_total));
+    const invoiceAmount = Money.toNumber(Money.parseDb(candidate.invoice_total));
+    const diff = Money.toNumber(Money.parseDb(candidate.amount_diff));
+
+    // Check tolerance: skip if variance exceeds tolerance %
+    if (grAmount > 0) {
+      const variancePct = (diff / grAmount) * 100;
+      if (variancePct > tolerancePct) {
+        result.skipped++;
+        continue;
+      }
+    }
+
+    try {
+      const clearResult = await clearItem({
+        grId: candidate.gr_id,
+        invoiceId: candidate.invoice_id,
+        userId: options.userId,
+      }, dbPool);
+
+      if (clearResult.variancePosted) {
+        result.withVariance++;
+      } else {
+        result.matched++;
+      }
+
+      result.details.push({
+        grNumber: candidate.gr_number,
+        invoiceNumber: candidate.invoice_number,
+        grAmount,
+        invoiceAmount,
+        variance: clearResult.varianceAmount,
+        status: clearResult.clearingRecord.status,
+      });
+    } catch (err) {
+      // Skip individual match failures (already cleared, etc.)
+      logger.warn('Auto-match skipped pair', {
+        grId: candidate.gr_id,
+        invoiceId: candidate.invoice_id,
+        error: (err as Error).message,
+      });
+      result.skipped++;
+    }
+  }
+
+  logger.info('GR/IR auto-match completed', {
+    matched: result.matched,
+    withVariance: result.withVariance,
+    skipped: result.skipped,
+  });
+
+  return result;
+}
+
+// =============================================================================
+// MATCH CANDIDATES — For UI suggestions
+// =============================================================================
+
+/**
+ * Get GR↔Invoice match candidates for the auto-match UI preview.
+ */
+export async function getMatchCandidates(
+  options: { supplierId?: string } = {},
+  pool?: pg.Pool
+): Promise<MatchCandidate[]> {
+  const dbPool = pool || globalPool;
+  const rows = await repo.getMatchCandidates(dbPool, options);
+
+  return rows.map((r) => ({
+    grId: r.gr_id,
+    grNumber: r.gr_number,
+    grDate: r.gr_date,
+    poId: r.po_id,
+    poNumber: r.po_number,
+    supplierId: r.supplier_id,
+    supplierName: r.supplier_name,
+    grAmount: Money.toNumber(Money.parseDb(r.gr_line_total)),
+    invoiceId: r.invoice_id,
+    invoiceNumber: r.invoice_number,
+    invoiceDate: r.invoice_date,
+    invoiceAmount: Money.toNumber(Money.parseDb(r.invoice_total)),
+    amountDiff: Money.toNumber(Money.parseDb(r.amount_diff)),
+    isExactMatch: r.is_exact_match,
+  }));
+}
+
+// =============================================================================
+// PO STATUS — Legacy endpoint
+// =============================================================================
+
+/**
+ * Get GR/IR clearing status for a PO (from the grir_clearing table).
+ */
+export async function getGrirStatus(
+  purchaseOrderId: string,
+  pool?: pg.Pool
+): Promise<GrirRecord | null> {
+  const dbPool = pool || globalPool;
+  const row = await repo.findClearingRecord(dbPool, { poId: purchaseOrderId });
+  return row ? normalizeClearingRow(row) : null;
+}
+
+/**
+ * Get clearing history for a PO.
+ */
+export async function getClearingHistory(
+  purchaseOrderId: string,
+  pool?: pg.Pool
+): Promise<GrirRecord[]> {
+  const dbPool = pool || globalPool;
+  const rows = await repo.getClearingHistory(dbPool, purchaseOrderId);
+  return rows.map(normalizeClearingRow);
+}
+
+// =============================================================================
+// NORMALIZERS
+// =============================================================================
+
+function normalizeOpenItem(row: repo.GrirOpenItemRow | repo.GrirSearchRow): GrirOpenItem {
   return {
-    id: row.id as string,
-    purchaseOrderId: row.purchase_order_id as string,
-    goodsReceiptId: row.goods_receipt_id as string | null,
-    invoiceId: row.invoice_id as string | null,
-    poAmount: Number(row.po_amount),
-    grAmount: row.gr_amount != null ? Number(row.gr_amount) : null,
-    invoiceAmount: row.invoice_amount != null ? Number(row.invoice_amount) : null,
-    variance: Number(row.variance || 0),
+    id: row.gr_id,
+    grNumber: row.gr_number,
+    grDate: row.gr_date,
+    poId: row.po_id,
+    poNumber: row.po_number,
+    poStatus: row.po_status,
+    supplierId: row.supplier_id,
+    supplierName: row.supplier_name,
+    supplierCode: row.supplier_code,
+    grAmount: Money.toNumber(Money.parseDb(row.gr_line_total)),
+    invoiceId: row.invoice_id,
+    invoiceNumber: row.invoice_number,
+    invoiceDate: row.invoice_date,
+    invoiceAmount: row.invoice_total != null
+      ? Money.toNumber(Money.parseDb(row.invoice_total))
+      : null,
+    invoiceStatus: row.invoice_status,
+    daysSinceGr: row.days_since_gr,
+    clearingStatus: row.clearing_status,
+    variance: row.variance != null
+      ? Money.toNumber(Money.parseDb(row.variance))
+      : null,
+  };
+}
+
+function normalizeClearingRow(row: repo.GrirClearingRow): GrirRecord {
+  return {
+    id: row.id,
+    purchaseOrderId: row.purchase_order_id,
+    goodsReceiptId: row.goods_receipt_id,
+    invoiceId: row.invoice_id,
+    poAmount: Money.toNumber(Money.parseDb(row.po_amount)),
+    grAmount: row.gr_amount != null ? Money.toNumber(Money.parseDb(row.gr_amount)) : null,
+    invoiceAmount: row.invoice_amount != null ? Money.toNumber(Money.parseDb(row.invoice_amount)) : null,
+    variance: Money.toNumber(Money.parseDb(row.variance)),
     status: row.status as GrirRecord['status'],
-    matchedAt: row.matched_at as string | null,
-    createdAt: row.created_at as string,
+    matchedAt: row.matched_at,
+    createdAt: row.created_at,
   };
 }

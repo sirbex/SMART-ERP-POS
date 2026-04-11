@@ -179,13 +179,35 @@ export function useCreateSpecialPeriod() {
 
 // ── GR/IR Clearing ──────────────────────────────────────────────────
 
-export function useGrirOpenItems(supplierId?: string) {
+export interface GrirOpenFilters {
+  supplierId?: string;
+  poNumber?: string;
+  grNumber?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  limit?: number;
+}
+
+export function useGrirOpenItems(filters?: GrirOpenFilters) {
   return useQuery({
-    queryKey: accountingKeys.grirClearing.open(supplierId),
+    queryKey: [...accountingKeys.grirClearing.all, 'open', filters],
     queryFn: async () => {
-      const res = await api.grirClearing.getOpenItems(supplierId ? { supplierId } : undefined);
+      const res = await api.grirClearing.getOpenItems(filters);
       return res.data?.data;
     },
+  });
+}
+
+export function useGrirSearch(query: string) {
+  return useQuery({
+    queryKey: [...accountingKeys.grirClearing.all, 'search', query],
+    queryFn: async () => {
+      const res = await api.grirClearing.search(query);
+      return res.data?.data;
+    },
+    enabled: query.length >= 2,
   });
 }
 
@@ -199,10 +221,42 @@ export function useGrirBalance() {
   });
 }
 
+export function useGrirMatchCandidates(supplierId?: string) {
+  return useQuery({
+    queryKey: [...accountingKeys.grirClearing.all, 'candidates', supplierId],
+    queryFn: async () => {
+      const res = await api.grirClearing.getMatchCandidates(supplierId ? { supplierId } : undefined);
+      return res.data?.data;
+    },
+  });
+}
+
+export function useGrirGrItems(grId: string | null) {
+  return useQuery({
+    queryKey: [...accountingKeys.grirClearing.all, 'gr-items', grId],
+    queryFn: async () => {
+      const res = await api.grirClearing.getGrItems(grId!);
+      return res.data?.data;
+    },
+    enabled: !!grId,
+  });
+}
+
+export function useGrirHistory(poId: string | null) {
+  return useQuery({
+    queryKey: [...accountingKeys.grirClearing.all, 'history', poId],
+    queryFn: async () => {
+      const res = await api.grirClearing.getHistory(poId!);
+      return res.data?.data;
+    },
+    enabled: !!poId,
+  });
+}
+
 export function useClearGrirItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { grEntryId: string; invoiceEntryId: string; amount: number }) =>
+    mutationFn: (data: { grId: string; invoiceId: string; date?: string }) =>
       api.grirClearing.clearItem(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
@@ -215,7 +269,8 @@ export function useClearGrirItem() {
 export function useGrirAutoMatch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.grirClearing.autoMatch(),
+    mutationFn: (data?: { supplierId?: string; tolerancePercent?: number }) =>
+      api.grirClearing.autoMatch(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
       toast.success('Auto-match complete');
