@@ -11,7 +11,7 @@
  * already queues those locally and syncs on reconnect.
  */
 
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const STATIC_CACHE = `pos-static-${CACHE_VERSION}`;
 const API_CACHE = `pos-api-${CACHE_VERSION}`;
 const APP_SHELL_CACHE = `pos-shell-${CACHE_VERSION}`;
@@ -41,6 +41,10 @@ self.addEventListener('install', (event) => {
       return cache.addAll([
         './',           // index.html (SPA entry point)
         './offline.html',
+        './manifest.json',
+        './pos-icon-192.png',
+        './pos-icon-512.png',
+        './apple-touch-icon.png',
       ]);
     })
   );
