@@ -34,7 +34,7 @@ interface PendingOrder {
 export default function OrdersQueuePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, permissions } = useAuth();
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
@@ -109,8 +109,8 @@ export default function OrdersQueuePage() {
     }
   };
 
-  // Check if current user can pay (CASHIER, ADMIN, MANAGER)
-  const canPay = user?.role === 'ADMIN' || user?.role === 'MANAGER' || user?.role === 'CASHIER';
+  // Check if current user can pay (legacy roles OR RBAC permission)
+  const canPay = user?.role === 'ADMIN' || user?.role === 'MANAGER' || user?.role === 'CASHIER' || permissions.has('orders.pay');
 
   return (
     <Layout>
