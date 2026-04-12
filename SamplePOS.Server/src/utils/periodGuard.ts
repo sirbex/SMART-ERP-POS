@@ -9,6 +9,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import { getBusinessDate } from './dateRange.js';
 
 export async function checkAccountingPeriodOpen(
   client: Pool | PoolClient,
@@ -28,8 +29,8 @@ export async function checkAccountingPeriodOpen(
   const status: string = result.rows[0].status;
   if (status === 'OPEN') return;
 
-  const d = new Date(transactionDate);
-  const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const d = transactionDate.split('-');
+  const label = `${d[0]}-${d[1]}`;
   throw new Error(
     `Cannot post to closed period: ${label}. Period status: ${status}. ` +
     `Create a reversal entry in the current open period instead.`

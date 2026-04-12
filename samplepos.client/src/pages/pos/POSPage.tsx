@@ -53,6 +53,7 @@ import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 import { syncOfflineCustomers } from '../../services/offlineSyncEngine';
 import { useAuth } from '../../hooks/useAuth';
+import { formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
 
 // ── Discount applied from DiscountDialog (before manager approval extension) ──
 interface AppliedDiscount {
@@ -268,9 +269,10 @@ export default function POSPage() {
     'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT'
   >('CASH');
 
-  // Cash register session + policy (single API call, no dual queries)
-  const { data: currentSession, posSessionPolicy, isLoading: isLoadingSession, isError: isSessionError } = useCurrentSession();
+  // Cash register session + policy + transaction mode (single API call, no dual queries)
+  const { data: currentSession, posSessionPolicy, posTransactionMode, isLoading: isLoadingSession, isError: isSessionError } = useCurrentSession();
   const sessionEnforced = posSessionPolicy !== 'DISABLED';
+  const isOrderMode = posTransactionMode === 'OrderToPayment';
 
   // State for showing open register dialog when required
   const [showOpenRegisterDialog, setShowOpenRegisterDialog] = useState(false);
@@ -310,7 +312,10 @@ export default function POSPage() {
   const createSale = useCreatePOSSale();
   // createInvoice kept for future manual invoice creation
   useCreateInvoice();
-  const { isOnline, saveSaleOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, reviewCount, failedCount } =
+
+  // Order mode state
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const { isOnline, saveSaleOffline, saveOrderOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, pendingOrderCount, reviewCount, failedCount } =
     useOfflineMode();
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -684,11 +689,15 @@ export default function POSPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Shift+Enter: Open payment modal
+      // Shift+Enter: Open payment modal (DirectSale) or Save Order (OrderToPayment)
       if (e.shiftKey && e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
-        if (items.length > 0 && !showPaymentModal) {
-          setShowPaymentModal(true);
+        if (items.length > 0) {
+          if (isOrderMode) {
+            handleCreateOrder();
+          } else if (!showPaymentModal) {
+            setShowPaymentModal(true);
+          }
         }
         return;
       }
@@ -804,7 +813,7 @@ export default function POSPage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [items, showPaymentModal, showUomModal, focusedCartIndex, uomModalItemIndex]);
+  }, [items, showPaymentModal, showUomModal, focusedCartIndex, uomModalItemIndex, isOrderMode]);
 
   // Clear all data (cart + localStorage offline data)
   const handleClearAllData = () => {
@@ -1994,6 +2003,235 @@ export default function POSPage() {
     }
   };
 
+  // ----- Order Mode: Save Order (no payment) -----
+  const handleCreateOrder = async () => {
+    if (isCreatingOrder) return;
+    if (items.length === 0) {
+      toast.error('Cart is empty. Add items before saving an order.');
+      return;
+    }
+    if (grandTotal < 0) {
+      toast.error('Total amount cannot be negative. Adjust your discounts.');
+      return;
+    }
+
+    setIsCreatingOrder(true);
+    try {
+      const orderItems = items.map((item) => ({
+        productId: item.id,
+        productName: item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountAmount: item.discount?.amount || 0,
+        uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
+        baseQty: item.quantity, // will be recalculated by backend if UOM differs
+        baseUomId: undefined,
+        conversionFactor: 1,
+      }));
+
+      // ── Offline: save order locally, sync when internet is restored ──
+      if (!isOnline) {
+        const offlineId = saveOrderOffline({
+          customerId: selectedCustomer?.id,
+          items: orderItems,
+          notes: '',
+        });
+        toast.success(`Order saved offline (${offlineId}). Will sync when online.`);
+
+        // Build order receipt data BEFORE clearing cart
+        const today = new Date();
+        setReceiptData({
+          saleNumber: `ORDER: ${offlineId}`,
+          saleDate: formatReceiptDateTime(today),
+          subtotal,
+          discountAmount: items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0),
+          taxAmount: tax,
+          totalAmount: grandTotal,
+          cashierName: currentUser?.fullName,
+          items: items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+            uom: item.uom,
+            discountAmount: item.discount?.amount,
+          })),
+          customerName: selectedCustomer?.name,
+          companyName: invoiceSettings?.companyName,
+          companyAddress: invoiceSettings?.companyAddress || undefined,
+          companyPhone: invoiceSettings?.companyPhone || undefined,
+          paymentAccounts: invoiceSettings?.paymentAccounts
+            ?.filter(a => a.isActive && a.showOnReceipt)
+            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
+          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
+        });
+        setLastSale({
+          id: offlineId,
+          saleNumber: offlineId,
+          saleDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+          totalAmount: grandTotal,
+        });
+
+        // Clear cart
+        setItems([]);
+        setSelectedCustomer(null);
+        setPaymentLines([]);
+        setPaymentAmount('');
+        clearPersistedCart();
+
+        // Show receipt/print modal
+        setShowReceiptModal(true);
+        return;
+      }
+
+      // ── Online: send order to server immediately ──
+      const orderData = {
+        customerId: selectedCustomer?.id,
+        notes: '',
+        items: orderItems,
+      };
+      const response = await api.orders.create(orderData);
+      if (response.data?.success) {
+        const order = response.data.data as {
+          id?: string;
+          orderNumber?: string;
+          order_number?: string;
+          totalAmount?: string | number;
+          items?: Array<{
+            productName?: string;
+            product_name?: string;
+            quantity?: string | number;
+            unitPrice?: string | number;
+            unit_price?: string | number;
+            lineTotal?: string | number;
+            line_total?: string | number;
+            discountAmount?: string | number;
+            discount_amount?: string | number;
+          }>;
+        };
+        const orderNum = order.orderNumber || order.order_number || '';
+        toast.success(`Order ${orderNum} saved! Sent to cashier queue.`);
+
+        // Build order receipt data BEFORE clearing cart
+        const today = new Date();
+        setReceiptData({
+          saleNumber: `ORDER: ${orderNum}`,
+          saleDate: formatReceiptDateTime(today),
+          subtotal,
+          discountAmount: items.reduce(
+            (sum, item) => sum + (item.discount?.amount || 0),
+            0
+          ),
+          taxAmount: tax,
+          totalAmount: grandTotal,
+          cashierName: currentUser?.fullName,
+          items: items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+            uom: item.uom,
+            discountAmount: item.discount?.amount,
+          })),
+          customerName: selectedCustomer?.name,
+          companyName: invoiceSettings?.companyName,
+          companyAddress: invoiceSettings?.companyAddress || undefined,
+          companyPhone: invoiceSettings?.companyPhone || undefined,
+          paymentAccounts: invoiceSettings?.paymentAccounts
+            ?.filter(a => a.isActive && a.showOnReceipt)
+            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
+          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
+        });
+        setLastSale({
+          id: order.id || orderNum,
+          saleNumber: orderNum,
+          saleDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+          totalAmount: grandTotal,
+        });
+
+        // Clear cart
+        setItems([]);
+        setSelectedCustomer(null);
+        setPaymentLines([]);
+        setPaymentAmount('');
+        clearPersistedCart();
+
+        // Show receipt/print modal
+        setShowReceiptModal(true);
+      } else {
+        toast.error(response.data?.error || 'Failed to create order');
+      }
+    } catch (err: unknown) {
+      // CRITICAL: If network failed mid-request, save offline instead of losing the order
+      const isNetworkError =
+        (err instanceof Error && ('code' in err && (err as Record<string, unknown>).code === 'ERR_NETWORK')) ||
+        !navigator.onLine;
+      if (isNetworkError) {
+        const orderItems = items.map((item) => ({
+          productId: item.id,
+          productName: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountAmount: item.discount?.amount || 0,
+          uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
+          baseQty: item.quantity,
+          baseUomId: undefined,
+          conversionFactor: 1,
+        }));
+        const offlineId = saveOrderOffline({
+          customerId: selectedCustomer?.id,
+          items: orderItems,
+          notes: '',
+        });
+        toast.success(`Network failed — order saved offline (${offlineId}). Will sync when online.`);
+
+        const today = new Date();
+        setReceiptData({
+          saleNumber: `ORDER: ${offlineId}`,
+          saleDate: formatReceiptDateTime(today),
+          subtotal,
+          discountAmount: items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0),
+          taxAmount: tax,
+          totalAmount: grandTotal,
+          cashierName: currentUser?.fullName,
+          items: items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+            uom: item.uom,
+            discountAmount: item.discount?.amount,
+          })),
+          customerName: selectedCustomer?.name,
+          companyName: invoiceSettings?.companyName,
+          companyAddress: invoiceSettings?.companyAddress || undefined,
+          companyPhone: invoiceSettings?.companyPhone || undefined,
+          paymentAccounts: invoiceSettings?.paymentAccounts
+            ?.filter(a => a.isActive && a.showOnReceipt)
+            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
+          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
+        });
+        setLastSale({
+          id: offlineId,
+          saleNumber: offlineId,
+          saleDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+          totalAmount: grandTotal,
+        });
+        setItems([]);
+        setSelectedCustomer(null);
+        setPaymentLines([]);
+        setPaymentAmount('');
+        clearPersistedCart();
+        setShowReceiptModal(true);
+      } else {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to create order';
+        toast.error(errorMessage);
+      }
+    } finally {
+      setIsCreatingOrder(false);
+    }
+  };
+
   // Finalize sale handler
   const handleFinalizeSale = async () => {
     console.log('🔵 handleFinalizeSale called');
@@ -2724,7 +2962,7 @@ export default function POSPage() {
                     <div className="flex items-center gap-2 text-xs text-gray-500">
                       <span>{sale.data.lineItems.length} items</span>
                       <span>•</span>
-                      <span>{new Date(sale.timestamp).toLocaleTimeString()}</span>
+                      <span>{formatTimestampTime(sale.timestamp)}</span>
                     </div>
                     {sale.syncError && (
                       <p className="text-xs text-red-500 mt-0.5 break-words">{sale.syncError}</p>
@@ -2780,6 +3018,18 @@ export default function POSPage() {
             )}
             <span className="opacity-75">Credit, deposit &amp; discount approval disabled</span>
           </div>
+        </div>
+      )}
+      {/* Order Mode Banner */}
+      {isOrderMode && (
+        <div className="bg-orange-50 border-b border-orange-200 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-orange-800 text-sm font-medium">
+            <span>📋</span>
+            <span>Order Mode — Items will be saved as an order for cashier payment</span>
+          </div>
+          <Link to="/orders-queue" className="text-orange-600 hover:text-orange-800 text-sm font-semibold underline">
+            View Queue →
+          </Link>
         </div>
       )}
       {/* Main layout: Responsive - stacked on mobile, 3-column on desktop */}
@@ -3127,15 +3377,26 @@ export default function POSPage() {
             />
           )}
 
-          {/* Primary Action — Payment */}
-          <button
-            onClick={() => items.length > 0 && setShowPaymentModal(true)}
-            disabled={items.length === 0}
-            className="w-full py-3 sm:py-3.5 mb-2 sm:mb-3 rounded-xl font-bold text-sm sm:text-base bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-emerald-200 border border-emerald-400"
-          >
-            💳 Charge {items.length > 0 && formatCurrency(grandTotal)}
-            <span className="hidden sm:block text-[10px] font-normal opacity-70 mt-0.5">Shift + Enter</span>
-          </button>
+          {/* Primary Action — Payment or Save Order */}
+          {isOrderMode ? (
+            <button
+              onClick={handleCreateOrder}
+              disabled={items.length === 0 || isCreatingOrder}
+              className="w-full py-3 sm:py-3.5 mb-2 sm:mb-3 rounded-xl font-bold text-sm sm:text-base bg-gradient-to-r from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-orange-200 border border-orange-400"
+            >
+              {isCreatingOrder ? '⏳ Saving...' : `📋 Save Order ${items.length > 0 ? formatCurrency(grandTotal) : ''}`}
+              <span className="hidden sm:block text-[10px] font-normal opacity-70 mt-0.5">Shift + Enter</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => items.length > 0 && setShowPaymentModal(true)}
+              disabled={items.length === 0}
+              className="w-full py-3 sm:py-3.5 mb-2 sm:mb-3 rounded-xl font-bold text-sm sm:text-base bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-emerald-200 border border-emerald-400"
+            >
+              💳 Charge {items.length > 0 && formatCurrency(grandTotal)}
+              <span className="hidden sm:block text-[10px] font-normal opacity-70 mt-0.5">Shift + Enter</span>
+            </button>
+          )}
 
           {/* Quick Actions — 2×2 colored grid */}
           <div className="grid grid-cols-4 gap-1 sm:gap-2.5 mb-2 sm:mb-3">
@@ -4193,8 +4454,8 @@ export default function POSPage() {
                               {quote.customerName || 'Walk-in Customer'}
                             </p>
                             <p className="text-sm text-gray-600 mt-1">
-                              {new Date(quote.createdAt).toLocaleDateString()} · Valid until{' '}
-                              {new Date(quote.validUntil).toLocaleDateString()}
+                              {formatTimestampDate(quote.createdAt)} · Valid until{' '}
+                              {formatTimestampDate(quote.validUntil)}
                             </p>
                           </div>
                           <div className="text-right">
@@ -4256,7 +4517,7 @@ export default function POSPage() {
                   {formatCurrency(savedQuoteData.quotation.totalAmount)}
                 </p>
                 <p className="text-xs text-gray-600 mt-2">
-                  Valid until: {new Date(savedQuoteData.quotation.validUntil).toLocaleDateString()}
+                  Valid until: {formatTimestampDate(savedQuoteData.quotation.validUntil)}
                 </p>
               </div>
             </div>

@@ -7,6 +7,7 @@ import { BankingService } from './bankingService.js';
 import { pool as globalPool } from '../db/pool.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import { Pool, PoolClient } from 'pg';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 /**
  * Get expenses with filtering and pagination
@@ -384,7 +385,7 @@ export const markExpensePaid = async (
           existingExpense.expenseNumber,
           existingExpense.amount,
           existingExpense.paymentMethod || 'BANK_TRANSFER',
-          updateData.paid_at?.split('T')[0] || new Date().toLocaleDateString('en-CA'),
+          updateData.paid_at?.split('T')[0] || getBusinessDate(),
           existingExpense.categoryId || undefined,
           dbPool
         );
@@ -418,7 +419,7 @@ export const markExpensePaid = async (
         }
       }
 
-      const paymentDate = paymentData.paymentDate || new Date().toLocaleDateString('en-CA');
+      const paymentDate = paymentData.paymentDate || getBusinessDate();
 
       await glEntryService.recordExpensePaymentToGL(
         {
@@ -546,10 +547,10 @@ const generateExpenseNumber = async (pool?: Pool): Promise<string> => {
   } catch (error) {
     logger.error('Error generating expense number', { error });
     // Fallback to timestamp-based number
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const timestamp = now.getTime().toString().slice(-4);
+    const bizDate = getBusinessDate();
+    const year = bizDate.slice(0, 4);
+    const month = bizDate.slice(5, 7);
+    const timestamp = Date.now().toString().slice(-4);
     return `EXP-${year}${month}-${timestamp}`;
   }
 };

@@ -13,10 +13,11 @@
  */
 
 import apiClient from '../utils/api';
-import type { OfflineSale } from '../hooks/useOfflineMode';
+import type { OfflineSale, OfflineOrder } from '../hooks/useOfflineMode';
 import type { AxiosError } from 'axios';
 
 const OFFLINE_SALES_KEY = 'pos_offline_sales';
+const OFFLINE_ORDERS_KEY = 'pos_offline_orders';
 const OFFLINE_CUSTOMERS_KEY = 'pos_offline_customers';
 
 /** Module-level lock — only one sync at a time per tab */
@@ -77,6 +78,120 @@ export function hasPendingSales(): boolean {
         return queue.some((s) => s.status === 'PENDING_SYNC');
     } catch {
         return false;
+    }
+}
+
+// ── Order Queue helpers ───────────────────────────────────────
+
+function loadOrderQueue(): OfflineOrder[] {
+    try {
+        const raw = localStorage.getItem(OFFLINE_ORDERS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(
+            (o: unknown): o is OfflineOrder =>
+                typeof o === 'object' && o !== null &&
+                'idempotencyKey' in o && 'offlineId' in o &&
+                'data' in o && 'status' in o
+        );
+    } catch {
+        return [];
+    }
+}
+
+function persistOrderQueue(queue: OfflineOrder[]): void {
+    localStorage.setItem(OFFLINE_ORDERS_KEY, JSON.stringify(queue));
+}
+
+/**
+ * Returns true if there are PENDING_SYNC orders in the queue.
+ */
+export function hasPendingOrders(): boolean {
+    try {
+        return loadOrderQueue().some((o) => o.status === 'PENDING_SYNC');
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Sync all PENDING_SYNC orders to the server.
+ * Uses the standard POST /api/orders endpoint.
+ * Idempotency keys prevent duplicate orders on retry.
+ */
+export async function syncOfflineOrders(): Promise<SyncResult> {
+    if (!navigator.onLine || !acquireSyncLock()) return { synced: 0, failed: 0, review: 0 };
+
+    let syncedCount = 0;
+    let failedCount = 0;
+
+    try {
+        const queue = loadOrderQueue();
+        const pending = queue.filter((o) => o.status === 'PENDING_SYNC');
+        if (pending.length === 0) return { synced: 0, failed: 0, review: 0 };
+
+        for (const order of pending) {
+            try {
+                // Resolve offline customer IDs
+                if (order.data.customerId && order.data.customerId.startsWith('offline_cust_')) {
+                    try {
+                        const offlineCusts = JSON.parse(localStorage.getItem(OFFLINE_CUSTOMERS_KEY) || '[]') as Array<{ id: string; name: string }>;
+                        const custEntry = offlineCusts.find(c => c.id === order.data.customerId);
+                        if (custEntry?.name) {
+                            const searchResp = await apiClient.get('/customers/search', { params: { q: custEntry.name, limit: 1 } });
+                            const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
+                            if (found?.id) order.data.customerId = found.id;
+                            else order.data.customerId = undefined;
+                        } else {
+                            order.data.customerId = undefined;
+                        }
+                    } catch {
+                        order.data.customerId = undefined;
+                    }
+                }
+
+                const response = await apiClient.post('/orders', {
+                    ...order.data,
+                    idempotencyKey: order.idempotencyKey,
+                });
+
+                if (response.data?.success) {
+                    order.status = 'SYNCED';
+                    syncedCount++;
+                } else {
+                    order.status = 'FAILED';
+                    order.syncError = (response.data?.error as string) || 'Unknown error';
+                    failedCount++;
+                }
+            } catch (err: unknown) {
+                const axErr = err as AxiosError;
+                if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
+                    break; // Stop — still offline
+                }
+                // Treat 409 (duplicate/idempotency hit) as success — order already exists
+                if (axErr.response?.status === 409) {
+                    order.status = 'SYNCED';
+                    syncedCount++;
+                } else {
+                    order.status = 'FAILED';
+                    const serverMsg = (axErr.response?.data as Record<string, unknown>)?.error;
+                    order.syncError = (typeof serverMsg === 'string' ? serverMsg : '') || axErr.message || 'Sync error';
+                    failedCount++;
+                }
+            }
+        }
+
+        // Persist updated statuses, remove SYNCED entries
+        const updatedQueue = queue.filter((o) => o.status !== 'SYNCED');
+        persistOrderQueue(updatedQueue);
+
+        // Notify hooks to re-read
+        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
+
+        return { synced: syncedCount, failed: failedCount, review: 0 };
+    } finally {
+        releaseSyncLock();
     }
 }
 

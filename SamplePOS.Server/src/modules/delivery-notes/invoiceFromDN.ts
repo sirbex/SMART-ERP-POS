@@ -12,6 +12,7 @@ import { NotFoundError, ValidationError, ConflictError } from '../../middleware/
 import { recordDeliveryNoteInvoiceToGL } from '../../services/glEntryService.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import Decimal from 'decimal.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 /**
  * Create an invoice from a POSTED delivery note.
@@ -143,7 +144,7 @@ export async function invoiceFromDeliveryNote(
     await recordDeliveryNoteInvoiceToGL({
       invoiceId: invoice.id,
       invoiceNumber: invoice.invoice_number,
-      invoiceDate: new Date().toLocaleDateString('en-CA'),
+      invoiceDate: getBusinessDate(),
       totalAmount,
       deliveryNoteNumber: dn.deliveryNoteNumber,
       customerId: dn.customerId,

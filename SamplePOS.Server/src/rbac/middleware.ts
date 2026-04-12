@@ -134,6 +134,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
       'expenses',
       'quotations',
       'crm',
+      'orders',
     ].includes(module);
   },
   CASHIER: (key) => {
@@ -150,9 +151,17 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
       'settings.read',
       'quotations.read',
       'quotations.create',
+      'orders.read',
+      'orders.create',
+      'orders.pay',
+      'orders.cancel',
     ].includes(key);
   },
-  STAFF: (key) => key.endsWith('.read'),
+  STAFF: (key) => {
+    // STAFF can read anything + create orders + use POS in order mode (dispenser workflow)
+    if (key.endsWith('.read')) return true;
+    return ['orders.create', 'pos.create'].includes(key);
+  },
 };
 
 /**

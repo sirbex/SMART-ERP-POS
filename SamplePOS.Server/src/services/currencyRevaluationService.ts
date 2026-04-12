@@ -26,6 +26,7 @@ import { AccountingCore, JournalLine } from './accountingCore.js';
 import { Money, Decimal } from '../utils/money.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger.js';
+import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 
 // =============================================================================
 // TYPES
@@ -257,9 +258,9 @@ export class CurrencyRevaluationService {
 
       if (request.autoReverse) {
         // Next day = start of next period
-        const nextDay = new Date(request.revaluationDate);
-        nextDay.setDate(nextDay.getDate() + 1);
-        reversalDate = nextDay.toISOString().split('T')[0];
+        const nextDay = new Date(request.revaluationDate + 'T00:00:00Z');
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        reversalDate = formatDateBusiness(nextDay);
 
         const reversal = await AccountingCore.reverseTransaction(
           {

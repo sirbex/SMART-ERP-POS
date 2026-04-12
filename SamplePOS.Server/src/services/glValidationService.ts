@@ -10,6 +10,7 @@ import type pg from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import * as glEntryService from './glEntryService.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 interface GLValidationResult {
   isValid: boolean;
@@ -429,7 +430,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
       await glEntryService.recordGoodsReceiptToGL({
         grId: gr.id,
         grNumber: gr.receipt_number || gr.id,
-        grDate: gr.received_date || new Date().toLocaleDateString('en-CA'),
+        grDate: gr.received_date || getBusinessDate(),
         totalAmount: parseFloat(gr.total_value),
         supplierId: gr.supplier_id || '',
         supplierName: gr.supplier_name || 'Unknown Supplier',
@@ -466,7 +467,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
       await glEntryService.recordSupplierPaymentToGL({
         paymentId: sp.Id,
         paymentNumber: sp.PaymentNumber || sp.Id,
-        paymentDate: sp.PaymentDate || new Date().toLocaleDateString('en-CA'),
+        paymentDate: sp.PaymentDate || getBusinessDate(),
         amount: parseFloat(sp.Amount),
         paymentMethod: (sp.PaymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK') || 'CASH',
         supplierId: sp.SupplierId || '',
@@ -516,7 +517,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
       await glEntryService.recordSaleToGL({
         saleId: sale.id,
         saleNumber: sale.sale_number,
-        saleDate: sale.sale_date || new Date().toLocaleDateString('en-CA'),
+        saleDate: sale.sale_date || getBusinessDate(),
         totalAmount: parseFloat(sale.total_amount) || 0,
         costAmount: parseFloat(sale.total_cost) || 0,
         paymentMethod: (sale.payment_method as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT') || 'CASH',

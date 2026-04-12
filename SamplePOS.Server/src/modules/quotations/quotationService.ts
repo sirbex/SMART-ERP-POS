@@ -25,6 +25,7 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -125,8 +126,8 @@ function normalizeQuotation(row: QuotationDbRow & { converted_to_sale_number?: s
     taxAmount: parseFloat(row.tax_amount),
     totalAmount: parseFloat(row.total_amount),
     status: row.status,
-    validFrom: typeof row.valid_from === 'string' ? row.valid_from : row.valid_from.toLocaleDateString('en-CA'),
-    validUntil: typeof row.valid_until === 'string' ? row.valid_until : row.valid_until.toLocaleDateString('en-CA'),
+    validFrom: typeof row.valid_from === 'string' ? row.valid_from : formatDateBusiness(row.valid_from),
+    validUntil: typeof row.valid_until === 'string' ? row.valid_until : formatDateBusiness(row.valid_until),
     convertedToSaleId: row.converted_to_sale_id,
     convertedToInvoiceId: row.converted_to_invoice_id,
     // Human-readable identifiers for display
@@ -821,7 +822,7 @@ export const quotationService = {
           {
             saleId: saleRecord.id,
             saleNumber: saleRecord.sale_number,
-            saleDate: saleRecord.sale_date || new Date().toLocaleDateString('en-CA'),
+            saleDate: saleRecord.sale_date || getBusinessDate(),
             totalAmount,
             costAmount: totalCost,
             paymentMethod,
@@ -1011,10 +1012,10 @@ export const quotationService = {
       subtotal = subtotal.plus(new Decimal(item.subtotal));
     }
 
-    const validFrom = new Date().toLocaleDateString('en-CA');
+    const validFrom = getBusinessDate();
     const validUntilDate = new Date();
     validUntilDate.setDate(validUntilDate.getDate() + 30);
-    const validUntil = validUntilDate.toLocaleDateString('en-CA');
+    const validUntil = formatDateBusiness(validUntilDate);
 
     // Create quotation header
     const quotation = await quotationRepository.createQuotation(client, {

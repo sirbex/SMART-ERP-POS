@@ -29,6 +29,7 @@ import {
     useBankAccounts,
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 type ReportType = 'summaries' | 'activity' | 'cash-position';
 
@@ -130,7 +131,7 @@ export const BankReportsTab: React.FC = () => {
                                                     <div>
                                                         <div>{formatCurrency(summary.lastReconciledBalance || 0)}</div>
                                                         <div className="text-xs text-muted-foreground">
-                                                            {new Date(summary.lastReconciledAt).toLocaleDateString()}
+                                                            {formatTimestampDate(summary.lastReconciledAt)}
                                                         </div>
                                                     </div>
                                                 ) : (
@@ -316,7 +317,7 @@ export const BankReportsTab: React.FC = () => {
                                             <div className="text-sm text-muted-foreground">Total Cash Balance</div>
                                             <div className="text-3xl font-bold">{formatCurrency(cashPosition.totalCashBalance)}</div>
                                             <div className="text-xs text-muted-foreground mt-1">
-                                                As of {new Date(cashPosition.asOfDate).toLocaleDateString()}
+                                                As of {formatTimestampDate(cashPosition.asOfDate)}
                                             </div>
                                         </CardContent>
                                     </Card>
@@ -354,7 +355,7 @@ export const BankReportsTab: React.FC = () => {
                                                     {formatCurrency(acc.balance)}
                                                 </TableCell>
                                                 <TableCell className="text-right text-sm text-muted-foreground">
-                                                    {acc.lastReconciled ? new Date(acc.lastReconciled).toLocaleDateString() : 'Never'}
+                                                    {acc.lastReconciled ? formatTimestampDate(acc.lastReconciled) : 'Never'}
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <span className={acc.unreconciledAmount !== 0 ? 'text-destructive' : 'text-green-600'}>

@@ -17,6 +17,7 @@ import { useOfflineContext } from '../../contexts/OfflineContext';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
 import type { OfflineSale } from '../../hooks/useOfflineMode';
 import apiClient from '../../utils/api';
+import { formatTimestampTime } from '../../utils/businessDate';
 
 interface OfflineSyncStatusPanelProps {
   /** Compact mode hides the cache section */
@@ -178,7 +179,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <span>{sale.data.lineItems.length} items</span>
                     <span>•</span>
-                    <span>{new Date(sale.timestamp).toLocaleTimeString()}</span>
+                    <span>{formatTimestampTime(sale.timestamp)}</span>
                   </div>
                   {sale.syncError && (
                     <p className="text-xs text-red-500 mt-0.5 break-words whitespace-normal">{sale.syncError}</p>

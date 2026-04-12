@@ -11,6 +11,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
+import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 
 // =============================================================================
 // TYPES
@@ -517,7 +518,7 @@ export class AccountingPeriodService {
             WHERE lt."TransactionDate"::DATE >= $1
               AND lt."TransactionDate"::DATE <= $2
         `,
-            [periodStart.toLocaleDateString('en-CA'), periodEnd.toLocaleDateString('en-CA')]
+            [formatDateBusiness(periodStart), formatDateBusiness(periodEnd)]
         );
 
         const debits = new Decimal(balanceCheck.rows[0]?.total_debits || '0');
@@ -539,7 +540,7 @@ export class AccountingPeriodService {
               AND sale_date <= $2
               AND status = 'PENDING'
         `,
-            [periodStart.toLocaleDateString('en-CA'), periodEnd.toLocaleDateString('en-CA')]
+            [formatDateBusiness(periodStart), formatDateBusiness(periodEnd)]
         );
 
         if (parseInt(pendingSales.rows[0]?.count || '0') > 0) {

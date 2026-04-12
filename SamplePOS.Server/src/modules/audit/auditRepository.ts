@@ -12,6 +12,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { pool as globalPool } from '../../db/pool.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 import {
   AuditLog,
   AuditLogDbRow,
@@ -231,13 +232,15 @@ export async function getAuditLogs(
   }
 
   if (filters.startDate) {
+    const { startUtc } = toUtcRange(filters.startDate, filters.startDate, BUSINESS_TIMEZONE);
     conditions.push(`created_at >= $${paramCount++}`);
-    values.push(filters.startDate);
+    values.push(startUtc);
   }
 
   if (filters.endDate) {
-    conditions.push(`created_at <= $${paramCount++}`);
-    values.push(filters.endDate);
+    const { endUtc } = toUtcRange(filters.endDate, filters.endDate, BUSINESS_TIMEZONE);
+    conditions.push(`created_at < $${paramCount++}`);
+    values.push(endUtc);
   }
 
   if (filters.searchTerm) {

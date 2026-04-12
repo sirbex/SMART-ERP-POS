@@ -13,6 +13,7 @@ import type { CreateProductInput } from "@/types/inputs";
 import type { Product } from "@/types/business";
 import type { ApiResponse } from "@/types/api";
 import { AxiosError } from "axios";
+import { getBusinessDate } from "@/utils/businessDate";
 import { UomSelector } from "./UomSelector";
 import { convertQtyToBase, convertCostToBase } from "@/utils/uom";
 import {
@@ -192,8 +193,7 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
         if (!item.expiryDate || item.expiryDate.trim() === "") {
           return true; // Expiry is required for tracked products
         }
-        const expiry = new Date(item.expiryDate);
-        if (expiry < new Date()) return true; // Cannot be in the past
+        if (item.expiryDate && item.expiryDate <= getBusinessDate()) return true; // Cannot be in the past
       }
 
       return false;
@@ -222,7 +222,7 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
       const payload = {
         supplierId: supplierId, // Send supplierId instead of purchaseOrderId
         purchaseOrderId: null, // Explicitly null
-        receiptDate: new Date().toISOString(),
+        receiptDate: getBusinessDate(),
         receivedBy: user.id,
         notes: notes || null,
         source: "MANUAL",

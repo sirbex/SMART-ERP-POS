@@ -10,6 +10,7 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import * as costCenterService from './costCenterService.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 const router = Router();
 
@@ -77,7 +78,7 @@ router.get('/:id/report', authenticate, asyncHandler(async (req, res) => {
 
 // GET /api/cost-centers/:id/budget — Get budget
 router.get('/:id/budget', authenticate, asyncHandler(async (req, res) => {
-  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+  const year = parseInt(req.query.year as string) || getBusinessYear();
   const month = req.query.month ? parseInt(req.query.month as string) : undefined;
   const budget = await costCenterService.getBudget(req.params.id, year, month, req.tenantPool);
   res.json({ success: true, data: budget });

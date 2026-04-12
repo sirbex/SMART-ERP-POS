@@ -90,6 +90,8 @@ const GrirClearingPage = lazyWithRetry(() => import('./pages/accounting/GrirClea
 const DunningPage = lazyWithRetry(() => import('./pages/accounting/DunningPage'));
 const WithholdingTaxPage = lazyWithRetry(() => import('./pages/accounting/WithholdingTaxPage'));
 const AssetAccountingPage = lazyWithRetry(() => import('./pages/accounting/AssetAccountingPage'));
+const OrdersQueuePage = lazyWithRetry(() => import('./pages/orders/OrdersQueuePage'));
+const OrderPaymentPage = lazyWithRetry(() => import('./pages/orders/OrderPaymentPage'));
 const JeApprovalPage = lazyWithRetry(() => import('./pages/accounting/JeApprovalPage'));
 const PaymentProgramPage = lazyWithRetry(() => import('./pages/accounting/PaymentProgramPage'));
 const MultiCurrencyPage = lazyWithRetry(() => import('./pages/accounting/MultiCurrencyPage'));
@@ -246,8 +248,28 @@ function App() {
                   <Route
                     path="/pos"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['pos.read', 'pos.create']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['pos.read', 'pos.create']}>
                         <POSPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Orders Queue */}
+                  <Route
+                    path="/orders-queue"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['orders.read']}>
+                        <OrdersQueuePage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Order Payment */}
+                  <Route
+                    path="/orders/:id/pay"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['orders.pay']}>
+                        <OrderPaymentPage />
                       </ProtectedRoute>
                     }
                   />

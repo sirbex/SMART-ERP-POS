@@ -38,6 +38,7 @@ import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
 import { v4 as uuidv4 } from 'uuid';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // =============================================================================
 // ACCOUNT CODES (from Chart of Accounts)
@@ -364,7 +365,7 @@ export const cashRegisterService = {
         userId: string,
         dbPool?: Pool
     ): Promise<void> {
-        const today = new Date().toLocaleDateString('en-CA');
+        const today = getBusinessDate();
         const idempotencyKey = `CASH_VAR_${session.id}`;
         const absVariance = variance.abs().toNumber();
 
@@ -529,7 +530,7 @@ export const cashRegisterService = {
         userId: string,
         dbPool?: Pool
     ): Promise<void> {
-        const today = new Date().toLocaleDateString('en-CA');
+        const today = getBusinessDate();
         const idempotencyKey = `CASH_MOV_${movement.id}`;
         const amount = new Decimal(movement.amount).toNumber();
 

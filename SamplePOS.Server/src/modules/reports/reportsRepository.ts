@@ -4,7 +4,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
-import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
+import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness } from '../../utils/dateRange.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import type {
   SalesReportRow,
@@ -101,11 +101,11 @@ function toUtcParams(
 ): [string, string] {
   const start =
     startDate instanceof Date
-      ? startDate.toISOString().slice(0, 10)
+      ? formatDateBusiness(startDate)
       : String(startDate).slice(0, 10);
   const end =
     endDate instanceof Date
-      ? endDate.toISOString().slice(0, 10)
+      ? formatDateBusiness(endDate)
       : String(endDate).slice(0, 10);
   const { startUtc, endUtc } = toUtcRange(start, end, TZ);
   return [startUtc, endUtc];
@@ -1334,8 +1334,9 @@ export const reportsRepository = {
     let dateFilter = '';
 
     if (options.startDate && options.endDate) {
-      dateFilter = 'AND p.updated_at BETWEEN $1 AND $2';
-      params.push(options.startDate, options.endDate);
+      const { startUtc, endUtc } = toUtcRange(options.startDate, options.endDate, BUSINESS_TIMEZONE);
+      dateFilter = 'AND p.updated_at >= $1 AND p.updated_at < $2';
+      params.push(startUtc, endUtc);
     }
 
     const query = `
@@ -1384,7 +1385,8 @@ export const reportsRepository = {
       productId?: string;
     }
   ): Promise<InventoryAdjustmentRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const { startUtc, endUtc } = toUtcRange(options.startDate, options.endDate, BUSINESS_TIMEZONE);
+    const params: unknown[] = [startUtc, endUtc];
     let productFilter = '';
 
     if (options.productId) {
@@ -1408,7 +1410,7 @@ export const reportsRepository = {
       INNER JOIN products p ON p.id = sm.product_id
       LEFT JOIN inventory_batches b ON b.id = sm.batch_id
       WHERE sm.movement_type IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE', 'RETURN', 'TRANSFER_IN', 'TRANSFER_OUT', 'OPENING_BALANCE')
-        AND sm.created_at BETWEEN $1 AND $2
+        AND sm.created_at >= $1 AND sm.created_at < $2
         ${productFilter}
       ORDER BY sm.created_at DESC
     `;
@@ -2483,7 +2485,7 @@ export const reportsRepository = {
     };
   }> {
     const asOfDate = options.asOfDate || new Date();
-    const asOfDateStr = asOfDate instanceof Date ? asOfDate.toLocaleDateString('en-CA') : asOfDate;
+    const asOfDateStr = asOfDate instanceof Date ? formatDateBusiness(asOfDate) : asOfDate;
 
     const query = `
       WITH customer_invoices AS (
@@ -2687,9 +2689,10 @@ export const reportsRepository = {
       reason?: 'DAMAGE' | 'EXPIRY' | 'THEFT' | 'OTHER';
     }
   ): Promise<WasteDamageRow[]> {
-    const params: unknown[] = [options.startDate, options.endDate];
+    const { startUtc, endUtc } = toUtcRange(options.startDate, options.endDate, BUSINESS_TIMEZONE);
+    const params: unknown[] = [startUtc, endUtc];
     const filters: string[] = [
-      'sm.created_at BETWEEN $1 AND $2',
+      'sm.created_at >= $1 AND sm.created_at < $2',
       "sm.movement_type IN ('DAMAGE', 'EXPIRY')",
     ];
 
@@ -4156,7 +4159,7 @@ export const reportsRepository = {
             .minus(row.refunds || 0);
 
           return {
-            date: row.date?.toLocaleDateString('en-CA'),
+            date: row.date ? formatDateBusiness(row.date) : '',
             cashInFloat: new Decimal(row.cash_in_float || 0).toDecimalPlaces(2).toNumber(),
             cashInPayment: new Decimal(row.cash_in_payment || 0).toDecimalPlaces(2).toNumber(),
             cashInOther: new Decimal(row.cash_in_other || 0).toDecimalPlaces(2).toNumber(),

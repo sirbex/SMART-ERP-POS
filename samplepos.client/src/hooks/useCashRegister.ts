@@ -5,6 +5,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import { useOfflineContext } from '../contexts/OfflineContext';
 import type {
@@ -105,10 +106,12 @@ export function useUpdateRegister() {
 // Key for caching session in localStorage (offline resilience)
 const SESSION_CACHE_KEY = 'cash_register_session';
 const SESSION_POLICY_KEY = 'pos_session_policy';
+const TRANSACTION_MODE_KEY = 'pos_transaction_mode';
 
 interface SessionWithPolicy {
     session: CashRegisterSession | null;
     posSessionPolicy: string;
+    posTransactionMode: 'DirectSale' | 'OrderToPayment';
 }
 
 function getCachedSession(): CashRegisterSession | null {
@@ -120,20 +123,37 @@ function getCachedSession(): CashRegisterSession | null {
     }
 }
 
+/** Read the cached transaction mode. ALWAYS returns the last server-confirmed value. */
+function getCachedTransactionMode(): 'DirectSale' | 'OrderToPayment' {
+    const val = localStorage.getItem(TRANSACTION_MODE_KEY);
+    return val === 'OrderToPayment' ? 'OrderToPayment' : 'DirectSale';
+}
+
 function getCachedSessionWithPolicy(): SessionWithPolicy {
     return {
         session: getCachedSession(),
         posSessionPolicy: localStorage.getItem(SESSION_POLICY_KEY) || 'DISABLED',
+        posTransactionMode: getCachedTransactionMode(),
     };
 }
 
 /**
  * Get current user's open session + POS session policy (single API call).
- * Caches to localStorage so the POS stays usable when offline
- * (avoids the "Cash Register Required" overlay on network blips).
+ *
+ * RESILIENCE CONTRACT:
+ * - Online: Always fetches fresh from server on mount (staleTime: 0).
+ * - Online: Re-polls every 15 seconds to catch admin setting changes.
+ * - Offline: Returns last server-confirmed value from localStorage.
+ * - Cross-tab: Listens for localStorage changes so admin tab → POS tab is instant.
+ * - Settings save: Cache is invalidated immediately (see SystemSettingsTab).
+ * - Hard refresh: staleTime:0 guarantees a server fetch; localStorage is placeholder only.
  */
 export function useCurrentSession() {
     const { isOnline } = useOfflineContext();
+    const queryClient = useQueryClient();
+
+    // Track the last confirmed value so we never lose it on fetch errors
+    const lastConfirmed = useRef<SessionWithPolicy>(getCachedSessionWithPolicy());
 
     const query = useQuery<SessionWithPolicy>({
         queryKey: QUERY_KEYS.currentSession,
@@ -142,31 +162,57 @@ export function useCurrentSession() {
                 success: boolean;
                 data: CashRegisterSession | null;
                 posSessionPolicy?: string;
+                posTransactionMode?: string;
             }>('/cash-registers/sessions/current');
             const session = response.data.data;
             const posSessionPolicy = response.data.posSessionPolicy || 'DISABLED';
-            // Persist for offline use
+            const posTransactionMode = (response.data.posTransactionMode || 'DirectSale') as 'DirectSale' | 'OrderToPayment';
+            // Persist for offline use — this is the single source of truth for cache
             if (session) {
                 localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(session));
             } else {
                 localStorage.removeItem(SESSION_CACHE_KEY);
             }
             localStorage.setItem(SESSION_POLICY_KEY, posSessionPolicy);
-            return { session, posSessionPolicy };
+            localStorage.setItem(TRANSACTION_MODE_KEY, posTransactionMode);
+
+            const result: SessionWithPolicy = { session, posSessionPolicy, posTransactionMode };
+            lastConfirmed.current = result;
+            return result;
         },
-        // Don't poll the server when offline — use cached data
-        refetchInterval: isOnline ? 120_000 : false,
-        staleTime: 60_000,
-        // Seed from localStorage so offline starts with last-known state
-        initialData: getCachedSessionWithPolicy,
-        placeholderData: (prev) => prev ?? getCachedSessionWithPolicy(),
+        // Poll every 15s online; stop polling offline (localStorage is used)
+        refetchInterval: isOnline ? 15_000 : false,
+        // Always refetch on mount/focus — never treat cached data as fresh
+        staleTime: 0,
+        refetchOnMount: 'always',
+        refetchOnWindowFocus: 'always',
+        // On network errors, keep showing the last successful data
+        retry: 2,
+        retryDelay: 2000,
+        // Seed UI from localStorage while the first fetch is in flight
+        placeholderData: getCachedSessionWithPolicy,
     });
 
-    // Expose session as `data` for backward compatibility + policy separately
+    // Cross-tab sync: if another tab changes the setting via localStorage, pick it up
+    useEffect(() => {
+        const handleStorage = (e: StorageEvent) => {
+            if (e.key === TRANSACTION_MODE_KEY || e.key === SESSION_POLICY_KEY) {
+                // Another tab wrote a new value — invalidate so React Query re-reads
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.currentSession });
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, [queryClient]);
+
+    // Derive the effective value: prefer fresh query data, fall back to last confirmed, then cache
+    const effective = query.data ?? lastConfirmed.current;
+
     return {
         ...query,
-        data: query.data?.session ?? null,
-        posSessionPolicy: query.data?.posSessionPolicy ?? 'DISABLED',
+        data: effective.session,
+        posSessionPolicy: effective.posSessionPolicy,
+        posTransactionMode: effective.posTransactionMode,
     };
 }
 

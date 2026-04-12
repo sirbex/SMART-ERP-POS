@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { formatTimestampDate } from '../../utils/businessDate';
 import Layout from '../../components/Layout';
 import { apiClient } from '../../utils/api';
 import type { ApiResponse } from '../../utils/api';
@@ -190,7 +191,7 @@ function DepartmentsTab() {
                             {departments.map((d) => (
                                 <tr key={d.id} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 font-medium text-gray-900">{d.name}</td>
-                                    <td className="px-4 py-3 text-gray-500">{d.createdAt?.split('T')[0]}</td>
+                                    <td className="px-4 py-3 text-gray-500">{formatTimestampDate(d.createdAt)}</td>
                                     <td className="px-4 py-3 text-right space-x-2">
                                         <button onClick={() => startEdit(d)} className="text-indigo-600 hover:text-indigo-800 text-xs font-medium">Edit</button>
                                         <button onClick={() => { if (confirm('Delete this department?')) delMut.mutate(d.id); }} className="text-red-600 hover:text-red-800 text-xs font-medium">Delete</button>
@@ -285,7 +286,7 @@ function PositionsTab() {
                                 <tr key={p.id} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 font-medium text-gray-900">{p.title}</td>
                                     <td className="px-4 py-3 text-right text-gray-700">{fmtCurrency(p.baseSalary)}</td>
-                                    <td className="px-4 py-3 text-gray-500">{p.createdAt?.split('T')[0]}</td>
+                                    <td className="px-4 py-3 text-gray-500">{formatTimestampDate(p.createdAt)}</td>
                                     <td className="px-4 py-3 text-right space-x-2">
                                         <button onClick={() => startEdit(p)} className="text-indigo-600 hover:text-indigo-800 text-xs font-medium">Edit</button>
                                         <button onClick={() => { if (confirm('Delete this position?')) delMut.mutate(p.id); }} className="text-red-600 hover:text-red-800 text-xs font-medium">Delete</button>

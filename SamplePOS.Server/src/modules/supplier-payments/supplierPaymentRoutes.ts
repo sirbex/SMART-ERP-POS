@@ -14,6 +14,7 @@ import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import Money from '../../utils/money.js';
 import { amountToWords } from '../../utils/amountToWords.js';
+import { formatBusinessTimestamp } from '../../utils/dateRange.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
 // Zod schemas for validation
@@ -653,7 +654,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
             // Footer
             doc.fontSize(8).font('Helvetica').fillColor('#999999');
-            doc.text(`Generated on ${new Date().toLocaleString()}`, margin, doc.page.height - 40, {
+            doc.text(`Generated on ${formatBusinessTimestamp()}`, margin, doc.page.height - 40, {
                 align: 'center',
                 width: contentWidth,
             });

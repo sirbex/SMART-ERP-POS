@@ -9,6 +9,7 @@ import { tenantRepository } from './tenantRepository.js';
 import { PLAN_LIMITS, type TenantPlan, type BillingInfo, normalizeTenant } from '../../../../shared/types/tenant.js';
 import { invalidateTenantCache } from '../../middleware/tenantMiddleware.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
 export const billingService = {
   /**
@@ -43,11 +44,11 @@ export const billingService = {
       tenantId,
       plan: tenant.plan as TenantPlan,
       status: statusMap[tenant.status] || 'CANCELLED',
-      currentPeriodStart: periodStart.toLocaleDateString('en-CA'),
-      currentPeriodEnd: periodEnd.toLocaleDateString('en-CA'),
+      currentPeriodStart: formatDateBusiness(periodStart),
+      currentPeriodEnd: formatDateBusiness(periodEnd),
       amount: planPricing[tenant.plan] || 0,
       currency: tenant.currency || 'USD',
-      nextBillingDate: periodEnd.toLocaleDateString('en-CA'),
+      nextBillingDate: formatDateBusiness(periodEnd),
       cancelAtPeriodEnd: false,
     };
   },
@@ -160,7 +161,7 @@ export const billingService = {
     events: { eventType: string; totalQuantity: number }[];
     totalEvents: number;
   }> {
-    const billingPeriod = period || new Date().toISOString().slice(0, 10);
+    const billingPeriod = period || getBusinessDate();
     const events = await tenantRepository.getBillingEvents(masterPool, tenantId, billingPeriod);
     const totalEvents = events.reduce((sum, e) => sum + e.totalQuantity, 0);
 

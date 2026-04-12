@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { useUpdateBankAlert, BankAlert } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
+import { formatTimestamp, formatTimestampDate } from '../../utils/businessDate';
 
 interface AlertDetailsModalProps {
     isOpen: boolean;
@@ -106,7 +107,7 @@ export const AlertDetailsModal: React.FC<AlertDetailsModalProps> = ({
                         </div>
                         <div className="text-sm text-muted-foreground">
                             <Clock className="h-4 w-4 inline mr-1" />
-                            {new Date(alert.createdAt).toLocaleString()}
+                            {formatTimestamp(alert.createdAt)}
                         </div>
                     </div>
 
@@ -153,7 +154,7 @@ export const AlertDetailsModal: React.FC<AlertDetailsModalProps> = ({
                                 {details.expectedDate && (
                                     <div className="flex justify-between p-3">
                                         <span className="text-muted-foreground">Expected Date</span>
-                                        <span className="font-medium">{new Date(details.expectedDate).toLocaleDateString()}</span>
+                                        <span className="font-medium">{formatTimestampDate(details.expectedDate)}</span>
                                     </div>
                                 )}
                                 {details.ruleName && (
@@ -183,7 +184,7 @@ export const AlertDetailsModal: React.FC<AlertDetailsModalProps> = ({
                         </div>
                         {alert.reviewedAt && (
                             <p className="text-sm text-muted-foreground">
-                                Last updated: {new Date(alert.reviewedAt).toLocaleString()}
+                                Last updated: {formatTimestamp(alert.reviewedAt)}
                             </p>
                         )}
                         {alert.resolutionNotes && (

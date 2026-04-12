@@ -33,6 +33,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../rbac/middleware.js';
 import { pool as globalPool } from '../db/pool.js';
+import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 
 const router = Router();
 
@@ -179,7 +180,7 @@ router.post(
 
     const result = await journalService.reverseJournalEntry({
       journalEntryId: id,
-      reversalDate: new Date().toLocaleDateString('en-CA'), // Today's date
+      reversalDate: getBusinessDate(), // Today's date
       reason,
       reversedBy: userId,
     });
@@ -490,9 +491,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const { dateFrom, dateTo } = req.query;
 
-    const today = new Date();
-    const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toLocaleDateString('en-CA');
+    const bizToday = getBusinessDate();
+    const defaultFrom = bizToday.slice(0, 7) + '-01';
+    const defaultTo = bizToday;
 
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
@@ -555,9 +556,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const { dateFrom, dateTo } = req.query;
 
-    const today = new Date();
-    const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toLocaleDateString('en-CA');
+    const bizToday = getBusinessDate();
+    const defaultFrom = bizToday.slice(0, 7) + '-01';
+    const defaultTo = bizToday;
 
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
@@ -601,9 +602,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const { dateFrom, dateTo } = req.query;
 
-    const today = new Date();
-    const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toLocaleDateString('en-CA');
+    const bizToday = getBusinessDate();
+    const defaultFrom = bizToday.slice(0, 7) + '-01';
+    const defaultTo = bizToday;
 
     const startDate = (dateFrom as string) || defaultFrom;
     const endDate = (dateTo as string) || defaultTo;
@@ -649,9 +650,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const { dateFrom, dateTo } = req.query;
 
-    const today = new Date();
-    const defaultFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
-    const defaultTo = today.toLocaleDateString('en-CA');
+    const bizToday = getBusinessDate();
+    const defaultFrom = bizToday.slice(0, 7) + '-01';
+    const defaultTo = bizToday;
 
     const { plService } = withServices(req);
 
@@ -681,24 +682,18 @@ router.get(
     const pool = req.tenantPool || globalPool;
     const comparisons = [];
 
-    const today = new Date();
-
-    // Helper to format date as YYYY-MM-DD without timezone issues
-    const formatDate = (d: Date) => {
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
+    // Use business date for correct year/month near midnight
+    const bizToday = getBusinessDate();
+    const [bizYear, bizMonth] = bizToday.split('-').map(Number);
 
     for (let i = 0; i < numPeriods; i++) {
-      // First day of month i months ago
-      const periodStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      // First day of month i months ago (UTC-safe arithmetic)
+      const periodStart = new Date(Date.UTC(bizYear, bizMonth - 1 - i, 1));
       // Last day of that month
-      const periodEnd = new Date(today.getFullYear(), today.getMonth() - i + 1, 0);
+      const periodEnd = new Date(Date.UTC(bizYear, bizMonth - i, 0));
 
-      const startDate = formatDate(periodStart);
-      const endDate = formatDate(periodEnd);
+      const startDate = formatDateBusiness(periodStart);
+      const endDate = formatDateBusiness(periodEnd);
 
       const result = await pool.query(
         'SELECT * FROM fn_get_profit_loss_summary($1::DATE, $2::DATE)',
@@ -708,7 +703,7 @@ router.get(
       const summary = result.rows[0] || {};
 
       comparisons.push({
-        period: periodStart.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
+        period: `${periodStart.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${periodStart.getUTCFullYear()}`,
         startDate,
         endDate,
         totalRevenue: Money.parseDb(summary.total_revenue).toNumber(),

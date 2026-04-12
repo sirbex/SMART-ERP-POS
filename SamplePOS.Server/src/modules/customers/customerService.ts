@@ -8,7 +8,7 @@ import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../share
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
 import { ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
-import { BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
+import { BUSINESS_TIMEZONE, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
 /**
  * Get all customers with pagination
@@ -397,19 +397,17 @@ export async function getCustomerStatement(
 
   // Default range: last 30 days in business timezone if not provided
   // Compute "today" in Africa/Kampala by applying UTC+3 offset
-  const nowUtc = Date.now();
-  const kampalaMs = nowUtc + 3 * 60 * 60 * 1000; // Africa/Kampala = UTC+3 (no DST)
-  const todayStr = new Date(kampalaMs).toISOString().slice(0, 10);
+  const todayStr = getBusinessDate();
 
   const periodEndStr = end
-    ? (end instanceof Date ? end.toISOString().slice(0, 10) : String(end).slice(0, 10))
+    ? (end instanceof Date ? formatDateBusiness(end) : String(end).slice(0, 10))
     : todayStr;
   const periodStartStr = start
-    ? (start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10))
+    ? (start instanceof Date ? formatDateBusiness(start) : String(start).slice(0, 10))
     : (() => {
       const d = new Date(periodEndStr + 'T00:00:00Z');
       d.setUTCDate(d.getUTCDate() - 30);
-      return d.toISOString().slice(0, 10);
+      return formatDateBusiness(d);
     })();
 
   // Opening balance prior to period start (invoice ledger only)

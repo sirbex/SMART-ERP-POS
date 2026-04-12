@@ -37,6 +37,7 @@ import { formatCurrency } from '../../utils/currency';
 import toast from 'react-hot-toast';
 import { apiClient } from '../../utils/api';
 import { accountingApi, customersApi } from '../../services/api';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 // Types based on existing C# API DTOs
 interface CustomerAccount {
@@ -812,7 +813,7 @@ const CustomerFinancialPage = () => {
                                                                 <div>
                                                                     <div className="font-medium">{formatCurrency(receivable.amount)}</div>
                                                                     <div className="text-sm text-gray-500">
-                                                                        Due: {new Date(receivable.dueDate).toLocaleDateString()}
+                                                                        Due: {formatTimestampDate(receivable.dueDate)}
                                                                         {isOverdue && <span className="text-red-600 ml-2">({daysPastDue} days overdue)</span>}
                                                                     </div>
                                                                     {receivable.invoiceNumber && (

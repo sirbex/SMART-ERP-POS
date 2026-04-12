@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 /** Validates that a table name is a safe PostgreSQL identifier (defense-in-depth) */
 const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
@@ -165,7 +166,7 @@ export const systemManagementRepository = {
         }
     ): Promise<BackupRecord> {
         // Generate backup number with retry on conflict (race-safe)
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         const maxRetries = 5;
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -332,7 +333,7 @@ export const systemManagementRepository = {
         }
     ): Promise<string> {
         // Generate reset number with retry on conflict (race-safe)
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         const maxRetries = 5;
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {

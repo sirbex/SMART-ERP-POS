@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { getBusinessDate } from '../../utils/businessDate';
 import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
@@ -541,7 +542,7 @@ export default function GoodsReceiptsPage() {
           batchNumber: it.batchNumber ?? it.batch_number ?? '',
           expiryDate:
             it.expiryDate || it.expiry_date
-              ? new Date(String(it.expiryDate || it.expiry_date)).toISOString().slice(0, 10)
+              ? String(it.expiryDate || it.expiry_date).slice(0, 10)
               : '',
           receivedQuantity: shouldAutoFill ? ordered : currentReceived,
           unitCost: Number(it.unitCost ?? it.unit_cost ?? 0),
@@ -606,7 +607,7 @@ export default function GoodsReceiptsPage() {
             edits.batchNumber !== (item.batchNumber || item.batch_number)) ||
           (edits.expiryDate !== undefined &&
             edits.expiryDate !==
-            (item.expiryDate ? new Date(item.expiryDate).toISOString().slice(0, 10) : '')) ||
+            (item.expiryDate ? String(item.expiryDate).slice(0, 10) : '')) ||
           (edits.receivedQuantity !== undefined &&
             edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
           (edits.unitCost !== undefined &&
@@ -621,7 +622,7 @@ export default function GoodsReceiptsPage() {
           if (edits.batchNumber !== undefined) entry.batchNumber = edits.batchNumber || null;
           if (edits.expiryDate !== undefined)
             entry.expiryDate = edits.expiryDate
-              ? new Date(edits.expiryDate).toISOString()
+              ? String(edits.expiryDate)
               : null;
           if (edits.isBonus !== undefined) entry.isBonus = !!edits.isBonus;
           batchItems.push(entry);
@@ -776,7 +777,7 @@ export default function GoodsReceiptsPage() {
       }
       const payload = {
         purchaseOrderId: poData.po.id,
-        receiptDate: new Date().toISOString(),
+        receiptDate: getBusinessDate(),
         notes: null,
         receivedBy: user.id,
         items: poData.items.map((it: POItemData) => {
@@ -1983,9 +1984,8 @@ function GRItemRow({
     if (!v) return null;
     const d = new Date(v);
     if (isNaN(d.getTime())) return 'Invalid date';
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return d <= today ? 'Must be a future date' : null;
+    const todayStr = getBusinessDate();
+    return v <= todayStr ? 'Must be a future date' : null;
   })();
 
   // Line completeness indicator — batch optional (auto-generated if blank)
@@ -2133,7 +2133,7 @@ function GRItemRow({
               className={`w-full border rounded px-2 py-1 text-sm ${expiryError ? 'border-red-500' : 'focus:ring-2 focus:ring-blue-400 focus:border-blue-400'}`}
               value={es.expiryDate ?? ''}
               disabled={disabled}
-              min={new Date().toISOString().split('T')[0]}
+              min={getBusinessDate()}
               onChange={(e) => onFieldChange(item.id, 'expiryDate', e.target.value || undefined)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {

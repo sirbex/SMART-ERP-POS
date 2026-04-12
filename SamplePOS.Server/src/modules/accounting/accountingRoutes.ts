@@ -21,6 +21,7 @@ import { getSettings } from '../settings/invoiceSettingsService.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';
+import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
 // Zod schemas for accounting routes
 const ChartOfAccountsQuerySchema = z.object({
@@ -431,7 +432,7 @@ router.get(
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="general-ledger-${new Date().toLocaleDateString('en-CA')}.csv"`
+      `attachment; filename="general-ledger-${getBusinessDate()}.csv"`
     );
     res.send(csvContent);
   })
@@ -560,7 +561,7 @@ router.get(
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
     const query = TrialBalanceQuerySchema.parse(req.query);
-    const asOfDate = query.asOfDate || new Date().toLocaleDateString('en-CA');
+    const asOfDate = query.asOfDate || getBusinessDate();
     const includeZeroBalances = query.includeZeroBalances === 'true';
 
     const trialBalance = await accountingRepository.getTrialBalance(
@@ -590,7 +591,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const query = DateQuerySchema.parse(req.query);
-    const asOfDate = query.asOfDate || new Date().toLocaleDateString('en-CA');
+    const asOfDate = query.asOfDate || getBusinessDate();
 
     const balanceSheet = await accountingRepository.getBalanceSheet(asOfDate, pool);
 
@@ -622,8 +623,8 @@ router.get(
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const query = DateRangeQuerySchema.parse(req.query);
-    const startDate = query.startDate || firstDayOfMonth.toLocaleDateString('en-CA');
-    const endDate = query.endDate || now.toLocaleDateString('en-CA');
+    const startDate = query.startDate || formatDateBusiness(firstDayOfMonth);
+    const endDate = query.endDate || formatDateBusiness(now);
 
     const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
 
@@ -658,8 +659,8 @@ router.get(
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const query = DateRangeQuerySchema.parse(req.query);
-    const startDate = query.startDate || firstDayOfMonth.toLocaleDateString('en-CA');
-    const endDate = query.endDate || now.toLocaleDateString('en-CA');
+    const startDate = query.startDate || formatDateBusiness(firstDayOfMonth);
+    const endDate = query.endDate || formatDateBusiness(now);
 
     // Get income statement for net income
     const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
@@ -948,7 +949,7 @@ router.get(
     res.json({
       success: true,
       data: {
-        asOfDate: new Date().toLocaleDateString('en-CA'),
+        asOfDate: getBusinessDate(),
         chartOfAccounts: {
           total: totalAccounts,
           byType: accountsByType,

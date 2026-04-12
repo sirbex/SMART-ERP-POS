@@ -18,6 +18,7 @@ import type {
     SupplierStatementData,
     SupplierAgingRow,
 } from './cnDnReportTypes.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
@@ -282,7 +283,7 @@ export async function getSupplierAging(
     data: SupplierAgingRow[];
     summary: { totalSuppliers: number; totalOutstanding: number; current: number; over90: number };
 }> {
-    const asOfDate = new Date().toISOString().split('T')[0];
+    const asOfDate = getBusinessDate();
     const data = await repo.getSupplierAging(pool, asOfDate);
 
     let totalOutstanding = new Decimal(0);

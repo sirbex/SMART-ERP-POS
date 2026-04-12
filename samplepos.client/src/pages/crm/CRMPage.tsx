@@ -19,6 +19,7 @@ import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { apiClient, api } from '../../utils/api';
 import type { ApiResponse } from '../../utils/api';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 // ============================================================================
 // TYPES
@@ -809,11 +810,11 @@ function OpportunityWorkspace({
                                                                     : ''
                                                             }
                                                         >
-                                                            Due: {new Date(act.dueDate).toLocaleDateString()}
+                                                            Due: {formatTimestampDate(act.dueDate)}
                                                         </span>
                                                     )}
                                                     {act.createdByName && <span>by {act.createdByName}</span>}
-                                                    <span>{new Date(act.createdAt).toLocaleDateString()}</span>
+                                                    <span>{formatTimestampDate(act.createdAt)}</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -846,12 +847,12 @@ function OpportunityWorkspace({
                                     <DetailField label="Assigned To" value={opp.assignedToName} />
                                     <DetailField
                                         label="Created"
-                                        value={new Date(opp.createdAt).toLocaleDateString()}
+                                        value={formatTimestampDate(opp.createdAt)}
                                     />
                                     {opp.wonAt && (
                                         <DetailField
                                             label="Won At"
-                                            value={new Date(opp.wonAt).toLocaleDateString()}
+                                            value={formatTimestampDate(opp.wonAt)}
                                         />
                                     )}
                                     {opp.quotationId && (
@@ -985,7 +986,7 @@ function OpportunityWorkspace({
                                                 <span>{(doc.fileSize / 1024).toFixed(1)} KB</span>
                                             )}
                                             {doc.uploadedByName && <span>by {doc.uploadedByName}</span>}
-                                            <span>{new Date(doc.uploadedAt).toLocaleDateString()}</span>
+                                            <span>{formatTimestampDate(doc.uploadedAt)}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1452,7 +1453,7 @@ function LeadsTab() {
                                         </span>
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-500">
-                                        {new Date(lead.createdAt).toLocaleDateString()}
+                                        {formatTimestampDate(lead.createdAt)}
                                     </td>
                                     <td className="px-4 py-3 text-right space-x-2">
                                         {lead.status !== 'CONVERTED' && lead.status !== 'LOST' && (

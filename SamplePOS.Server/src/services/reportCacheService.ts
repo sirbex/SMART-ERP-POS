@@ -5,6 +5,7 @@
 import NodeCache from 'node-cache';
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 // Cache configuration
 const DEFAULT_TTL = 300; // 5 minutes in seconds (reports need freshness)
@@ -179,7 +180,7 @@ export const TTL_PRESETS = {
  */
 export function getRecommendedTTL(reportType: string, parameters: Record<string, unknown>): number {
   // Real-time reports (today's data)
-  const today = new Date().toLocaleDateString('en-CA');
+  const today = getBusinessDate();
   if (parameters.startDate === today || parameters.asOfDate === today) {
     return TTL_PRESETS.REALTIME;
   }

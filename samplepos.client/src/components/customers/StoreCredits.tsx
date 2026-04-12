@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
 import { DatePicker } from '../ui/date-picker';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 interface StoreCredit {
     id: string;
@@ -335,7 +336,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                                 return (
                                     <tr key={credit.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {new Date(credit.createdAt).toLocaleDateString()}
+                                            {formatTimestampDate(credit.createdAt)}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="text-sm font-medium text-gray-900">
@@ -368,7 +369,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
                                             {credit.expiresAt ? (
                                                 <div className={isExpiringSoon ? 'text-amber-600' : 'text-gray-600'}>
-                                                    {new Date(credit.expiresAt).toLocaleDateString()}
+                                                    {formatTimestampDate(credit.expiresAt)}
                                                     {isExpiringSoon && <div className="text-xs">Expiring Soon!</div>}
                                                 </div>
                                             ) : (

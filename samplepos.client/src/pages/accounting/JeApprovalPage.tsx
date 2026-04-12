@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useJeApprovalRules, useCreateJeApprovalRule, usePendingApprovals, useApproveEntry, useRejectEntry } from '../../hooks/useAccountingModules';
+import { formatTimestampDate } from '../../utils/businessDate';
 import { ShieldCheck, Plus, X, CheckCircle, XCircle } from 'lucide-react';
 
 interface ApprovalRule {
@@ -176,7 +177,7 @@ export default function JeApprovalPage() {
                   <td className="px-6 py-4 text-sm text-gray-700">{entry.description || '—'}</td>
                   <td className="px-6 py-4 text-sm text-right font-medium">{fmt(entry.totalAmount)}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{entry.requestedBy || '—'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{entry.requestedAt?.split('T')[0]}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{formatTimestampDate(entry.requestedAt)}</td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
                       <button

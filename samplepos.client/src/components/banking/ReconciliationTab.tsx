@@ -26,6 +26,7 @@ import {
     useReconcileTransactions
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 export const ReconciliationTab: React.FC = () => {
     const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -210,7 +211,7 @@ export const ReconciliationTab: React.FC = () => {
 
                     {selectedAccount?.lastReconciledAt && (
                         <p className="text-sm text-muted-foreground">
-                            Last reconciled: {new Date(selectedAccount.lastReconciledAt).toLocaleDateString()}
+                            Last reconciled: {formatTimestampDate(selectedAccount.lastReconciledAt)}
                         </p>
                     )}
                 </CardContent>
@@ -359,7 +360,7 @@ export const ReconciliationTab: React.FC = () => {
                                                     />
                                                 </TableCell>
                                                 <TableCell className="whitespace-nowrap">
-                                                    {new Date(txn.transactionDate).toLocaleDateString()}
+                                                    {formatTimestampDate(txn.transactionDate)}
                                                 </TableCell>
                                                 <TableCell className="max-w-xs truncate" title={txn.description}>
                                                     {txn.description}

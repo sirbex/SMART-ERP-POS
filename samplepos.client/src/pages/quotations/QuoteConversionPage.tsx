@@ -13,6 +13,7 @@ import quotationApi from '../../api/quotations';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { getQuoteStatusBadge, isQuoteConvertible } from '@shared/types/quotation';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 export default function QuoteConversionPage() {
   const { quoteNumber } = useParams<{ quoteNumber: string }>();
@@ -122,7 +123,7 @@ export default function QuoteConversionPage() {
                     {quotation.convertedAt && (
                       <div className="flex items-center gap-2 text-sm text-yellow-800">
                         <span>Converted:</span>
-                        <span className="font-semibold">{new Date(quotation.convertedAt).toLocaleString()}</span>
+                        <span className="font-semibold">{formatTimestamp(quotation.convertedAt)}</span>
                       </div>
                     )}
                   </div>
@@ -144,7 +145,7 @@ export default function QuoteConversionPage() {
                 <p className="text-red-800">
                   {quotation.status === 'CANCELLED'
                     ? 'This quotation has been cancelled and cannot be converted.'
-                    : `This quotation has expired (valid until: ${new Date(quotation.validUntil).toLocaleDateString()}). Update validity dates to reactivate.`
+                    : `This quotation has expired (valid until: ${formatTimestampDate(quotation.validUntil)}). Update validity dates to reactivate.`
                   }
                 </p>
               </div>

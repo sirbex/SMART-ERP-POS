@@ -4,6 +4,7 @@ import { platformApi } from '../../services/platformApi';
 import type { PlatformAdmin } from '../../services/platformApi';
 import { usePlatformAuth } from '../../contexts/PlatformAuthContext';
 import {
+import { formatTimestampDate } from '../../utils/businessDate';
     ShieldCheck,
     Plus,
     X,
@@ -251,9 +252,9 @@ export default function AdminsPage() {
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3 text-slate-500">
-                                                {a.lastLoginAt ? new Date(a.lastLoginAt).toLocaleDateString() : 'Never'}
+                                                {a.lastLoginAt ? formatTimestampDate(a.lastLoginAt) : 'Never'}
                                             </td>
-                                            <td className="px-4 py-3 text-slate-500">{new Date(a.createdAt).toLocaleDateString()}</td>
+                                            <td className="px-4 py-3 text-slate-500">{formatTimestampDate(a.createdAt)}</td>
                                             <td className="px-4 py-3 text-right">
                                                 <div className="flex items-center justify-end gap-1">
                                                     <button

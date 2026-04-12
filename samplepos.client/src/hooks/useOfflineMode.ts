@@ -15,6 +15,7 @@ import type { AxiosInstance, AxiosError } from 'axios';
 
 // ── Storage ───────────────────────────────────────────────────
 const OFFLINE_SALES_KEY = 'pos_offline_sales';
+const OFFLINE_ORDERS_KEY = 'pos_offline_orders';
 
 // ── Types ─────────────────────────────────────────────────────
 export interface OfflineSaleLineItem {
@@ -61,6 +62,36 @@ export interface OfflineSale {
   stockDeductions: Array<{ productId: string; quantity: number }>;
 }
 
+// ── Offline Order Types ───────────────────────────────────────
+export interface OfflineOrderItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  discountAmount: number;
+  uomId?: string;
+  baseQty?: number;
+  baseUomId?: string;
+  conversionFactor?: number;
+}
+
+export interface OfflineOrderData {
+  customerId?: string;
+  items: OfflineOrderItem[];
+  notes?: string;
+}
+
+export interface OfflineOrder {
+  /** Unique idempotency key – prevents double-posting on sync */
+  idempotencyKey: string;
+  /** Human-readable offline ID shown in UI */
+  offlineId: string;
+  timestamp: number;
+  data: OfflineOrderData;
+  status: 'PENDING_SYNC' | 'SYNCED' | 'FAILED';
+  syncError?: string;
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 function generateIdempotencyKey(): string {
   return `ofl_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
@@ -88,10 +119,33 @@ function saveQueue(queue: OfflineSale[]): void {
   localStorage.setItem(OFFLINE_SALES_KEY, JSON.stringify(queue));
 }
 
+// ── Order Queue Helpers ───────────────────────────────────────
+function loadOrderQueue(): OfflineOrder[] {
+  try {
+    const raw = localStorage.getItem(OFFLINE_ORDERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (o: unknown): o is OfflineOrder =>
+        typeof o === 'object' && o !== null &&
+        'idempotencyKey' in o && 'offlineId' in o &&
+        'data' in o && 'status' in o
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveOrderQueue(queue: OfflineOrder[]): void {
+  localStorage.setItem(OFFLINE_ORDERS_KEY, JSON.stringify(queue));
+}
+
 // ── Hook ──────────────────────────────────────────────────────
 export function useOfflineMode() {
   const { isOnline } = useOfflineContext();
   const [syncQueue, setSyncQueue] = useState<OfflineSale[]>(() => loadQueue());
+  const [orderQueue, setOrderQueue] = useState<OfflineOrder[]>(() => loadOrderQueue());
   const isSyncingRef = useRef(false);
 
   // Keep localStorage in sync with state
@@ -99,14 +153,44 @@ export function useOfflineMode() {
     saveQueue(syncQueue);
   }, [syncQueue]);
 
+  useEffect(() => {
+    saveOrderQueue(orderQueue);
+  }, [orderQueue]);
+
   // Re-read queue when background or app-level sync updates localStorage
   useEffect(() => {
     const handleQueueUpdate = () => {
       setSyncQueue(loadQueue());
+      setOrderQueue(loadOrderQueue());
     };
     window.addEventListener('offline-queue-updated', handleQueueUpdate);
     return () => window.removeEventListener('offline-queue-updated', handleQueueUpdate);
   }, []);
+
+  /**
+   * Save an order for offline sync (Order→Payment mode).
+   * – No stock deduction (orders don't deduct inventory)
+   * – No payment lines (payment happens later at the cashier)
+   * – Assigns idempotency key for server-side deduplication
+   */
+  const saveOrderOffline = useCallback(
+    (orderData: OfflineOrderData): string => {
+      const idempotencyKey = generateIdempotencyKey();
+      const offlineId = `OFFLINE-ORD-${Date.now().toString(36).toUpperCase()}`;
+
+      const order: OfflineOrder = {
+        idempotencyKey,
+        offlineId,
+        timestamp: Date.now(),
+        data: orderData,
+        status: 'PENDING_SYNC',
+      };
+
+      setOrderQueue((prev) => [...prev, order]);
+      return offlineId;
+    },
+    []
+  );
 
   /**
    * Save a sale for offline sync.
@@ -343,17 +427,21 @@ export function useOfflineMode() {
   const pendingCount = syncQueue.filter((s) => s.status === 'PENDING_SYNC').length;
   const reviewCount = syncQueue.filter((s) => s.status === 'REQUIRES_REVIEW').length;
   const failedCount = syncQueue.filter((s) => s.status === 'FAILED').length;
+  const pendingOrderCount = orderQueue.filter((o) => o.status === 'PENDING_SYNC').length;
 
   return {
     isOnline,
     syncQueue,
+    orderQueue,
     saveSaleOffline,
+    saveOrderOffline,
     syncPendingSales,
     cancelOfflineSale,
     clearSyncQueue,
     retryFailedSale,
     retryAllFailed,
     pendingCount,
+    pendingOrderCount,
     reviewCount,
     failedCount,
   };

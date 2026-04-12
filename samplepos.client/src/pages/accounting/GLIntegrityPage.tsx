@@ -1,5 +1,6 @@
 import { useGLIntegrityAudit } from '../../hooks/useAccountingModules';
 import { ShieldCheck, AlertCircle, AlertTriangle, Info, Loader2, RefreshCw } from 'lucide-react';
+import { formatTimestamp } from '../../utils/businessDate';
 
 interface Finding {
   check: string;
@@ -71,7 +72,7 @@ export default function GLIntegrityPage() {
                   {report.totalChecks} checks completed in {report.durationMs}ms
                   {report.warnings > 0 && ` • ${report.warnings} warning(s)`}
                 </p>
-                <p className="text-xs text-gray-400 mt-1">Run: {new Date(report.runDate).toLocaleString()}</p>
+                <p className="text-xs text-gray-400 mt-1">Run: {formatTimestamp(report.runDate)}</p>
               </div>
             </div>
           </div>

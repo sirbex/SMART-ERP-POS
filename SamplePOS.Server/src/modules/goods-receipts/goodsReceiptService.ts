@@ -27,6 +27,7 @@ import {
   PurchaseOrderBusinessRules,
 } from '../../middleware/businessRules.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
+import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../utils/dateRange.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -347,7 +348,7 @@ export const goodsReceiptService = {
       // TIMESTAMPTZ columns return Date objects from pg driver — coerce to YYYY-MM-DD string
       // The custom type parser only handles DATE (OID 1082), not TIMESTAMPTZ
       if (gr.receivedDate && typeof gr.receivedDate !== 'string') {
-        gr.receivedDate = (gr.receivedDate as unknown as Date).toLocaleDateString('en-CA');
+        gr.receivedDate = formatDateBusiness(gr.receivedDate as unknown as Date);
       }
 
       // Lock the GR row to prevent double-finalization by concurrent requests
@@ -385,7 +386,7 @@ export const goodsReceiptService = {
           preValidationErrors.push(`${productName}: received quantity must be greater than 0`);
         if (!Number.isFinite(unitCost) || unitCost < 0)
           preValidationErrors.push(`${productName}: unit cost cannot be negative`);
-        if (expiryDate && expiryDate < new Date().toLocaleDateString('en-CA'))
+        if (expiryDate && expiryDate < getBusinessDate())
           preValidationErrors.push(`${productName}: expiry date cannot be in the past`);
       }
 
@@ -436,8 +437,7 @@ export const goodsReceiptService = {
         // Generate human-readable batch number: BATCH-YYYYMMDD-001
         let batchNumber: string = item.batchNumber ?? '';
         if (!batchNumber) {
-          const today = new Date();
-          const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+          const dateStr = getBusinessDate().replace(/-/g, ''); // YYYYMMDD
           const prefix = `BATCH-${dateStr}-`;
 
           // Single atomic query to get next sequence number
@@ -537,7 +537,7 @@ export const goodsReceiptService = {
            WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
         );
         const movementNumber =
-          movementNumberResult.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+          movementNumberResult.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
 
         await client.query(
           `INSERT INTO stock_movements (
@@ -815,7 +815,7 @@ export const goodsReceiptService = {
       // ============================================================
       try {
         await client.query('SAVEPOINT gr_state_tables');
-        const grDateStr = gr.receivedDate || new Date().toLocaleDateString('en-CA');
+        const grDateStr = gr.receivedDate || getBusinessDate();
 
         // Pre-aggregate by productId for batch UPSERT
         const invMap = new Map<string, Decimal>();
@@ -867,7 +867,7 @@ export const goodsReceiptService = {
           {
             grId: id,
             grNumber: grNumber || id,
-            grDate: gr.receivedDate || new Date().toLocaleDateString('en-CA'),
+            grDate: gr.receivedDate || getBusinessDate(),
             totalAmount,
             supplierId,
             supplierName,
@@ -1254,7 +1254,7 @@ export const goodsReceiptService = {
       // Create GR header (COMPLETED — no draft→finalize cycle for imports)
       const gr = await goodsReceiptRepository.createGR(client, {
         purchaseOrderId: null,
-        receiptDate: new Date().toLocaleDateString('en-CA'),
+        receiptDate: getBusinessDate(),
         notes: 'Opening Inventory Import',
         receivedBy: userId,
         source: 'OPENING_BALANCE',
@@ -1355,7 +1355,7 @@ export const goodsReceiptService = {
            WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
         );
         const movementNumber =
-          movNumResult.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+          movNumResult.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
 
         // Create stock movement
         // SAP UoM snapshot: resolve base UoM for opening balance (always base unit, factor=1)
@@ -1467,7 +1467,7 @@ export const goodsReceiptService = {
         nameMap.set(r.id as string, r.name as string);
       }
 
-      const importDate = new Date().toLocaleDateString('en-CA');
+      const importDate = getBusinessDate();
       for (const sm of stockMovements) {
         if (sm.movementValue === 0) continue;
         try {

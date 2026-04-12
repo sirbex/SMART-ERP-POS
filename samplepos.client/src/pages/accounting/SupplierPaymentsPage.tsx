@@ -57,6 +57,7 @@ import {
     supplierPaymentAllocationService
 } from '../../services/comprehensive-accounting';
 import type {
+import { formatTimestampDate } from '../../utils/businessDate';
     SupplierPayment,
     SupplierInvoice,
     CreateSupplierPaymentRequest,
@@ -628,7 +629,7 @@ const SupplierPaymentsPage: React.FC = () => {
                 doc.text(`Invoice: ${alloc.invoiceNumber}${alloc.supplierInvoiceRef ? ` (Ref: ${alloc.supplierInvoiceRef})` : ''}`, 15, yPos);
                 if (alloc.invoiceDate) {
                     doc.setFont('helvetica', 'normal');
-                    doc.text(`Date: ${new Date(alloc.invoiceDate).toLocaleDateString()}`, 130, yPos);
+                    doc.text(`Date: ${formatTimestampDate(alloc.invoiceDate)}`, 130, yPos);
                 }
                 yPos += 3;
 
@@ -1202,7 +1203,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     </div>
                                                     <div>
                                                         <span className="font-medium">Date:</span>
-                                                        <div>{payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'N/A'}</div>
+                                                        <div>{payment.paymentDate ? formatTimestampDate(payment.paymentDate) : 'N/A'}</div>
                                                     </div>
                                                     <div>
                                                         <span className="font-medium">Reference:</span>
@@ -1284,11 +1285,11 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     </div>
                                                     <div>
                                                         <span className="font-medium">Date:</span>
-                                                        <div>{bill.invoiceDate ? new Date(bill.invoiceDate).toLocaleDateString() : 'N/A'}</div>
+                                                        <div>{bill.invoiceDate ? formatTimestampDate(bill.invoiceDate) : 'N/A'}</div>
                                                     </div>
                                                     <div>
                                                         <span className="font-medium">Due Date:</span>
-                                                        <div>{bill.dueDate ? new Date(bill.dueDate).toLocaleDateString() : 'N/A'}</div>
+                                                        <div>{bill.dueDate ? formatTimestampDate(bill.dueDate) : 'N/A'}</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1441,7 +1442,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                                         <span className="font-medium text-gray-900">{inv.invoiceNumber || inv.supplierInvoiceNumber}</span>
                                                         {inv.dueDate && (
                                                             <span className="ml-2 text-gray-500">
-                                                                Due: {new Date(inv.dueDate).toLocaleDateString()}
+                                                                Due: {formatTimestampDate(inv.dueDate)}
                                                             </span>
                                                         )}
                                                     </div>
@@ -1895,7 +1896,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     </div>
                                                     {alloc.invoiceDate && (
                                                         <span className="text-xs text-gray-500">
-                                                            ({new Date(alloc.invoiceDate).toLocaleDateString()})
+                                                            ({formatTimestampDate(alloc.invoiceDate)})
                                                         </span>
                                                     )}
                                                 </div>

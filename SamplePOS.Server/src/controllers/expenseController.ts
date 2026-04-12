@@ -13,6 +13,7 @@ import {
   RejectExpenseSchema,
   MarkExpensePaidSchema,
 } from '../../../shared/zod/expense.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 // Extend Express Request type to include user property
 interface AuthenticatedUser {
@@ -572,7 +573,7 @@ export const exportExpenses = asyncHandler(async (req, res) => {
   const csv = csvRows.join('\n');
 
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', `attachment; filename="expenses_${new Date().toLocaleDateString('en-CA')}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="expenses_${getBusinessDate()}.csv"`);
   res.send(csv);
 });
 

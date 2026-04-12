@@ -7,6 +7,7 @@ import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 import { ResponsiveTableWrapper } from '../components/ui/ResponsiveTableWrapper';
 import {
+import { formatTimestamp } from '../utils/businessDate';
     Dialog,
     DialogContent,
     DialogHeader,
@@ -264,7 +265,7 @@ export default function ReconciliationPage() {
                                 {summary.overallStatus === 'ALL_RECONCILED' ? 'All Accounts Reconciled' : `${summary.discrepancyCount} Account(s) with Discrepancies`}
                             </p>
                             <p className="text-sm text-gray-600">
-                                As of {summary.asOfDate} | Generated {new Date(summary.generatedAt).toLocaleString()}
+                                As of {summary.asOfDate} | Generated {formatTimestamp(summary.generatedAt)}
                             </p>
                         </div>
                     </div>

@@ -7,6 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
+import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -86,7 +87,7 @@ export class InventoryBusinessRules {
   static validateExpiryDate(expiryDate: string | null, allowPast: boolean = false): void {
     if (!expiryDate) return;
 
-    const today = new Date().toLocaleDateString('en-CA');
+    const today = getBusinessDate();
 
     if (!allowPast && expiryDate < today) {
       throw new BusinessRuleViolation(
@@ -184,14 +185,14 @@ export class InventoryBusinessRules {
   static validateExpiryWarning(expiryDate: string | null, warningDays: number = 30): boolean {
     if (!expiryDate) return false;
 
-    const today = new Date();
+    const todayStr = getBusinessDate();
     const warningDate = new Date();
     warningDate.setDate(warningDate.getDate() + warningDays);
-    const warningStr = warningDate.toLocaleDateString('en-CA');
+    const warningStr = formatDateBusiness(warningDate);
 
     if (expiryDate <= warningStr) {
-      const expiryMs = new Date(expiryDate + 'T00:00:00').getTime();
-      const daysRemaining = Math.ceil((expiryMs - today.getTime()) / (1000 * 60 * 60 * 24));
+      const diffMs = new Date(expiryDate + 'T00:00:00Z').getTime() - new Date(todayStr + 'T00:00:00Z').getTime();
+      const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
       logger.warn(`BR-INV-007: Item expiring within ${warningDays} days`, {
         expiryDate,
         daysRemaining,
@@ -208,8 +209,9 @@ export class InventoryBusinessRules {
   static validateShortExpiry(expiryDate: string | null, minimumDays: number = 7): void {
     if (!expiryDate) return;
 
-    const expiryMs = new Date(expiryDate + 'T00:00:00').getTime();
-    const daysRemaining = Math.ceil((expiryMs - Date.now()) / (1000 * 60 * 60 * 24));
+    const todayStr = getBusinessDate();
+    const diffMs = new Date(expiryDate + 'T00:00:00Z').getTime() - new Date(todayStr + 'T00:00:00Z').getTime();
+    const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
     if (daysRemaining < minimumDays) {
       throw new BusinessRuleViolation(
@@ -617,7 +619,7 @@ export class PurchaseOrderBusinessRules {
    */
   static validateExpectedDate(expectedDate: string | null): void {
     if (expectedDate) {
-      const today = new Date().toLocaleDateString('en-CA');
+      const today = getBusinessDate();
 
       if (expectedDate < today) {
         logger.warn('Expected delivery date is in the past', { expectedDate });
@@ -823,9 +825,9 @@ export class PurchaseOrderBusinessRules {
           supplierId,
           supplierName: name,
           leadTimeDays: lead_time_days,
-          orderDate: orderDate.toLocaleDateString('en-CA'),
-          expectedDate: expectedDate.toLocaleDateString('en-CA'),
-          minExpectedDate: minExpectedDate.toLocaleDateString('en-CA'),
+          orderDate: formatDateBusiness(orderDate),
+          expectedDate: formatDateBusiness(expectedDate),
+          minExpectedDate: formatDateBusiness(minExpectedDate),
         });
         // Warning only - allow expedited orders
       }

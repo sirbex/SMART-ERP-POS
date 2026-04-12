@@ -289,16 +289,18 @@ router.get(
         const user = req.user as { id: string };
         const session = await cashRegisterService.getUserOpenSession(user.id, pool);
 
-        // Include session policy so the POS page needs only one request
-        const policyRow = await pool.query(
-            `SELECT pos_session_policy FROM system_settings LIMIT 1`
+        // Include session policy + transaction mode so the POS page needs only one request
+        const settingsRow = await pool.query(
+            `SELECT pos_session_policy, pos_transaction_mode FROM system_settings LIMIT 1`
         );
-        const posSessionPolicy = (policyRow.rows[0]?.pos_session_policy as string) || 'DISABLED';
+        const posSessionPolicy = (settingsRow.rows[0]?.pos_session_policy as string) || 'DISABLED';
+        const posTransactionMode = (settingsRow.rows[0]?.pos_transaction_mode as string) || 'DirectSale';
 
         res.json({
             success: true,
             data: session, // null if no open session
             posSessionPolicy,
+            posTransactionMode,
         });
     })
 );

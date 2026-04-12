@@ -54,6 +54,7 @@ import { creditDebitNoteRoutes } from './modules/credit-debit-notes/creditDebitN
 import { returnGrnRoutes } from './modules/return-grn/returnGrnRoutes.js';
 import { documentFlowRoutes } from './modules/document-flow/documentFlowRoutes.js';
 import { pricingEngineRoutes } from './modules/pricing/pricingRoutes.js';
+import ordersRoutes from './modules/orders/ordersRoutes.js';
 import { costCenterRoutes } from './modules/cost-centers/costCenterRoutes.js';
 import { periodControlRoutes } from './modules/period-control/periodControlRoutes.js';
 import { grirClearingRoutes } from './modules/grir-clearing/grirClearingRoutes.js';
@@ -302,6 +303,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/sales', salesRoutes);
+app.use('/api/orders', ordersRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/goods-receipts', goodsReceiptRoutes);

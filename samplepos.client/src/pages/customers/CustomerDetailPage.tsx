@@ -10,6 +10,7 @@ import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import CustomerDeposits from '../../components/customers/CustomerDeposits';
 import StoreCredits from '../../components/customers/StoreCredits';
 import { DatePicker } from '../../components/ui/date-picker';
+import { getBusinessDate, formatTimestamp, formatTimestampDate } from '../../utils/businessDate';
 
 // ── Local interfaces for Customer Detail page ──────────────────
 
@@ -658,7 +659,7 @@ export default function CustomerDetailPage() {
                       {invoices.slice(0, 10).map((inv) => (
                         <tr key={inv.id} className="hover:bg-gray-50">
                           <td className="px-4 py-2 font-medium">{inv.invoiceNumber}</td>
-                          <td className="px-4 py-2 text-sm text-gray-600">{inv.issueDate ? new Date(inv.issueDate).toLocaleString() : '-'}</td>
+                          <td className="px-4 py-2 text-sm text-gray-600">{inv.issueDate ? formatTimestamp(inv.issueDate) : '-'}</td>
                           <td className="px-4 py-2 text-sm text-gray-600">{inv.paymentMethod || 'CREDIT'}</td>
                           <td className="px-4 py-2 font-semibold">{formatCurrency(inv.totalAmount)}</td>
                           <td className="px-4 py-2 text-sm text-gray-600">{formatCurrency(inv.amountPaid)}</td>
@@ -694,7 +695,7 @@ export default function CustomerDetailPage() {
                 </div>
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Last Purchase</dt>
-                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{sum?.lastPurchaseDate ? new Date(sum.lastPurchaseDate).toLocaleString() : '-'}</dd>
+                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{sum?.lastPurchaseDate ? formatTimestamp(sum.lastPurchaseDate) : '-'}</dd>
                 </div>
               </dl>
             </div>
@@ -730,7 +731,7 @@ export default function CustomerDetailPage() {
                       {invoices.map((inv) => (
                         <tr key={inv.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4">{inv.invoiceNumber}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{inv.issueDate ? new Date(inv.issueDate).toLocaleString() : '-'}</td>
+                          <td className="px-6 py-4 text-sm text-gray-600">{inv.issueDate ? formatTimestamp(inv.issueDate) : '-'}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{inv.paymentMethod || 'CREDIT'}</td>
                           <td className="px-6 py-4 font-semibold">{formatCurrency(inv.totalAmount)}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{formatCurrency(inv.amountPaid)}</td>
@@ -841,7 +842,7 @@ export default function CustomerDetailPage() {
                       >
                         <div>
                           <div className="text-sm font-medium text-gray-900">{inv.invoiceNumber}</div>
-                          <div className="text-xs text-gray-500">{inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : '-'}</div>
+                          <div className="text-xs text-gray-500">{inv.issueDate ? formatTimestampDate(inv.issueDate) : '-'}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-sm font-semibold text-red-600">{formatCurrency(inv.balance)}</div>
@@ -886,7 +887,7 @@ export default function CustomerDetailPage() {
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
                           const url = `/customers/${id}/statement/export.csv${params ? '?' + params : ''}`;
-                          downloadFile(url, `statement-${id}-${new Date().toISOString().slice(0, 10)}.csv`);
+                          downloadFile(url, `statement-${id}-${getBusinessDate()}.csv`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
                         aria-label="Export Statement CSV"
@@ -900,7 +901,7 @@ export default function CustomerDetailPage() {
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
                           const url = `/customers/${id}/statement/export.pdf${params ? '?' + params : ''}`;
-                          downloadFile(url, `statement-${id}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                          downloadFile(url, `statement-${id}-${getBusinessDate()}.pdf`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
                         aria-label="Export Statement PDF"
@@ -958,7 +959,7 @@ export default function CustomerDetailPage() {
                           return (
                             <tr key={idx} className="hover:bg-gray-50">
                               <td className="px-6 py-4 text-sm text-gray-600">
-                                {e.date ? new Date(e.date).toLocaleString() : '-'}
+                                {e.date ? formatTimestamp(e.date) : '-'}
                               </td>
                               <td className="px-6 py-4">
                                 <span className={`px-2 py-1 rounded text-xs ${e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
@@ -1069,7 +1070,7 @@ export default function CustomerDetailPage() {
                               {depositEntries.map((de: DepositEntry, idx: number) => (
                                 <tr key={idx} className="hover:bg-amber-50/50">
                                   <td className="px-6 py-4 text-sm text-gray-600">
-                                    {de.date ? new Date(de.date).toLocaleString() : '-'}
+                                    {de.date ? formatTimestamp(de.date) : '-'}
                                   </td>
                                   <td className="px-6 py-4">
                                     <span className={`px-2 py-1 rounded text-xs ${de.type === 'DEPOSIT_IN' ? 'bg-green-100 text-green-800' :
@@ -1121,7 +1122,7 @@ export default function CustomerDetailPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {(txData as TransactionRow[]).map((t) => (
                         <tr key={t.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 text-sm text-gray-600">{new Date(t.transactionDate).toLocaleString()}</td>
+                          <td className="px-6 py-4 text-sm text-gray-600">{formatTimestamp(t.transactionDate)}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{t.type}</td>
                           <td className={`px-6 py-4 font-semibold ${t.type === 'PAYMENT' ? 'text-red-600' : 'text-green-700'}`}>{formatCurrency(t.amount)}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{t.referenceNumber || '-'}</td>
@@ -1309,11 +1310,11 @@ export default function CustomerDetailPage() {
                   <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
                     <div>
                       <div className="text-gray-600">Issued</div>
-                      <div className="text-gray-900">{detailsInvoice.issueDate ? new Date(detailsInvoice.issueDate).toLocaleString() : '-'}</div>
+                      <div className="text-gray-900">{detailsInvoice.issueDate ? formatTimestamp(detailsInvoice.issueDate) : '-'}</div>
                     </div>
                     <div>
                       <div className="text-gray-600">Due</div>
-                      <div className="text-gray-900">{detailsInvoice.dueDate ? new Date(detailsInvoice.dueDate).toLocaleDateString() : '-'}</div>
+                      <div className="text-gray-900">{detailsInvoice.dueDate ? formatTimestampDate(detailsInvoice.dueDate) : '-'}</div>
                     </div>
                     <div>
                       <div className="text-gray-600">Total</div>
@@ -1400,7 +1401,7 @@ export default function CustomerDetailPage() {
                             {payments.map((p) => (
                               <tr key={p.id} className="hover:bg-gray-50">
                                 <td className="px-4 py-2 text-sm text-gray-700">{p.receiptNumber ?? p.receipt_number}</td>
-                                <td className="px-4 py-2 text-sm text-gray-600">{p.paymentDate ? new Date(p.paymentDate).toLocaleString() : (p.payment_date ? new Date(p.payment_date).toLocaleString() : '-')}</td>
+                                <td className="px-4 py-2 text-sm text-gray-600">{p.paymentDate ? formatTimestamp(p.paymentDate) : (p.payment_date ? formatTimestamp(p.payment_date) : '-')}</td>
                                 <td className="px-4 py-2 text-sm text-gray-600">{p.paymentMethod ?? p.payment_method}</td>
                                 <td className="px-4 py-2 font-semibold">{formatCurrency(typeof p.amount === 'number' ? p.amount : Number(p.amount ?? 0))}</td>
                                 <td className="px-4 py-2 text-sm text-gray-600">{p.referenceNumber ?? p.reference_number ?? '-'}</td>
@@ -1466,7 +1467,7 @@ export default function CustomerDetailPage() {
                               />
                             </td>
                             <td className="px-4 py-2 text-sm text-gray-700">{s.saleNumber}</td>
-                            <td className="px-4 py-2 text-sm text-gray-600">{s.saleDate ? new Date(s.saleDate).toLocaleString() : '-'}</td>
+                            <td className="px-4 py-2 text-sm text-gray-600">{s.saleDate ? formatTimestamp(s.saleDate) : '-'}</td>
                             <td className="px-4 py-2 font-semibold">{formatCurrency(s.totalAmount ?? 0)}</td>
                             <td className="px-4 py-2">
                               <span className={`px-2 py-1 rounded text-xs ${s.paymentMethod === 'CREDIT' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>

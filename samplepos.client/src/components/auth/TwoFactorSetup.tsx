@@ -13,6 +13,7 @@ import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Shield, ShieldCheck, ShieldOff, Copy, Check, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 export function TwoFactorSetup() {
     const [step, setStep] = useState<'status' | 'setup' | 'verify' | 'disable' | 'regenerate'>('status');
@@ -150,7 +151,7 @@ export function TwoFactorSetup() {
                             </p>
                             <p className="text-sm text-gray-500">
                                 {status?.enabled
-                                    ? `Enabled on ${new Date(status.verifiedAt!).toLocaleDateString()}`
+                                    ? `Enabled on ${formatTimestampDate(status.verifiedAt!)}`
                                     : status?.required
                                         ? 'Required for your role (Admin/Manager)'
                                         : 'Optional but recommended'

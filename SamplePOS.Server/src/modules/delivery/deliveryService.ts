@@ -37,6 +37,7 @@ import type {
 } from '../../../../shared/types/delivery.js';
 import * as deliveryRepo from './deliveryRepository.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // ====================================================
 // SHARED HELPERS
@@ -722,7 +723,7 @@ export async function createDeliveryFromSale(
       }
 
       // 4. Build delivery order request
-      const deliveryDate = input.deliveryDate || new Date().toLocaleDateString('en-CA');
+      const deliveryDate = input.deliveryDate || getBusinessDate();
       const deliveryAddress = input.deliveryAddress || sale.customer_address || '';
 
       if (!deliveryAddress.trim()) {

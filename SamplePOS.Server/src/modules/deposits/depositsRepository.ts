@@ -6,6 +6,7 @@
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 // Type for either a Pool or PoolClient - allows reuse in transactions
 type DbConnection = Pool | PoolClient;
@@ -69,7 +70,7 @@ export interface ApplyDepositInput {
 export async function generateDepositNumber(
     pool: Pool
 ): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const seq = await pool.query("SELECT nextval('deposit_number_seq')");
     const num = seq.rows[0].nextval;
     return `DEP-${year}-${String(num).padStart(4, '0')}`;

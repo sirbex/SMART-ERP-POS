@@ -30,6 +30,7 @@ import {
 import { useRegisters, useOpenSession, useForceCloseSession } from '../../hooks/useCashRegister';
 import { useAuth } from '../../hooks/useAuth';
 import { Loader2, DollarSign, AlertTriangle, User } from 'lucide-react';
+import { formatTimestamp } from '../../utils/businessDate';
 
 interface OpenRegisterDialogProps {
     open: boolean;
@@ -102,7 +103,7 @@ export function OpenRegisterDialog({
     const formatSessionTime = (dateStr: string | null | undefined): string => {
         if (!dateStr) return '';
         try {
-            return new Date(dateStr).toLocaleString();
+            return formatTimestamp(dateStr);
         } catch {
             return dateStr;
         }

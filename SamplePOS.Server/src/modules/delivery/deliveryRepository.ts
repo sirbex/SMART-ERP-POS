@@ -19,6 +19,7 @@ import type {
   DeliveryOrderQuery,
   DeliveryRouteQuery
 } from '../../../../shared/types/delivery.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 // ====================================================
 // DELIVERY ORDER OPERATIONS
@@ -28,7 +29,7 @@ import type {
  * Generate next delivery number in sequence
  */
 export async function generateDeliveryNumber(pool: Pool): Promise<string> {
-  const year = new Date().getFullYear();
+  const year = getBusinessYear();
   const result = await pool.query(`
     SELECT COALESCE(MAX(CAST(SUBSTRING(delivery_number FROM 'DEL-\\d{4}-(\\d{4})') AS INTEGER)), 0) + 1 as next_number
     FROM delivery_orders 
@@ -43,11 +44,13 @@ export async function generateDeliveryNumber(pool: Pool): Promise<string> {
  * Generate a time-based tracking number (TRK-YYYY-DDD-SSSSS)
  */
 export function generateTrackingNumber(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const start = new Date(year, 0, 1);
-  const doy = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-  const secondsInDay = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  const bizDate = getBusinessDate();
+  const [yearStr, monthStr, dayStr] = bizDate.split('-');
+  const year = parseInt(yearStr);
+  const startOfYear = new Date(Date.UTC(year, 0, 1));
+  const current = new Date(Date.UTC(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr)));
+  const doy = Math.ceil((current.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const secondsInDay = Math.floor(Date.now() / 1000) % 86400;
   return `TRK-${year}-${String(doy).padStart(3, '0')}-${String(secondsInDay).padStart(5, '0')}`;
 }
 

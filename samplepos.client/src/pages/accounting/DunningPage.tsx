@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useDunningLevels, useCreateDunningLevel, useDunningAnalysis } from '../../hooks/useAccountingModules';
 import { AlertTriangle, Plus, Search, X } from 'lucide-react';
+import { getBusinessDate } from '../../utils/businessDate';
 
 interface DunningLevel {
   id: string;
@@ -36,7 +37,7 @@ interface DunningProposal {
 export default function DunningPage() {
   const [showForm, setShowForm] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
-  const [analysisDate, setAnalysisDate] = useState(new Date().toISOString().split('T')[0]);
+  const [analysisDate, setAnalysisDate] = useState(getBusinessDate());
   const { data: levels, isLoading } = useDunningLevels();
   const createMutation = useCreateDunningLevel();
   const analysisMutation = useDunningAnalysis();

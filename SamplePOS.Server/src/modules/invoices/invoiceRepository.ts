@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import { getBusinessYear, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
 // Helper to normalize Pascal case database columns to camelCase
 function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
@@ -64,7 +65,7 @@ export const invoiceRepository = {
     return res.rows[0] ? normalizeInvoiceRow(res.rows[0]) : null;
   },
   async generateInvoiceNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     // Advisory lock prevents concurrent duplicate invoice number generation
     // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('invoice_number_seq'))`);
@@ -86,7 +87,7 @@ export const invoiceRepository = {
   },
 
   async generateReceiptNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     // Advisory lock prevents concurrent duplicate receipt number generation
     // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('receipt_number_seq'))`);
@@ -114,8 +115,8 @@ export const invoiceRepository = {
       customerName: string;
       saleId?: string | null;
       quoteId?: string | null;
-      issueDate?: Date | null;
-      dueDate?: Date | null;
+      issueDate?: string | Date | null;
+      dueDate?: string | Date | null;
       subtotal: number;
       taxAmount: number;
       totalAmount: number;
@@ -143,8 +144,8 @@ export const invoiceRepository = {
         data.customerId,
         data.customerName,
         data.saleId || null,
-        data.issueDate || now,
-        data.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        data.issueDate || getBusinessDate(),
+        data.dueDate || (() => { const d = new Date(getBusinessDate() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 30); return formatDateBusiness(d); })(),
         data.subtotal,
         data.taxAmount,
         data.totalAmount,
@@ -263,7 +264,7 @@ export const invoiceRepository = {
     // Period enforcement (replaces trg_enforce_period_invoice_payments)
     const periodDate = typeof data.paymentDate === 'string'
       ? data.paymentDate
-      : (data.paymentDate ?? new Date()).toISOString().slice(0, 10);
+      : (data.paymentDate ? formatDateBusiness(data.paymentDate instanceof Date ? data.paymentDate : new Date(data.paymentDate)) : getBusinessDate());
     await checkAccountingPeriodOpen(pool, periodDate);
 
     // invoice_payments table has lowercase columns with uuid_generate_v4() default for id

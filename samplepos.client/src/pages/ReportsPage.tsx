@@ -48,6 +48,7 @@ import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
 import CustomerAgingReport from '../components/reports/CustomerAgingReport';
 import { DateRangeFilter } from '../components/ui/DateRangeFilter';
+import { formatTimestamp } from '../utils/businessDate';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -2272,8 +2273,8 @@ export default function ReportsPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4 text-sm text-gray-600">
-                  <div>Opened: {reportData.session.openedAt ? new Date(reportData.session.openedAt).toLocaleString() : '—'}</div>
-                  <div>Closed: {reportData.session.closedAt ? new Date(reportData.session.closedAt).toLocaleString() : '—'}</div>
+                  <div>Opened: {reportData.session.openedAt ? formatTimestamp(reportData.session.openedAt) : '—'}</div>
+                  <div>Closed: {reportData.session.closedAt ? formatTimestamp(reportData.session.closedAt) : '—'}</div>
                 </div>
               </div>
             </div>

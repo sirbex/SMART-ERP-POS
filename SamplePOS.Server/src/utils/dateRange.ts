@@ -68,7 +68,7 @@ function tzOffsetMs(year: number, month: number, day: number, tz: string): numbe
 /**
  * Return today's date as 'YYYY-MM-DD' in the business timezone.
  *
- * Fixes the classic bug where `new Date().toLocaleDateString('en-CA')` or
+ * Fixes the classic bug where `getBusinessDate()` or
  * `.toISOString().slice(0,10)` returns the UTC date, causing sales made
  * between midnight and 03:00 EAT (21:00–00:00 UTC) to land on the wrong day.
  */
@@ -84,4 +84,39 @@ export function getBusinessDate(tz: string = BUSINESS_TIMEZONE): string {
   const m = parts.find(p => p.type === 'month')!.value;
   const d = parts.find(p => p.type === 'day')!.value;
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * Return the current business year as a 4-digit number.
+ * Uses the business timezone so ID generation near midnight is correct.
+ */
+export function getBusinessYear(tz: string = BUSINESS_TIMEZONE): number {
+  return parseInt(getBusinessDate(tz).slice(0, 4), 10);
+}
+
+/**
+ * Convert a Date object to 'YYYY-MM-DD' in the business timezone.
+ * Use this instead of `formatDateBusiness(date)` or
+ * `date.toISOString().slice(0,10)` which both produce wrong results
+ * for Africa/Kampala between 21:00–00:00 UTC.
+ */
+export function formatDateBusiness(date: Date, tz: string = BUSINESS_TIMEZONE): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const y = parts.find(p => p.type === 'year')!.value;
+  const m = parts.find(p => p.type === 'month')!.value;
+  const d = parts.find(p => p.type === 'day')!.value;
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Format the current moment as a human-readable timestamp in the business timezone.
+ * E.g. '12/04/2026, 10:05:30' for PDF footers and report generatedAt.
+ */
+export function formatBusinessTimestamp(tz: string = BUSINESS_TIMEZONE): string {
+  return new Date().toLocaleString('en-GB', { timeZone: tz });
 }

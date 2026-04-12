@@ -36,6 +36,7 @@ import type {
     CreateSupplierCreditNote,
     CreateSupplierDebitNote,
 } from '../../../../shared/zod/creditDebitNote.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // ============================================================
 // CUSTOMER SIDE
@@ -98,7 +99,7 @@ export const creditDebitNoteService = {
                 referenceInvoiceId: input.invoiceId,
                 customerId: invoice.customerId,
                 customerName: invoice.customerName,
-                issueDate: input.issueDate || new Date().toISOString().split('T')[0],
+                issueDate: input.issueDate || getBusinessDate(),
                 subtotal: Money.toNumber(subtotal),
                 taxAmount: Money.toNumber(taxTotal),
                 totalAmount: total,
@@ -166,7 +167,7 @@ export const creditDebitNoteService = {
                 referenceInvoiceId: input.invoiceId,
                 customerId: invoice.customerId,
                 customerName: invoice.customerName,
-                issueDate: input.issueDate || new Date().toISOString().split('T')[0],
+                issueDate: input.issueDate || getBusinessDate(),
                 subtotal: Money.toNumber(subtotal),
                 taxAmount: Money.toNumber(taxTotal),
                 totalAmount: Money.toNumber(totalAmount),
@@ -215,7 +216,7 @@ export const creditDebitNoteService = {
                 noteNumber: note.invoiceNumber,
                 noteDate: typeof note.issueDate === 'string'
                     ? note.issueDate.split('T')[0]
-                    : new Date().toISOString().split('T')[0],
+                    : getBusinessDate(),
                 subtotal: note.subtotal,
                 taxAmount: note.taxAmount,
                 totalAmount: note.totalAmount,
@@ -425,7 +426,7 @@ export const creditDebitNoteService = {
                 try {
                     await AccountingCore.reverseTransaction({
                         originalTransactionId: glTxn.rows[0].Id,
-                        reversalDate: new Date().toISOString().split('T')[0],
+                        reversalDate: getBusinessDate(),
                         reason: `CANCEL: ${noteData.invoiceNumber} — ${reason}`,
                         userId: SYSTEM_USER_ID,
                         idempotencyKey: `${refType}_CANCEL-${noteId}`,
@@ -616,7 +617,7 @@ export const supplierCreditDebitNoteService = {
                 documentType: 'SUPPLIER_CREDIT_NOTE',
                 referenceInvoiceId: input.invoiceId,
                 supplierId: invoice.supplierId,
-                issueDate: input.issueDate || new Date().toISOString().split('T')[0],
+                issueDate: input.issueDate || getBusinessDate(),
                 subtotal: Money.toNumber(subtotal),
                 taxAmount: Money.toNumber(taxTotal),
                 totalAmount: total,
@@ -676,7 +677,7 @@ export const supplierCreditDebitNoteService = {
                 documentType: 'SUPPLIER_DEBIT_NOTE',
                 referenceInvoiceId: input.invoiceId,
                 supplierId: invoice.supplierId,
-                issueDate: input.issueDate || new Date().toISOString().split('T')[0],
+                issueDate: input.issueDate || getBusinessDate(),
                 subtotal: Money.toNumber(subtotal),
                 taxAmount: Money.toNumber(taxTotal),
                 totalAmount: Money.toNumber(totalAmount),
@@ -716,7 +717,7 @@ export const supplierCreditDebitNoteService = {
                 noteNumber: note.invoiceNumber,
                 noteDate: typeof note.issueDate === 'string'
                     ? note.issueDate.split('T')[0]
-                    : new Date().toISOString().split('T')[0],
+                    : getBusinessDate(),
                 subtotal: note.subtotal,
                 taxAmount: note.taxAmount,
                 totalAmount: note.totalAmount,
@@ -786,7 +787,7 @@ export const supplierCreditDebitNoteService = {
                 try {
                     await AccountingCore.reverseTransaction({
                         originalTransactionId: glTxn.rows[0].Id,
-                        reversalDate: new Date().toISOString().split('T')[0],
+                        reversalDate: getBusinessDate(),
                         reason: `CANCEL: ${noteData.invoiceNumber} — ${reason}`,
                         userId: SYSTEM_USER_ID,
                         idempotencyKey: `${refType}_CANCEL-${noteId}`,

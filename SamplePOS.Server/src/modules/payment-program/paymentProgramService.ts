@@ -20,6 +20,7 @@ import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
 import { ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 // =============================================================================
 // TYPES
@@ -82,7 +83,7 @@ export const createPaymentRun = async (
     `SELECT COALESCE(MAX(CAST(SUBSTRING(run_number FROM 9) AS INTEGER)), 0) + 1 as next_num
      FROM payment_runs WHERE run_number LIKE 'PR-____-%'`
   );
-  const year = new Date().getFullYear();
+  const year = getBusinessYear();
   const nextNum = parseInt(numResult.rows[0].next_num);
   const runNumber = `PR-${year}-${String(nextNum).padStart(4, '0')}`;
 

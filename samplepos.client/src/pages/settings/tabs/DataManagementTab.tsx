@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiResponse } from '../../../services/api';
 import {
+import { formatTimestamp } from '../../../utils/businessDate';
     Database,
     Download,
     Upload,
@@ -361,7 +362,7 @@ function OverviewSection({
                                 Last Backup: {stats.lastBackup.backupNumber}
                             </p>
                             <p className="text-sm text-gray-500">
-                                Created: {new Date(stats.lastBackup.createdAt).toLocaleString()}
+                                Created: {formatTimestamp(stats.lastBackup.createdAt)}
                             </p>
                         </div>
                     </div>
@@ -384,7 +385,7 @@ function OverviewSection({
                         <div>
                             <p className="font-medium text-gray-900">Last Reset</p>
                             <p className="text-sm text-gray-500">
-                                {new Date(stats.lastReset).toLocaleString()}
+                                {formatTimestamp(stats.lastReset)}
                             </p>
                         </div>
                     </div>
@@ -586,7 +587,7 @@ function BackupSection({
                                     </div>
                                     <p className="text-sm text-gray-500 mt-1">{backup.reason}</p>
                                     <p className="text-xs text-gray-400 mt-1">
-                                        {backup.fileSizeFormatted} • {new Date(backup.createdAt).toLocaleString()}
+                                        {backup.fileSizeFormatted} • {formatTimestamp(backup.createdAt)}
                                     </p>
                                 </div>
                                 <div className="flex gap-2">
@@ -1031,7 +1032,7 @@ function RestoreSection({
                                     </div>
                                     <p className="text-sm text-gray-500">{backup.reason}</p>
                                     <p className="text-xs text-gray-400">
-                                        {backup.fileSizeFormatted} • {new Date(backup.createdAt).toLocaleString()}
+                                        {backup.fileSizeFormatted} • {formatTimestamp(backup.createdAt)}
                                     </p>
                                 </div>
                             </label>
@@ -1069,7 +1070,7 @@ function RestoreSection({
                             <p className="font-semibold">{selectedBackupDetails.backupNumber}</p>
                             <p className="text-sm text-gray-600">{selectedBackupDetails.reason}</p>
                             <p className="text-xs text-gray-500 mt-1">
-                                Created: {new Date(selectedBackupDetails.createdAt).toLocaleString()}
+                                Created: {formatTimestamp(selectedBackupDetails.createdAt)}
                             </p>
                         </div>
 

@@ -23,6 +23,7 @@
 import type { Pool } from 'pg';
 import logger from '../utils/logger.js';
 import { Money } from '../utils/money.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 /** Represents a single operation that may have a GL/subledger mismatch */
 export interface IntegrityIssue {
@@ -60,7 +61,7 @@ export interface IntegrityReport {
  * Returns actionable diagnostics for every discrepancy found.
  */
 export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityReport> {
-    const asOfDate = new Date().toLocaleDateString('en-CA');
+    const asOfDate = getBusinessDate();
     const issues: IntegrityIssue[] = [];
 
     // 1. Get GL Inventory balance

@@ -31,6 +31,7 @@ import {
     BankRecurringRule,
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 interface RuleFormData {
     name: string;
@@ -354,7 +355,7 @@ export const RecurringRulesTab: React.FC = () => {
                                         <TableCell>
                                             {rule.lastMatchedAt ? (
                                                 <span title={rule.lastMatchedAt}>
-                                                    {new Date(rule.lastMatchedAt).toLocaleDateString()}
+                                                    {formatTimestampDate(rule.lastMatchedAt)}
                                                 </span>
                                             ) : (
                                                 <span className="text-muted-foreground">Never</span>

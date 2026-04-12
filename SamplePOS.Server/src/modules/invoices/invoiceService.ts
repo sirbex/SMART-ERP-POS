@@ -9,6 +9,7 @@ import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
 interface PaymentLineRow {
@@ -414,7 +415,7 @@ export const invoiceService = {
                 deliveryAddress: customer.address,
                 items: deliveryItems,
                 totalAmount: Money.parseDb(fresh.total_amount).toNumber(),
-                deliveryDate: new Date().toLocaleDateString('en-CA'), // Today
+                deliveryDate: getBusinessDate(), // Today
                 priority: 'NORMAL' as const,
                 notes: `Auto-generated from invoice ${fresh.invoice_number}`,
               };
@@ -731,8 +732,8 @@ export const invoiceService = {
       try {
         const paymentDateStr =
           input.paymentDate instanceof Date
-            ? input.paymentDate.toLocaleDateString('en-CA')
-            : new Date().toLocaleDateString('en-CA');
+            ? formatDateBusiness(input.paymentDate)
+            : getBusinessDate();
 
         await glEntryService.recordInvoicePaymentToGL(
           {

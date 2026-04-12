@@ -32,6 +32,11 @@ export const PERMISSIONS: Record<string, Permission> = {
   POS_VOID: p('pos.void', 'pos', 'void', 'Void POS transactions'),
   POS_APPROVE: p('pos.approve', 'pos', 'approve', 'Approve POS overrides'),
 
+  ORDERS_READ: p('orders.read', 'orders', 'read', 'View POS orders queue'),
+  ORDERS_CREATE: p('orders.create', 'orders', 'create', 'Create POS orders (dispenser)'),
+  ORDERS_PAY: p('orders.pay', 'orders', 'pay', 'Complete POS orders with payment (cashier)'),
+  ORDERS_CANCEL: p('orders.cancel', 'orders', 'cancel', 'Cancel pending POS orders'),
+
   PURCHASING_READ: p('purchasing.read', 'purchasing', 'read', 'View purchase orders'),
   PURCHASING_CREATE: p('purchasing.create', 'purchasing', 'create', 'Create purchase orders'),
   PURCHASING_UPDATE: p('purchasing.update', 'purchasing', 'update', 'Modify purchase orders'),

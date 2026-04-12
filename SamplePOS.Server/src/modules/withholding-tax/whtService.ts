@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Money } from '../../utils/money.js';
 import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 import { ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 
@@ -334,11 +335,12 @@ export const getWhtEntries = async (
   pool?: pg.Pool
 ): Promise<WhtEntry[]> => {
   const dbPool = pool || globalPool;
+  const { startUtc, endUtc } = toUtcRange(startDate, endDate, BUSINESS_TIMEZONE);
   const result = await dbPool.query(
     `SELECT * FROM withholding_tax_entries
-     WHERE created_at BETWEEN $1 AND $2
+     WHERE created_at >= $1 AND created_at < $2
      ORDER BY created_at DESC`,
-    [startDate, endDate + 'T23:59:59Z']
+    [startUtc, endUtc]
   );
   return result.rows.map(r => ({
     id: r.id,

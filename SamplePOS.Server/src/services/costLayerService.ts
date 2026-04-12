@@ -9,6 +9,7 @@ import { BusinessError, NotFoundError } from '../middleware/errorHandler.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import logger from '../utils/logger.js';
 import type { CostLayer, CreateCostLayer } from '../../../shared/zod/cost-layer.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -124,7 +125,7 @@ async function _createCostLayerOnClient(
 ): Promise<void> {
   const quantity = new Decimal(data.quantity);
   const unitCost = new Decimal(data.unitCost);
-  const receivedDate = data.receivedDate || new Date().toISOString();
+  const receivedDate = data.receivedDate || getBusinessDate();
   const totalValue = quantity.times(unitCost);
 
   // Validate inputs

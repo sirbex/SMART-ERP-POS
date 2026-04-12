@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 /**
  * Hold Order Repository
@@ -51,7 +52,7 @@ export const holdRepository = {
      * Generate next hold number (HOLD-YYYY-####)
      */
     async generateHoldNumber(client: PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         const seq = await client.query("SELECT nextval('hold_number_seq')");
         const num = seq.rows[0].nextval;
         return `HOLD-${year}-${String(num).padStart(4, '0')}`;

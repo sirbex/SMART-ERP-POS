@@ -20,6 +20,7 @@ import { UnitOfWork } from '../db/unitOfWork.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID, getValidUserId } from '../utils/constants.js';
 import { checkAccountingPeriodOpen } from '../utils/periodGuard.js';
+import { getBusinessDate, getBusinessYear } from '../utils/dateRange.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -635,7 +636,7 @@ export class JournalEntryService {
    * Generate unique journal entry number
    */
   private async generateEntryNumber(client: PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const prefix = `JE-${year}-`;
 
     const result = await client.query(

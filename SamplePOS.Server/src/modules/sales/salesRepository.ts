@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { BusinessError } from '../../middleware/errorHandler.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
-import { getBusinessDate } from '../../utils/dateRange.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 export interface SaleRecord {
   id: string;
@@ -173,7 +173,7 @@ export const salesRepository = {
    * so the advisory lock is held until COMMIT.
    */
   async generateSaleNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     // Advisory lock prevents concurrent duplicate sale number generation (held until TX commit)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('sale_number_seq'))`);
     const result = await pool.query(
@@ -1169,7 +1169,7 @@ export const salesRepository = {
    * Must be called inside a transaction for advisory lock safety.
    */
   async generateRefundNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('refund_number_seq'))`);
     const result = await pool.query(
       `SELECT refund_number FROM sale_refunds
@@ -1218,7 +1218,7 @@ export const salesRepository = {
       [
         refundNumber,
         data.saleId,
-        data.refundDate || new Date().toLocaleDateString('en-CA'),
+        data.refundDate || getBusinessDate(),
         data.reason,
         data.totalAmount,
         data.totalCost,

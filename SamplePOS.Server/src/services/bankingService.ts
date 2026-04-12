@@ -67,6 +67,7 @@ import {
     normalizeBankStatementLine,
     normalizeBankRecurringRule,
 } from '../../../shared/types/banking.js';
+import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../utils/dateRange.js';
 
 // SYSTEM_USER_ID imported from ../utils/constants.js
 
@@ -110,7 +111,7 @@ export class BankingService {
      * Replaces fn_generate_bank_txn_number() which used a sequence
      */
     private static async generateBankTxnNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         const prefix = `BTX-${year}-`;
         const result = await client.query(
             `SELECT COALESCE(MAX(CAST(SUBSTRING(transaction_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
@@ -125,7 +126,7 @@ export class BankingService {
      * Replaces fn_generate_statement_number()
      */
     private static async generateStatementNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         const prefix = `STM-${year}-`;
         const result = await client.query(
             `SELECT COALESCE(MAX(CAST(SUBSTRING(statement_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
@@ -313,7 +314,7 @@ export class BankingService {
         userId: string,
         dbPool?: pg.Pool
     ): Promise<void> {
-        const entryDate = new Date().toLocaleDateString('en-CA');
+        const entryDate = getBusinessDate();
 
         // Get or create Opening Balance Equity account (3900)
         const equityAccount = await client.query(`
@@ -911,7 +912,7 @@ export class BankingService {
             await AccountingCore.reverseTransaction(
                 {
                     originalTransactionId: origTxn.gl_transaction_id,
-                    reversalDate: new Date().toLocaleDateString('en-CA'),
+                    reversalDate: getBusinessDate(),
                     reason: dto.reason,
                     userId,
                     idempotencyKey: `REV-${dto.transactionId}`,
@@ -945,7 +946,7 @@ export class BankingService {
                     revTxnId,
                     revTxnNum,
                     origTxn.bank_account_id,
-                    new Date().toLocaleDateString('en-CA'),
+                    getBusinessDate(),
                     reversalType,
                     origTxn.category_id,
                     `REVERSAL: ${dto.reason}`,
@@ -1768,7 +1769,7 @@ export class BankingService {
                 break;
         }
 
-        return nextDate.toLocaleDateString('en-CA');
+        return formatDateBusiness(nextDate);
     }
 
     // ---------------------------------------------------------------------------
@@ -2030,7 +2031,7 @@ export class BankingService {
         dbPool?: pg.Pool
     ): Promise<CashPositionReport> {
         const pool = dbPool || globalPool;
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         const result = await pool.query(
             `
@@ -2592,7 +2593,7 @@ export class BankingService {
                     {
                         bankAccountId: line.bank_account_id as string,
                         transactionDate:
-                            (line.transaction_date as string) || new Date().toLocaleDateString('en-CA'),
+                            (line.transaction_date as string) || getBusinessDate(),
                         type: txnType,
                         categoryId: (options.categoryId || line.suggested_category_id) as string | undefined,
                         description: (line.description as string) || 'Imported transaction',
@@ -2882,7 +2883,7 @@ export class BankingService {
             // Fallback: try native Date parsing
             const date = new Date(value);
             if (!isNaN(date.getTime())) {
-                return date.toLocaleDateString('en-CA');
+                return formatDateBusiness(date);
             }
         } catch {
             // Ignore parsing errors

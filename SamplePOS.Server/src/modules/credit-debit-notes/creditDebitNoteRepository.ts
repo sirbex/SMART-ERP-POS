@@ -13,6 +13,7 @@
 
 import type { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
+import { getBusinessYear, getBusinessDate } from '../../utils/dateRange.js';
 
 // ============================================================
 // TYPES
@@ -87,7 +88,7 @@ export const creditDebitNoteRepository = {
     // ----------------------------------------------------------
 
     async generateCreditNoteNumber(client: Pool | PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('credit_note_number_seq'))`);
         const result = await client.query(
             `SELECT "InvoiceNumber" FROM invoices 
@@ -102,7 +103,7 @@ export const creditDebitNoteRepository = {
     },
 
     async generateDebitNoteNumber(client: Pool | PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('debit_note_number_seq'))`);
         const result = await client.query(
             `SELECT "InvoiceNumber" FROM invoices 
@@ -232,7 +233,7 @@ export const creditDebitNoteRepository = {
       ) RETURNING *`,
             [
                 noteId, data.invoiceNumber, data.customerId, data.customerName,
-                data.issueDate || now.toISOString().split('T')[0],
+                data.issueDate || getBusinessDate(),
                 data.subtotal, data.taxAmount, data.totalAmount,
                 data.notes || null, now,
                 data.documentType, data.referenceInvoiceId, data.reason,
@@ -526,7 +527,7 @@ export const creditDebitNoteRepository = {
 export const supplierCreditDebitNoteRepository = {
 
     async generateSupplierCreditNoteNumber(client: Pool | PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('supplier_cn_number_seq'))`);
         const result = await client.query(
             `SELECT "SupplierInvoiceNumber" FROM supplier_invoices
@@ -541,7 +542,7 @@ export const supplierCreditDebitNoteRepository = {
     },
 
     async generateSupplierDebitNoteNumber(client: Pool | PoolClient): Promise<string> {
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('supplier_dn_number_seq'))`);
         const result = await client.query(
             `SELECT "SupplierInvoiceNumber" FROM supplier_invoices
@@ -661,7 +662,7 @@ export const supplierCreditDebitNoteRepository = {
       ) RETURNING *`,
             [
                 noteId, data.invoiceNumber, data.supplierId,
-                data.issueDate || now.toISOString().split('T')[0],
+                data.issueDate || getBusinessDate(),
                 data.subtotal, data.taxAmount, data.totalAmount,
                 data.notes || null, now,
                 data.documentType, data.referenceInvoiceId, data.reason,

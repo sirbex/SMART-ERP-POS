@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { platformApi } from '../../services/platformApi';
 import type { PlatformHealthData } from '../../services/platformApi';
 import { Activity, RefreshCw, AlertCircle, CheckCircle2, Database } from 'lucide-react';
+import { formatTimestampTime } from '../../utils/businessDate';
 
 export default function PlatformHealthPage() {
     const [health, setHealth] = useState<PlatformHealthData | null>(null);
@@ -79,7 +80,7 @@ export default function PlatformHealthPage() {
                                 {statusOk ? 'All Systems Operational' : 'Degraded Performance'}
                             </p>
                             <p className="text-sm text-slate-500">
-                                {health.activePools} active database pool{health.activePools !== 1 ? 's' : ''} &middot; Last checked {new Date(health.timestamp).toLocaleTimeString()}
+                                {health.activePools} active database pool{health.activePools !== 1 ? 's' : ''} &middot; Last checked {formatTimestampTime(health.timestamp)}
                             </p>
                         </div>
                     </div>
@@ -110,7 +111,7 @@ export default function PlatformHealthPage() {
                             </div>
                             <div>
                                 <p className="text-sm text-slate-500">Last Check</p>
-                                <p className="text-lg font-bold text-slate-900">{new Date(health.timestamp).toLocaleTimeString()}</p>
+                                <p className="text-lg font-bold text-slate-900">{formatTimestampTime(health.timestamp)}</p>
                             </div>
                         </div>
                     </div>
@@ -134,7 +135,7 @@ export default function PlatformHealthPage() {
                                                 <td className="py-2.5 text-slate-600">
                                                     <div className="flex items-center gap-4 text-xs">
                                                         <span>Connections: <strong>{pool.connectionCount}</strong></span>
-                                                        <span className="text-slate-400">Last used: {new Date(pool.lastUsed).toLocaleTimeString()}</span>
+                                                        <span className="text-slate-400">Last used: {formatTimestampTime(pool.lastUsed)}</span>
                                                     </div>
                                                 </td>
                                             </tr>

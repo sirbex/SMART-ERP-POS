@@ -20,6 +20,7 @@ import type {
   CreateDeliveryNoteLine,
 } from '../../api/deliveryNotes';
 import type { Quotation, QuotationItem } from '@shared/types/quotation';
+import { formatTimestamp } from '../../utils/businessDate';
 
 // ── Status helpers ─────────────────────────────────────────
 
@@ -772,13 +773,13 @@ function DeliveryNoteDetail({
           {dn.pickedAt && (
             <div>
               <p className="text-sm text-gray-500">Picked At</p>
-              <p className="font-medium">{new Date(dn.pickedAt).toLocaleString()}</p>
+              <p className="font-medium">{formatTimestamp(dn.pickedAt)}</p>
             </div>
           )}
           {dn.postedAt && (
             <div>
               <p className="text-sm text-gray-500">Goods Issue At</p>
-              <p className="font-medium">{new Date(dn.postedAt).toLocaleString()}</p>
+              <p className="font-medium">{formatTimestamp(dn.postedAt)}</p>
             </div>
           )}
         </div>

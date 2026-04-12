@@ -8,6 +8,7 @@
 import { useMemo } from 'react';
 import { useStockLevels } from '../hooks/useInventory';
 import { Link } from 'react-router-dom';
+import { formatTimestampDate } from '../utils/businessDate';
 
 // Batch interface for expiring items
 interface ExpiringBatch {
@@ -255,7 +256,7 @@ export default function ExpiryAlertsWidget({
                         {formatDaysUntilExpiry(batch.daysUntilExpiry)}
                       </span>
                       <span className="text-xs text-gray-500">
-                        Expires: {new Date(batch.expiryDate).toLocaleDateString()}
+                        Expires: {formatTimestampDate(batch.expiryDate)}
                       </span>
                     </div>
                   </div>

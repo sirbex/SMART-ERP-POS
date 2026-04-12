@@ -10,6 +10,7 @@ import { UnitOfWork } from '../db/unitOfWork.js';
 import type pg from 'pg';
 import logger from '../utils/logger.js';
 import * as pricingCache from './pricingCacheService.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
@@ -206,7 +207,7 @@ async function findApplicableTier(
   dbPool?: pg.Pool | pg.PoolClient
 ): Promise<PricingTierRow | null> {
   const pool = dbPool || globalPool;
-  const now = new Date();
+  const now = getBusinessDate();
 
   // Query for matching tiers with priority ordering
   const result = await pool.query<PricingTierRow>(

@@ -16,6 +16,7 @@ import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -534,7 +535,7 @@ export const purchaseOrderService = {
    * Generate Goods Receipt number (GR-YYYY-NNNN format)
    */
   async generateGRNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const result = await pool.query(
       `SELECT receipt_number FROM goods_receipts 
        WHERE receipt_number LIKE $1 
@@ -656,7 +657,7 @@ export const purchaseOrderService = {
    * Generate Payment number (PAY-YYYY-NNNN format)
    */
   async generatePaymentNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const result = await pool.query(
       `SELECT payment_number FROM payments 
        WHERE payment_number LIKE $1 

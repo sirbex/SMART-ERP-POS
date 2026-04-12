@@ -3,6 +3,7 @@
 
 import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 
 export interface HistoryFilters {
   startDate?: string;
@@ -18,12 +19,14 @@ export const productHistoryRepository = {
     let i = 2;
 
     if (filters?.startDate) {
+      const { startUtc } = toUtcRange(filters.startDate, filters.startDate, BUSINESS_TIMEZONE);
       where.push(`gri.created_at >= $${i++}`);
-      params.push(filters.startDate);
+      params.push(startUtc);
     }
     if (filters?.endDate) {
-      where.push(`gri.created_at <= $${i++}`);
-      params.push(filters.endDate);
+      const { endUtc } = toUtcRange(filters.endDate, filters.endDate, BUSINESS_TIMEZONE);
+      where.push(`gri.created_at < $${i++}`);
+      params.push(endUtc);
     }
 
     const sql = `
@@ -80,12 +83,14 @@ export const productHistoryRepository = {
     let i = 2;
 
     if (filters?.startDate) {
+      const { startUtc } = toUtcRange(filters.startDate, filters.startDate, BUSINESS_TIMEZONE);
       where.push(`si.created_at >= $${i++}`);
-      params.push(filters.startDate);
+      params.push(startUtc);
     }
     if (filters?.endDate) {
-      where.push(`si.created_at <= $${i++}`);
-      params.push(filters.endDate);
+      const { endUtc } = toUtcRange(filters.endDate, filters.endDate, BUSINESS_TIMEZONE);
+      where.push(`si.created_at < $${i++}`);
+      params.push(endUtc);
     }
 
     const sql = `
@@ -134,12 +139,14 @@ export const productHistoryRepository = {
     let i = 2;
 
     if (filters?.startDate) {
+      const { startUtc } = toUtcRange(filters.startDate, filters.startDate, BUSINESS_TIMEZONE);
       where.push(`sm.created_at >= $${i++}`);
-      params.push(filters.startDate);
+      params.push(startUtc);
     }
     if (filters?.endDate) {
-      where.push(`sm.created_at <= $${i++}`);
-      params.push(filters.endDate);
+      const { endUtc } = toUtcRange(filters.endDate, filters.endDate, BUSINESS_TIMEZONE);
+      where.push(`sm.created_at < $${i++}`);
+      params.push(endUtc);
     }
     if (filters?.type) {
       where.push(`sm.movement_type = $${i++}`);

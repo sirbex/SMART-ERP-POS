@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgedReceivables, useAgedPayables } from '../../hooks/useAccountingModules';
 import { Clock, Users, Truck, Loader2, AlertTriangle } from 'lucide-react';
+import { getBusinessDate } from '../../utils/businessDate';
 
 interface AgedBucket {
   entityId: string;
@@ -43,7 +44,7 @@ function fmt(n: number | undefined): string {
 
 export default function AgedBalancePage() {
   const [activeTab, setActiveTab] = useState<TabKey>('receivables');
-  const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [asOfDate, setAsOfDate] = useState(() => getBusinessDate());
 
   const receivables = useAgedReceivables(activeTab === 'receivables' ? asOfDate : undefined);
   const payables = useAgedPayables(activeTab === 'payables' ? asOfDate : undefined);

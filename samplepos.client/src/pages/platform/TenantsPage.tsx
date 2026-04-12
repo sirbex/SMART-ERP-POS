@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { platformApi } from '../../services/platformApi';
 import type { Tenant, TenantUsage, BillingInfo, AuditLogEntry, LimitCheck, BillingEvent } from '../../services/platformApi';
 import {
+import { formatTimestampDate } from '../../utils/businessDate';
   Building2,
   Plus,
   Search,
@@ -500,7 +501,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Created</p>
-                    <p className="text-sm text-slate-700">{new Date(tenant.createdAt).toLocaleDateString()}</p>
+                    <p className="text-sm text-slate-700">{formatTimestampDate(tenant.createdAt)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Edge Sync</p>
@@ -572,7 +573,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                     <hr className="border-slate-200" />
                     <div className="border border-slate-200 bg-slate-50 rounded-lg p-4 text-center">
                       <p className="text-sm text-slate-500 mb-2">This tenant is deactivated.</p>
-                      <p className="text-xs text-slate-400">Deactivated on {tenant.deactivatedAt ? new Date(tenant.deactivatedAt).toLocaleDateString() : 'Unknown'}</p>
+                      <p className="text-xs text-slate-400">Deactivated on {tenant.deactivatedAt ? formatTimestampDate(tenant.deactivatedAt) : 'Unknown'}</p>
                     </div>
                   </>
                 )}
@@ -699,7 +700,7 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                       <div key={entry.id} className="border border-slate-100 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium text-slate-800">{entry.action}</span>
-                          <span className="text-xs text-slate-400">{new Date(entry.createdAt).toLocaleString()}</span>
+                          <span className="text-xs text-slate-400">{formatTimestamp(entry.createdAt)}</span>
                         </div>
                         <p className="text-xs text-slate-500">by {entry.actor}</p>
                         {entry.details && Object.keys(entry.details).length > 0 && (
@@ -878,7 +879,7 @@ export default function TenantsPage() {
                       <td className="px-4 py-3"><span className={`text-sm font-medium ${planBadge[t.plan] || 'text-slate-600'}`}>{t.plan}</span></td>
                       <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge[t.status] || ''}`}>{t.status}</span></td>
                       <td className="px-4 py-3 text-slate-500">{t.country} / {t.currency}</td>
-                      <td className="px-4 py-3 text-slate-500">{new Date(t.createdAt).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-slate-500">{formatTimestampDate(t.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button onClick={() => setSelectedTenant(t)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="View details"><Eye className="w-4 h-4" /></button>

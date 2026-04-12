@@ -29,6 +29,7 @@ import type { DeliveryNoteListItem } from '../../api/deliveryNotes';
 import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 interface InvoiceSettings {
   companyName?: string;
@@ -229,8 +230,8 @@ export default function QuoteDetailPage() {
             <div className="print-col-right">
               <table className="print-detail-table">
                 <tbody>
-                  <tr><td className="print-detail-label">Date:</td><td className="print-detail-value">{new Date(quotation.createdAt).toLocaleDateString()}</td></tr>
-                  <tr><td className="print-detail-label">Valid Until:</td><td className="print-detail-value">{new Date(quotation.validUntil).toLocaleDateString()}</td></tr>
+                  <tr><td className="print-detail-label">Date:</td><td className="print-detail-value">{formatTimestampDate(quotation.createdAt)}</td></tr>
+                  <tr><td className="print-detail-label">Valid Until:</td><td className="print-detail-value">{formatTimestampDate(quotation.validUntil)}</td></tr>
                   <tr><td className="print-detail-label">Status:</td><td className="print-detail-value-bold">{badge.label}</td></tr>
                 </tbody>
               </table>
@@ -357,8 +358,8 @@ export default function QuoteDetailPage() {
             {quotation.description && (
               <div><p className="text-sm text-gray-600">Description</p><p className="font-semibold">{quotation.description}</p></div>
             )}
-            <div><p className="text-sm text-gray-600">Valid From</p><p className="font-semibold">{new Date(quotation.validFrom).toLocaleDateString()}</p></div>
-            <div><p className="text-sm text-gray-600">Valid Until</p><p className="font-semibold">{new Date(quotation.validUntil).toLocaleDateString()}</p></div>
+            <div><p className="text-sm text-gray-600">Valid From</p><p className="font-semibold">{formatTimestampDate(quotation.validFrom)}</p></div>
+            <div><p className="text-sm text-gray-600">Valid Until</p><p className="font-semibold">{formatTimestampDate(quotation.validUntil)}</p></div>
           </div>
         </div>
 
@@ -544,7 +545,7 @@ export default function QuoteDetailPage() {
               </p>
             )}
             {quotation.convertedAt && (
-              <p className="text-green-700 text-sm">Converted on {new Date(quotation.convertedAt).toLocaleString()}</p>
+              <p className="text-green-700 text-sm">Converted on {formatTimestamp(quotation.convertedAt)}</p>
             )}
           </div>
         )}

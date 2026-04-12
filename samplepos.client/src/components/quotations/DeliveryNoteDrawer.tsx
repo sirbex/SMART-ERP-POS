@@ -10,6 +10,7 @@ import SlideDrawer from '../ui/SlideDrawer';
 import deliveryNotesApi from '../../api/deliveryNotes';
 import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
+import { formatTimestamp } from '../../utils/businessDate';
 
 interface Props {
     dnId: string | null;
@@ -206,7 +207,7 @@ export default function DeliveryNoteDrawer({ dnId, quotationId, quoteNumber, onC
                         {dn.postedAt && (
                             <div>
                                 <p className="text-gray-500">Posted At</p>
-                                <p className="font-medium">{new Date(dn.postedAt).toLocaleString()}</p>
+                                <p className="font-medium">{formatTimestamp(dn.postedAt)}</p>
                             </div>
                         )}
                     </div>

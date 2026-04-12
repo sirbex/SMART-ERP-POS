@@ -50,6 +50,9 @@ export interface SystemSettings {
     // POS Session Policy
     posSessionPolicy: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
 
+    // POS Transaction Mode (SAP-style order→payment split)
+    posTransactionMode: 'DirectSale' | 'OrderToPayment';
+
     // Low Stock Alerts
     lowStockAlertsEnabled: boolean;
     lowStockThreshold: number;
@@ -92,6 +95,7 @@ export interface SystemSettingsDbRow {
     invoice_show_payment_terms: boolean;
     invoice_default_payment_terms?: string;
     pos_session_policy: string;
+    pos_transaction_mode: string;
     low_stock_alerts_enabled: boolean;
     low_stock_threshold: number;
     created_at: string;
@@ -130,6 +134,7 @@ export interface UpdateSystemSettingsDto {
     invoiceShowPaymentTerms?: boolean;
     invoiceDefaultPaymentTerms?: string;
     posSessionPolicy?: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
+    posTransactionMode?: 'DirectSale' | 'OrderToPayment';
     lowStockAlertsEnabled?: boolean;
     lowStockThreshold?: number;
     updatedById?: string;
@@ -168,6 +173,7 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         invoiceShowPaymentTerms: dbRow.invoice_show_payment_terms,
         invoiceDefaultPaymentTerms: dbRow.invoice_default_payment_terms,
         posSessionPolicy: (dbRow.pos_session_policy || 'DISABLED') as SystemSettings['posSessionPolicy'],
+        posTransactionMode: (dbRow.pos_transaction_mode || 'DirectSale') as SystemSettings['posTransactionMode'],
         lowStockAlertsEnabled: dbRow.low_stock_alerts_enabled,
         lowStockThreshold: dbRow.low_stock_threshold,
         createdAt: dbRow.created_at,

@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { platformApi } from '../../services/platformApi';
 import type { DashboardSummary, PlatformHealthData } from '../../services/platformApi';
 import { Building2, Users, Database, Activity, AlertCircle, RefreshCw } from 'lucide-react';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ElementType; color: string }) {
     return (
@@ -204,7 +205,7 @@ export default function PlatformDashboardPage() {
                                                     {t.status}
                                                 </span>
                                             </td>
-                                            <td className="py-2.5 text-slate-500">{new Date(t.createdAt).toLocaleDateString()}</td>
+                                            <td className="py-2.5 text-slate-500">{formatTimestampDate(t.createdAt)}</td>
                                         </tr>
                                     );
                                 })}

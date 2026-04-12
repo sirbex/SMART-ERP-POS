@@ -34,32 +34,34 @@ function safeParseDate(dateString: string): Date {
   return new Date(dateString);
 }
 
+const BUSINESS_TIMEZONE = 'Africa/Kampala';
+
 /**
- * Format date and time for display
+ * Format date and time for display (pinned to business timezone)
  */
 export function formatDateTime(dateString: string): string {
   if (isDateOnly(dateString)) {
     // Date-only strings should display as date only, not with time
-    return safeParseDate(dateString).toLocaleDateString();
+    return safeParseDate(dateString).toLocaleDateString('en-GB', { timeZone: BUSINESS_TIMEZONE });
   }
-  return new Date(dateString).toLocaleString();
+  return new Date(dateString).toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }
 
 /**
- * Format date only
+ * Format date only (pinned to business timezone)
  */
 export function formatDate(dateString: string): string {
-  return safeParseDate(dateString).toLocaleDateString();
+  return safeParseDate(dateString).toLocaleDateString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }
 
 /**
- * Format time only
+ * Format time only (pinned to business timezone)
  */
 export function formatTime(dateString: string): string {
   if (isDateOnly(dateString)) {
     return ''; // No time component for date-only strings
   }
-  return new Date(dateString).toLocaleTimeString();
+  return new Date(dateString).toLocaleTimeString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }
 
 /**

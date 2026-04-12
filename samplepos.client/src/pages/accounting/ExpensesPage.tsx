@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Link } from 'react-router-dom';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
+import { formatTimestamp } from '../../utils/businessDate';
 
 const ExpensesPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -533,7 +534,7 @@ const ExpensesPage: React.FC = () => {
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs text-green-700 uppercase tracking-wide">Approved At</label>
-                      <p className="text-gray-900 font-medium">{selectedExpense.approvedAt ? new Date(selectedExpense.approvedAt).toLocaleString() : '-'}</p>
+                      <p className="text-gray-900 font-medium">{selectedExpense.approvedAt ? formatTimestamp(selectedExpense.approvedAt) : '-'}</p>
                     </div>
                   </div>
                 </div>
@@ -553,7 +554,7 @@ const ExpensesPage: React.FC = () => {
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs text-red-700 uppercase tracking-wide">Rejected At</label>
-                      <p className="text-gray-900 font-medium">{selectedExpense.rejectedAt ? new Date(selectedExpense.rejectedAt).toLocaleString() : '-'}</p>
+                      <p className="text-gray-900 font-medium">{selectedExpense.rejectedAt ? formatTimestamp(selectedExpense.rejectedAt) : '-'}</p>
                     </div>
                   </div>
                   {selectedExpense.rejectionReason && (

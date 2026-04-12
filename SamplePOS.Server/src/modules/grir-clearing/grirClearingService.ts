@@ -30,6 +30,7 @@ import { AccountCodes } from '../../services/glEntryService.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import * as repo from './grirClearingRepository.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 const GRIR_CLEARING_ACCOUNT = '2150';
 
@@ -335,7 +336,7 @@ export async function clearItem(
     });
 
     // 6. Post GL entries — SAP standard clearing journal
-    const entryDate = data.date || new Date().toISOString().split('T')[0];
+    const entryDate = data.date || getBusinessDate();
     const lines: JournalLine[] = [
       // Debit GR/IR Clearing (reverses the credit from GR posting)
       {

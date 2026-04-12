@@ -29,6 +29,7 @@ import {
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
 import { recordSupplierCreditNoteToGL } from '../../services/glEntryService.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -86,7 +87,7 @@ export const returnGrnService = {
             const returnGrn = await returnGrnRepository.create(client, {
                 grnId: input.grnId,
                 supplierId: gr.supplierId,
-                returnDate: input.returnDate || new Date().toISOString().split('T')[0],
+                returnDate: input.returnDate || getBusinessDate(),
                 reason: input.reason,
                 createdBy: input.createdBy,
             });
@@ -303,7 +304,7 @@ export const returnGrnService = {
                     {
                         returnGrnId: rgrnId,
                         returnGrnNumber: posted.returnGrnNumber || rgrnId,
-                        returnDate: new Date().toLocaleDateString('en-CA'),
+                        returnDate: getBusinessDate(),
                         totalAmount: returnTotalNum,
                         supplierId,
                         supplierName,
@@ -354,7 +355,7 @@ export const returnGrnService = {
                         documentType: 'SUPPLIER_CREDIT_NOTE',
                         referenceInvoiceId,
                         supplierId: supplierId || rgrn.supplierId,
-                        issueDate: new Date().toLocaleDateString('en-CA'),
+                        issueDate: getBusinessDate(),
                         subtotal: returnTotalNum,
                         taxAmount: 0,
                         totalAmount: returnTotalNum,
@@ -386,7 +387,7 @@ export const returnGrnService = {
                         await recordSupplierCreditNoteToGL({
                             noteId: postedScn.id,
                             noteNumber: postedScn.invoiceNumber,
-                            noteDate: new Date().toLocaleDateString('en-CA'),
+                            noteDate: getBusinessDate(),
                             subtotal: returnTotalNum,
                             taxAmount: 0,
                             totalAmount: returnTotalNum,

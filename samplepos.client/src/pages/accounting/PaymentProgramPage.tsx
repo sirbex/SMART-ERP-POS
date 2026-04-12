@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePaymentPrograms, useCreatePaymentRun, useExecutePaymentRun } from '../../hooks/useAccountingModules';
 import { Banknote, Plus, X, Play } from 'lucide-react';
+import { getBusinessDate } from '../../utils/businessDate';
 
 interface PaymentRun {
   id: string;
@@ -26,7 +27,7 @@ export default function PaymentProgramPage() {
   const createMutation = useCreatePaymentRun();
   const executeMutation = useExecutePaymentRun();
 
-  const [form, setForm] = useState({ runDate: new Date().toISOString().split('T')[0], paymentMethod: '', supplierId: '' });
+  const [form, setForm] = useState({ runDate: getBusinessDate(), paymentMethod: '', supplierId: '' });
 
   const runs = (Array.isArray(data) ? data : []) as PaymentRun[];
 
@@ -37,7 +38,7 @@ export default function PaymentProgramPage() {
       paymentMethod: form.paymentMethod || undefined,
       supplierId: form.supplierId || undefined,
     });
-    setForm({ runDate: new Date().toISOString().split('T')[0], paymentMethod: '', supplierId: '' });
+    setForm({ runDate: getBusinessDate(), paymentMethod: '', supplierId: '' });
     setShowForm(false);
   };
 

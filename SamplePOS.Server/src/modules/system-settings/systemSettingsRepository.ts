@@ -154,6 +154,10 @@ export const systemSettingsRepository = {
             setClauses.push(`pos_session_policy = $${paramIndex++}`);
             values.push(updates.posSessionPolicy);
         }
+        if (updates.posTransactionMode !== undefined) {
+            setClauses.push(`pos_transaction_mode = $${paramIndex++}`);
+            values.push(updates.posTransactionMode);
+        }
         if (updates.lowStockAlertsEnabled !== undefined) {
             setClauses.push(`low_stock_alerts_enabled = $${paramIndex++}`);
             values.push(updates.lowStockAlertsEnabled);

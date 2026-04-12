@@ -42,6 +42,7 @@ import type {
     ComprehensiveInvoice
 } from '../../types/comprehensive-accounting';
 import type { Customer } from '../../types/business';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 const CustomerPaymentsPage: React.FC = () => {
     const [payments, setPayments] = useState<CustomerPayment[]>([]);
@@ -471,7 +472,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                             </div>
                                             <div>
                                                 <span className="font-medium">Date:</span>
-                                                <div>{new Date(payment.paymentDate).toLocaleDateString()}</div>
+                                                <div>{formatTimestampDate(payment.paymentDate)}</div>
                                             </div>
                                             <div>
                                                 <span className="font-medium">Reference:</span>

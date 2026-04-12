@@ -5,6 +5,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { formatTimestampDate } from '../../utils/businessDate';
 import { extractApiError } from '../../utils/extractApiError';
 import Layout from '../../components/Layout';
 import {
@@ -255,7 +256,7 @@ export default function CategoriesPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">
-                      {cat.createdAt.split('T')[0]}
+                      {formatTimestampDate(cat.createdAt)}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
                       <button

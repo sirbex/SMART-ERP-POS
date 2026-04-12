@@ -22,6 +22,7 @@ import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
 import { ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 // =============================================================================
 // TYPES
@@ -175,7 +176,7 @@ export const acquireAsset = async (
       `SELECT COALESCE(MAX(CAST(SUBSTRING(asset_number FROM 9) AS INTEGER)), 0) + 1 as next_num
        FROM fixed_assets WHERE asset_number LIKE 'FA-____-%'`
     );
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const nextNum = parseInt(numResult.rows[0].next_num);
     const assetNumber = `FA-${year}-${String(nextNum).padStart(4, '0')}`;
 

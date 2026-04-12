@@ -8,6 +8,7 @@ import {
   RecordMovementData,
   MovementFilters,
 } from './types.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 /**
  * Record stock movement
@@ -24,7 +25,7 @@ export async function recordMovement(pool: Pool | PoolClient, data: RecordMoveme
      FROM stock_movements 
      WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
   );
-  const movementNumber = movNumRes.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+  const movementNumber = movNumRes.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
 
   const result = await pool.query(
     `INSERT INTO stock_movements (

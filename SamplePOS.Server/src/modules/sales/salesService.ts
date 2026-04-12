@@ -24,7 +24,7 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
-import { getBusinessDate } from '../../utils/dateRange.js';
+import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../utils/dateRange.js';
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -1019,7 +1019,7 @@ export const salesService = {
           );
 
           // Use pre-generated movement number and increment
-          const movementNumber = `MOV-${new Date().getFullYear()}-${String(movementSeq).padStart(4, '0')}`;
+          const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
           movementSeq++;
 
           // Determine unit cost from batch with bank precision
@@ -1270,15 +1270,18 @@ export const salesService = {
             const customerName = customerResult.rows[0]?.name || 'Unknown Customer';
 
             // Calculate due date (30 days from today)
-            const dueDate = new Date();
-            dueDate.setDate(dueDate.getDate() + 30);
+            const dueDateStr = (() => {
+              const d = new Date(getBusinessDate() + 'T00:00:00Z');
+              d.setUTCDate(d.getUTCDate() + 30);
+              return formatDateBusiness(d);
+            })();
 
             const invoiceResult = await invoiceRepository.createInvoice(client, {
               saleId: sale.id,
               customerId: input.customerId,
               customerName: customerName,
               quoteId: input.quoteId,
-              dueDate: dueDate,
+              dueDate: dueDateStr,
               subtotal: Money.toNumber(Money.parse(input.subtotal || 0)),
               taxAmount: Money.toNumber(Money.parse(input.taxAmount || 0)),
               totalAmount: Money.toNumber(Money.parse(input.totalAmount || 0)),
@@ -1445,8 +1448,11 @@ export const salesService = {
           });
 
           // Calculate due date (30 days from today)
-          const dueDate = new Date();
-          dueDate.setDate(dueDate.getDate() + 30);
+          const dueDateStr = (() => {
+            const d = new Date(getBusinessDate() + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + 30);
+            return formatDateBusiness(d);
+          })();
 
           // IMPORTANT: Invoice represents the FULL SALE, not just the credit portion
           // This allows tracking all payments against the full amount
@@ -1454,7 +1460,7 @@ export const salesService = {
             saleId: sale.id,
             customerId: input.customerId,
             customerName: customerName,
-            dueDate: dueDate,
+            dueDate: dueDateStr,
             subtotal: Money.toNumber(Money.parse(input.subtotal || subtotal.toNumber())),
             taxAmount: Money.toNumber(Money.parse(input.taxAmount || taxAmount.toNumber())),
             totalAmount: Money.toNumber(finalTotalAmount), // Full sale amount
@@ -2140,9 +2146,7 @@ export const salesService = {
       }
 
       // Fiscal period guard — cannot void sales in closed periods
-      const saleDate = sale.sale_date instanceof Date
-        ? sale.sale_date.toISOString().slice(0, 10)
-        : String(sale.sale_date).slice(0, 10);
+      const saleDate = String(sale.sale_date).slice(0, 10);
       await checkAccountingPeriodOpen(client, saleDate);
 
       // Validate void reason
@@ -2321,7 +2325,7 @@ export const salesService = {
            WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
         );
         const movementNumber =
-          movNumRes.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+          movNumRes.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
 
         await client.query(
           `INSERT INTO stock_movements (
@@ -2450,9 +2454,7 @@ export const salesService = {
       // ============================================================
       try {
         await client.query('SAVEPOINT void_daily_summary');
-        const voidSaleDate = sale.sale_date instanceof Date
-          ? sale.sale_date.toISOString().slice(0, 10)
-          : String(sale.sale_date).slice(0, 10);
+        const voidSaleDate = String(sale.sale_date).slice(0, 10);
         const isCredit = sale.payment_method === 'CREDIT';
         const amountPaid = parseFloat(sale.amount_paid || 0);
         const saleTotal = parseFloat(sale.total_amount || 0);
@@ -2483,9 +2485,7 @@ export const salesService = {
       // ============================================================
       try {
         await client.query('SAVEPOINT void_state_tables');
-        const voidDateStr = sale.sale_date instanceof Date
-          ? sale.sale_date.toISOString().slice(0, 10)
-          : String(sale.sale_date).slice(0, 10);
+        const voidDateStr = String(sale.sale_date).slice(0, 10);
 
         // Batch-fetch categories
         const voidProductIds = saleItems.map((it: { productId: string }) => it.productId).filter(Boolean);
@@ -2666,9 +2666,7 @@ export const salesService = {
       }
 
       // Fiscal period guard — cannot refund sales in closed periods
-      const saleDate = sale.sale_date instanceof Date
-        ? sale.sale_date.toISOString().slice(0, 10)
-        : String(sale.sale_date).slice(0, 10);
+      const saleDate = String(sale.sale_date).slice(0, 10);
       await checkAccountingPeriodOpen(client, saleDate);
 
       // Validate reason
@@ -2916,7 +2914,7 @@ export const salesService = {
            WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
         );
         const movementNumber =
-          movNumRes.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+          movNumRes.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
 
         await client.query(
           `INSERT INTO stock_movements (
@@ -3028,9 +3026,7 @@ export const salesService = {
         // SAVEPOINT: prevents PG aborted-transaction if this fails
         try {
           await client.query('SAVEPOINT refund_daily_summary');
-          const refundSaleDate = sale.sale_date instanceof Date
-            ? sale.sale_date.toISOString().slice(0, 10)
-            : String(sale.sale_date).slice(0, 10);
+          const refundSaleDate = String(sale.sale_date).slice(0, 10);
           const isCredit = sale.payment_method === 'CREDIT';
           const amtPaid = parseFloat(sale.amount_paid || 0);
           const saleTotalAmt = parseFloat(sale.total_amount || 0);

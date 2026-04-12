@@ -7,6 +7,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 // =============================================================================
 // INTERFACES
@@ -343,7 +344,7 @@ export const cashRegisterRepository = {
    * Generate next session number (REG-YYYY-NNNN format)
    */
   async generateSessionNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const result = await pool.query(`
       SELECT session_number FROM cash_register_sessions
       WHERE session_number LIKE $1
@@ -1064,7 +1065,7 @@ export const cashRegisterRepository = {
     data: Omit<ZReportRecord, 'id' | 'reportNumber' | 'generatedAt'>
   ): Promise<ZReportRecord> {
     // Generate Z-report number in service layer (replaces fn_next_z_report_number())
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const prefix = `ZRPT-${year}-`;
     const seqResult = await pool.query(
       `SELECT COALESCE(MAX(CAST(SPLIT_PART(report_number, '-', 3) AS INTEGER)), 0) + 1 AS next_num

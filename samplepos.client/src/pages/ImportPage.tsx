@@ -21,6 +21,7 @@ import type {
   ImportJobStatus,
 } from '../api/import';
 import {
+import { formatTimestamp } from '../utils/businessDate';
   Card,
   CardContent,
   CardDescription,
@@ -59,7 +60,7 @@ const STATUS_STYLES: Record<ImportJobStatus, string> = {
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString();
+  return formatTimestamp(iso);
 }
 
 function progressPercent(job: ImportJob): number {

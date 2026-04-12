@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DatePicker } from './ui/date-picker';
+import { formatTimestampDate } from '../utils/businessDate';
 
 export type DateRangePreset =
   | 'today'
@@ -261,7 +262,7 @@ export default function DateRangeFilter({
       {/* Date Range Display */}
       {!showCustomDates && startDate && endDate && (
         <div className="text-xs text-gray-500 mt-1 ml-20">
-          {new Date(startDate).toLocaleDateString()} - {new Date(endDate).toLocaleDateString()}
+          {formatTimestampDate(startDate)} - {formatTimestampDate(endDate)}
         </div>
       )}
     </div>

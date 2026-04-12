@@ -8,6 +8,7 @@ import { getSettings } from '../settings/invoiceSettingsService.js';
 import PDFDocument from 'pdfkit';
 import Decimal from 'decimal.js';
 import Money from '../../utils/money.js';
+import { formatBusinessTimestamp } from '../../utils/dateRange.js';
 import { amountToWords } from '../../utils/amountToWords.js';
 import {
   asyncHandler,
@@ -611,7 +612,7 @@ export const invoiceController = {
         align: 'center',
         width: contentWidth,
       });
-      doc.text(`Generated on ${new Date().toLocaleString()}`, margin, footerY + 12, {
+      doc.text(`Generated on ${formatBusinessTimestamp()}`, margin, footerY + 12, {
         align: 'center',
         width: contentWidth,
       });

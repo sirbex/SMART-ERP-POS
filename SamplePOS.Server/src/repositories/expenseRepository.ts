@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { ExpenseFilters, Expense, ExpenseDbRow, CreateExpenseData, UpdateExpenseData } from '../types/expense.js';
 import logger from '../utils/logger.js';
 import { ConflictError } from '../middleware/errorHandler.js';
+import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 
 /**
  * Get expenses with filtering and pagination
@@ -1094,12 +1095,12 @@ export const getExpenseDetailedList = async (
       referenceNumber: row.reference_number || '',
       createdBy: row.created_by,
       approvedBy: row.approved_by || '',
-      approvedAt: row.approved_at ? row.approved_at.toISOString().split('T')[0] : '',
+      approvedAt: row.approved_at ? formatDateBusiness(new Date(row.approved_at)) : '',
       rejectedBy: row.rejected_by || '',
-      rejectedAt: row.rejected_at ? row.rejected_at.toISOString().split('T')[0] : '',
+      rejectedAt: row.rejected_at ? formatDateBusiness(new Date(row.rejected_at)) : '',
       rejectionReason: row.rejection_reason || '',
       paidBy: row.paid_by || '',
-      paidAt: row.paid_at ? row.paid_at.toISOString().split('T')[0] : '',
+      paidAt: row.paid_at ? formatDateBusiness(new Date(row.paid_at)) : '',
       daysPending: row.days_pending,
       notes: row.notes || '',
     }));

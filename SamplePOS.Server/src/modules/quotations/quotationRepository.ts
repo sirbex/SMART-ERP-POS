@@ -14,6 +14,7 @@
 import { Pool, PoolClient } from 'pg';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 // ============================================================================
 // DATABASE ROW INTERFACES (snake_case from database)
@@ -96,7 +97,7 @@ export const quotationRepository = {
    * Uses sequence for thread-safe incrementing
    */
   async generateQuoteNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const seq = await pool.query("SELECT nextval('quotations_seq')");
     const num = seq.rows[0].nextval;
     return `Q-${year}-${String(num).padStart(4, '0')}`;

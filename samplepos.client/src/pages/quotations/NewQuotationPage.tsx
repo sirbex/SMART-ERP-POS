@@ -18,6 +18,7 @@ import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
 import { ResponsiveFormGrid } from '../../components/ui/ResponsiveFormGrid';
 import Decimal from 'decimal.js';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 interface QuoteItem {
   id: string;
@@ -968,7 +969,7 @@ export default function NewQuotationPage() {
                     )}
                     <div className="text-sm">
                       <span className="text-gray-600">Valid Until:</span>{' '}
-                      <span className="font-medium">{new Date(validUntil).toLocaleDateString()}</span>
+                      <span className="font-medium">{formatTimestampDate(validUntil)}</span>
                     </div>
                   </div>
                 </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, History, X, Plus } from 'lucide-react';
+import { formatTimestamp } from '../utils/businessDate';
 
 // Auth helper for fetch calls
 const authHeaders = (): HeadersInit => {
@@ -646,7 +647,7 @@ export default function PeriodManagementPage() {
                                                     {entry.action}
                                                 </span>
                                                 <span className="text-sm text-gray-500">
-                                                    {new Date(entry.changedAt).toLocaleString()}
+                                                    {formatTimestamp(entry.changedAt)}
                                                 </span>
                                             </div>
                                             {entry.changedBy && (

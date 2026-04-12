@@ -10,6 +10,7 @@ import {
   CreateDeliveryNoteData,
   CreateDeliveryNoteLineData,
 } from './types.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 // ─── Row normalizers ───────────────────────────────────────────
 
@@ -64,7 +65,7 @@ export const deliveryNoteRepository = {
    * Generate next delivery note number (DN-YYYY-####)
    */
   async generateDeliveryNoteNumber(client: PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     const seq = await client.query("SELECT nextval('delivery_notes_seq')");
     const num = seq.rows[0].nextval;
     return `DN-${year}-${String(num).padStart(4, '0')}`;
@@ -101,7 +102,7 @@ export const deliveryNoteRepository = {
         data.quotationId,
         data.customerId,
         data.customerName || null,
-        data.deliveryDate || new Date().toISOString().slice(0, 10),
+        data.deliveryDate || getBusinessDate(),
         data.warehouseNotes || null,
         data.deliveryAddress || null,
         data.driverName || null,

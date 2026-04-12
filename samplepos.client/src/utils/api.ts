@@ -352,6 +352,37 @@ export const api = {
       apiClient.get<ApiResponse>(`sales/${id}/refunds`),
   },
 
+  // POS Orders (Order→Payment workflow)
+  orders: {
+    listPending: (params?: { orderDate?: string }) =>
+      apiClient.get<ApiResponse>('orders/pending', { params }),
+    pendingCount: () =>
+      apiClient.get<ApiResponse>('orders/pending-count'),
+    list: (params?: { page?: number; limit?: number; status?: string; startDate?: string; endDate?: string }) =>
+      apiClient.get<ApiResponse>('orders', { params }),
+    getById: (id: string) =>
+      apiClient.get<ApiResponse>(`orders/${id}`),
+    create: (data: {
+      customerId?: string | null;
+      items: { productId: string; productName: string; quantity: number; unitPrice: number; discountAmount?: number; uomId?: string | null; baseQty?: number | null; baseUomId?: string | null; conversionFactor?: number | null }[];
+      subtotal?: number;
+      discountAmount?: number;
+      taxAmount?: number;
+      totalAmount?: number;
+      assignedCashierId?: string | null;
+      orderDate?: string;
+      notes?: string | null;
+    }) => apiClient.post<ApiResponse>('orders', data),
+    complete: (id: string, data: {
+      paymentMethod: string;
+      paymentReceived: number;
+      paymentLines?: { paymentMethod: string; amount: number; reference?: string }[];
+      cashRegisterSessionId?: string;
+    }) => apiClient.post<ApiResponse>(`orders/${id}/complete`, data),
+    cancel: (id: string, data: { reason: string }) =>
+      apiClient.post<ApiResponse>(`orders/${id}/cancel`, data),
+  },
+
   // Invoices
   invoices: {
     list: (params?: { page?: number; limit?: number; customerId?: string }) =>

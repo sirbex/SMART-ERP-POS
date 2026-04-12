@@ -46,6 +46,7 @@ import {
     type CreateSupplierNoteLineInput,
 } from '../../services/creditDebitNoteService';
 import { api } from '../../services/api';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 // ============================================================
 // Main Page
@@ -229,7 +230,7 @@ function CustomerNotesTab() {
                                             </div>
                                             <div>
                                                 <span className="text-gray-500">Date:</span>{' '}
-                                                {new Date(note.issueDate).toLocaleDateString()}
+                                                {formatTimestampDate(note.issueDate)}
                                             </div>
                                         </div>
                                     </div>
@@ -296,7 +297,7 @@ function CustomerNotesTab() {
                                 <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>
                                 <div><span className="text-gray-500">Tax:</span> {formatCurrency(selectedNote.taxAmount)}</div>
                                 <div><span className="text-gray-500">Total:</span> {formatCurrency(selectedNote.totalAmount)}</div>
-                                <div><span className="text-gray-500">Date:</span> {new Date(selectedNote.issueDate).toLocaleDateString()}</div>
+                                <div><span className="text-gray-500">Date:</span> {formatTimestampDate(selectedNote.issueDate)}</div>
                             </div>
                             {selectedNote.reason && (
                                 <div><span className="text-gray-500">Reason:</span> {selectedNote.reason}</div>
@@ -457,7 +458,7 @@ function SupplierNotesTab() {
                                             </div>
                                             <div>
                                                 <span className="text-gray-500">Date:</span>{' '}
-                                                {new Date(note.issueDate).toLocaleDateString()}
+                                                {formatTimestampDate(note.issueDate)}
                                             </div>
                                         </div>
                                     </div>
@@ -524,7 +525,7 @@ function SupplierNotesTab() {
                                 <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>
                                 <div><span className="text-gray-500">Tax:</span> {formatCurrency(selectedNote.taxAmount)}</div>
                                 <div><span className="text-gray-500">Total:</span> {formatCurrency(selectedNote.totalAmount)}</div>
-                                <div><span className="text-gray-500">Date:</span> {new Date(selectedNote.issueDate).toLocaleDateString()}</div>
+                                <div><span className="text-gray-500">Date:</span> {formatTimestampDate(selectedNote.issueDate)}</div>
                             </div>
                             {selectedNote.reason && (
                                 <div><span className="text-gray-500">Reason:</span> {selectedNote.reason}</div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
 import { apiClient } from '../../utils/api';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 interface CustomerDeposit {
     id: string;
@@ -304,7 +305,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
                             {deposits.map((deposit, index) => (
                                 <tr key={deposit.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {new Date(deposit.createdAt).toLocaleDateString()}
+                                        {formatTimestampDate(deposit.createdAt)}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="text-sm font-medium text-gray-900">

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useRevaluationPreview, useExecuteRevaluation } from '../../hooks/useAccountingModules';
 import { ArrowRightLeft, Loader2, TrendingUp, TrendingDown, Globe } from 'lucide-react';
+import { getBusinessDate } from '../../utils/businessDate';
 
 interface CurrencyBalance {
   accountCode: string;
@@ -15,7 +16,7 @@ interface CurrencyBalance {
 }
 
 export default function CurrencyRevaluationPage() {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getBusinessDate();
   const [date, setDate] = useState(today);
   const [autoReverse, setAutoReverse] = useState(true);
 

@@ -2,6 +2,7 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 export interface PurchaseOrder {
   id: string;
@@ -55,7 +56,7 @@ export const purchaseOrderRepository = {
    * Generate next PO number (PO-YYYY-NNNN format)
    */
   async generatePONumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     // Advisory lock prevents concurrent duplicate PO number generation (held until TX commit)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('po_number_seq'))`);
     const result = await pool.query(

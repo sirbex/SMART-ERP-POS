@@ -17,6 +17,7 @@ import type {
   DuplicateStrategy,
   ImportErrorType,
 } from '../../../../shared/zod/importSchemas.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 // ── Normalize DB rows to camelCase ────────────────────────
 
@@ -61,7 +62,7 @@ function normalizeErrorRow(row: Record<string, unknown>): ImportJobError {
  */
 export async function generateJobNumber(dbPool?: pg.Pool | pg.PoolClient): Promise<string> {
   const pool = dbPool || globalPool;
-  const year = new Date().getFullYear();
+  const year = getBusinessYear();
   const result = await pool.query(`SELECT nextval('import_job_number_seq') AS seq`);
   const seq = String(result.rows[0].seq).padStart(4, '0');
   return `IMP-${year}-${seq}`;
@@ -562,7 +563,7 @@ export async function bulkInsertSuppliers(
      ), 0) AS max_seq FROM suppliers`
   );
   let nextSeq = (Number(seqRes.rows[0]?.max_seq) || 0) + 1;
-  const year = new Date().getFullYear();
+  const year = getBusinessYear();
 
   const values: unknown[] = [];
   const placeholders: string[] = [];

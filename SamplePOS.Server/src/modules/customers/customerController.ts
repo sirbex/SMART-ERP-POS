@@ -11,6 +11,7 @@ import Money from '../../utils/money.js';
 import { amountToWords } from '../../utils/amountToWords.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate, formatBusinessTimestamp } from '../../utils/dateRange.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const PaginationQuerySchema = z.object({
@@ -265,7 +266,7 @@ export const exportCustomerStatementCsv = asyncHandler(async (req: Request, res:
     pool
   );
 
-  const filename = `customer-statement-${id}-${new Date().toISOString().slice(0, 10)}.csv`;
+  const filename = `customer-statement-${id}-${getBusinessDate()}.csv`;
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -317,7 +318,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   const settings = await getSettings(req.tenantPool || globalPool);
 
   const customerName = customer?.name?.replace(/[^a-z0-9]/gi, '_') || id.slice(0, 8);
-  const filename = `statement-${customerName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `statement-${customerName}-${getBusinessDate()}.pdf`;
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -382,7 +383,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
   doc
     .fontSize(9)
     .font('Helvetica')
-    .text(`Generated: ${new Date().toLocaleString()}`, margin, 90, {
+    .text(`Generated: ${formatBusinessTimestamp()}`, margin, 90, {
       align: 'center',
       width: contentWidth,
     });

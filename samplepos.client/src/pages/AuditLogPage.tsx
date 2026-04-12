@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AuditLog } from '@shared/types/audit';
 import { DatePicker } from '../components/ui/date-picker';
 import Layout from '../components/Layout';
+import { formatTimestamp } from '../utils/businessDate';
 
 // API function to fetch audit logs
 async function fetchAuditLogs(filters: {
@@ -245,7 +246,7 @@ export default function AuditLogPage() {
                     {auditLogs.map((log) => (
                       <tr key={log.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {new Date(log.createdAt).toLocaleString()}
+                          {formatTimestamp(log.createdAt)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">

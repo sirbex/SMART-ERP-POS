@@ -6,6 +6,7 @@
  */
 
 import type { Pool, PoolClient } from 'pg';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 // ============================================================
 // Types
@@ -73,7 +74,7 @@ export const returnGrnRepository = {
      */
     async generateNumber(pool: Pool | PoolClient): Promise<string> {
         await pool.query(`SELECT pg_advisory_xact_lock(hashtext('rgrn_number_seq'))`);
-        const year = new Date().getFullYear();
+        const year = getBusinessYear();
         const result = await pool.query(
             `SELECT return_grn_number FROM return_grn
        WHERE return_grn_number LIKE $1

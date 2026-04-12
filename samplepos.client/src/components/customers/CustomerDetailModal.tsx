@@ -7,6 +7,7 @@ import { downloadFile } from '../../utils/download';
 import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
 import { AxiosError } from 'axios';
+import { getBusinessDate, formatTimestampDate } from '../../utils/businessDate';
 
 interface CustomerData {
     id: string;
@@ -339,7 +340,7 @@ export default function CustomerDetailModal({
                                                 <div>
                                                     <span className="text-gray-500">Created:</span>
                                                     <span className="ml-2 text-gray-900">
-                                                        {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}
+                                                        {c.createdAt ? formatTimestampDate(c.createdAt) : '-'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -687,7 +688,7 @@ export default function CustomerDetailModal({
                                                                 stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                                                             ].filter(Boolean).join('&');
                                                             const url = `/customers/${customerId}/statement/export.csv${params ? '?' + params : ''}`;
-                                                            downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.csv`);
+                                                            downloadFile(url, `statement-${customerId}-${getBusinessDate()}.csv`);
                                                         }}
                                                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
                                                     >
@@ -700,7 +701,7 @@ export default function CustomerDetailModal({
                                                                 stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                                                             ].filter(Boolean).join('&');
                                                             const url = `/customers/${customerId}/statement/export.pdf${params ? '?' + params : ''}`;
-                                                            downloadFile(url, `statement-${customerId}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                                                            downloadFile(url, `statement-${customerId}-${getBusinessDate()}.pdf`);
                                                         }}
                                                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
                                                     >
@@ -744,7 +745,7 @@ export default function CustomerDetailModal({
                                             ) : ((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => (
                                                 <div key={idx} className="border border-gray-200 rounded-lg p-3">
                                                     <div className="flex items-center justify-between mb-2">
-                                                        <span className="text-xs text-gray-500">{new Date(e.date).toLocaleDateString()}</span>
+                                                        <span className="text-xs text-gray-500">{formatTimestampDate(e.date)}</span>
                                                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${e.type === 'INVOICE' ? 'bg-blue-100 text-blue-800' :
                                                             e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
                                                                 'bg-gray-100 text-gray-800'
@@ -803,7 +804,7 @@ export default function CustomerDetailModal({
                                                         </tr>
                                                     ) : ((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => (
                                                         <tr key={idx} className="hover:bg-gray-50">
-                                                            <td className="px-4 py-3 text-sm text-gray-600">{new Date(e.date).toLocaleDateString()}</td>
+                                                            <td className="px-4 py-3 text-sm text-gray-600">{formatTimestampDate(e.date)}</td>
                                                             <td className="px-4 py-3 text-sm">
                                                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${e.type === 'INVOICE' ? 'bg-blue-100 text-blue-800' :
                                                                     e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :

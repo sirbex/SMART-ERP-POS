@@ -2,6 +2,7 @@ import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 export interface GoodsReceipt {
   id: string;
@@ -81,7 +82,7 @@ export const goodsReceiptRepository = {
    * so the advisory lock is held until COMMIT.
    */
   async generateGRNumber(pool: Pool | PoolClient): Promise<string> {
-    const year = new Date().getFullYear();
+    const year = getBusinessYear();
     // Advisory lock prevents concurrent duplicate GR number generation
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('gr_number_seq'))`);
     const result = await pool.query(

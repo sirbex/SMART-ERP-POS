@@ -18,6 +18,7 @@ import { ValidationError } from '../../middleware/errorHandler.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 export type StockMovementType =
   | 'GOODS_RECEIPT'
@@ -208,7 +209,7 @@ export class StockMovementHandler {
           await glEntryService.recordStockMovementToGL({
             movementId: movementResult.rows[0].id,
             movementNumber: movementResult.rows[0].movement_number,
-            movementDate: new Date().toLocaleDateString('en-CA'),
+            movementDate: getBusinessDate(),
             movementType: params.movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
             movementValue,
             productName,
@@ -433,7 +434,7 @@ export class StockMovementHandler {
        WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
     );
 
-    return result.rows[0]?.movement_number || `MOV-${new Date().getFullYear()}-0001`;
+    return result.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
   }
 
   /**

@@ -5,7 +5,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
-import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
+import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness } from '../../utils/dateRange.js';
 
 export async function findAllCustomers(
   limit: number = 50,
@@ -440,9 +440,9 @@ export async function countCustomerTransactions(customerId: string, dbPool?: pg.
 /**
  * Statement queries: opening balance and in-period entries
  */
-export async function getOpeningBalance(customerId: string, start: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<number> {
+export async function getOpeningBalance(customerId: string, start: Date | string, dbPool?: pg.Pool | pg.PoolClient): Promise<number> {
   const pool = dbPool || globalPool;
-  const startStr = start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10);
+  const startStr = start instanceof Date ? formatDateBusiness(start) : String(start).slice(0, 10);
   const { startUtc } = toUtcRange(startStr, startStr, BUSINESS_TIMEZONE);
   // Derive opening balance from invoices (AR ledger) — same source as fn_recalculate_customer_ar_balance
   // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
@@ -483,10 +483,10 @@ export async function getOpeningBalance(customerId: string, start: Date, dbPool?
  * This tracks: Credit sales (INVOICE), Payments (PAYMENT), Manual adjustments (ADJUSTMENT)
  * Deposits are tracked separately - they don't affect invoice balance
  */
-export async function getStatementEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
+export async function getStatementEntries(customerId: string, start: Date | string, end: Date | string, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
   const pool = dbPool || globalPool;
-  const startStr = start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10);
-  const endStr = end instanceof Date ? end.toISOString().slice(0, 10) : String(end).slice(0, 10);
+  const startStr = start instanceof Date ? formatDateBusiness(start) : String(start).slice(0, 10);
+  const endStr = end instanceof Date ? formatDateBusiness(end) : String(end).slice(0, 10);
   const { startUtc, endUtc } = toUtcRange(startStr, endStr, BUSINESS_TIMEZONE);
   // Derive entries from invoices (AR ledger) — same source as fn_recalculate_customer_ar_balance
   // invoices uses PascalCase columns (EF Core), invoice_payments uses lowercase
@@ -570,10 +570,10 @@ export async function getStatementEntries(customerId: string, start: Date, end: 
  * Get deposit activity for a customer (separate from invoice ledger)
  * Returns both deposit receipts and deposit applications
  */
-export async function getDepositEntries(customerId: string, start: Date, end: Date, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
+export async function getDepositEntries(customerId: string, start: Date | string, end: Date | string, dbPool?: pg.Pool | pg.PoolClient): Promise<Record<string, unknown>[]> {
   const pool = dbPool || globalPool;
-  const startStr = start instanceof Date ? start.toISOString().slice(0, 10) : String(start).slice(0, 10);
-  const endStr = end instanceof Date ? end.toISOString().slice(0, 10) : String(end).slice(0, 10);
+  const startStr = start instanceof Date ? formatDateBusiness(start) : String(start).slice(0, 10);
+  const endStr = end instanceof Date ? formatDateBusiness(end) : String(end).slice(0, 10);
   const { startUtc, endUtc } = toUtcRange(startStr, endStr, BUSINESS_TIMEZONE);
   const res = await pool.query(
     `(

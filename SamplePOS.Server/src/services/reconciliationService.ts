@@ -12,6 +12,7 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { checkInventoryIntegrity, type IntegrityIssue } from './inventoryIntegrityService.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -78,7 +79,7 @@ export class ReconciliationService {
      * Compares GL balance with cash payments
      */
     async reconcileCash(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         try {
             const result = await this.pool.query(
@@ -132,7 +133,7 @@ export class ReconciliationService {
      * Compares GL balance with customer balances and invoice balances
      */
     async reconcileAccountsReceivable(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         try {
             const result = await this.pool.query(
@@ -188,7 +189,7 @@ export class ReconciliationService {
      * Compares GL balance with inventory valuation (products and batches)
      */
     async reconcileInventory(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         try {
             const result = await this.pool.query(
@@ -293,7 +294,7 @@ export class ReconciliationService {
      * Compares GL balance with supplier outstanding balances
      */
     async reconcileAccountsPayable(asOfDate?: string): Promise<ReconciliationReport> {
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         try {
             // GL-driven reconciliation: compare total AP balance from GL entries
@@ -403,7 +404,7 @@ export class ReconciliationService {
      * Runs all reconciliations and returns a summary
      */
     async getFullReconciliation(asOfDate?: string): Promise<FullReconciliationSummary> {
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         try {
             const result = await this.pool.query(
@@ -463,7 +464,7 @@ export class ReconciliationService {
             difference: number;
         }>;
     }> {
-        const date = asOfDate || new Date().toLocaleDateString('en-CA');
+        const date = asOfDate || getBusinessDate();
 
         try {
             let query = '';

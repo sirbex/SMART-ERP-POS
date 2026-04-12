@@ -37,6 +37,7 @@ import {
     BankAlert
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 const alertTypeConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
     'LOW_BALANCE': { icon: DollarSign, label: 'Low Balance', color: 'text-orange-600' },
@@ -237,7 +238,7 @@ export const BankAlertsTab: React.FC = () => {
                                                         <Badge variant={sevConfig.variant}>{sevConfig.label}</Badge>
                                                     </TableCell>
                                                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                                                        {new Date(alert.createdAt).toLocaleDateString()}
+                                                        {formatTimestampDate(alert.createdAt)}
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-2">
@@ -314,7 +315,7 @@ export const BankAlertsTab: React.FC = () => {
                                 <div>
                                     <Label className="text-muted-foreground">Created</Label>
                                     <p className="font-medium">
-                                        {new Date(selectedAlert.createdAt).toLocaleString()}
+                                        {formatTimestamp(selectedAlert.createdAt)}
                                     </p>
                                 </div>
                             </div>

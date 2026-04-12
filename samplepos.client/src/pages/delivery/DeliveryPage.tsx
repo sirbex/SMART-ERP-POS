@@ -11,6 +11,7 @@ import Layout from '../../components/Layout';
 import deliveryApi from '../../api/delivery';
 import type { DeliveryAnalytics, DeliverableSale } from '../../api/delivery';
 import { formatCurrency } from '../../utils/currency';
+import { formatTimestamp, getBusinessDate } from '../../utils/businessDate';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import apiClient from '../../utils/api';
 import type {
@@ -673,7 +674,7 @@ function TrackingTab() {
                       </div>
                       {h.notes && <p className="text-gray-600 text-xs mt-0.5">{h.notes}</p>}
                       <p className="text-gray-400 text-xs mt-0.5">
-                        {new Date(h.statusDate).toLocaleString()}
+                        {formatTimestamp(h.statusDate)}
                         {h.changedByName && ` — ${h.changedByName}`}
                       </p>
                     </div>
@@ -891,7 +892,7 @@ function DeliveryDetailModal({ order: initialOrder, onClose }: { order: Delivery
                     </div>
                     {h.notes && <p className="text-gray-600 text-xs mt-0.5">{h.notes}</p>}
                     <p className="text-gray-400 text-xs mt-0.5">
-                      {new Date(h.statusDate).toLocaleString()}
+                      {formatTimestamp(h.statusDate)}
                       {h.changedByName && ` — ${h.changedByName}`}
                     </p>
                   </div>
@@ -1044,7 +1045,7 @@ function DriverAssignModal({ order, onClose, onSuccess }: { order: DeliveryOrder
 function CreateDeliveryModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({
     customerId: '',
-    deliveryDate: new Date().toLocaleDateString('en-CA'),
+    deliveryDate: getBusinessDate(),
     deliveryAddress: '',
     deliveryContactName: undefined as string | undefined,
     deliveryContactPhone: undefined as string | undefined,
@@ -1278,7 +1279,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
   const [selectedSale, setSelectedSale] = useState<DeliverableSale | null>(null);
   const [form, setForm] = useState({
     deliveryAddress: '',
-    deliveryDate: new Date().toLocaleDateString('en-CA'),
+    deliveryDate: getBusinessDate(),
     deliveryContactName: '',
     deliveryContactPhone: '',
     deliveryFee: 0,
@@ -1325,7 +1326,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
     setSelectedSale(null);
     setForm({
       deliveryAddress: '',
-      deliveryDate: new Date().toLocaleDateString('en-CA'),
+      deliveryDate: getBusinessDate(),
       deliveryContactName: '',
       deliveryContactPhone: '',
       deliveryFee: 0,
@@ -1647,7 +1648,7 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
 
 function CreateRouteModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [routeName, setRouteName] = useState('');
-  const [routeDate, setRouteDate] = useState(new Date().toLocaleDateString('en-CA'));
+  const [routeDate, setRouteDate] = useState(getBusinessDate());
   const [vehiclePlateNumber, setVehiclePlateNumber] = useState('');
 
   // Fetch pending delivery orders to add to route

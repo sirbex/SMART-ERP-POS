@@ -35,6 +35,7 @@ import type {
     CreatePriceRule,
     UpdatePriceRule,
 } from '../../../../shared/zod/priceRules.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // ============================================================================
 // Engine-private cache — stores full ResolvedPrice objects
@@ -116,7 +117,7 @@ export async function getFinalPrice(
 
     const basePrice = Money.parseDb(product.sellingPrice);
     const _costPrice = Money.parseDb(product.costPrice);
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const today = getBusinessDate(); // YYYY-MM-DD
 
     // --- 1. Pricing Tier (direct query — bypasses old calculatePrice) ---
     const tier = await repo.findApplicableTier(pool, productId, groupId, quantity, today);
@@ -270,7 +271,7 @@ export async function getFinalPricesBulk(
     }
 
     const productIds = items.map(i => i.productId);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getBusinessDate();
 
     // Batch: base prices (1 query)
     const basePriceMap = await repo.getProductBasePricesBulk(pool, productIds);

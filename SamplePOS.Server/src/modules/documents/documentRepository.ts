@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import logger from '../../utils/logger.js';
+import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 
 export interface Document {
   id: string;
@@ -215,13 +216,15 @@ export class DocumentRepository {
     }
 
     if (filters.fromDate) {
+      const { startUtc } = toUtcRange(filters.fromDate, filters.fromDate, BUSINESS_TIMEZONE);
       whereConditions.push(`created_at >= $${++paramCount}`);
-      queryParams.push(filters.fromDate);
+      queryParams.push(startUtc);
     }
 
     if (filters.toDate) {
-      whereConditions.push(`created_at <= $${++paramCount}`);
-      queryParams.push(filters.toDate);
+      const { endUtc } = toUtcRange(filters.toDate, filters.toDate, BUSINESS_TIMEZONE);
+      whereConditions.push(`created_at < $${++paramCount}`);
+      queryParams.push(endUtc);
     }
 
     if (filters.search) {

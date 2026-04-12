@@ -20,6 +20,7 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
 import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // Payment segment type (local definition)
 interface PaymentSegment {
@@ -268,7 +269,7 @@ export const paymentsService = {
           customerId: input.customerId,
           invoicedAmount: 0,
           paidAmount: input.amount,
-          paymentDate: new Date().toLocaleDateString('en-CA'),
+          paymentDate: getBusinessDate(),
         });
       } catch (stateError: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT payment_state_tables');
@@ -300,7 +301,7 @@ export const paymentsService = {
         {
           paymentId: result.transactionId,
           paymentNumber: input.reference || `CPAY-${result.transactionId.slice(0, 8)}`,
-          paymentDate: new Date().toLocaleDateString('en-CA'),
+          paymentDate: getBusinessDate(),
           amount: input.amount,
           paymentMethod:
             (input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER') || 'CASH',

@@ -27,6 +27,7 @@ import { Money, Decimal } from '../utils/money.js';
 import { AccountingCore, AccountingError } from './accountingCore.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger.js';
+import { getBusinessDate } from '../utils/dateRange.js';
 
 // =============================================================================
 // TYPES
@@ -364,7 +365,7 @@ export class GLReconciliationService {
 
         await AccountingCore.createJournalEntry(
           {
-            entryDate: new Date().toISOString().split('T')[0],
+            entryDate: getBusinessDate(),
             description: `Write-off for reconciliation ${reconcileNumber}`,
             referenceType: 'RECONCILIATION_WRITEOFF',
             referenceId: reconcileId,

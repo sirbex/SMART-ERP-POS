@@ -14,6 +14,7 @@ import type { DbConnection } from '../../db/unitOfWork.js';
 export type EntityType =
   | 'QUOTATION'
   | 'SALE'
+  | 'ORDER'
   | 'DELIVERY_ORDER'
   | 'DELIVERY_NOTE'
   | 'INVOICE'

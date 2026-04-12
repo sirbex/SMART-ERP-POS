@@ -29,6 +29,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
     { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600', permissions: ['pos.read', 'pos.create'] },
+    { name: 'Orders Queue', path: '/orders-queue', icon: '📋', color: 'text-orange-600', permissions: ['orders.read'] },
     { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600', permissions: ['inventory.read'] },
     { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600', permissions: ['customers.read'] },
     { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600', permissions: ['suppliers.read'] },

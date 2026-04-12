@@ -50,6 +50,7 @@ import type {
     CreateCustomerPaymentRequest
 } from '../../types/comprehensive-accounting';
 import type { Customer, Product } from '../../types/business';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 const INVOICE_STATUSES = [
     { value: '', label: 'All Statuses' },
@@ -510,13 +511,13 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                                                     </div>
                                                     <div>
                                                         <span className="font-medium">Date:</span>
-                                                        <div>{new Date(invoice.invoiceDate).toLocaleDateString()}</div>
+                                                        <div>{formatTimestampDate(invoice.invoiceDate)}</div>
                                                     </div>
                                                 </div>
 
                                                 {invoice.dueDate && (
                                                     <div className="mt-2 text-sm text-gray-600">
-                                                        <span className="font-medium">Due:</span> {new Date(invoice.dueDate).toLocaleDateString()}
+                                                        <span className="font-medium">Due:</span> {formatTimestampDate(invoice.dueDate)}
                                                         {isOverdue(invoice) && (
                                                             <span className="ml-2 text-red-600 font-medium">
                                                                 ({Math.floor((new Date().getTime() - new Date(invoice.dueDate).getTime()) / (1000 * 60 * 60 * 24))} days overdue)
@@ -879,11 +880,11 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                                 </div>
                                 <div>
                                     <Label className="text-sm font-medium text-gray-600">Invoice Date</Label>
-                                    <div>{new Date(selectedInvoice.invoiceDate).toLocaleDateString()}</div>
+                                    <div>{formatTimestampDate(selectedInvoice.invoiceDate)}</div>
                                 </div>
                                 <div>
                                     <Label className="text-sm font-medium text-gray-600">Due Date</Label>
-                                    <div>{selectedInvoice.dueDate ? new Date(selectedInvoice.dueDate).toLocaleDateString() : 'N/A'}</div>
+                                    <div>{selectedInvoice.dueDate ? formatTimestampDate(selectedInvoice.dueDate) : 'N/A'}</div>
                                 </div>
                             </div>
 

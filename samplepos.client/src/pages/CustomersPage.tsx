@@ -11,6 +11,7 @@ import QuickAddCustomerModal from '../components/customers/QuickAddCustomerModal
 import CustomerDetailModal from '../components/customers/CustomerDetailModal';
 import { useModalAccessibility } from '../hooks/useFocusTrap';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
+import { getBusinessDate, formatTimestamp } from '../utils/businessDate';
 
 interface StatementResponse {
   openingBalance: number | string;
@@ -641,7 +642,7 @@ export default function CustomersPage() {
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
                           const url = `/customers/${statementCustomerId}/statement/export.csv${params ? '?' + params : ''}`;
-                          downloadFile(url, `statement-${statementCustomerId}-${new Date().toISOString().slice(0, 10)}.csv`);
+                          downloadFile(url, `statement-${statementCustomerId}-${getBusinessDate()}.csv`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
                         aria-label="Export Statement CSV"
@@ -655,7 +656,7 @@ export default function CustomersPage() {
                             stmtEnd ? `end=${new Date(stmtEnd).toISOString()}` : ''
                           ].filter(Boolean).join('&');
                           const url = `/customers/${statementCustomerId}/statement/export.pdf${params ? '?' + params : ''}`;
-                          downloadFile(url, `statement-${statementCustomerId}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                          downloadFile(url, `statement-${statementCustomerId}-${getBusinessDate()}.pdf`);
                         }}
                         className="px-3 py-2 border border-gray-300 rounded bg-white hover:bg-gray-50 text-sm"
                         aria-label="Export Statement PDF"
@@ -735,7 +736,7 @@ export default function CustomersPage() {
                           </tr>
                         ) : ((statement as StatementResponse).entries || []).map((e: StatementEntry, idx: number) => (
                           <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 text-sm text-gray-600">{new Date(e.date).toLocaleString()}</td>
+                            <td className="px-6 py-4 text-sm text-gray-600">{formatTimestamp(e.date)}</td>
                             <td className="px-6 py-4 text-sm">
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${e.type === 'INVOICE' ? 'bg-blue-100 text-blue-800' :
                                 e.type === 'PAYMENT' ? 'bg-green-100 text-green-800' :
@@ -777,7 +778,7 @@ export default function CustomersPage() {
                           <tbody className="bg-white divide-y divide-emerald-100">
                             {((statement as StatementResponse).deposits!.entries || []).map((d: DepositEntry, idx: number) => (
                               <tr key={idx} className="hover:bg-emerald-50">
-                                <td className="px-6 py-4 text-sm text-gray-600">{new Date(d.date).toLocaleString()}</td>
+                                <td className="px-6 py-4 text-sm text-gray-600">{formatTimestamp(d.date)}</td>
                                 <td className="px-6 py-4 text-sm">
                                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${d.type === 'DEPOSIT_IN' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
                                     }`}>

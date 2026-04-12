@@ -46,6 +46,7 @@ interface SystemSettings {
     lowStockAlertsEnabled: boolean;
     lowStockThreshold: number;
     posSessionPolicy: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
+    posTransactionMode: 'DirectSale' | 'OrderToPayment';
 }
 
 async function fetchSettings(): Promise<SystemSettings> {
@@ -79,8 +80,16 @@ export default function SystemSettingsTab() {
 
     const mutation = useMutation({
         mutationFn: updateSettings,
-        onSuccess: () => {
+        onSuccess: (_data, variables) => {
             queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
+            // Immediately write transaction mode to localStorage so that:
+            // 1. Same-tab POS page picks it up on next render (via cache read)
+            // 2. Other tabs receive a 'storage' event and invalidate their query
+            if (variables.posTransactionMode) {
+                localStorage.setItem('pos_transaction_mode', variables.posTransactionMode);
+            }
+            // Invalidate cash register session so POS refetches from server immediately
+            queryClient.invalidateQueries({ queryKey: ['cash-register-session', 'current'] });
             setIsSaving(false);
             setSaveMessage('Settings saved successfully!');
             setTimeout(() => setSaveMessage(''), 3000);
@@ -854,6 +863,82 @@ function POSSessionPolicyInline({
     );
 }
 
+// POS Transaction Mode (inline within Registers tab)
+function POSTransactionModeInline({
+    settings,
+    onSave,
+    isSaving,
+}: SettingsComponentProps) {
+    const [mode, setMode] = useState<'DirectSale' | 'OrderToPayment'>(
+        settings.posTransactionMode || 'DirectSale'
+    );
+
+    const modes = [
+        {
+            value: 'DirectSale' as const,
+            label: 'Direct Sale',
+            description: 'Standard POS flow. Cashier scans items and processes payment in one step.',
+        },
+        {
+            value: 'OrderToPayment' as const,
+            label: 'Order → Payment (SAP-style)',
+            description: 'Two-step flow. Dispenser/staff creates an order, then cashier processes payment separately. Ideal for pharmacies and split-role workflows.',
+        },
+    ];
+
+    const handleSave = () => {
+        onSave({ posTransactionMode: mode } as Partial<SystemSettings>);
+    };
+
+    const currentMode = settings.posTransactionMode || 'DirectSale';
+
+    return (
+        <div className="space-y-6 mt-8 pt-8 border-t border-gray-200">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-900">POS Transaction Mode</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                    Controls whether the POS creates sales directly or uses a two-step order→payment workflow.
+                </p>
+            </div>
+
+            <div className="space-y-3">
+                {modes.map((m) => (
+                    <label
+                        key={m.value}
+                        className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${mode === m.value
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                    >
+                        <input
+                            type="radio"
+                            name="posTransactionMode"
+                            value={m.value}
+                            checked={mode === m.value}
+                            onChange={() => setMode(m.value)}
+                            className="mt-1"
+                        />
+                        <div>
+                            <div className="font-medium text-gray-900">{m.label}</div>
+                            <div className="text-sm text-gray-500 mt-0.5">{m.description}</div>
+                        </div>
+                    </label>
+                ))}
+            </div>
+
+            <div className="flex justify-end">
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving || mode === currentMode}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 px-6 rounded-lg transition-colors"
+                >
+                    {isSaving ? 'Saving...' : 'Save Mode'}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // Register Management Tab (includes Session Policy)
 function RegisterManagement({ settings, onSave, isSaving }: SettingsComponentProps) {
     const { data: registers, isLoading } = useRegisters();
@@ -1109,6 +1194,9 @@ function RegisterManagement({ settings, onSave, isSaving }: SettingsComponentPro
 
             {/* Session Policy */}
             <POSSessionPolicyInline settings={settings} onSave={onSave} isSaving={isSaving} />
+
+            {/* POS Transaction Mode */}
+            <POSTransactionModeInline settings={settings} onSave={onSave} isSaving={isSaving} />
         </div>
     );
 }

@@ -12,6 +12,7 @@ import type { QuotationStatus } from '@shared/types/quotation';
 import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge, normalizeStatus } from '@shared/types/quotation';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
+import { formatTimestampDate } from '../../utils/businessDate';
 
 export default function QuotationsPage() {
   const navigate = useNavigate();
@@ -316,7 +317,7 @@ export default function QuotationsPage() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-blue-600">{quote.quoteNumber}</div>
                         <div className="text-xs text-gray-500">
-                          {new Date(quote.createdAt).toLocaleDateString()}
+                          {formatTimestampDate(quote.createdAt)}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -358,7 +359,7 @@ export default function QuotationsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
-                          {new Date(quote.validUntil).toLocaleDateString()}
+                          {formatTimestampDate(quote.validUntil)}
                         </div>
                         {daysUntilExpiry > 0 && quote.status !== 'CONVERTED' && (
                           <div

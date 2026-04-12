@@ -3,6 +3,7 @@ import { useCurrencies, useCurrencyConfig, useSetExchangeRate, useUpdateCurrency
 import { api, getErrorMessage } from '../../utils/api';
 import { Globe, Plus, X, ArrowRightLeft, Settings } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getBusinessDate } from '../../utils/businessDate';
 
 interface Currency {
   id: string;
@@ -28,7 +29,7 @@ export default function MultiCurrencyPage() {
   const setRate = useSetExchangeRate();
   const updateConfig = useUpdateCurrencyConfig();
 
-  const [rateForm, setRateForm] = useState({ fromCurrency: '', toCurrency: '', rate: 0, effectiveDate: new Date().toISOString().split('T')[0] });
+  const [rateForm, setRateForm] = useState({ fromCurrency: '', toCurrency: '', rate: 0, effectiveDate: getBusinessDate() });
   const [convertForm, setConvertForm] = useState({ from: 'USD', to: 'UGX', amount: 100, date: '' });
   const [convertResult, setConvertResult] = useState<{ convertedAmount?: number; rate?: number } | null>(null);
   const [configForm, setConfigForm] = useState({ functionalCurrency: '', reportingCurrency: '', exchangeRateType: 'SPOT' });
@@ -40,7 +41,7 @@ export default function MultiCurrencyPage() {
   const handleSetRate = async (e: React.FormEvent) => {
     e.preventDefault();
     await setRate.mutateAsync(rateForm);
-    setRateForm({ fromCurrency: '', toCurrency: '', rate: 0, effectiveDate: new Date().toISOString().split('T')[0] });
+    setRateForm({ fromCurrency: '', toCurrency: '', rate: 0, effectiveDate: getBusinessDate() });
     setShowRateForm(false);
   };
 

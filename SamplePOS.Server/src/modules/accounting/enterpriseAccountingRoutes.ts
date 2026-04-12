@@ -20,6 +20,7 @@ import { GLReconciliationService } from '../../services/glReconciliationService.
 import { CurrencyRevaluationService } from '../../services/currencyRevaluationService.js';
 import { GLIntegrityChecker } from '../../services/glIntegrityChecker.js';
 import { AgedBalanceService } from '../../services/agedBalanceService.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 const router = Router();
 
@@ -32,7 +33,7 @@ router.use(authenticate);
 
 /** GET /api/enterprise-accounting/fiscal-year/status?year=2025 */
 router.get('/fiscal-year/status', asyncHandler(async (req, res) => {
-  const year = parseInt(req.query.year as string) || new Date().getFullYear();
+  const year = parseInt(req.query.year as string) || getBusinessYear();
   const status = await FiscalYearCloseService.getStatus(year, req.tenantPool);
   res.json({ success: true, data: status });
 }));
@@ -231,14 +232,14 @@ router.get('/integrity/full-audit',
 
 /** GET /api/enterprise-accounting/aging/receivables?asOfDate=2025-06-15 */
 router.get('/aging/receivables', asyncHandler(async (req, res) => {
-  const asOfDate = (req.query.asOfDate as string) || new Date().toISOString().split('T')[0];
+  const asOfDate = (req.query.asOfDate as string) || getBusinessDate();
   const report = await AgedBalanceService.agedReceivables(asOfDate, req.tenantPool);
   res.json({ success: true, data: report });
 }));
 
 /** GET /api/enterprise-accounting/aging/payables?asOfDate=2025-06-15 */
 router.get('/aging/payables', asyncHandler(async (req, res) => {
-  const asOfDate = (req.query.asOfDate as string) || new Date().toISOString().split('T')[0];
+  const asOfDate = (req.query.asOfDate as string) || getBusinessDate();
   const report = await AgedBalanceService.agedPayables(asOfDate, req.tenantPool);
   res.json({ success: true, data: report });
 }));
