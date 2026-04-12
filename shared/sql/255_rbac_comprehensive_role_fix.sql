@@ -144,9 +144,15 @@ BEGIN
   -- -------------------------------------------------------
 
   -- 3a. ACCOUNTANT
-  --     Full accounting + banking + reports + read-only on sales/purchasing/customers/suppliers/inventory
+  --     Full accounting + banking + reports + expenses
+  --     POS & sales (create, void, refund) so accountant can complete sales & receive payments
+  --     Orders (read, create, pay, cancel) for order-to-payment workflow
+  --     Customers (read, create, export) for customer payments
+  --     Suppliers (read, create, update) for supplier payments
+  --     Purchasing (read, create) for invoice matching
+  --     Quotations (read) for reference
   INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
-  VALUES ('Accountant', 'Financial operations - accounting, banking, and reporting', true, sys, sys)
+  VALUES ('Accountant', 'Financial operations - accounting, banking, payments, and reporting', true, sys, sys)
   ON CONFLICT (name) DO UPDATE SET
     description = EXCLUDED.description,
     is_system_role = true,
@@ -157,14 +163,24 @@ BEGIN
   DELETE FROM rbac_role_permissions WHERE role_id = rid;
   INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
   SELECT rid, key, sys FROM rbac_permissions_catalog
-  WHERE module IN ('accounting', 'banking', 'reports')
+  WHERE module IN ('accounting', 'banking', 'reports', 'expenses', 'orders')
      OR key IN (
-       'sales.read', 'sales.export',
-       'purchasing.read',
-       'customers.read', 'customers.export',
-       'suppliers.read',
+       -- POS: process transactions & void
+       'pos.read', 'pos.create', 'pos.void',
+       -- Sales: full lifecycle for payment completion
+       'sales.read', 'sales.create', 'sales.update', 'sales.void',
+       'sales.refund', 'sales.approve', 'sales.export',
+       -- Purchasing: read + create for invoice matching
+       'purchasing.read', 'purchasing.create',
+       -- Customers: read + create for customer payments
+       'customers.read', 'customers.create', 'customers.export',
+       -- Suppliers: read + create + update for supplier payments
+       'suppliers.read', 'suppliers.create', 'suppliers.update',
+       -- Inventory: read-only for stock reference
        'inventory.read',
-       'settings.read'
+       -- Settings & quotations: read-only
+       'settings.read',
+       'quotations.read'
      );
 
   -- 3b. WAREHOUSE CLERK

@@ -138,10 +138,13 @@ export class RbacController {
       ADMIN: () => true,
       MANAGER: (key) => {
         const mod = key.split('.')[0];
-        return ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'accounting', 'banking', 'delivery', 'settings', 'hr', 'expenses', 'quotations', 'crm'].includes(mod);
+        return ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'accounting', 'banking', 'delivery', 'settings', 'hr', 'expenses', 'quotations', 'crm', 'orders'].includes(mod);
       },
-      CASHIER: (key) => ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'customers.create', 'inventory.read', 'suppliers.read', 'delivery.read', 'settings.read', 'quotations.read', 'quotations.create'].includes(key),
-      STAFF: (key) => key.endsWith('.read'),
+      CASHIER: (key) => ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'customers.create', 'inventory.read', 'suppliers.read', 'delivery.read', 'settings.read', 'quotations.read', 'quotations.create', 'orders.read', 'orders.create', 'orders.pay', 'orders.cancel'].includes(key),
+      STAFF: (key) => {
+        if (key.endsWith('.read')) return true;
+        return ['orders.create', 'pos.create'].includes(key);
+      },
     };
 
     const filter = LEGACY_ROLE_FILTERS[legacyRole];
