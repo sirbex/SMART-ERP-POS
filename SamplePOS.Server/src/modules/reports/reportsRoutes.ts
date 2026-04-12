@@ -381,5 +381,17 @@ export function createReportsRouter(pool: Pool) {
     asyncHandler(async (req, res) => cnDnReportsController.getSupplierAging(req, res, p(req)))
   );
 
+  // Orders Reports
+  router.get(
+    '/orders-report',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getOrdersReport(req, res, p(req)))
+  );
+  router.get(
+    '/cancelled-orders',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.getCancelledOrdersReport(req, res, p(req)))
+  );
+
   return router;
 }

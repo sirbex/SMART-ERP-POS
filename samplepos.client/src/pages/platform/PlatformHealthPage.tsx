@@ -135,7 +135,7 @@ export default function PlatformHealthPage() {
                                                 <td className="py-2.5 text-slate-600">
                                                     <div className="flex items-center gap-4 text-xs">
                                                         <span>Connections: <strong>{pool.connectionCount}</strong></span>
-                                                        <span className="text-slate-400">Last used: {formatTimestampTime(pool.lastUsed)}</span>
+                                                        <span className="text-slate-400">Last used: {formatTimestampTime(String(pool.lastUsed))}</span>
                                                     </div>
                                                 </td>
                                             </tr>

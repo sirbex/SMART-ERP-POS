@@ -10,7 +10,7 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import * as costCenterService from './costCenterService.js';
-import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 const router = Router();
 

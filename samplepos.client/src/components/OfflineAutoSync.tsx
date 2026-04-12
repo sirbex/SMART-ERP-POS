@@ -66,7 +66,7 @@ export default function OfflineAutoSync() {
             const chain = hasSales
                 ? syncOfflineSales().then(({ synced }) => {
                     if (synced > 0) toast.success(`Background sync: ${synced} sale(s) synced`);
-                  })
+                })
                 : Promise.resolve();
 
             chain

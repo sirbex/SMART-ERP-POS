@@ -5,6 +5,7 @@ import Layout from '../../components/Layout';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import { useAuth } from '../../hooks/useAuth';
+import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { toast } from 'react-hot-toast';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ export default function OrdersQueuePage() {
     try {
       const date = new Date(timestamp);
       if (isNaN(date.getTime())) return '';
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: BUSINESS_TIMEZONE });
     } catch {
       return '';
     }

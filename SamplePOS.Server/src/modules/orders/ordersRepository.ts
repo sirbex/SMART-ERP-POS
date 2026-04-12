@@ -25,6 +25,7 @@ export interface OrderRecord {
   completedAt: string | null;
   cancelledAt: string | null;
   cancelledBy: string | null;
+  cancelledByName: string | null;
   cancelReason: string | null;
   items?: OrderItemRecord[];
 }
@@ -258,11 +259,13 @@ export const ordersRepository = {
         o.completed_at     AS "completedAt",
         o.cancelled_at     AS "cancelledAt",
         o.cancelled_by     AS "cancelledBy",
+        ucx.full_name      AS "cancelledByName",
         o.cancel_reason    AS "cancelReason"
       FROM pos_orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN users uc ON uc.id = o.created_by
       LEFT JOIN users ua ON ua.id = o.assigned_cashier_id
+      LEFT JOIN users ucx ON ucx.id = o.cancelled_by
       WHERE ${column} = $1`,
       [identifier]
     );
@@ -398,11 +401,13 @@ export const ordersRepository = {
         o.completed_at     AS "completedAt",
         o.cancelled_at     AS "cancelledAt",
         o.cancelled_by     AS "cancelledBy",
+        ucx.full_name      AS "cancelledByName",
         o.cancel_reason    AS "cancelReason"
       FROM pos_orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN users uc ON uc.id = o.created_by
       LEFT JOIN users ua ON ua.id = o.assigned_cashier_id
+      LEFT JOIN users ucx ON ucx.id = o.cancelled_by
       ${whereClause}
       ORDER BY o.created_at DESC
       LIMIT $${idx++} OFFSET $${idx++}`,

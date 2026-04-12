@@ -659,8 +659,8 @@ function PayrollTab() {
                                         <div key={step} className="flex items-center gap-2">
                                             {i > 0 && <div className="w-8 h-px bg-gray-300" />}
                                             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${step === selectedPeriod.status ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300' :
-                                                    ['OPEN', 'PROCESSED', 'POSTED'].indexOf(step) < ['OPEN', 'PROCESSED', 'POSTED'].indexOf(selectedPeriod.status) ? 'bg-green-100 text-green-700' :
-                                                        'bg-gray-100 text-gray-400'
+                                                ['OPEN', 'PROCESSED', 'POSTED'].indexOf(step) < ['OPEN', 'PROCESSED', 'POSTED'].indexOf(selectedPeriod.status) ? 'bg-green-100 text-green-700' :
+                                                    'bg-gray-100 text-gray-400'
                                                 }`}>
                                                 {['OPEN', 'PROCESSED', 'POSTED'].indexOf(step) < ['OPEN', 'PROCESSED', 'POSTED'].indexOf(selectedPeriod.status) && (
                                                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
@@ -764,8 +764,8 @@ export default function HRPage() {
                             key={t.key}
                             onClick={() => setView(t.key)}
                             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === t.key
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
                                 }`}
                         >
                             {t.label}

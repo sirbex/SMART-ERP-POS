@@ -95,6 +95,21 @@ export function getBusinessYear(tz: string = BUSINESS_TIMEZONE): number {
 }
 
 /**
+ * Add (or subtract) calendar days to a YYYY-MM-DD string and return YYYY-MM-DD.
+ * Pure string→string — avoids timezone-sensitive Date object conversions.
+ */
+export function addDaysToDateString(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  // Construct at noon UTC to avoid any DST edge cases
+  const ms = Date.UTC(y, m - 1, d, 12, 0, 0) + days * 86_400_000;
+  const dt = new Date(ms);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/**
  * Convert a Date object to 'YYYY-MM-DD' in the business timezone.
  * Use this instead of `formatDateBusiness(date)` or
  * `date.toISOString().slice(0,10)` which both produce wrong results

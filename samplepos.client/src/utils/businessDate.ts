@@ -6,15 +6,15 @@
 export const BUSINESS_TIMEZONE = 'Africa/Kampala';
 
 const dtf = new Intl.DateTimeFormat('en-CA', {
-  timeZone: BUSINESS_TIMEZONE,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
 });
 
 /** Returns today's date in business timezone as 'YYYY-MM-DD' */
 export function getBusinessDate(): string {
-  return dtf.format(new Date());
+    return dtf.format(new Date());
 }
 
 /**
@@ -23,10 +23,10 @@ export function getBusinessDate(): string {
  * Output: Localized date+time string in business TZ (e.g. '12/04/2026, 10:00:00 AM')
  */
 export function formatTimestamp(isoString: string | null | undefined): string {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  if (isNaN(date.getTime())) return String(isoString);
-  return date.toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE });
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return String(isoString);
+    return date.toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }
 
 /**
@@ -35,10 +35,10 @@ export function formatTimestamp(isoString: string | null | undefined): string {
  * Output: 'DD/MM/YYYY' in business TZ
  */
 export function formatTimestampDate(isoString: string | null | undefined): string {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  if (isNaN(date.getTime())) return String(isoString);
-  return date.toLocaleDateString('en-GB', { timeZone: BUSINESS_TIMEZONE });
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return String(isoString);
+    return date.toLocaleDateString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }
 
 /**
@@ -47,8 +47,8 @@ export function formatTimestampDate(isoString: string | null | undefined): strin
  * Output: 'HH:MM:SS' in business TZ
  */
 export function formatTimestampTime(isoString: string | null | undefined): string {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  if (isNaN(date.getTime())) return String(isoString);
-  return date.toLocaleTimeString('en-GB', { timeZone: BUSINESS_TIMEZONE });
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return String(isoString);
+    return date.toLocaleTimeString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }

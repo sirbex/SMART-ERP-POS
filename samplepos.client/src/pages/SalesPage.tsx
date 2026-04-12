@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
+import { BUSINESS_TIMEZONE, getBusinessDate } from '../utils/businessDate';
 import Decimal from 'decimal.js';
 import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
@@ -147,13 +148,29 @@ interface PartialPaymentsViewProps {
   endDate?: string;
 }
 
+interface OrderGroup {
+  userId: string;
+  userName: string;
+  orderCount: number;
+  pendingCount: number;
+  completedCount: number;
+  cancelledCount: number;
+  totalValue: Decimal;
+}
+
+interface OrderedByViewProps {
+  groups: OrderGroup[];
+  startDate?: string;
+  endDate?: string;
+}
+
 interface SaleDetailModalProps {
   sale: SaleRow;
   onClose: () => void;
   onSaleUpdated?: () => void;
 }
 
-type TabType = 'overview' | 'by-customer' | 'by-user' | 'invoices' | 'payments' | 'all-sales';
+type TabType = 'overview' | 'by-customer' | 'by-user' | 'ordered-by' | 'invoices' | 'payments' | 'all-sales';
 type DateFilterType =
   | 'today'
   | 'yesterday'
@@ -180,7 +197,7 @@ function formatDisplayDate(dateString: string | null | undefined): string {
   return dateString;
 }
 
-// Format timestamp to display time (HH:MM:SS format)
+// Format timestamp to display time (HH:MM:SS format) in business timezone
 function formatDisplayTime(timestamp: string | null | undefined): string {
   if (!timestamp) return 'N/A';
 
@@ -188,12 +205,13 @@ function formatDisplayTime(timestamp: string | null | undefined): string {
     const date = new Date(timestamp);
     if (isNaN(date.getTime())) return 'N/A';
 
-    // Format as HH:MM:SS in 24-hour format
+    // Format as HH:MM:SS in 24-hour format, pinned to business timezone
     return date.toLocaleTimeString('en-US', {
       hour12: false,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
+      timeZone: BUSINESS_TIMEZONE,
     });
   } catch (error) {
     return 'N/A';
@@ -209,10 +227,14 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
     return `${year}-${m}-${d}`;
   };
 
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1; // getMonth() returns 0-11
-  const day = today.getDate();
+  // Use business timezone date (Africa/Kampala) instead of browser local date
+  const todayStr = getBusinessDate(); // YYYY-MM-DD in business timezone
+  const [yearStr, monthStr, dayStr] = todayStr.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10); // 1-12
+  const day = parseInt(dayStr, 10);
+  // Construct Date from business-date parts for calendar math (weekday, month boundaries)
+  const today = new Date(year, month - 1, day);
 
   let startYear = year,
     startMonth = month,
@@ -562,6 +584,47 @@ export default function SalesPage() {
     return Array.from(grouped.values()).sort((a, b) => b.salesCount - a.salesCount);
   }, [filteredSales, cashierData]);
 
+  // Fetch orders and group by creator (for "Ordered By" tab)
+  const [orderGroups, setOrderGroups] = useState<OrderGroup[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOrdersLoading(true);
+    api.orders.list({ page: 1, limit: 1000, startDate, endDate })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = (resp.data?.data ?? []) as Record<string, unknown>[];
+        const grouped = new Map<string, OrderGroup>();
+        rows.forEach((o) => {
+          const uid = String(o.createdBy || '');
+          const uname = String(o.createdByName || 'Unknown');
+          if (!grouped.has(uid)) {
+            grouped.set(uid, {
+              userId: uid,
+              userName: uname,
+              orderCount: 0,
+              pendingCount: 0,
+              completedCount: 0,
+              cancelledCount: 0,
+              totalValue: new Decimal(0),
+            });
+          }
+          const g = grouped.get(uid)!;
+          g.orderCount++;
+          const st = String(o.status || '');
+          if (st === 'PENDING') g.pendingCount++;
+          else if (st === 'COMPLETED') g.completedCount++;
+          else if (st === 'CANCELLED') g.cancelledCount++;
+          g.totalValue = g.totalValue.plus(Number(o.totalAmount || 0));
+        });
+        setOrderGroups(Array.from(grouped.values()).sort((a, b) => b.orderCount - a.orderCount));
+      })
+      .catch(() => { if (!cancelled) setOrderGroups([]); })
+      .finally(() => { if (!cancelled) setOrdersLoading(false); });
+    return () => { cancelled = true; };
+  }, [startDate, endDate]);
+
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: '📊', adminOnly: true },
     {
@@ -572,6 +635,7 @@ export default function SalesPage() {
     },
     { id: 'by-customer' as TabType, label: 'By Customer', icon: '👥', adminOnly: true },
     { id: 'by-user' as TabType, label: 'By Cashier', icon: '🧑‍💼', adminOnly: true },
+    { id: 'ordered-by' as TabType, label: 'Ordered By', icon: '📋', adminOnly: true },
     { id: 'invoices' as TabType, label: 'Credit Sales', icon: '📄', adminOnly: false },
     { id: 'payments' as TabType, label: 'Partial Payments', icon: '💰', adminOnly: false },
   ].filter((tab) => !isCashier || !tab.adminOnly);
@@ -965,6 +1029,27 @@ export default function SalesPage() {
                         <p className="text-gray-500 text-lg">No cashier sales found</p>
                         <p className="text-gray-400 text-sm mt-2">
                           Sales by cashier will appear here
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Ordered By Tab */}
+                {activeTab === 'ordered-by' && (
+                  <>
+                    {ordersLoading ? (
+                      <div className="text-center py-12">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" />
+                        <p className="text-gray-500">Loading orders...</p>
+                      </div>
+                    ) : orderGroups.length > 0 ? (
+                      <OrderedByView groups={orderGroups} startDate={startDate} endDate={endDate} />
+                    ) : (
+                      <div className="text-center py-12">
+                        <p className="text-gray-500 text-lg">No orders found</p>
+                        <p className="text-gray-400 text-sm mt-2">
+                          Orders by user will appear here
                         </p>
                       </div>
                     )}
@@ -1379,6 +1464,121 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Ordered By View Component — shows orders grouped by who created them
+function OrderedByView({ groups, startDate, endDate }: OrderedByViewProps) {
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
+  const [expandedOrders, setExpandedOrders] = useState<Record<string, unknown>[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  useEffect(() => {
+    if (!expandedUser) {
+      setExpandedOrders([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingOrders(true);
+    api.orders.list({ page: 1, limit: 200, startDate, endDate })
+      .then((resp) => {
+        if (cancelled) return;
+        const all = (resp.data?.data ?? []) as Record<string, unknown>[];
+        setExpandedOrders(all.filter((o) => String(o.createdBy || '') === expandedUser));
+      })
+      .catch(() => { if (!cancelled) setExpandedOrders([]); })
+      .finally(() => { if (!cancelled) setLoadingOrders(false); });
+    return () => { cancelled = true; };
+  }, [expandedUser, startDate, endDate]);
+
+  const totalOrders = groups.reduce((s, g) => s + g.orderCount, 0);
+  const totalValue = groups.reduce((s, g) => s.plus(g.totalValue), new Decimal(0));
+
+  return (
+    <div className="space-y-4">
+      {/* Summary bar */}
+      <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-4">
+        <span>{groups.length} users</span>
+        <span>{totalOrders} total orders</span>
+        <span>Value: {formatCurrency(totalValue.toNumber())}</span>
+      </div>
+
+      {groups.map((g) => (
+        <div key={g.userId} className="border border-gray-200 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setExpandedUser(expandedUser === g.userId ? null : g.userId)}
+            className="w-full bg-gray-50 hover:bg-gray-100 p-4 flex items-center justify-between transition-colors"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-orange-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
+                {g.userName.charAt(0).toUpperCase()}
+              </div>
+              <div className="text-left">
+                <div className="font-semibold text-gray-900">{g.userName}</div>
+                <div className="text-sm text-gray-600">{g.orderCount} orders</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="text-right text-sm space-y-0.5">
+                {g.completedCount > 0 && (
+                  <div className="text-green-600">{g.completedCount} completed</div>
+                )}
+                {g.pendingCount > 0 && (
+                  <div className="text-yellow-600">{g.pendingCount} pending</div>
+                )}
+                {g.cancelledCount > 0 && (
+                  <div className="text-red-600">{g.cancelledCount} cancelled</div>
+                )}
+              </div>
+              <div className="text-right">
+                <div className="text-xl font-bold text-gray-900">
+                  {formatCurrency(g.totalValue.toNumber())}
+                </div>
+              </div>
+            </div>
+          </button>
+
+          {expandedUser === g.userId && (
+            <div className="p-4 bg-white border-t border-gray-200">
+              {loadingOrders ? (
+                <div className="text-center py-4 text-gray-500">Loading orders...</div>
+              ) : expandedOrders.length === 0 ? (
+                <div className="text-center py-4 text-gray-400">No orders found</div>
+              ) : (
+                <table className="min-w-full">
+                  <thead className="text-xs text-gray-500 uppercase">
+                    <tr>
+                      <th className="text-left pb-2">Order #</th>
+                      <th className="text-left pb-2">Customer</th>
+                      <th className="text-left pb-2">Date</th>
+                      <th className="text-left pb-2">Status</th>
+                      <th className="text-right pb-2">Amount</th>
+                      <th className="text-left pb-2">Cancel Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-sm">
+                    {expandedOrders.map((o) => {
+                      const st = String(o.status || '');
+                      const statusColor = st === 'COMPLETED' ? 'text-green-600' : st === 'CANCELLED' ? 'text-red-600' : 'text-yellow-600';
+                      return (
+                        <tr key={String(o.id)} className="border-t border-gray-100">
+                          <td className="py-2 font-medium text-blue-600">{String(o.orderNumber || '')}</td>
+                          <td className="py-2">{String(o.customerName || 'Walk-in')}</td>
+                          <td className="py-2">{String(o.orderDate || '')}</td>
+                          <td className={`py-2 font-medium ${statusColor}`}>{st}</td>
+                          <td className="py-2 text-right font-medium">{formatCurrency(Number(o.totalAmount || 0))}</td>
+                          <td className="py-2 text-gray-500 text-xs">{st === 'CANCELLED' ? String(o.cancelReason || '-') : ''}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

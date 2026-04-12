@@ -37,7 +37,7 @@ import {
     BankAlert
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
-import { formatTimestampDate } from '../../utils/businessDate';
+import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
 
 const alertTypeConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
     'LOW_BALANCE': { icon: DollarSign, label: 'Low Balance', color: 'text-orange-600' },

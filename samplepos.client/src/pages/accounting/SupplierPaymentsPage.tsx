@@ -45,6 +45,7 @@ import {
 } from '../../components/ui/temp-ui-components';
 import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
+import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { toast } from 'react-hot-toast';
 import { ERROR_MESSAGES } from '../../constants/errorMessages';
 import { SUPPLIER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/paymentMethods';
@@ -724,7 +725,7 @@ const SupplierPaymentsPage: React.FC = () => {
         // Footer
         doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Generated on ${new Date().toLocaleString()}`, pageWidth / 2, 285, { align: 'center' });
+        doc.text(`Generated on ${new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}`, pageWidth / 2, 285, { align: 'center' });
         doc.text('Computer-generated document. No signature required for amounts under UGX 1,000,000.', pageWidth / 2, 290, { align: 'center' });
 
         // Save the PDF
@@ -2011,7 +2012,7 @@ const SupplierPaymentsPage: React.FC = () => {
 
                             {/* Footer */}
                             <div className="footer mt-8 pt-4 border-t border-dashed border-gray-400 text-xs text-gray-500 text-center">
-                                <p>Generated on {new Date().toLocaleString()}</p>
+                                <p>Generated on {new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}</p>
                                 <p>This is a computer-generated document. No signature required for amounts under UGX 1,000,000.</p>
                             </div>
                         </div>

@@ -109,16 +109,22 @@ interface SaleRecord {
   total_amount?: number;
 }
 
-/** Format a Date into a receipt-friendly date+time string: DD/MM/YYYY h:mm AM/PM */
+/** Format a Date into a receipt-friendly date+time string: DD/MM/YYYY h:mm AM/PM
+ *  Always uses business timezone (Africa/Kampala) regardless of browser settings.
+ */
 function formatReceiptDateTime(date: Date): string {
-  const dd = String(date.getDate()).padStart(2, '0');
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const yyyy = date.getFullYear();
-  const hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  const hour12 = hours % 12 || 12;
-  return `${dd}/${mm}/${yyyy} ${hour12}:${minutes} ${ampm}`;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Kampala',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(date);
+
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')} ${get('dayPeriod').toUpperCase()}`;
 }
 
 /** Product search result (mirrors POSProductSearch's ProductSearchResult) */
@@ -315,7 +321,7 @@ export default function POSPage() {
 
   // Order mode state
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
-  const { isOnline, saveSaleOffline, saveOrderOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, pendingOrderCount, reviewCount, failedCount } =
+  const { isOnline, saveSaleOffline, saveOrderOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, pendingOrderCount: _pendingOrderCount, reviewCount, failedCount } =
     useOfflineMode();
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -2962,7 +2968,7 @@ export default function POSPage() {
                     <div className="flex items-center gap-2 text-xs text-gray-500">
                       <span>{sale.data.lineItems.length} items</span>
                       <span>•</span>
-                      <span>{formatTimestampTime(sale.timestamp)}</span>
+                      <span>{formatTimestampTime(String(sale.timestamp))}</span>
                     </div>
                     {sale.syncError && (
                       <p className="text-xs text-red-500 mt-0.5 break-words">{sale.syncError}</p>
@@ -4454,8 +4460,8 @@ export default function POSPage() {
                               {quote.customerName || 'Walk-in Customer'}
                             </p>
                             <p className="text-sm text-gray-600 mt-1">
-                              {formatTimestampDate(quote.createdAt)} · Valid until{' '}
-                              {formatTimestampDate(quote.validUntil)}
+                              {formatTimestampDate(String(quote.createdAt))} · Valid until{' '}
+                              {formatTimestampDate(String(quote.validUntil))}
                             </p>
                           </div>
                           <div className="text-right">

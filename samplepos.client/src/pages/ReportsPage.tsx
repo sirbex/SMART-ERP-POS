@@ -347,7 +347,9 @@ type ReportType =
   | 'SUPPLIER_STATEMENT'
   | 'SUPPLIER_AGING'
   | 'VOID_SALES_REPORT'
-  | 'REFUND_REPORT';
+  | 'REFUND_REPORT'
+  | 'ORDERS_REPORT'
+  | 'CANCELLED_ORDERS_REPORT';
 
 interface ReportOption {
   value: ReportType;
@@ -757,6 +759,24 @@ const REPORT_OPTIONS: ReportOption[] = [
     category: 'Sales',
     icon: '↩️',
   },
+  {
+    value: 'ORDERS_REPORT',
+    label: 'Orders Report',
+    description: 'All orders with creator, assigned cashier, status, and completion/cancellation details',
+    requiresDateRange: true,
+    supportsFilters: ['status', 'userId'],
+    category: 'Sales',
+    icon: '📝',
+  },
+  {
+    value: 'CANCELLED_ORDERS_REPORT',
+    label: 'Cancelled Orders Report',
+    description: 'Cancelled orders with cancellation reasons, who cancelled, and lost value analysis',
+    requiresDateRange: true,
+    supportsFilters: ['userId'],
+    category: 'Sales',
+    icon: '❌',
+  },
 ];
 
 // Dynamic report data interface - covers all report types
@@ -1096,6 +1116,8 @@ export default function ReportsPage() {
           return;
         }
         params.supplierId = supplierId;
+      } else if (selectedReport === 'ORDERS_REPORT') {
+        if (status) params.status = status;
       }
 
       const { data: result } = await api.post('/reports/generate', params);
@@ -1168,6 +1190,8 @@ export default function ReportsPage() {
         'SUPPLIER_AGING': 'supplier-aging',
         'VOID_SALES_REPORT': 'void-sales',
         'REFUND_REPORT': 'refunds',
+        'ORDERS_REPORT': 'orders-report',
+        'CANCELLED_ORDERS_REPORT': 'cancelled-orders',
       };
 
       const endpoint = reportEndpointMap[selectedReport];
@@ -1586,12 +1610,22 @@ export default function ReportsPage() {
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-label="Payment status"
+              aria-label="Status filter"
             >
               <option value="">All Status</option>
-              <option value="PENDING">Pending</option>
-              <option value="PAID">Paid</option>
-              <option value="PARTIAL">Partial</option>
+              {selectedReport === 'ORDERS_REPORT' ? (
+                <>
+                  <option value="PENDING">Pending</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </>
+              ) : (
+                <>
+                  <option value="PENDING">Pending</option>
+                  <option value="PAID">Paid</option>
+                  <option value="PARTIAL">Partial</option>
+                </>
+              )}
             </select>
           </div>
         )}

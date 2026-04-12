@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
+import { BUSINESS_TIMEZONE } from '../utils/businessDate';
 import {
   useSalesSummary,
   useTopSellingProducts,
@@ -283,6 +284,7 @@ export default function Dashboard() {
               year: 'numeric',
               month: 'long',
               day: 'numeric',
+              timeZone: BUSINESS_TIMEZONE,
             })}
           </div>
         </div>

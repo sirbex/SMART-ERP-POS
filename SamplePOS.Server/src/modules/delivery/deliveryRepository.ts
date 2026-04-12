@@ -366,7 +366,7 @@ export async function updateDeliveryOrderStatus(
          delivery_order_id, old_status, new_status, changed_by_id, notes
        ) VALUES ($1, $2, $3, $4, $5)`,
       [id, oldStatus, data.status, userId || null,
-       'Status changed from ' + (oldStatus || 'NULL') + ' to ' + data.status]
+        'Status changed from ' + (oldStatus || 'NULL') + ' to ' + data.status]
     );
 
     // Set completion timestamp when delivered

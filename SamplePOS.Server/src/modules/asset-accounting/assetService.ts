@@ -22,7 +22,7 @@ import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
 import { ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
-import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
+import { getBusinessYear } from '../../utils/dateRange.js';
 
 // =============================================================================
 // TYPES

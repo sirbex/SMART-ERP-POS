@@ -24,7 +24,7 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
-import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../utils/dateRange.js';
+import { getBusinessDate, getBusinessYear, addDaysToDateString } from '../../utils/dateRange.js';
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
@@ -1269,12 +1269,8 @@ export const salesService = {
             ]);
             const customerName = customerResult.rows[0]?.name || 'Unknown Customer';
 
-            // Calculate due date (30 days from today)
-            const dueDateStr = (() => {
-              const d = new Date(getBusinessDate() + 'T00:00:00Z');
-              d.setUTCDate(d.getUTCDate() + 30);
-              return formatDateBusiness(d);
-            })();
+            // Calculate due date (30 days from today) — string-only, no Date conversion
+            const dueDateStr = addDaysToDateString(getBusinessDate(), 30);
 
             const invoiceResult = await invoiceRepository.createInvoice(client, {
               saleId: sale.id,
@@ -1447,12 +1443,8 @@ export const salesService = {
             hasPaymentLines: !!(input.paymentLines && input.paymentLines.length > 0),
           });
 
-          // Calculate due date (30 days from today)
-          const dueDateStr = (() => {
-            const d = new Date(getBusinessDate() + 'T00:00:00Z');
-            d.setUTCDate(d.getUTCDate() + 30);
-            return formatDateBusiness(d);
-          })();
+          // Calculate due date (30 days from today) — string-only, no Date conversion
+          const dueDateStr = addDaysToDateString(getBusinessDate(), 30);
 
           // IMPORTANT: Invoice represents the FULL SALE, not just the credit portion
           // This allows tracking all payments against the full amount

@@ -830,8 +830,8 @@ function POSSessionPolicyInline({
                     <label
                         key={p.value}
                         className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${policy === p.value
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300'
                             }`}
                     >
                         <input
@@ -906,8 +906,8 @@ function POSTransactionModeInline({
                     <label
                         key={m.value}
                         className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${mode === m.value
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300'
                             }`}
                     >
                         <input

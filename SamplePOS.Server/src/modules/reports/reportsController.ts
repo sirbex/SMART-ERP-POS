@@ -109,6 +109,19 @@ const SalesByCashierQuerySchema = z.object({
   user_id: z.string().optional(),
   format: z.string().optional(),
 });
+const OrdersReportQuerySchema = z.object({
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  status: z.enum(['PENDING', 'COMPLETED', 'CANCELLED']).optional(),
+  user_id: z.string().optional(),
+  format: z.string().optional(),
+});
+const CancelledOrdersQuerySchema = z.object({
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  user_id: z.string().optional(),
+  format: z.string().optional(),
+});
 const CashRegisterDateRangeSchema = z.object({
   startDate: z.string().min(1, 'startDate is required'),
   endDate: z.string().min(1, 'endDate is required'),
@@ -4307,6 +4320,26 @@ export const reportsController = {
         };
         return await cnDnReportsController.getInvoiceAdjustments(modifiedReq, res, pool);
 
+      // ── Orders Reports ──────────────────────────────
+      case 'ORDERS_REPORT':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          status: params.status,
+          user_id: params.userId,
+          format: params.format,
+        };
+        return await reportsController.getOrdersReport(modifiedReq, res, pool);
+
+      case 'CANCELLED_ORDERS_REPORT':
+        queryParams = {
+          start_date: params.startDate,
+          end_date: params.endDate,
+          user_id: params.userId,
+          format: params.format,
+        };
+        return await reportsController.getCancelledOrdersReport(modifiedReq, res, pool);
+
       default:
         return res.status(400).json({
           success: false,
@@ -4808,6 +4841,295 @@ export const reportsController = {
     }
 
     logger.info('Bank transactions report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  /**
+   * Orders Report — all orders with creator/canceller details
+   * GET /api/reports/orders-report
+   */
+  async getOrdersReport(req: Request, res: Response, pool: Pool) {
+    const { start_date, end_date, status, user_id, format } = OrdersReportQuerySchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    let idx = 1;
+
+    if (start_date) {
+      conditions.push(`o.order_date >= $${idx++}`);
+      values.push(start_date);
+    }
+    if (end_date) {
+      conditions.push(`o.order_date <= $${idx++}`);
+      values.push(end_date);
+    }
+    if (status) {
+      conditions.push(`o.status = $${idx++}`);
+      values.push(status);
+    }
+    if (user_id) {
+      conditions.push(`o.created_by = $${idx++}`);
+      values.push(user_id);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(
+      `SELECT
+        o.order_number     AS "orderNumber",
+        o.order_date       AS "orderDate",
+        o.status,
+        c.name             AS "customerName",
+        o.total_amount     AS "totalAmount",
+        o.discount_amount  AS "discountAmount",
+        uc.full_name       AS "createdBy",
+        ua.full_name       AS "assignedCashier",
+        o.completed_at     AS "completedAt",
+        o.cancelled_at     AS "cancelledAt",
+        ucx.full_name      AS "cancelledBy",
+        o.cancel_reason    AS "cancelReason",
+        o.notes,
+        o.created_at       AS "createdAt",
+        (SELECT COUNT(*) FROM pos_order_items WHERE order_id = o.id)::int AS "itemCount"
+      FROM pos_orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN users uc ON uc.id = o.created_by
+      LEFT JOIN users ua ON ua.id = o.assigned_cashier_id
+      LEFT JOIN users ucx ON ucx.id = o.cancelled_by
+      ${whereClause}
+      ORDER BY o.created_at DESC`,
+      values
+    );
+
+    const rows = result.rows;
+
+    // Summary aggregation
+    const totalOrders = rows.length;
+    const pendingOrders = rows.filter((r: Record<string, unknown>) => r.status === 'PENDING').length;
+    const completedOrders = rows.filter((r: Record<string, unknown>) => r.status === 'COMPLETED').length;
+    const cancelledOrders = rows.filter((r: Record<string, unknown>) => r.status === 'CANCELLED').length;
+    const totalValue = rows.reduce(
+      (sum: Decimal, r: Record<string, unknown>) => sum.plus(Number(r.totalAmount) || 0),
+      new Decimal(0)
+    ).toDecimalPlaces(2).toNumber();
+    const cancelledValue = rows
+      .filter((r: Record<string, unknown>) => r.status === 'CANCELLED')
+      .reduce(
+        (sum: Decimal, r: Record<string, unknown>) => sum.plus(Number(r.totalAmount) || 0),
+        new Decimal(0)
+      ).toDecimalPlaces(2).toNumber();
+    const cancellationRate = totalOrders > 0
+      ? new Decimal(cancelledOrders).dividedBy(totalOrders).times(100).toDecimalPlaces(1).toNumber()
+      : 0;
+
+    const summary = {
+      totalOrders,
+      pendingOrders,
+      completedOrders,
+      cancelledOrders,
+      totalValue,
+      cancelledValue,
+      cancellationRate,
+    };
+
+    // PDF export
+    if (format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = getBusinessDate();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="orders-report-${date}.pdf"`);
+      doc.pipe(res);
+
+      const startDate = start_date ? formatDatePDF(start_date) : 'All Time';
+      const endDate = end_date ? formatDatePDF(end_date) : 'Present';
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Orders Report',
+        subtitle: `${startDate} to ${endDate}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total Orders', value: String(totalOrders), color: PDFColors.primary },
+        { label: 'Completed', value: String(completedOrders), color: PDFColors.success },
+        { label: 'Cancelled', value: String(cancelledOrders), color: PDFColors.danger },
+        { label: 'Total Value', value: formatCurrencyPDF(totalValue), color: PDFColors.info },
+        { label: 'Cancellation Rate', value: `${cancellationRate}%`, color: PDFColors.warning },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Order #', key: 'orderNumber', width: 0.12 },
+        { header: 'Date', key: 'orderDate', width: 0.09 },
+        { header: 'Status', key: 'status', width: 0.09 },
+        { header: 'Customer', key: 'customerName', width: 0.12 },
+        { header: 'Amount', key: 'totalAmount', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Created By', key: 'createdBy', width: 0.12 },
+        { header: 'Cashier', key: 'assignedCashier', width: 0.12 },
+        { header: 'Cancelled By', key: 'cancelledBy', width: 0.12 },
+        { header: 'Reason', key: 'cancelReason', width: 0.12 },
+      ];
+
+      pdfGen.addTable(columns, rows);
+      pdfGen.end();
+      return;
+    }
+
+    // JSON response
+    const report = {
+      reportType: 'ORDERS_REPORT',
+      reportName: 'Orders Report',
+      generatedAt: formatDateTime(),
+      generatedBy: userId,
+      parameters: { start_date, end_date, status, user_id },
+      data: rows,
+      recordCount: rows.length,
+      executionTimeMs: 0,
+      summary,
+    };
+
+    logger.info('Orders report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  /**
+   * Cancelled Orders Report — focused on cancelled orders with reasons + canceller
+   * GET /api/reports/cancelled-orders
+   */
+  async getCancelledOrdersReport(req: Request, res: Response, pool: Pool) {
+    const { start_date, end_date, user_id, format } = CancelledOrdersQuerySchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const conditions: string[] = [`o.status = 'CANCELLED'`];
+    const values: unknown[] = [];
+    let idx = 1;
+
+    if (start_date) {
+      conditions.push(`o.order_date >= $${idx++}`);
+      values.push(start_date);
+    }
+    if (end_date) {
+      conditions.push(`o.order_date <= $${idx++}`);
+      values.push(end_date);
+    }
+    if (user_id) {
+      conditions.push(`(o.created_by = $${idx} OR o.cancelled_by = $${idx++})`);
+      values.push(user_id);
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const result = await pool.query(
+      `SELECT
+        o.order_number     AS "orderNumber",
+        o.order_date       AS "orderDate",
+        c.name             AS "customerName",
+        o.total_amount     AS "totalAmount",
+        uc.full_name       AS "createdBy",
+        o.cancelled_at     AS "cancelledAt",
+        ucx.full_name      AS "cancelledBy",
+        o.cancel_reason    AS "cancelReason",
+        o.notes,
+        (SELECT COUNT(*) FROM pos_order_items WHERE order_id = o.id)::int AS "itemCount"
+      FROM pos_orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN users uc ON uc.id = o.created_by
+      LEFT JOIN users ucx ON ucx.id = o.cancelled_by
+      ${whereClause}
+      ORDER BY o.cancelled_at DESC`,
+      values
+    );
+
+    const rows = result.rows;
+
+    // Summary: group by cancel reason
+    const reasonCounts: Record<string, number> = {};
+    let totalLostValue = new Decimal(0);
+    for (const row of rows) {
+      const reason = (row as Record<string, unknown>).cancelReason as string || 'No reason provided';
+      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+      totalLostValue = totalLostValue.plus(Number((row as Record<string, unknown>).totalAmount) || 0);
+    }
+
+    // Group by canceller
+    const cancellerCounts: Record<string, number> = {};
+    for (const row of rows) {
+      const canceller = (row as Record<string, unknown>).cancelledBy as string || 'Unknown';
+      cancellerCounts[canceller] = (cancellerCounts[canceller] || 0) + 1;
+    }
+
+    const summary = {
+      totalCancelledOrders: rows.length,
+      totalLostValue: totalLostValue.toDecimalPlaces(2).toNumber(),
+      topCancelReasons: Object.entries(reasonCounts)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 5)
+        .map(([reason, count]) => ({ reason, count })),
+      cancellationsByUser: Object.entries(cancellerCounts)
+        .sort(([, a], [, b]) => b - a)
+        .map(([user, count]) => ({ user, count })),
+    };
+
+    // PDF export
+    if (format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      const doc = pdfGen.getDocument();
+
+      const date = getBusinessDate();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="cancelled-orders-${date}.pdf"`);
+      doc.pipe(res);
+
+      const startDate = start_date ? formatDatePDF(start_date) : 'All Time';
+      const endDate = end_date ? formatDatePDF(end_date) : 'Present';
+
+      pdfGen.addHeader({
+        companyName,
+        title: 'Cancelled Orders Report',
+        subtitle: `${startDate} to ${endDate}`,
+        generatedAt: formatDateTime(),
+      });
+
+      pdfGen.addSummaryCards([
+        { label: 'Total Cancelled', value: String(rows.length), color: PDFColors.danger },
+        { label: 'Lost Value', value: formatCurrencyPDF(summary.totalLostValue), color: PDFColors.warning },
+      ]);
+
+      const columns: PDFTableColumn[] = [
+        { header: 'Order #', key: 'orderNumber', width: 0.12 },
+        { header: 'Date', key: 'orderDate', width: 0.09 },
+        { header: 'Customer', key: 'customerName', width: 0.13 },
+        { header: 'Amount', key: 'totalAmount', width: 0.1, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        { header: 'Created By', key: 'createdBy', width: 0.12 },
+        { header: 'Cancelled By', key: 'cancelledBy', width: 0.12 },
+        { header: 'Cancelled At', key: 'cancelledAt', width: 0.12, format: (v) => v ? formatDatePDF(String(v)) : '—' },
+        { header: 'Reason', key: 'cancelReason', width: 0.2 },
+      ];
+
+      pdfGen.addTable(columns, rows);
+      pdfGen.end();
+      return;
+    }
+
+    // JSON response
+    const report = {
+      reportType: 'CANCELLED_ORDERS_REPORT',
+      reportName: 'Cancelled Orders Report',
+      generatedAt: formatDateTime(),
+      generatedBy: userId,
+      parameters: { start_date, end_date, user_id },
+      data: rows,
+      recordCount: rows.length,
+      executionTimeMs: 0,
+      summary,
+    };
+
+    logger.info('Cancelled orders report generated', { userId, recordCount: report.recordCount });
     res.json({ success: true, data: report });
   },
 };

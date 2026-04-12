@@ -29,7 +29,7 @@ import type { DeliveryNoteListItem } from '../../api/deliveryNotes';
 import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
-import { formatTimestampDate } from '../../utils/businessDate';
+import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
 
 interface InvoiceSettings {
   companyName?: string;
@@ -230,8 +230,8 @@ export default function QuoteDetailPage() {
             <div className="print-col-right">
               <table className="print-detail-table">
                 <tbody>
-                  <tr><td className="print-detail-label">Date:</td><td className="print-detail-value">{formatTimestampDate(quotation.createdAt)}</td></tr>
-                  <tr><td className="print-detail-label">Valid Until:</td><td className="print-detail-value">{formatTimestampDate(quotation.validUntil)}</td></tr>
+                  <tr><td className="print-detail-label">Date:</td><td className="print-detail-value">{formatTimestampDate(String(quotation.createdAt))}</td></tr>
+                  <tr><td className="print-detail-label">Valid Until:</td><td className="print-detail-value">{formatTimestampDate(String(quotation.validUntil))}</td></tr>
                   <tr><td className="print-detail-label">Status:</td><td className="print-detail-value-bold">{badge.label}</td></tr>
                 </tbody>
               </table>
@@ -545,7 +545,7 @@ export default function QuoteDetailPage() {
               </p>
             )}
             {quotation.convertedAt && (
-              <p className="text-green-700 text-sm">Converted on {formatTimestamp(quotation.convertedAt)}</p>
+              <p className="text-green-700 text-sm">Converted on {formatTimestamp(String(quotation.convertedAt))}</p>
             )}
           </div>
         )}

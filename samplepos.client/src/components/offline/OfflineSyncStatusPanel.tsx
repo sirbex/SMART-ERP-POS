@@ -179,7 +179,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <span>{sale.data.lineItems.length} items</span>
                     <span>•</span>
-                    <span>{formatTimestampTime(sale.timestamp)}</span>
+                    <span>{formatTimestampTime(String(sale.timestamp))}</span>
                   </div>
                   {sale.syncError && (
                     <p className="text-xs text-red-500 mt-0.5 break-words whitespace-normal">{sale.syncError}</p>

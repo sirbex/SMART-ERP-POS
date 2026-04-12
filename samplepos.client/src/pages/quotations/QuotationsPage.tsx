@@ -317,7 +317,7 @@ export default function QuotationsPage() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-blue-600">{quote.quoteNumber}</div>
                         <div className="text-xs text-gray-500">
-                          {formatTimestampDate(quote.createdAt)}
+                          {formatTimestampDate(String(quote.createdAt))}
                         </div>
                       </td>
                       <td className="px-6 py-4">

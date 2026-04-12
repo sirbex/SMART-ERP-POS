@@ -22,6 +22,7 @@ import type { ReturnableItem } from '../../hooks/useReturnGrn';
 import { useAuth } from '../../hooks/useAuth';
 import { useTenant } from '../../contexts/TenantContext';
 import { formatCurrency } from '../../utils/currency';
+import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
@@ -460,7 +461,7 @@ export default function GoodsReceiptsPage() {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(128, 128, 128);
-    doc.text(`Generated on ${new Date().toLocaleString()}`, 14, 285);
+    doc.text(`Generated on ${new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}`, 14, 285);
     doc.text(`${brandName} - Goods Receipt Document`, 196, 285, { align: 'right' });
 
     // Save

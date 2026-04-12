@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { platformApi } from '../../services/platformApi';
 import type { Tenant, TenantUsage, BillingInfo, AuditLogEntry, LimitCheck, BillingEvent } from '../../services/platformApi';
-import { formatTimestampDate } from '../../utils/businessDate';
+import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
 import {
   Building2,
   Plus,
@@ -637,9 +637,9 @@ function TenantDetailDrawer({ tenant, onClose, onRefresh }: { tenant: Tenant; on
                       <div>
                         <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Status</p>
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${billing.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' :
-                            billing.status === 'TRIALING' ? 'bg-blue-100 text-blue-700' :
-                              billing.status === 'PAST_DUE' ? 'bg-amber-100 text-amber-700' :
-                                'bg-red-100 text-red-700'
+                          billing.status === 'TRIALING' ? 'bg-blue-100 text-blue-700' :
+                            billing.status === 'PAST_DUE' ? 'bg-amber-100 text-amber-700' :
+                              'bg-red-100 text-red-700'
                           }`}>{billing.status}</span>
                       </div>
                     </div>

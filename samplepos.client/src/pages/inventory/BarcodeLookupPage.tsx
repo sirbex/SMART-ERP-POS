@@ -15,6 +15,7 @@ import Layout from '../../components/Layout';
 import BarcodeScannerIndicator from '../../components/barcode/BarcodeScannerIndicator';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { formatCurrency } from '../../utils/currency';
+import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import apiClient from '../../utils/api';
 import toast from 'react-hot-toast';
 
@@ -356,7 +357,7 @@ export default function BarcodeLookupPage() {
                           {entry.result ? entry.result.productName : entry.error}
                         </span>
                         <span className="text-xs text-gray-400">
-                          {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: BUSINESS_TIMEZONE })}
                         </span>
                       </div>
                     </button>

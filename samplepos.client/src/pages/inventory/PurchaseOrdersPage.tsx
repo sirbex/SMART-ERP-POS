@@ -11,6 +11,7 @@ import {
 } from '../../hooks/usePurchaseOrders';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { formatCurrency } from '../../utils/currency';
+import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
@@ -1305,6 +1306,7 @@ export default function PurchaseOrdersPage() {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
+        timeZone: BUSINESS_TIMEZONE,
       });
     } catch {
       return '-';
@@ -1436,7 +1438,7 @@ export default function PurchaseOrdersPage() {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(128, 128, 128);
-    doc.text(`Generated on ${new Date().toLocaleString()}`, 15, yPos);
+    doc.text(`Generated on ${new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}`, 15, yPos);
     doc.text(
       `Created: ${formatDate(po.createdAt)} | Updated: ${formatDate(po.updatedAt)}`,
       15,
