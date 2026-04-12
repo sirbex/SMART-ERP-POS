@@ -527,7 +527,7 @@ export const salesRepository = {
         s.status,
         s.notes,
         s.cashier_id,
-        s.created_at as "createdAt",
+        s.created_at,
         c.name as customer_name,
         u.full_name as cashier_name
        FROM sales s

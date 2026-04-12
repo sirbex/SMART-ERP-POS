@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
+import { convertKeysToCamelCase } from '../../utils/caseConverter.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -81,14 +82,14 @@ export const ordersRepository = {
   async findByIdempotencyKey(pool: Pool | PoolClient, key: string): Promise<OrderRecord | null> {
     const result = await pool.query(
       `SELECT
-        o.id, o.order_number AS "orderNumber", o.customer_id AS "customerId",
-        c.name AS "customerName", o.subtotal, o.discount_amount AS "discountAmount",
-        o.tax_amount AS "taxAmount", o.total_amount AS "totalAmount", o.status,
-        o.created_by AS "createdBy", uc.full_name AS "createdByName",
-        o.assigned_cashier_id AS "assignedCashierId", ua.full_name AS "assignedCashierName",
-        o.order_date AS "orderDate", o.notes, o.created_at AS "createdAt",
-        o.completed_at AS "completedAt", o.cancelled_at AS "cancelledAt",
-        o.cancelled_by AS "cancelledBy", o.cancel_reason AS "cancelReason"
+        o.id, o.order_number, o.customer_id,
+        c.name AS customer_name, o.subtotal, o.discount_amount,
+        o.tax_amount, o.total_amount, o.status,
+        o.created_by, uc.full_name AS created_by_name,
+        o.assigned_cashier_id, ua.full_name AS assigned_cashier_name,
+        o.order_date, o.notes, o.created_at,
+        o.completed_at, o.cancelled_at,
+        o.cancelled_by, o.cancel_reason
       FROM pos_orders o
       LEFT JOIN customers c ON o.customer_id = c.id
       LEFT JOIN users uc ON o.created_by = uc.id
@@ -97,7 +98,7 @@ export const ordersRepository = {
       LIMIT 1`,
       [key]
     );
-    return result.rows[0] || null;
+    return result.rows[0] ? convertKeysToCamelCase(result.rows[0]) as OrderRecord : null;
   },
 
   /**
@@ -139,22 +140,22 @@ export const ordersRepository = {
       ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8, $9, $10, $11)
       RETURNING
         id,
-        order_number     AS "orderNumber",
-        customer_id      AS "customerId",
+        order_number,
+        customer_id,
         subtotal,
-        discount_amount  AS "discountAmount",
-        tax_amount       AS "taxAmount",
-        total_amount     AS "totalAmount",
+        discount_amount,
+        tax_amount,
+        total_amount,
         status,
-        created_by       AS "createdBy",
-        assigned_cashier_id AS "assignedCashierId",
-        order_date       AS "orderDate",
+        created_by,
+        assigned_cashier_id,
+        order_date,
         notes,
-        created_at       AS "createdAt",
-        completed_at     AS "completedAt",
-        cancelled_at     AS "cancelledAt",
-        cancelled_by     AS "cancelledBy",
-        cancel_reason    AS "cancelReason"`,
+        created_at,
+        completed_at,
+        cancelled_at,
+        cancelled_by,
+        cancel_reason`,
       [
         orderNumber,
         data.customerId || null,
@@ -172,10 +173,10 @@ export const ordersRepository = {
 
     // Attach display names as null (caller can enrich)
     const row = result.rows[0];
-    row.customerName = null;
-    row.createdByName = null;
-    row.assignedCashierName = null;
-    return row;
+    row.customer_name = null;
+    row.created_by_name = null;
+    row.assigned_cashier_name = null;
+    return convertKeysToCamelCase(row) as OrderRecord;
   },
 
   /**
@@ -214,21 +215,21 @@ export const ordersRepository = {
       ) VALUES ${placeholders.join(', ')}
       RETURNING
         id,
-        order_id          AS "orderId",
-        product_id        AS "productId",
-        product_name      AS "productName",
+        order_id,
+        product_id,
+        product_name,
         quantity,
-        unit_price        AS "unitPrice",
-        line_total        AS "lineTotal",
-        discount_amount   AS "discountAmount",
-        uom_id            AS "uomId",
-        base_qty          AS "baseQty",
-        base_uom_id       AS "baseUomId",
-        conversion_factor AS "conversionFactor"`,
+        unit_price,
+        line_total,
+        discount_amount,
+        uom_id,
+        base_qty,
+        base_uom_id,
+        conversion_factor`,
       values
     );
 
-    return result.rows;
+    return result.rows.map(r => convertKeysToCamelCase(r) as OrderItemRecord);
   },
 
   /**
@@ -241,26 +242,26 @@ export const ordersRepository = {
     const orderResult = await pool.query(
       `SELECT
         o.id,
-        o.order_number     AS "orderNumber",
-        o.customer_id      AS "customerId",
-        c.name             AS "customerName",
+        o.order_number,
+        o.customer_id,
+        c.name             AS customer_name,
         o.subtotal,
-        o.discount_amount  AS "discountAmount",
-        o.tax_amount       AS "taxAmount",
-        o.total_amount     AS "totalAmount",
+        o.discount_amount,
+        o.tax_amount,
+        o.total_amount,
         o.status,
-        o.created_by       AS "createdBy",
-        uc.full_name       AS "createdByName",
-        o.assigned_cashier_id AS "assignedCashierId",
-        ua.full_name       AS "assignedCashierName",
-        o.order_date       AS "orderDate",
+        o.created_by,
+        uc.full_name       AS created_by_name,
+        o.assigned_cashier_id,
+        ua.full_name       AS assigned_cashier_name,
+        o.order_date,
         o.notes,
-        o.created_at       AS "createdAt",
-        o.completed_at     AS "completedAt",
-        o.cancelled_at     AS "cancelledAt",
-        o.cancelled_by     AS "cancelledBy",
-        ucx.full_name      AS "cancelledByName",
-        o.cancel_reason    AS "cancelReason"
+        o.created_at,
+        o.completed_at,
+        o.cancelled_at,
+        o.cancelled_by,
+        ucx.full_name      AS cancelled_by_name,
+        o.cancel_reason
       FROM pos_orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN users uc ON uc.id = o.created_by
@@ -272,30 +273,30 @@ export const ordersRepository = {
 
     if (orderResult.rows.length === 0) return null;
 
-    const order: OrderRecord = orderResult.rows[0];
+    const order: OrderRecord = convertKeysToCamelCase(orderResult.rows[0]) as OrderRecord;
 
     // Fetch items
     const itemsResult = await pool.query(
       `SELECT
         id,
-        order_id          AS "orderId",
-        product_id        AS "productId",
-        product_name      AS "productName",
+        order_id,
+        product_id,
+        product_name,
         quantity,
-        unit_price        AS "unitPrice",
-        line_total        AS "lineTotal",
-        discount_amount   AS "discountAmount",
-        uom_id            AS "uomId",
-        base_qty          AS "baseQty",
-        base_uom_id       AS "baseUomId",
-        conversion_factor AS "conversionFactor"
+        unit_price,
+        line_total,
+        discount_amount,
+        uom_id,
+        base_qty,
+        base_uom_id,
+        conversion_factor
       FROM pos_order_items
       WHERE order_id = $1
       ORDER BY product_name`,
       [order.id]
     );
 
-    order.items = itemsResult.rows;
+    order.items = itemsResult.rows.map(r => convertKeysToCamelCase(r) as OrderItemRecord);
     return order;
   },
 
@@ -315,23 +316,23 @@ export const ordersRepository = {
     const result = await pool.query(
       `SELECT
         o.id,
-        o.order_number     AS "orderNumber",
-        o.customer_id      AS "customerId",
-        c.name             AS "customerName",
+        o.order_number,
+        o.customer_id,
+        c.name             AS customer_name,
         o.subtotal,
-        o.discount_amount  AS "discountAmount",
-        o.tax_amount       AS "taxAmount",
-        o.total_amount     AS "totalAmount",
+        o.discount_amount,
+        o.tax_amount,
+        o.total_amount,
         o.status,
-        o.created_by       AS "createdBy",
-        uc.full_name       AS "createdByName",
-        o.assigned_cashier_id AS "assignedCashierId",
-        ua.full_name       AS "assignedCashierName",
-        o.order_date       AS "orderDate",
+        o.created_by,
+        uc.full_name       AS created_by_name,
+        o.assigned_cashier_id,
+        ua.full_name       AS assigned_cashier_name,
+        o.order_date,
         o.notes,
-        o.created_at       AS "createdAt",
-        o.completed_at     AS "completedAt",
-        (SELECT COUNT(*) FROM pos_order_items WHERE order_id = o.id) AS "itemCount"
+        o.created_at,
+        o.completed_at,
+        (SELECT COUNT(*) FROM pos_order_items WHERE order_id = o.id) AS item_count
       FROM pos_orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN users uc ON uc.id = o.created_by
@@ -341,7 +342,7 @@ export const ordersRepository = {
       values
     );
 
-    return result.rows;
+    return result.rows.map(r => convertKeysToCamelCase(r) as OrderRecord);
   },
 
   /**
@@ -383,26 +384,26 @@ export const ordersRepository = {
     const result = await pool.query(
       `SELECT
         o.id,
-        o.order_number     AS "orderNumber",
-        o.customer_id      AS "customerId",
-        c.name             AS "customerName",
+        o.order_number,
+        o.customer_id,
+        c.name             AS customer_name,
         o.subtotal,
-        o.discount_amount  AS "discountAmount",
-        o.tax_amount       AS "taxAmount",
-        o.total_amount     AS "totalAmount",
+        o.discount_amount,
+        o.tax_amount,
+        o.total_amount,
         o.status,
-        o.created_by       AS "createdBy",
-        uc.full_name       AS "createdByName",
-        o.assigned_cashier_id AS "assignedCashierId",
-        ua.full_name       AS "assignedCashierName",
-        o.order_date       AS "orderDate",
+        o.created_by,
+        uc.full_name       AS created_by_name,
+        o.assigned_cashier_id,
+        ua.full_name       AS assigned_cashier_name,
+        o.order_date,
         o.notes,
-        o.created_at       AS "createdAt",
-        o.completed_at     AS "completedAt",
-        o.cancelled_at     AS "cancelledAt",
-        o.cancelled_by     AS "cancelledBy",
-        ucx.full_name      AS "cancelledByName",
-        o.cancel_reason    AS "cancelReason"
+        o.created_at,
+        o.completed_at,
+        o.cancelled_at,
+        o.cancelled_by,
+        ucx.full_name      AS cancelled_by_name,
+        o.cancel_reason
       FROM pos_orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN users uc ON uc.id = o.created_by
@@ -414,7 +415,7 @@ export const ordersRepository = {
       dataValues
     );
 
-    return { rows: result.rows, total };
+    return { rows: result.rows.map(r => convertKeysToCamelCase(r) as OrderRecord), total };
   },
 
   /**
