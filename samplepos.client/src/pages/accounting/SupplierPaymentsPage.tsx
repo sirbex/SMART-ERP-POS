@@ -56,8 +56,8 @@ import {
     supplierInvoiceService,
     supplierPaymentAllocationService
 } from '../../services/comprehensive-accounting';
-import type {
 import { formatTimestampDate } from '../../utils/businessDate';
+import type {
     SupplierPayment,
     SupplierInvoice,
     CreateSupplierPaymentRequest,
