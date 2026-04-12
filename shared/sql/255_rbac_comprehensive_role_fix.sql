@@ -11,11 +11,17 @@ BEGIN;
 
 -- =============================================================================
 -- 1. ENSURE ALL PERMISSIONS EXIST IN CATALOG
---    (base 60 already exist; adds banking, delivery, settings, inventory.manage,
---     crm, hr, and sales.refund if missing)
+--    (base 60 already exist; adds orders, banking, delivery, settings,
+--     inventory.manage, crm, hr, and sales.refund if missing)
 -- =============================================================================
 
 INSERT INTO rbac_permissions_catalog (key, module, action, description) VALUES
+  -- Orders (4)
+  ('orders.read',   'orders', 'read',   'View POS orders queue'),
+  ('orders.create', 'orders', 'create', 'Create POS orders (dispenser)'),
+  ('orders.pay',    'orders', 'pay',    'Complete POS orders with payment (cashier)'),
+  ('orders.cancel', 'orders', 'cancel', 'Cancel pending POS orders'),
+
   -- Banking (7)
   ('banking.read',      'banking', 'read',      'View bank accounts and transactions'),
   ('banking.create',    'banking', 'create',    'Create bank accounts and transactions'),
