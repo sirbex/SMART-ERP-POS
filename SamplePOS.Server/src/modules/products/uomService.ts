@@ -68,6 +68,48 @@ export async function deleteMasterUom(id: string, dbPool?: pg.Pool) {
   });
 }
 
+/**
+ * Clear overrides that are redundant (formula would produce the same value)
+ * or erroneous (base cost/price stored instead of UoM-adjusted value).
+ *
+ * Clears when factor > 1 and override matches either:
+ *  - baseCost / basePrice  (bug: per-unit value stored as override)
+ *  - baseCost × factor / basePrice × factor  (redundant: same as computed)
+ */
+async function clearRedundantOverrides(
+  pool: pg.Pool,
+  productId: string,
+  conversionFactor: number,
+  costOverride: number | null,
+  priceOverride: number | null,
+): Promise<{ costOverride: number | null; priceOverride: number | null }> {
+  if (conversionFactor <= 1 || (costOverride === null && priceOverride === null)) {
+    return { costOverride, priceOverride };
+  }
+
+  const productResult = await pool.query(
+    'SELECT cost_price, selling_price FROM products WHERE id = $1',
+    [productId]
+  );
+  const product = productResult.rows[0];
+  if (!product) return { costOverride, priceOverride };
+
+  const baseCost = parseFloat(product.cost_price || '0');
+  const basePrice = parseFloat(product.selling_price || '0');
+  const computedCost = new Decimal(baseCost).times(conversionFactor).toNumber();
+  const computedPrice = new Decimal(basePrice).times(conversionFactor).toNumber();
+
+  // Clear if override equals base cost (erroneous) or computed value (redundant)
+  if (costOverride !== null && (Math.abs(costOverride - baseCost) < 0.01 || Math.abs(costOverride - computedCost) < 0.01)) {
+    costOverride = null;
+  }
+  if (priceOverride !== null && (Math.abs(priceOverride - basePrice) < 0.01 || Math.abs(priceOverride - computedPrice) < 0.01)) {
+    priceOverride = null;
+  }
+
+  return { costOverride, priceOverride };
+}
+
 export async function getProductUoms(productId: string, dbPool?: pg.Pool) {
   return repo.listProductUoms(productId, dbPool);
 }
@@ -80,29 +122,12 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
     await repo.unsetDefaultForProduct(data.productId, dbPool);
   }
 
-  // Safeguard: clear cost/price overrides that equal the base cost/price
-  // when factor > 1 — these are clearly erroneous (per-unit cost stored instead
-  // of UOM-adjusted cost). The frontend formula (baseCost × factor) will handle it.
+  // Safeguard: clear redundant overrides (formula handles the conversion)
   let costOverride = data.costOverride ?? null;
   let priceOverride = data.priceOverride ?? null;
-  if (data.conversionFactor > 1 && (costOverride !== null || priceOverride !== null)) {
-    const productResult = await pool.query(
-      'SELECT cost_price, selling_price FROM products WHERE id = $1',
-      [data.productId]
-    );
-    const product = productResult.rows[0];
-    if (product) {
-      const baseCost = parseFloat(product.cost_price || '0');
-      const basePrice = parseFloat(product.selling_price || '0');
-      // If override equals base cost, it was set incorrectly — clear it
-      if (costOverride !== null && Math.abs(costOverride - baseCost) < 0.01) {
-        costOverride = null;
-      }
-      if (priceOverride !== null && Math.abs(priceOverride - basePrice) < 0.01) {
-        priceOverride = null;
-      }
-    }
-  }
+  ({ costOverride, priceOverride } = await clearRedundantOverrides(
+    pool, data.productId, data.conversionFactor, costOverride, priceOverride
+  ));
 
   const result = await repo.createProductUom(
     {
@@ -165,8 +190,30 @@ export async function updateProductUom(
   auditContext?: AuditContext,
   dbPool?: pg.Pool
 ) {
+  const pool = dbPool || globalPool;
   // Use the update-specific schema that doesn't require productId/uomId
   const parsed = ProductUomUpdateSchema.parse(payload);
+
+  // Safeguard: clear redundant overrides (same logic as addProductUom)
+  let costOverride = parsed.costOverride;
+  let priceOverride = parsed.priceOverride;
+
+  if (costOverride !== undefined || priceOverride !== undefined) {
+    // Look up the existing product_uom to get productId and conversionFactor
+    const existing = await repo.getProductUomById(id, pool);
+    if (existing) {
+      const factor = parsed.conversionFactor ?? parseFloat(existing.conversionFactor);
+      const cleared = await clearRedundantOverrides(
+        pool,
+        existing.productId,
+        factor,
+        costOverride ?? null,
+        priceOverride ?? null,
+      );
+      costOverride = cleared.costOverride;
+      priceOverride = cleared.priceOverride;
+    }
+  }
 
   const result = await repo.updateProductUom(
     id,
@@ -174,8 +221,8 @@ export async function updateProductUom(
       barcode: parsed.barcode,
       conversionFactor: parsed.conversionFactor,
       isDefault: parsed.isDefault,
-      priceOverride: parsed.priceOverride,
-      costOverride: parsed.costOverride,
+      priceOverride: priceOverride,
+      costOverride: costOverride,
     },
     dbPool
   );

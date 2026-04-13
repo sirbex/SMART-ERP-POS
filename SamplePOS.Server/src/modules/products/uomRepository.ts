@@ -265,3 +265,27 @@ export async function deleteProductUom(id: string, dbPool?: pg.Pool): Promise<bo
   const res = await pool.query(`DELETE FROM product_uoms WHERE id = $1`, [id]);
   return (res.rowCount ?? 0) > 0;
 }
+
+export async function getProductUomById(id: string, dbPool?: pg.Pool): Promise<DbProductUom | null> {
+  const pool = dbPool || globalPool;
+  const res = await pool.query(
+    `SELECT 
+      pu.id,
+      pu.product_id as "productId",
+      pu.uom_id as "uomId",
+      u.name as "uomName",
+      u.symbol as "uomSymbol",
+      pu.conversion_factor as "conversionFactor",
+      pu.barcode,
+      pu.is_default as "isDefault",
+      pu.price_override as "priceOverride",
+      pu.cost_override as "costOverride",
+      pu.created_at as "createdAt",
+      pu.updated_at as "updatedAt"
+    FROM product_uoms pu
+    JOIN uoms u ON u.id = pu.uom_id
+    WHERE pu.id = $1`,
+    [id]
+  );
+  return res.rows[0] ?? null;
+}

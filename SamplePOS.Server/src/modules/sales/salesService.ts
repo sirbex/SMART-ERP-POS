@@ -358,6 +358,7 @@ export const salesService = {
         let baseUnit = 'PIECE';
         let snapshotConversionFactor = new Decimal(1); // SAP UoM snapshot
         let snapshotBaseUomId: string | null = null; // SAP UoM snapshot
+        let snapshotSellingUomId: string | null = null; // Resolved uoms.id for the selling UoM
         try {
           // Use pre-fetched product data (batch query instead of per-item)
           const prefetchedProduct = productsMap.get(item.productId);
@@ -370,20 +371,40 @@ export const salesService = {
           baseUnit = defaultUom?.symbol || 'PIECE';
           snapshotBaseUomId = defaultUom?.uom_id || null; // Capture base UoM ID at posting time
 
-          // If UoM provided and different from base, try find conversion
-          if (selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
-            const match = productUoms.find((r: ProductUomRow) => {
+          // SAP-like: Use uomId (product_uoms.id) for deterministic conversion lookup
+          // Fallback to string matching on UoM name/symbol for backward compatibility
+          let convMatch: ProductUomRow | undefined;
+          if (item.uomId) {
+            convMatch = productUoms.find((r: ProductUomRow) => r.id === item.uomId);
+          }
+          if (!convMatch && selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
+            convMatch = productUoms.find((r: ProductUomRow) => {
               const name = (r.name || '').toString().toUpperCase();
               const symbol = (r.symbol || '').toString().toUpperCase();
               const want = selectedUom.toUpperCase();
               return name === want || (symbol && symbol === want);
             });
-            if (match) {
-              const factor = new Decimal(match.conversion_factor || 1);
-              baseQty = new Decimal(item.quantity).times(factor);
-              snapshotConversionFactor = factor; // Capture conversion factor at posting time
-            }
           }
+          if (convMatch && !convMatch.is_default) {
+            const factor = new Decimal(convMatch.conversion_factor || 1);
+            baseQty = new Decimal(item.quantity).times(factor);
+            snapshotConversionFactor = factor; // Capture conversion factor at posting time
+            snapshotSellingUomId = convMatch.uom_id; // Capture uoms.id for the selling UoM
+          } else if (convMatch) {
+            // Matched by uomId but it IS the default (base) UoM — no conversion needed
+            snapshotSellingUomId = convMatch.uom_id;
+          }
+
+          logger.info('UoM conversion resolved', {
+            productId: item.productId,
+            inputUom: selectedUom,
+            inputUomId: item.uomId,
+            baseUnit,
+            matchedById: convMatch ? convMatch.id === item.uomId : false,
+            conversionFactor: snapshotConversionFactor.toNumber(),
+            enteredQty: item.quantity,
+            baseQty: baseQty.toNumber(),
+          });
           // Use productResult later below
         } catch (e) {
           logger.warn('UoM conversion failed, falling back to base unit', {
@@ -490,14 +511,8 @@ export const salesService = {
           Money.round(itemCost.dividedBy(new Decimal(item.quantity)), 2)
         );
 
-        // Look up the actual uom_id from product_uoms if provided
-        let actualUomId: string | undefined = undefined;
-        if (item.uomId) {
-          const uomLookup = await client.query('SELECT uom_id FROM product_uoms WHERE id = $1', [
-            item.uomId,
-          ]);
-          actualUomId = uomLookup.rows[0]?.uom_id;
-        }
+        // Use the selling UoM ID resolved during conversion lookup (no extra query needed)
+        const actualUomId = snapshotSellingUomId || undefined;
 
         itemsWithCosts.push({
           saleId: '', // Will be set after sale creation
@@ -907,25 +922,31 @@ export const salesService = {
         );
         baseUnit = productBaseRes.rows[0]?.symbol || 'PIECE';
         deductBaseUomId = productBaseRes.rows[0]?.uom_id || null;
-        if (selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
-          const conv = await client.query(
-            `SELECT pu.conversion_factor, u.name, u.symbol
-             FROM product_uoms pu
-             JOIN uoms u ON u.id = pu.uom_id
-             WHERE pu.product_id = $1`,
-            [item.productId]
-          );
-          const match = conv.rows.find((r: Record<string, unknown>) => {
+
+        // SAP-like: Use uomId (product_uoms.id) for deterministic conversion lookup
+        const conv = await client.query(
+          `SELECT pu.id, pu.conversion_factor, pu.is_default, u.name, u.symbol
+           FROM product_uoms pu
+           JOIN uoms u ON u.id = pu.uom_id
+           WHERE pu.product_id = $1`,
+          [item.productId]
+        );
+        let deductMatch: Record<string, unknown> | undefined;
+        if (item.uomId) {
+          deductMatch = conv.rows.find((r: Record<string, unknown>) => r.id === item.uomId);
+        }
+        if (!deductMatch && selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
+          deductMatch = conv.rows.find((r: Record<string, unknown>) => {
             const name = (r.name || '').toString().toUpperCase();
             const symbol = (r.symbol || '').toString().toUpperCase();
             const want = selectedUom.toUpperCase();
             return name === want || (symbol && symbol === want);
           });
-          if (match) {
-            const factor = new Decimal(Number(match.conversion_factor) || 1);
-            baseQty = new Decimal(item.quantity).times(factor);
-            deductConversionFactor = factor;
-          }
+        }
+        if (deductMatch && !deductMatch.is_default) {
+          const factor = new Decimal(Number(deductMatch.conversion_factor) || 1);
+          baseQty = new Decimal(item.quantity).times(factor);
+          deductConversionFactor = factor;
         }
         // Get product costing method again
         const productResult = await client.query(

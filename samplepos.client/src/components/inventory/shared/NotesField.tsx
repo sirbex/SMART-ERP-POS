@@ -22,7 +22,7 @@ export function NotesField({
 }: NotesFieldProps) {
   return (
     <div className={className}>
-      <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">
+      <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
         Notes
       </label>
       <textarea

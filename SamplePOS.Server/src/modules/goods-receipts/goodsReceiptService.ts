@@ -435,6 +435,15 @@ export const goodsReceiptService = {
         // Bonus stock: cost recorded as 0 for inventory batches (free goods from supplier)
         const effectiveCost: number = isBonus ? 0 : unitCost;
 
+        // ── SAP-STANDARD: Normalize to base units ──────────────────────────
+        // Inventory batches, cost layers, and product valuation MUST store
+        // quantities in base units and costs per base unit.
+        // Example: 10 BOX × 100 (factor) = 1000 pieces, cost 1200/BOX → 12/pc
+        const baseQty = new Decimal(receivedQty).times(finConversionFactor).toNumber();
+        const baseCostPerUnit: number = isBonus
+          ? 0
+          : new Decimal(unitCost).div(finConversionFactor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+
         // Generate human-readable batch number: BATCH-YYYYMMDD-001
         let batchNumber: string = item.batchNumber ?? '';
         if (!batchNumber) {
@@ -468,7 +477,7 @@ export const goodsReceiptService = {
         }
         if (expiryDate) InventoryBusinessRules.validateExpiryDate(expiryDate, false);
 
-        // Check previous cost for alert
+        // Check previous cost for alert (compare base-unit costs)
         const prodRes = await client.query(
           'SELECT p.name, pv.cost_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
           [productId]
@@ -477,9 +486,9 @@ export const goodsReceiptService = {
           ? Money.parseDb(prodRes.rows[0].cost_price).toNumber()
           : 0;
 
-        if (Number.isFinite(previousCostNum) && previousCostNum !== unitCost) {
+        if (Number.isFinite(previousCostNum) && previousCostNum !== baseCostPerUnit) {
           const prev = new Decimal(previousCostNum);
-          const next = new Decimal(unitCost);
+          const next = new Decimal(baseCostPerUnit);
           const changeAmount = next.minus(prev);
           const changePct = prev.eq(0) ? new Decimal(100) : changeAmount.div(prev).times(100);
           alerts.push({
@@ -493,13 +502,13 @@ export const goodsReceiptService = {
           });
         }
 
-        // Create inventory batch for received quantity
+        // Create inventory batch for received quantity (SAP: always in base units)
         const batch = await inventoryRepository.createBatch(client, {
           productId,
           batchNumber,
-          quantity: receivedQty,
+          quantity: baseQty,
           expiryDate,
-          costPrice: effectiveCost,
+          costPrice: baseCostPerUnit,
           goodsReceiptId: gr.id,
           goodsReceiptItemId: item.id ?? null,
           purchaseOrderId: gr.purchaseOrderId ?? null,
@@ -535,14 +544,14 @@ export const goodsReceiptService = {
             productId,
             batch.id,
             'GOODS_RECEIPT',
-            receivedQty,
-            effectiveCost,
+            baseQty,             // SAP: quantity in base units
+            baseCostPerUnit,     // SAP: cost per base unit
             'GOODS_RECEIPT',
             gr.id,
             `GR ${grNumber || gr.id} - Batch ${batchNumber}${isBonus ? ' (BONUS)' : ''}`,
             receivedBy || null,
-            receivedQty, // SAP UoM snapshot: entered quantity (same as received in GR context)
-            finBaseUomId, // SAP UoM snapshot: base UoM at posting time
+            receivedQty,         // SAP UoM snapshot: entered quantity in order units
+            finBaseUomId,        // SAP UoM snapshot: base UoM at posting time
             finConversionFactor, // SAP UoM snapshot: conversion factor at posting time
           ]
         );
@@ -567,8 +576,8 @@ export const goodsReceiptService = {
         if (!isBonus) {
           costLayerData.push({
             productId,
-            quantity: receivedQty,
-            unitCost: effectiveCost,
+            quantity: baseQty,           // SAP: always in base units
+            unitCost: baseCostPerUnit,   // SAP: always per base unit
             goodsReceiptId: gr.id,
             batchNumber,
           });
@@ -578,6 +587,7 @@ export const goodsReceiptService = {
       // ============================================================
       // SUPPLIER PRICE TRACKING
       // Auto-update supplier_product_prices for each product received
+      // SAP: Store base-unit cost so ProcurementSearch returns consistent values
       // ============================================================
       const supplierId = gr.supplierId ?? null;
       const receiptDateStr: string = gr.receivedDate ?? '';
@@ -586,11 +596,17 @@ export const goodsReceiptService = {
           // Only track non-bonus items for price history (bonus = free goods, not real pricing)
           if (!item.isBonus && Money.parseDb(item.unitCost).toNumber() > 0) {
             try {
+              // Normalize to base-unit cost before storing
+              const itemConvFactor = Number(item.conversionFactor) || 1;
+              const supplierBaseCost = new Decimal(Money.parseDb(item.unitCost).toString())
+                .div(itemConvFactor)
+                .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+                .toNumber();
               await supplierProductPriceRepository.upsertSupplierPrice(
                 client,
                 supplierId,
                 item.productId,
-                Money.parseDb(item.unitCost).toNumber(),
+                supplierBaseCost,
                 receiptDateStr || null
               );
             } catch (priceErr: unknown) {

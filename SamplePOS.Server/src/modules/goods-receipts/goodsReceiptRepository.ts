@@ -246,7 +246,8 @@ export const goodsReceiptRepository = {
          ROUND((gri.cost_price - COALESCE(poi.unit_price, pv.cost_price))::numeric, 2) as "costVariance",
          COALESCE(u.name, def_u.name) as "uomName",
          COALESCE(u.symbol, def_u.symbol) as "uomSymbol",
-         COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1) as "conversionFactor"
+         COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1) as "conversionFactor",
+         COALESCE(gri.uom_id, poi.uom_id) as "uomId"
        FROM goods_receipt_items gri
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
        JOIN products p ON gri.product_id = p.id

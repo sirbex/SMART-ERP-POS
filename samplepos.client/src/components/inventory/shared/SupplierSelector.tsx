@@ -6,6 +6,8 @@ interface SupplierSelectorProps {
   disabled?: boolean;
   required?: boolean;
   className?: string;
+  /** When false, hides the built-in label and helper text (caller renders its own). Defaults to true. */
+  showLabel?: boolean;
 }
 
 /**
@@ -19,6 +21,7 @@ export function SupplierSelector({
   disabled = false,
   required = true,
   className = "",
+  showLabel = true,
 }: SupplierSelectorProps) {
   const { data: suppliersData, isLoading } = useSuppliers();
 
@@ -27,9 +30,11 @@ export function SupplierSelector({
 
   return (
     <div className={className}>
-      <label htmlFor="supplier" className="block text-sm font-medium text-gray-700 mb-2">
-        Supplier {required && <span className="text-red-500">*</span>}
-      </label>
+      {showLabel && (
+        <label htmlFor="supplier" className="block text-sm font-medium text-gray-700 mb-1">
+          Supplier {required && <span className="text-red-500">*</span>}
+        </label>
+      )}
       <select
         id="supplier"
         value={value}
@@ -47,7 +52,7 @@ export function SupplierSelector({
           </option>
         ))}
       </select>
-      {required && (
+      {showLabel && required && (
         <p className="mt-1 text-xs text-gray-500">BR-PO-001: Supplier validation required</p>
       )}
     </div>

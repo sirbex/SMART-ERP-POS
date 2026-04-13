@@ -319,8 +319,8 @@ export const inventoryRepository = {
         // Auto-populate source_type (replaces trg_prevent_ghost_batches)
         data.goodsReceiptId ? 'GOODS_RECEIPT'
           : data.adjustmentId ? 'STOCK_ADJUSTMENT'
-          : data.isOpeningBalance ? 'OPENING_BALANCE'
-          : 'DIRECT_ENTRY',
+            : data.isOpeningBalance ? 'OPENING_BALANCE'
+              : 'DIRECT_ENTRY',
       ]
     );
     return result.rows[0];

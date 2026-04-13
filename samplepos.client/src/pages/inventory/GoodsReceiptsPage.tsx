@@ -124,6 +124,8 @@ interface GRItemRow {
   uom_symbol?: string;
   uomName?: string;
   uom_name?: string;
+  uomId?: string;
+  uom_id?: string;
   conversionFactor?: number | string;
   conversion_factor?: number | string;
 }
@@ -1945,7 +1947,12 @@ function GRItemRow({
 
   // Use bundled UoM data from GR detail response (no per-item fetch)
   const uomList = bundledUoms;
-  const defaultUom = uomList.find(u => u.isDefault) || uomList[0];
+  // When receiving from PO, match the PO's UoM; otherwise use product default
+  const itemUomId = item.uomId || item.uom_id;
+  const poUom = itemUomId
+    ? uomList.find(u => u.uomId === itemUomId || u.id === itemUomId)
+    : undefined;
+  const defaultUom = poUom || uomList.find(u => u.isDefault) || uomList[0];
   const selectedUomId = es.selectedUomId || defaultUom?.id;
   const selectedUom = uomList.find(u => u.id === selectedUomId || u.uomId === selectedUomId);
   const factor = selectedUom ? new Decimal(selectedUom.conversionFactor).toNumber() : 1;

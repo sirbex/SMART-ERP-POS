@@ -108,6 +108,7 @@ export interface ProductBatchRow {
 
 export interface ProductUomRow {
     [key: string]: unknown;
+    id: string;  // product_uoms.id (join table PK)
     product_id: string;
     uom_id: string;
     name: string;
@@ -151,7 +152,7 @@ export async function batchFetchProductUoms(
 ): Promise<Map<string, ProductUomRow[]>> {
     return batchFetchGroupMap<ProductUomRow>(
         conn,
-        `SELECT pu.product_id, pu.uom_id, u.name, u.symbol, 
+        `SELECT pu.id, pu.product_id, pu.uom_id, u.name, u.symbol, 
             pu.conversion_factor::text, pu.is_default
      FROM product_uoms pu
      JOIN uoms u ON u.id = pu.uom_id

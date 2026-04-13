@@ -60,6 +60,7 @@ interface POLineItem {
   productName: string;
   quantity: string;
   unitCost: string;
+  lineTotal: string; // SAP-style: bi-directional with unitCost
   baseCost: string; // Base unit cost — needed for UOM cost recalculation
   // Selected ordering UoM
   selectedUomId?: string | null;
@@ -167,26 +168,25 @@ function LineItemRow({
   onTab: (fromField: 'qty' | 'cost', index: number) => void;
 }) {
   const localCostRef = useRef<HTMLInputElement | null>(null);
-
-  // Compute line total
-  let lineTotal = new Decimal(0);
-  try {
-    lineTotal = new Decimal(item.quantity || 0).times(new Decimal(item.unitCost || 0));
-  } catch { /* invalid decimal input */ }
+  const localTotalRef = useRef<HTMLInputElement | null>(null);
 
   const needsReorder = item.quantityOnHand !== undefined &&
     item.reorderLevel !== undefined &&
     item.quantityOnHand <= item.reorderLevel;
 
-  const handleKeyDown = (field: 'qty' | 'cost') => (e: React.KeyboardEvent) => {
+  const handleKeyDown = (field: 'qty' | 'cost' | 'total') => (e: React.KeyboardEvent) => {
     if (e.key === 'Tab' && !e.shiftKey) {
       if (field === 'qty') {
-        // Tab from quantity → unit cost (same row)
         e.preventDefault();
         localCostRef.current?.focus();
         localCostRef.current?.select();
       } else if (field === 'cost') {
-        // Tab from unit cost → next product search (next row)
+        // Tab from unit cost → line total (SAP: Net Price → Net Value)
+        e.preventDefault();
+        localTotalRef.current?.focus();
+        localTotalRef.current?.select();
+      } else if (field === 'total') {
+        // Tab from line total → next row
         e.preventDefault();
         onTab('cost', index);
       }
@@ -196,6 +196,9 @@ function LineItemRow({
       if (field === 'qty') {
         localCostRef.current?.focus();
         localCostRef.current?.select();
+      } else if (field === 'cost') {
+        localTotalRef.current?.focus();
+        localTotalRef.current?.select();
       } else {
         onTab('cost', index);
       }
@@ -225,7 +228,7 @@ function LineItemRow({
           </div>
         </div>
       </td>
-      <td className="px-2 py-2">
+      <td className="px-2 py-2 w-20">
         <input
           ref={(el) => { onQtyRef(el); }}
           type="number"
@@ -235,13 +238,13 @@ function LineItemRow({
           onKeyDown={handleKeyDown('qty')}
           step="1"
           min="1"
-          className="w-20 px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="0"
           disabled={disabled}
         />
       </td>
       {/* Order Unit selector */}
-      <td className="px-2 py-2">
+      <td className="px-2 py-2 w-36">
         <div className="flex flex-col gap-0.5">
           <UomSelector
             productId={item.productId}
@@ -260,7 +263,8 @@ function LineItemRow({
           )}
         </div>
       </td>
-      <td className="px-2 py-2">
+      {/* Unit Cost — always editable (SAP Net Price) */}
+      <td className="px-2 py-2 w-36">
         <input
           ref={(el) => { localCostRef.current = el; onCostRef(el); }}
           type="number"
@@ -270,7 +274,7 @@ function LineItemRow({
           onKeyDown={handleKeyDown('cost')}
           step="0.01"
           min="0"
-          className="w-28 px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="0.00"
           disabled={disabled}
         />
@@ -280,8 +284,21 @@ function LineItemRow({
           </div>
         )}
       </td>
-      <td className="px-2 py-2 text-right text-sm font-medium text-gray-900 whitespace-nowrap">
-        {formatCurrency(lineTotal.toNumber())}
+      {/* Line Total — always editable (SAP Net Value) */}
+      <td className="px-2 py-2 w-36">
+        <input
+          ref={(el) => { localTotalRef.current = el; }}
+          type="number"
+          value={item.lineTotal}
+          onChange={(e) => onUpdate(item.id, 'lineTotal', e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onKeyDown={handleKeyDown('total')}
+          step="0.01"
+          min="0"
+          className="w-full px-2 py-1 text-right text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          placeholder="0.00"
+          disabled={disabled}
+        />
       </td>
       <td className="px-2 py-2 text-center">
         <button
@@ -322,19 +339,25 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   const [notes, setNotes] = useState('');
   const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
     if (initialReorderItems && initialReorderItems.length > 0) {
-      return initialReorderItems.map((item) => ({
-        id: `reorder-${item.productId}`,
-        productId: item.productId,
-        productName: item.productName,
-        quantity: String(item.suggestedQty || 1),
-        unitCost: item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00',
-        baseCost: item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00',
-        selectedUomId: null,
-        quantityOnHand: item.currentStock,
-        reorderLevel: item.reorderPoint,
-        reorderQuantity: item.suggestedQty,
-        costSource: item.costPrice ? 'Cost' : '',
-      }));
+      return initialReorderItems.map((item) => {
+        const cost = item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00';
+        const qty = String(item.suggestedQty || 1);
+        const total = new Decimal(qty).times(new Decimal(cost)).toFixed(2);
+        return {
+          id: `reorder-${item.productId}`,
+          productId: item.productId,
+          productName: item.productName,
+          quantity: qty,
+          unitCost: cost,
+          lineTotal: total,
+          baseCost: cost,
+          selectedUomId: null,
+          quantityOnHand: item.currentStock,
+          reorderLevel: item.reorderPoint,
+          reorderQuantity: item.suggestedQty,
+          costSource: item.costPrice ? 'Cost' : '',
+        };
+      });
     }
     return [];
   });
@@ -361,16 +384,14 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     focusSearch();
   }, [focusSearch]);
 
-  // Calculate totals with Decimal.js precision
+  // Calculate totals — always use lineTotal (kept in sync by bi-directional update)
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
     let itemCount = 0;
 
     lineItems.forEach((item) => {
       try {
-        const qty = new Decimal(item.quantity || 0);
-        const cost = new Decimal(item.unitCost || 0);
-        subtotal = subtotal.plus(qty.times(cost));
+        subtotal = subtotal.plus(new Decimal(item.lineTotal || 0));
         itemCount++;
       } catch {
         // Invalid number, skip
@@ -414,6 +435,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
       productName: product.name,
       quantity: suggestedQty,
       unitCost: initialCost,
+      lineTotal: new Decimal(suggestedQty).times(new Decimal(initialCost)).toFixed(2),
       baseCost: initialCost, // Base unit cost for UOM recalculation
       selectedUomId: product.purchaseUomId || null,
       quantityOnHand: product.quantityOnHand,
@@ -435,23 +457,59 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     }, 100);
   }, [lineItems.length]);
 
-  // Update line item
+  // SAP ME21N-style: editing one field auto-recalculates the linked field
   const updateLineItem = useCallback((id: string, field: keyof POLineItem, value: string) => {
     setLineItems((prevItems) =>
-      prevItems.map((item) =>
-        item.id === id ? { ...item, [field]: value } : item
-      )
+      prevItems.map((item) => {
+        if (item.id !== id) return item;
+        const updated = { ...item, [field]: value };
+        try {
+          if (field === 'unitCost') {
+            // Unit cost changed → recalculate line total
+            updated.lineTotal = new Decimal(updated.quantity || 0)
+              .times(new Decimal(value || 0))
+              .toDecimalPlaces(2)
+              .toString();
+          } else if (field === 'lineTotal') {
+            // Line total changed → recalculate unit cost
+            const qty = new Decimal(updated.quantity || 0);
+            if (qty.gt(0)) {
+              updated.unitCost = new Decimal(value || 0)
+                .div(qty)
+                .toDecimalPlaces(2)
+                .toString();
+            }
+          } else if (field === 'quantity') {
+            // Quantity changed → recalculate line total (keep unit cost)
+            updated.lineTotal = new Decimal(value || 0)
+              .times(new Decimal(updated.unitCost || 0))
+              .toDecimalPlaces(2)
+              .toString();
+          }
+        } catch { /* invalid decimal, skip sync */ }
+        return updated;
+      })
     );
   }, []);
 
-  // UOM change updates cost and tracks conversion factor
-  const handleUomChange = useCallback((id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => {
+  // UOM change: SAP ME21N — always compute baseCost × factor (ignore costOverride from UomSelector)
+  const handleUomChange = useCallback((id: string, uomId: string | null, _newCost: string, factor: string, uomName: string) => {
     setLineItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, selectedUomId: uomId, unitCost: newCost, conversionFactor: factor, selectedUomName: uomName }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        let unitCost = item.unitCost;
+        let lineTotal = item.lineTotal;
+        try {
+          const base = new Decimal(item.baseCost || item.unitCost || 0);
+          const f = new Decimal(factor || 1);
+          unitCost = base.times(f).toDecimalPlaces(2).toString();
+          lineTotal = new Decimal(item.quantity || 0)
+            .times(new Decimal(unitCost))
+            .toDecimalPlaces(2)
+            .toString();
+        } catch { /* skip */ }
+        return { ...item, selectedUomId: uomId, unitCost, lineTotal, conversionFactor: factor, selectedUomName: uomName };
+      })
     );
   }, []);
 
@@ -569,26 +627,30 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
 
       <form onSubmit={handleSubmit}>
         {/* Header Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-6">
           {/* Supplier Selection */}
-          <div className="flex items-end gap-2">
-            <SupplierSelector value={supplierId} onChange={setSupplierId} disabled={isSubmitting} className="flex-1" />
-            <button
-              type="button"
-              onClick={() => setShowQuickSupplier(true)}
-              disabled={isSubmitting}
-              className="px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
-              title="Quick-create a new supplier"
-            >
-              + New
-            </button>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Supplier <span className="text-red-500">*</span></label>
+            <div className="flex items-center gap-2">
+              <SupplierSelector value={supplierId} onChange={setSupplierId} disabled={isSubmitting} className="flex-1" showLabel={false} />
+              <button
+                type="button"
+                onClick={() => setShowQuickSupplier(true)}
+                disabled={isSubmitting}
+                className="px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+                title="Quick-create a new supplier"
+              >
+                + New
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">BR-PO-001: Supplier validation required</p>
           </div>
 
           {/* Expected Delivery Date */}
           <div>
             <label
               htmlFor="expectedDelivery"
-              className="block text-sm font-medium text-gray-700 mb-2"
+              className="block text-sm font-medium text-gray-700 mb-1"
             >
               Expected Delivery Date
             </label>
@@ -601,16 +663,17 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
             />
             <p className="mt-1 text-xs text-gray-500">BR-PO-005: Must be future date</p>
           </div>
-        </div>
 
-        {/* Notes */}
-        <NotesField
-          value={notes}
-          onChange={setNotes}
-          disabled={isSubmitting}
-          placeholder="Optional notes about this purchase order..."
-          className="mb-4"
-        />
+          {/* Notes — full width */}
+          <div className="md:col-span-2">
+            <NotesField
+              value={notes}
+              onChange={setNotes}
+              disabled={isSubmitting}
+              placeholder="Optional notes about this purchase order..."
+            />
+          </div>
+        </div>
 
         {/* Line Items Section */}
         <div className="mb-6 border border-gray-300 rounded-lg p-4">
@@ -624,7 +687,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
           </div>
 
           {/* Procurement Product Search */}
-          <div className="flex items-start gap-2 mb-3">
+          <div className="flex items-end gap-2 mb-3">
             <ProcurementProductSearch
               supplierId={supplierId}
               onProductSelect={addLineItem}
@@ -636,7 +699,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
               type="button"
               onClick={() => setShowQuickProduct(true)}
               disabled={isSubmitting}
-              className="mt-6 px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+              className="mb-px px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
               title="Quick-create a new product"
             >
               + New
@@ -653,19 +716,19 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                         Product
                       </th>
-                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-20">
                         Qty
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-32">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-36">
                         Order UoM
                       </th>
-                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-36">
                         Unit Cost
                       </th>
-                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-36">
                         Line Total
                       </th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12">
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-10">
                       </th>
                     </tr>
                   </thead>
@@ -763,21 +826,22 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     if (!po.items || po.items.length === 0) return [];
     return po.items.map((item: POItemRow) => {
       const cost = String(item.unit_price || item.unitCost || 0);
+      const qty = String(item.ordered_quantity || item.quantity || 0);
       const factor = Number(item.conversion_factor || item.conversionFactor || 1);
-      // Derive base cost from product_cost_price (from product_valuation),
-      // or fall back to dividing the displayed cost by the conversion factor.
       const productBaseCost = Number(item.product_cost_price || item.productCostPrice || 0);
       const derivedBaseCost = productBaseCost > 0
         ? String(productBaseCost)
         : factor > 1
           ? new Decimal(cost).dividedBy(factor).toFixed(2)
           : cost;
+      const total = new Decimal(qty || 0).times(new Decimal(cost || 0)).toFixed(2);
       return {
         id: item.id || `existing-${Math.random()}`,
         productId: item.product_id || item.productId || '',
         productName: item.product_name || item.productName || '',
-        quantity: String(item.ordered_quantity || item.quantity || 0),
+        quantity: qty,
         unitCost: cost,
+        lineTotal: total,
         baseCost: derivedBaseCost,
         selectedUomId: item.uom_id || item.uomId || null,
         selectedUomName: item.uom_name || item.uomName || undefined,
@@ -809,15 +873,13 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     focusSearch();
   }, [focusSearch]);
 
-  // Calculate totals
+  // Calculate totals — always use lineTotal (kept in sync by bi-directional update)
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
     let itemCount = 0;
     lineItems.forEach((item) => {
       try {
-        const qty = new Decimal(item.quantity || 0);
-        const cost = new Decimal(item.unitCost || 0);
-        subtotal = subtotal.plus(qty.times(cost));
+        subtotal = subtotal.plus(new Decimal(item.lineTotal || 0));
         itemCount++;
       } catch { /* skip */ }
     });
@@ -853,6 +915,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       productName: product.name,
       quantity: suggestedQty,
       unitCost: initialCost,
+      lineTotal: new Decimal(suggestedQty).times(new Decimal(initialCost)).toFixed(2),
       baseCost: initialCost,
       selectedUomId: product.purchaseUomId || null,
       quantityOnHand: product.quantityOnHand,
@@ -869,18 +932,56 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     }, 100);
   }, [lineItems.length]);
 
+  // SAP ME21N-style: editing one field auto-recalculates the linked field
   const updateLineItem = useCallback((id: string, field: keyof POLineItem, value: string) => {
-    setLineItems((prev) => prev.map((item) => item.id === id ? { ...item, [field]: value } : item));
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const updated = { ...item, [field]: value };
+        try {
+          if (field === 'unitCost') {
+            updated.lineTotal = new Decimal(updated.quantity || 0)
+              .times(new Decimal(value || 0))
+              .toDecimalPlaces(2)
+              .toString();
+          } else if (field === 'lineTotal') {
+            const qty = new Decimal(updated.quantity || 0);
+            if (qty.gt(0)) {
+              updated.unitCost = new Decimal(value || 0)
+                .div(qty)
+                .toDecimalPlaces(2)
+                .toString();
+            }
+          } else if (field === 'quantity') {
+            updated.lineTotal = new Decimal(value || 0)
+              .times(new Decimal(updated.unitCost || 0))
+              .toDecimalPlaces(2)
+              .toString();
+          }
+        } catch { /* invalid decimal, skip sync */ }
+        return updated;
+      })
+    );
   }, []);
 
-  // UOM change updates cost and tracks conversion factor
-  const handleUomChange = useCallback((id: string, uomId: string | null, newCost: string, factor: string, uomName: string) => {
+  // UOM change: SAP ME21N — always compute baseCost × factor (ignore costOverride from UomSelector)
+  const handleUomChange = useCallback((id: string, uomId: string | null, _newCost: string, factor: string, uomName: string) => {
     setLineItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, selectedUomId: uomId, unitCost: newCost, conversionFactor: factor, selectedUomName: uomName }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        let unitCost = item.unitCost;
+        let lineTotal = item.lineTotal;
+        try {
+          const base = new Decimal(item.baseCost || item.unitCost || 0);
+          const f = new Decimal(factor || 1);
+          unitCost = base.times(f).toDecimalPlaces(2).toString();
+          lineTotal = new Decimal(item.quantity || 0)
+            .times(new Decimal(unitCost))
+            .toDecimalPlaces(2)
+            .toString();
+        } catch { /* skip */ }
+        return { ...item, selectedUomId: uomId, unitCost, lineTotal, conversionFactor: factor, selectedUomName: uomName };
+      })
     );
   }, []);
 
@@ -997,10 +1098,10 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
             <div className="text-xs text-gray-500">{lineItems.length} item{lineItems.length !== 1 ? 's' : ''}</div>
           </div>
 
-          <div className="flex items-start gap-2 mb-3">
+          <div className="flex items-end gap-2 mb-3">
             <ProcurementProductSearch supplierId={supplierId} onProductSelect={addLineItem} disabled={isSubmitting} className="flex-1" inputRef={searchInputRef} />
             <button type="button" onClick={() => setShowQuickProduct(true)} disabled={isSubmitting}
-              className="mt-6 px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap">+ New</button>
+              className="mb-px px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap">+ New</button>
           </div>
 
           {lineItems.length > 0 ? (
@@ -1010,11 +1111,11 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-24">Qty</th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-32">Order UoM</th>
-                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Unit Cost</th>
-                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Line Total</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12"></th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-20">Qty</th>
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase w-36">Order UoM</th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-36">Unit Cost</th>
+                      <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase w-36">Line Total</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-10"></th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
