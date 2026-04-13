@@ -7,12 +7,14 @@ RUN apk add --no-cache dumb-init postgresql16-client
 
 # Install production dependencies
 FROM base AS deps
+RUN apk add --no-cache python3 make g++
 WORKDIR /app/SamplePOS.Server
 COPY SamplePOS.Server/package.json SamplePOS.Server/package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 # Build — needs devDependencies + shared types
 FROM base AS builder
+RUN apk add --no-cache python3 make g++
 WORKDIR /app/SamplePOS.Server
 COPY SamplePOS.Server/package.json SamplePOS.Server/package-lock.json* ./
 RUN npm install --no-audit --no-fund
