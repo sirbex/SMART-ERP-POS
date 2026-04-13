@@ -53,7 +53,7 @@ import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 import { syncOfflineCustomers } from '../../services/offlineSyncEngine';
 import { useAuth } from '../../hooks/useAuth';
-import { formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
+import { getBusinessDate, formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
 
 // ── Discount applied from DiscountDialog (before manager approval extension) ──
 interface AppliedDiscount {
@@ -2074,7 +2074,7 @@ export default function POSPage() {
         setLastSale({
           id: offlineId,
           saleNumber: offlineId,
-          saleDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+          saleDate: getBusinessDate(),
           totalAmount: grandTotal,
         });
 
@@ -2151,7 +2151,7 @@ export default function POSPage() {
         setLastSale({
           id: order.id || orderNum,
           saleNumber: orderNum,
-          saleDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+          saleDate: getBusinessDate(),
           totalAmount: grandTotal,
         });
 
@@ -2220,7 +2220,7 @@ export default function POSPage() {
         setLastSale({
           id: offlineId,
           saleNumber: offlineId,
-          saleDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+          saleDate: getBusinessDate(),
           totalAmount: grandTotal,
         });
         setItems([]);
@@ -2501,7 +2501,7 @@ export default function POSPage() {
           0
         );
         const today = new Date();
-        const offlineSaleDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const offlineSaleDate = getBusinessDate();
 
         setReceiptData({
           saleNumber: offlineId,

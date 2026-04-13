@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { format, endOfMonth } from 'date-fns';
 import { FileText, TrendingUp, TrendingDown, Users, Package, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
+import { getBusinessDate } from '../utils/businessDate';
 import { DatePicker } from '../components/ui/date-picker';
 
 // Auth helper for fetch calls
@@ -76,9 +77,12 @@ interface ComparativePeriod {
 }
 
 export default function ProfitLossPage() {
-    const today = new Date();
-    const [dateFrom, setDateFrom] = useState(format(startOfMonth(today), 'yyyy-MM-dd'));
-    const [dateTo, setDateTo] = useState(format(endOfMonth(today), 'yyyy-MM-dd'));
+    const bizDate = getBusinessDate();
+    const [y, m] = bizDate.split('-').map(Number);
+    const firstOfMonth = `${y}-${String(m).padStart(2, '0')}-01`;
+    const lastOfMonth = format(endOfMonth(new Date(y, m - 1, 1)), 'yyyy-MM-dd');
+    const [dateFrom, setDateFrom] = useState(firstOfMonth);
+    const [dateTo, setDateTo] = useState(lastOfMonth);
     const [activeTab, setActiveTab] = useState<ViewTab>('summary');
     const [comparativePeriods, setComparativePeriods] = useState(3);
 

@@ -4,7 +4,7 @@ import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
-import { BUSINESS_TIMEZONE } from '../utils/businessDate';
+import { BUSINESS_TIMEZONE, getBusinessDate, addDaysToDateString } from '../utils/businessDate';
 import {
   useSalesSummary,
   useTopSellingProducts,
@@ -122,15 +122,12 @@ function safeNum(v: unknown): number {
 
 // ─── Helper: Today's date as YYYY-MM-DD ──────────────────────────
 function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return getBusinessDate();
 }
 
 // ─── Helper: 7 days ago ──────────────────────────────────────────
 function weekAgoStr(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 7);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return addDaysToDateString(getBusinessDate(), -7);
 }
 
 // ─── Mini sparkline bar chart (pure CSS) ─────────────────────────

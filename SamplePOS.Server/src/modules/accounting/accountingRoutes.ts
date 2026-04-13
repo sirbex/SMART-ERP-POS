@@ -619,12 +619,13 @@ router.get(
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
-    const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Use business date for default range (timezone-safe, SAP pattern)
+    const bizDate = getBusinessDate();
+    const firstDayOfMonth = bizDate.slice(0, 8) + '01';
 
     const query = DateRangeQuerySchema.parse(req.query);
-    const startDate = query.startDate || formatDateBusiness(firstDayOfMonth);
-    const endDate = query.endDate || formatDateBusiness(now);
+    const startDate = query.startDate || firstDayOfMonth;
+    const endDate = query.endDate || bizDate;
 
     const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
 
@@ -655,12 +656,13 @@ router.get(
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
-    const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Use business date for default range (timezone-safe, SAP pattern)
+    const bizDate = getBusinessDate();
+    const firstDayOfMonth = bizDate.slice(0, 8) + '01';
 
     const query = DateRangeQuerySchema.parse(req.query);
-    const startDate = query.startDate || formatDateBusiness(firstDayOfMonth);
-    const endDate = query.endDate || formatDateBusiness(now);
+    const startDate = query.startDate || firstDayOfMonth;
+    const endDate = query.endDate || bizDate;
 
     // Get income statement for net income
     const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);

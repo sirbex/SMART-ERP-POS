@@ -4,7 +4,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
-import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness } from '../../utils/dateRange.js';
+import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness, getBusinessDate } from '../../utils/dateRange.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import type {
   SalesReportRow,
@@ -59,6 +59,7 @@ Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
 // Utility function to format timestamps in a simplified, human-readable format
 // NOTE: This is only for TIMESTAMPTZ audit fields, NOT for DATE columns
+// Always uses Africa/Kampala timezone for consistent output (SAP pattern)
 function formatDate(date: Date | string | null | undefined): string | null {
   if (!date) return null;
   // If already a plain date string (YYYY-MM-DD), return as-is (timezone strategy)
@@ -71,11 +72,13 @@ function formatDate(date: Date | string | null | undefined): string | null {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
+    timeZone: 'Africa/Kampala',
   });
 }
 
 // Utility function to format date only (no time)
 // For DATE columns, returns the string as-is per timezone strategy
+// Always uses Africa/Kampala timezone for consistent output (SAP pattern)
 function formatDateOnly(date: Date | string | null | undefined): string | null {
   if (!date) return null;
   // If already a plain date string (YYYY-MM-DD), return as-is (timezone strategy)
@@ -85,6 +88,7 @@ function formatDateOnly(date: Date | string | null | undefined): string | null {
     year: 'numeric',
     month: 'short',
     day: '2-digit',
+    timeZone: 'Africa/Kampala',
   });
 }
 
@@ -218,7 +222,7 @@ export const reportsRepository = {
     summary: { totalItems: number; totalQuantity: number; totalValue: number; totalPotentialRevenue: number; totalPotentialProfit: number };
     byCategory: Array<{ category: string; productCount: number; quantityOnHand: number; costValue: number; potentialRevenue: number; potentialProfit: number; profitMargin: number }>;
   }> {
-    const asOfDate = options.asOfDate || new Date();
+    const asOfDate = options.asOfDate || getBusinessDate();
 
     let categoryFilter = '';
     const params: unknown[] = [asOfDate];
@@ -2484,7 +2488,7 @@ export const reportsRepository = {
       overdueAmount: number;
     };
   }> {
-    const asOfDate = options.asOfDate || new Date();
+    const asOfDate = options.asOfDate || getBusinessDate();
     const asOfDateStr = asOfDate instanceof Date ? formatDateBusiness(asOfDate) : asOfDate;
 
     const query = `

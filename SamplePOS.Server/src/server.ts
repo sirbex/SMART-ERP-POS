@@ -83,6 +83,7 @@ import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js'
 import healthRoutes, { incrementMetric, closeHealthRedis } from './routes/health.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
+import { getBusinessDate, getBusinessYear, BUSINESS_TIMEZONE, formatBusinessTimestamp } from './utils/dateRange.js';
 
 // All modules now use consistent named exports for maintainability
 
@@ -263,6 +264,21 @@ app.get('/health', async (req, res) => {
       },
     });
   }
+});
+
+// Server time endpoint — SAP/Odoo pattern: server is SOLE authority for business dates.
+// Frontend MUST use this instead of new Date() for any business-critical date defaults.
+app.get('/api/server-time', (_req, res) => {
+  res.json({
+    success: true,
+    data: {
+      businessDate: getBusinessDate(),           // 'YYYY-MM-DD' in Africa/Kampala
+      businessYear: getBusinessYear(),            // 4-digit year
+      serverTimestamp: new Date().toISOString(),   // UTC ISO-8601
+      businessTimestamp: formatBusinessTimestamp(), // Human-readable in business TZ
+      timezone: BUSINESS_TIMEZONE,                 // 'Africa/Kampala'
+    },
+  });
 });
 
 // API Documentation (Swagger UI)

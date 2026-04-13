@@ -376,9 +376,10 @@ export const deleteExpense = async (id: string, dbPool?: pg.Pool | pg.PoolClient
 export const generateExpenseNumber = async (dbPool?: pg.Pool | pg.PoolClient): Promise<string> => {
   const pool = dbPool || globalPool;
   try {
-    const now = new Date();
-    const yearPart = now.getFullYear().toString();
-    const monthPart = String(now.getMonth() + 1).padStart(2, '0');
+    // Use business date (Africa/Kampala) to avoid wrong month near midnight UTC
+    const bizDate = getBusinessDate();
+    const yearPart = bizDate.slice(0, 4);
+    const monthPart = bizDate.slice(5, 7);
     const prefix = `EXP-${yearPart}${monthPart}-`;
 
     const result = await pool.query(

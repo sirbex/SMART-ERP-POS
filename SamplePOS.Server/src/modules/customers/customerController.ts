@@ -274,7 +274,7 @@ export const exportCustomerStatementCsv = asyncHandler(async (req: Request, res:
   lines.push('Date,Type,Reference,Description,Debit,Credit,Balance');
   for (const e of statement.entries) {
     const row = [
-      new Date(e.date).toISOString(),
+      String(e.date),
       e.type,
       e.reference ?? '',
       (e.description ?? '').replace(/\n|\r/g, ' '),
@@ -429,17 +429,17 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
     .fontSize(9)
     .font('Helvetica')
     .text(
-      `From: ${new Date(statement.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+      `From: ${new Date(statement.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Africa/Kampala' })}`,
       margin + contentWidth / 2 + 15,
       cardY + 30
     )
     .text(
-      `To: ${new Date(statement.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+      `To: ${new Date(statement.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Africa/Kampala' })}`,
       margin + contentWidth / 2 + 15,
       cardY + 48
     )
     .text(
-      `Duration: ${Math.ceil((new Date(statement.periodEnd).getTime() - new Date(statement.periodStart).getTime()) / (1000 * 60 * 60 * 24))} days`,
+      `Duration: ${Math.ceil((new Date(statement.periodEnd + 'T12:00:00Z').getTime() - new Date(statement.periodStart + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24))} days`,
       margin + contentWidth / 2 + 15,
       cardY + 66
     );
@@ -562,6 +562,7 @@ export const exportCustomerStatementPdf = asyncHandler(async (req: Request, res:
         month: 'short',
         day: 'numeric',
         year: '2-digit',
+        timeZone: 'Africa/Kampala',
       }),
       entry.type,
       (entry.reference || '-').slice(0, 15),

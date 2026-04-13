@@ -52,3 +52,14 @@ export function formatTimestampTime(isoString: string | null | undefined): strin
     if (isNaN(date.getTime())) return String(isoString);
     return date.toLocaleTimeString('en-GB', { timeZone: BUSINESS_TIMEZONE });
 }
+
+/**
+ * Add (or subtract) days from a 'YYYY-MM-DD' date string.
+ * Pure arithmetic — no timezone drift.
+ */
+export function addDaysToDateString(dateStr: string, days: number): string {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const ms = Date.UTC(y, m - 1, d, 12, 0, 0) + days * 86_400_000;
+    const dt = new Date(ms);
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}

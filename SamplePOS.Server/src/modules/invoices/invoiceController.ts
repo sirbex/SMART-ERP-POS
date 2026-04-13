@@ -8,7 +8,7 @@ import { getSettings } from '../settings/invoiceSettingsService.js';
 import PDFDocument from 'pdfkit';
 import Decimal from 'decimal.js';
 import Money from '../../utils/money.js';
-import { formatBusinessTimestamp } from '../../utils/dateRange.js';
+import { formatBusinessTimestamp, getBusinessDate } from '../../utils/dateRange.js';
 import { amountToWords } from '../../utils/amountToWords.js';
 import {
   asyncHandler,
@@ -226,13 +226,13 @@ export const invoiceController = {
         .fontSize(8)
         .font('Helvetica')
         .text(
-          `Issue: ${invoice.issue_date ? new Date(String(invoice.issue_date)).toLocaleDateString() : 'N/A'}`,
+          `Issue: ${invoice.issue_date ? new Date(String(invoice.issue_date)).toLocaleDateString('en-US', { timeZone: 'Africa/Kampala' }) : 'N/A'}`,
           margin,
           68,
           { align: 'right', width: contentWidth }
         )
         .text(
-          `Due: ${invoice.due_date ? new Date(String(invoice.due_date)).toLocaleDateString() : 'N/A'}`,
+          `Due: ${invoice.due_date ? new Date(String(invoice.due_date)).toLocaleDateString('en-US', { timeZone: 'Africa/Kampala' }) : 'N/A'}`,
           margin,
           78,
           { align: 'right', width: contentWidth }
@@ -528,7 +528,7 @@ export const invoiceController = {
 
           const rowData = [
             receiptNumber || 'N/A',
-            paymentDate ? new Date(paymentDate).toLocaleDateString() : 'N/A',
+            paymentDate ? new Date(paymentDate).toLocaleDateString('en-US', { timeZone: 'Africa/Kampala' }) : 'N/A',
             paymentMethod || 'N/A',
             formatCurrency(Number(payment.amount || 0)),
             referenceNumber || '-',

@@ -10,6 +10,7 @@ import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { demandForecastService } from './demandForecastService.js';
 import { demandForecastRepository } from './demandForecastRepository.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // Debug: Log available controller methods
 console.log('🔍 reportsController methods:', Object.keys(reportsController));
@@ -308,7 +309,7 @@ export function createReportsRouter(pool: Pool) {
     '/demand-forecast/product/:productId',
     asyncHandler(async (req, res) => {
       const stats = await demandForecastRepository.getStatsForProduct(p(req), req.params.productId);
-      const currentMonth = new Date().getMonth() + 1;
+      const currentMonth = parseInt(getBusinessDate().slice(5, 7), 10);
       const seasonality = await demandForecastRepository.getSeasonalityForMonth(
         p(req),
         currentMonth

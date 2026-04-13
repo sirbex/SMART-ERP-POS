@@ -253,7 +253,7 @@ export const invoiceRepository = {
       invoiceId: string;
       amount: number;
       paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
-      paymentDate?: Date | null;
+      paymentDate?: Date | string | null;
       referenceNumber?: string | null;
       notes?: string | null;
       processedById?: string | null;

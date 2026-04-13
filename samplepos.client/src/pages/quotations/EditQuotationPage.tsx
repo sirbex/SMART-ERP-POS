@@ -16,6 +16,7 @@ import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
+import { getBusinessDate, addDaysToDateString } from '../../utils/businessDate';
 import Decimal from 'decimal.js';
 
 interface QuoteItem {
@@ -65,9 +66,9 @@ export default function EditQuotationPage() {
   const [customerEmail, setCustomerEmail] = useState('');
   const [reference, setReference] = useState('');
   const [description, setDescription] = useState('');
-  const [validFrom, setValidFrom] = useState(new Date().toLocaleDateString('en-CA'));
+  const [validFrom, setValidFrom] = useState(getBusinessDate());
   const [validUntil, setValidUntil] = useState(
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA')
+    addDaysToDateString(getBusinessDate(), 30)
   );
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [termsAndConditions, setTermsAndConditions] = useState('');

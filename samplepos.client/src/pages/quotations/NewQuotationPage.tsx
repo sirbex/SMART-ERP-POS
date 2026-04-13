@@ -18,7 +18,7 @@ import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
 import { ResponsiveFormGrid } from '../../components/ui/ResponsiveFormGrid';
 import Decimal from 'decimal.js';
-import { formatTimestampDate } from '../../utils/businessDate';
+import { formatTimestampDate, getBusinessDate } from '../../utils/businessDate';
 
 interface QuoteItem {
   id: string;
@@ -418,7 +418,7 @@ export default function NewQuotationPage() {
       customerName: customerName || selectedCustomer?.name,
       customerPhone: (customerPhone || selectedCustomer?.phone) || undefined,
       customerEmail: (customerEmail || selectedCustomer?.email) || undefined,
-      validFrom: new Date().toLocaleDateString('en-CA'),
+      validFrom: getBusinessDate(),
       validUntil,
       notes: internalNotes || undefined,
       items: items.map((item) => ({

@@ -15,7 +15,7 @@ import {
 } from '../../../../shared/zod/quotation.js';
 import { quotationService } from './quotationService.js';
 import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
-import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
+import { getBusinessDate, addDaysToDateString } from '../../utils/dateRange.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const UpdateStatusSchema = z.object({
@@ -40,11 +40,7 @@ export const quotationController = {
       customerEmail: validatedData.customerEmail || null,
       description: validatedData.notes || null,
       validFrom: validatedData.validFrom || getBusinessDate(),
-      validUntil: validatedData.validUntil || (() => {
-        const d = new Date();
-        d.setDate(d.getDate() + (validatedData.validityDays || 30));
-        return formatDateBusiness(d);
-      })(),
+      validUntil: validatedData.validUntil || addDaysToDateString(getBusinessDate(), validatedData.validityDays || 30),
       createdById: userId,
       fulfillmentMode: validatedData.fulfillmentMode || 'RETAIL',
       items: validatedData.items,
@@ -67,9 +63,7 @@ export const quotationController = {
 
     const validFrom = getBusinessDate();
     const validityDays = validatedData.validityDays || 30;
-    const validUntilDate = new Date();
-    validUntilDate.setDate(validUntilDate.getDate() + validityDays);
-    const validUntil = formatDateBusiness(validUntilDate);
+    const validUntil = addDaysToDateString(getBusinessDate(), validityDays);
 
     const result = await quotationService.createQuotation(pool, {
       quoteType: 'quick',

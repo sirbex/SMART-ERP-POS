@@ -8,6 +8,7 @@
 import { useState, useMemo } from 'react';
 import { useStockLevels } from '../../hooks/useInventory';
 import { useProducts } from '../../hooks/useProducts';
+import { getBusinessDate } from '../../utils/businessDate';
 import Decimal from 'decimal.js';
 
 // TIMEZONE STRATEGY: Display dates without conversion
@@ -103,8 +104,8 @@ export default function BatchManagementPage() {
             Number(level.total_stock || level.total_quantity || 0) === 0
               ? ('DEPLETED' as const)
               : ('ACTIVE' as const),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          created_at: getBusinessDate(),
+          updated_at: getBusinessDate(),
         })
       );
   }, [stockLevelsData]);
@@ -114,7 +115,7 @@ export default function BatchManagementPage() {
     if (!expiryDate) return 'NONE';
 
     const daysUntilExpiry = Math.ceil(
-      (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(expiryDate + 'T12:00:00Z').getTime() - new Date(getBusinessDate() + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24)
     );
 
     if (daysUntilExpiry < 0) return 'CRITICAL'; // Already expired
@@ -127,7 +128,7 @@ export default function BatchManagementPage() {
   const getDaysUntilExpiry = (expiryDate: string | null): number | null => {
     if (!expiryDate) return null;
     return Math.ceil(
-      (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(expiryDate + 'T12:00:00Z').getTime() - new Date(getBusinessDate() + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24)
     );
   };
 
@@ -596,7 +597,7 @@ function BatchDetailsModal({
 }) {
   const daysUntilExpiry = batch.expiry_date
     ? Math.ceil(
-      (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(batch.expiry_date + 'T12:00:00Z').getTime() - new Date(getBusinessDate() + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24)
     )
     : null;
 

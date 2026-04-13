@@ -435,16 +435,19 @@ export function formatQuantityPDF(amount: unknown): string {
 }
 
 // Utility function to format date
+// Always uses Africa/Kampala timezone for consistent PDF output (SAP pattern)
 export function formatDatePDF(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   return d.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
-    day: '2-digit'
+    day: '2-digit',
+    timeZone: 'Africa/Kampala',
   });
 }
 
 // Utility function to format datetime
+// Always uses Africa/Kampala timezone for consistent PDF output (SAP pattern)
 export function formatDateTimePDF(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   return d.toLocaleString('en-US', {
@@ -453,6 +456,7 @@ export function formatDateTimePDF(date: Date | string): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false
+    hour12: false,
+    timeZone: 'Africa/Kampala',
   });
 }

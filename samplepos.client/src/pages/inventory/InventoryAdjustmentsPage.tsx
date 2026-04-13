@@ -22,6 +22,7 @@ import apiClient from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
+import { getBusinessDate } from '../../utils/businessDate';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -82,14 +83,6 @@ interface StockLevelRow {
   average_cost?: string | number;
 }
 
-// Helper to format date to YYYY-MM-DD in local timezone
-const formatLocalDate = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 export default function InventoryAdjustmentsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -98,7 +91,7 @@ export default function InventoryAdjustmentsPage() {
   const { data: productsData } = useProducts();
 
   // Get recent adjustment movements for quick reference (today only)
-  const todayStr = formatLocalDate(new Date());
+  const todayStr = getBusinessDate();
   const { data: recentAdjustmentsData } = useStockMovements({
     movementType: 'ADJUSTMENT_IN,ADJUSTMENT_OUT',
     startDate: todayStr,
@@ -123,7 +116,7 @@ export default function InventoryAdjustmentsPage() {
   // Physical Count modal state
   const [showPhysicalCountModal, setShowPhysicalCountModal] = useState(false);
   const [countedQuantities, setCountedQuantities] = useState<Record<string, string>>({});
-  const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + formatLocalDate(new Date()));
+  const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + getBusinessDate());
   const [isProcessingCount, setIsProcessingCount] = useState(false);
   const [physicalCountSearchTerm, setPhysicalCountSearchTerm] = useState('');
   const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
@@ -208,7 +201,7 @@ export default function InventoryAdjustmentsPage() {
             expiry_date: level.nearest_expiry || null,
             cost_price: parseFloat(String(level.average_cost || '0')),
             status: 'ACTIVE',
-            created_at: new Date().toISOString(),
+            created_at: getBusinessDate(),
           },
         ];
       }
@@ -405,7 +398,7 @@ export default function InventoryAdjustmentsPage() {
 
       setShowPhysicalCountModal(false);
       setCountedQuantities({});
-      setPhysicalCountReason('Physical inventory count - ' + formatLocalDate(new Date()));
+      setPhysicalCountReason('Physical inventory count - ' + getBusinessDate());
       queryClient.invalidateQueries({ queryKey: ['stockLevels'] });
       queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
     } catch (err) {

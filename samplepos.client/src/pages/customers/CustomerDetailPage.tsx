@@ -323,7 +323,7 @@ export default function CustomerDetailPage() {
   const [payMethod, setPayMethod] = useState('CASH');
   const [payReferenceNumber, setPayReferenceNumber] = useState('');
   const [payNotes, setPayNotes] = useState('');
-  const [payDate, setPayDate] = useState<string>(() => new Date().toISOString().slice(0, 16)); // yyyy-MM-ddTHH:mm
+  const [payDate, setPayDate] = useState<string>(() => getBusinessDate()); // yyyy-MM-dd
   const [customerDepositBalance, setCustomerDepositBalance] = useState<number>(0);
   const [isLoadingDeposits, setIsLoadingDeposits] = useState(false);
   const [showInvoicePicker, setShowInvoicePicker] = useState(false);
@@ -363,7 +363,7 @@ export default function CustomerDetailPage() {
     setPayMethod('CASH');
     setPayReferenceNumber('');
     setPayNotes('');
-    setPayDate(new Date().toISOString().slice(0, 16));
+    setPayDate(getBusinessDate());
     setShowInvoicePicker(false);
     setPaymentOpen(true);
   };

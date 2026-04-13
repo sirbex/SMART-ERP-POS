@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DatePicker } from './ui/date-picker';
-import { formatTimestampDate } from '../utils/businessDate';
+import { formatTimestampDate, getBusinessDate } from '../utils/businessDate';
 
 export type DateRangePreset =
   | 'today'
@@ -40,55 +40,54 @@ const PRESET_OPTIONS: PresetOption[] = [
  * Uses precise date calculations with no timezone issues
  */
 export function getDateRange(preset: DateRangePreset): { startDate: string; endDate: string } {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const date = now.getDate();
-  const day = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  const today = getBusinessDate();
+  const [year, month, date] = today.split('-').map(Number);
+  const jsDate = new Date(year, month - 1, date);
+  const day = jsDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
 
   let start: Date;
   let end: Date;
 
   switch (preset) {
     case 'today':
-      start = new Date(year, month, date);
-      end = new Date(year, month, date);
+      start = new Date(year, month - 1, date);
+      end = new Date(year, month - 1, date);
       break;
 
     case 'yesterday':
-      start = new Date(year, month, date - 1);
-      end = new Date(year, month, date - 1);
+      start = new Date(year, month - 1, date - 1);
+      end = new Date(year, month - 1, date - 1);
       break;
 
     case 'this_week':
       // Week starts on Monday (1), ends on Sunday (0)
       const daysFromMonday = day === 0 ? 6 : day - 1; // If Sunday, go back 6 days
-      start = new Date(year, month, date - daysFromMonday);
-      end = new Date(year, month, date + (6 - daysFromMonday));
+      start = new Date(year, month - 1, date - daysFromMonday);
+      end = new Date(year, month - 1, date + (6 - daysFromMonday));
       break;
 
     case 'last_week':
       const lastWeekDaysFromMonday = day === 0 ? 6 : day - 1;
-      start = new Date(year, month, date - lastWeekDaysFromMonday - 7);
-      end = new Date(year, month, date - lastWeekDaysFromMonday - 1);
+      start = new Date(year, month - 1, date - lastWeekDaysFromMonday - 7);
+      end = new Date(year, month - 1, date - lastWeekDaysFromMonday - 1);
       break;
 
     case 'this_month':
-      start = new Date(year, month, 1);
-      end = new Date(year, month + 1, 0); // Last day of current month
+      start = new Date(year, month - 1, 1);
+      end = new Date(year, month, 0); // Last day of current month
       break;
 
     case 'last_month':
-      start = new Date(year, month - 1, 1);
-      end = new Date(year, month, 0); // Last day of previous month
+      start = new Date(year, month - 2, 1);
+      end = new Date(year, month - 1, 0); // Last day of previous month
       break;
 
     case 'custom':
     default:
       // Return current values for custom (user will manually adjust)
       return {
-        startDate: formatDateForInput(new Date(year, month, date)),
-        endDate: formatDateForInput(new Date(year, month, date)),
+        startDate: today,
+        endDate: today,
       };
   }
 

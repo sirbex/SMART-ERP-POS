@@ -51,18 +51,20 @@ function formatCurrency(amount: number, currencySymbol: string): string {
 }
 
 /**
- * Format date according to system settings date format
+ * Format date according to system settings date format.
+ * Always uses Africa/Kampala timezone to ensure consistent output
+ * regardless of server locale (SAP/Odoo pattern: server-authoritative TZ).
  */
 function formatDate(date: Date | string, dateFormat: string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
 
   // Common date format patterns
   const formatters: Record<string, Intl.DateTimeFormatOptions> = {
-    'DD/MM/YYYY': { day: '2-digit', month: '2-digit', year: 'numeric' },
-    'MM/DD/YYYY': { month: '2-digit', day: '2-digit', year: 'numeric' },
-    'YYYY-MM-DD': { year: 'numeric', month: '2-digit', day: '2-digit' },
-    'DD-MM-YYYY': { day: '2-digit', month: '2-digit', year: 'numeric' },
-    'MMM DD, YYYY': { month: 'short', day: '2-digit', year: 'numeric' },
+    'DD/MM/YYYY': { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Africa/Kampala' },
+    'MM/DD/YYYY': { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'Africa/Kampala' },
+    'YYYY-MM-DD': { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Africa/Kampala' },
+    'DD-MM-YYYY': { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Africa/Kampala' },
+    'MMM DD, YYYY': { month: 'short', day: '2-digit', year: 'numeric', timeZone: 'Africa/Kampala' },
   };
 
   const options = formatters[dateFormat] || formatters['DD/MM/YYYY'];

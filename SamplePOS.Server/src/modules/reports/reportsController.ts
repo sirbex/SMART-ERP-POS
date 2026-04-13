@@ -31,6 +31,7 @@ async function getCompanyName(pool: Pool): Promise<string> {
 }
 
 // Utility function to format dates in a simplified, human-readable format
+// Always uses Africa/Kampala timezone for consistent output (SAP pattern)
 function formatDateTime(date: Date = new Date()): string {
   return date.toLocaleString('en-US', {
     year: 'numeric',
@@ -40,16 +41,19 @@ function formatDateTime(date: Date = new Date()): string {
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
+    timeZone: 'Africa/Kampala',
   });
 }
 
 // Utility function to format date only (no time)
+// Always uses Africa/Kampala timezone for consistent output (SAP pattern)
 function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   return d.toLocaleString('en-US', {
     year: 'numeric',
     month: 'short',
     day: '2-digit',
+    timeZone: 'Africa/Kampala',
   });
 }
 

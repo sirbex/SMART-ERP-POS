@@ -4,6 +4,7 @@ import { inventoryRepository } from './inventoryRepository.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { StockMovementHandler } from './stockMovementHandler.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 export const inventoryService = {
   /**
@@ -73,7 +74,7 @@ export const inventoryService = {
     return batches.map((batch) => ({
       ...batch,
       daysUntilExpiry: Math.ceil(
-        (new Date(batch.expiryDate!).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+        (new Date(batch.expiryDate + 'T12:00:00Z').getTime() - new Date(getBusinessDate() + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24)
       ),
       urgency: this.calculateExpiryUrgency(batch.expiryDate!),
     }));
@@ -82,9 +83,9 @@ export const inventoryService = {
   /**
    * Calculate expiry urgency level
    */
-  calculateExpiryUrgency(expiryDate: Date): 'CRITICAL' | 'WARNING' | 'NORMAL' {
+  calculateExpiryUrgency(expiryDate: Date | string): 'CRITICAL' | 'WARNING' | 'NORMAL' {
     const daysUntilExpiry = Math.ceil(
-      (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(String(expiryDate) + 'T12:00:00Z').getTime() - new Date(getBusinessDate() + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24)
     );
 
     if (daysUntilExpiry <= 7) return 'CRITICAL';

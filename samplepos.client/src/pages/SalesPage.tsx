@@ -1609,7 +1609,7 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
         const body = resp.data;
         const salesArray = Array.isArray(body?.data) ? body.data
           : Array.isArray(body) ? body
-          : [];
+            : [];
         const rows = salesArray as Record<string, unknown>[];
         setSales(rows.map((sale) => ({
           id: String(sale.id || ''),
@@ -1774,7 +1774,7 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
         const body = resp.data;
         const salesArray = Array.isArray(body?.data) ? body.data
           : Array.isArray(body) ? body
-          : [];
+            : [];
         const rows = salesArray as Record<string, unknown>[];
         const allCredit = rows.map((sale) => ({
           id: String(sale.id || ''),

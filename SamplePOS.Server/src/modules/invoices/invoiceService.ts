@@ -112,8 +112,8 @@ export const invoiceService = {
       customerId: string;
       saleId?: string | null;
       quoteId?: string | null;
-      issueDate?: Date | null;
-      dueDate?: Date | null;
+      issueDate?: Date | string | null;
+      dueDate?: Date | string | null;
       notes?: string | null;
       createdById?: string | null;
       initialPaymentAmount?: number | null;
@@ -301,7 +301,7 @@ export const invoiceService = {
           invoiceId: invoice.id,
           amount: input.initialPaymentAmount,
           paymentMethod: 'CASH', // default; controller may override
-          paymentDate: new Date(),
+          paymentDate: getBusinessDate(),
           referenceNumber: null,
           notes: 'Initial payment at invoice creation',
           processedById: input.createdById || null,
@@ -317,7 +317,7 @@ export const invoiceService = {
               invoiceId: invoice.id,
               amount: lineAmount,
               paymentMethod: lineMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
-              paymentDate: new Date(),
+              paymentDate: getBusinessDate(),
               referenceNumber: payLine.reference || null,
               notes: 'Initial payment from sale',
               processedById: input.createdById || null,
@@ -528,7 +528,7 @@ export const invoiceService = {
     input: {
       amount: number;
       paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
-      paymentDate?: Date | null;
+      paymentDate?: Date | string | null;
       referenceNumber?: string | null;
       notes?: string | null;
       processedById?: string | null;
@@ -629,7 +629,7 @@ export const invoiceService = {
         invoiceId,
         amount: input.amount,
         paymentMethod: input.paymentMethod,
-        paymentDate: input.paymentDate || new Date(),
+        paymentDate: input.paymentDate || getBusinessDate(),
         referenceNumber: input.referenceNumber || null,
         notes: input.notes || null,
         processedById: input.processedById || null,
@@ -733,7 +733,7 @@ export const invoiceService = {
         const paymentDateStr =
           input.paymentDate instanceof Date
             ? formatDateBusiness(input.paymentDate)
-            : getBusinessDate();
+            : (typeof input.paymentDate === 'string' ? input.paymentDate : getBusinessDate());
 
         await glEntryService.recordInvoicePaymentToGL(
           {

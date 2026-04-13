@@ -25,7 +25,7 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import * as glEntryService from '../../services/glEntryService.js';
-import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
+import { getBusinessDate, formatDateBusiness, addDaysToDateString } from '../../utils/dateRange.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -599,9 +599,8 @@ export const quotationService = {
       }
 
       // BR-QUOTE-002: Verify not expired
-      const validUntil = new Date(quotation.valid_until);
-      const now = new Date();
-      if (validUntil < now) {
+      const today = getBusinessDate();
+      if (String(quotation.valid_until) < today) {
         throw new Error('Quotation has expired');
       }
 
@@ -872,7 +871,7 @@ export const quotationService = {
 
     // Create invoice AFTER committing the sale transaction
     // This ensures the sale is visible to the invoice service
-    const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const dueDate = addDaysToDateString(getBusinessDate(), 30);
     const invoiceResult = await invoiceService.createInvoice(pool, {
       saleId: saleRecord.id,
       customerId: customerId,
@@ -891,7 +890,7 @@ export const quotationService = {
     // Handle payment recording based on payment option
     if (data.paymentOption === 'full' && invoice) {
       // Full payment: mark invoice as PAID immediately
-      const paymentDate = new Date();
+      const paymentDate = getBusinessDate();
       await invoiceService.addPayment(pool, (invoice as Record<string, string>).id, {
         paymentDate: paymentDate,
         amount: totalAmount,
@@ -900,7 +899,7 @@ export const quotationService = {
       });
     } else if (data.paymentOption === 'partial' && data.depositAmount && invoice) {
       // Partial payment: record deposit, invoice remains PARTIALLY_PAID
-      const paymentDate = new Date();
+      const paymentDate = getBusinessDate();
       await invoiceService.addPayment(pool, (invoice as Record<string, string>).id, {
         paymentDate: paymentDate,
         amount: data.depositAmount,
@@ -1013,9 +1012,7 @@ export const quotationService = {
     }
 
     const validFrom = getBusinessDate();
-    const validUntilDate = new Date();
-    validUntilDate.setDate(validUntilDate.getDate() + 30);
-    const validUntil = formatDateBusiness(validUntilDate);
+    const validUntil = addDaysToDateString(validFrom, 30);
 
     // Create quotation header
     const quotation = await quotationRepository.createQuotation(client, {

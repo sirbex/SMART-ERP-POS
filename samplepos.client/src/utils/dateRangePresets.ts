@@ -22,6 +22,7 @@ import {
     endOfYear,
     subYears,
 } from 'date-fns';
+import { getBusinessDate } from './businessDate';
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -73,7 +74,9 @@ const fmt = (d: Date): string => format(d, 'yyyy-MM-dd');
 const WEEK_OPTS = { weekStartsOn: 1 as const };
 
 export function computeDateRange(preset: DatePresetKey): DateRange | null {
-    const today = startOfDay(new Date());
+    const bizDate = getBusinessDate();
+    const [y, m, d] = bizDate.split('-').map(Number);
+    const today = startOfDay(new Date(y, m - 1, d));
 
     switch (preset) {
         case 'TODAY':
