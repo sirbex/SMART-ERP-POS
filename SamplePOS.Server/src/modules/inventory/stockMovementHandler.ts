@@ -328,6 +328,7 @@ export class StockMovementHandler {
 
     // No batchId provided
     const isOutbound = ['ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY', 'SALE', 'TRANSFER_OUT'].includes(params.movementType);
+    const isInbound = !isOutbound;
 
     if (isOutbound) {
       // For outbound movements, pick the batch with the earliest expiry (FEFO)
@@ -350,10 +351,11 @@ export class StockMovementHandler {
     }
 
     // For inbound movements (or outbound with zero stock), find or create MAIN batch
+    // Look for MAIN batch regardless of status — reactivate DEPLETED batches for inbound
     let result = await client.query(
-      `SELECT id, product_id, batch_number, remaining_quantity, cost_price 
+      `SELECT id, product_id, batch_number, remaining_quantity, cost_price, status 
        FROM inventory_batches 
-       WHERE product_id = $1 AND batch_number = 'MAIN' AND status = 'ACTIVE' 
+       WHERE product_id = $1 AND batch_number = 'MAIN'
        ORDER BY received_date DESC 
        LIMIT 1
        FOR UPDATE`,
@@ -361,7 +363,24 @@ export class StockMovementHandler {
     );
 
     if (result.rows.length > 0) {
-      return result.rows[0];
+      const batch = result.rows[0];
+      // Reactivate DEPLETED MAIN batch for inbound movements
+      if (batch.status !== 'ACTIVE' && isInbound) {
+        await client.query(
+          `UPDATE inventory_batches SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [batch.id]
+        );
+        logger.info('Reactivated DEPLETED MAIN batch for inbound movement', {
+          productId: params.productId,
+          batchId: batch.id,
+        });
+      } else if (batch.status !== 'ACTIVE') {
+        // Outbound on a depleted batch — fall through to create
+      } else {
+        return batch;
+      }
+      // Return the reactivated batch
+      if (isInbound) return { ...batch, status: 'ACTIVE' };
     }
 
     // MAIN batch doesn't exist - create it atomically with ON CONFLICT
@@ -380,12 +399,13 @@ export class StockMovementHandler {
       `INSERT INTO inventory_batches 
        (product_id, batch_number, quantity, remaining_quantity, cost_price, received_date, status)
        VALUES ($1, 'MAIN', 0, 0, $2, CURRENT_TIMESTAMP, 'ACTIVE')
-       ON CONFLICT (product_id, batch_number) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+       ON CONFLICT (product_id, batch_number) DO UPDATE 
+       SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
        RETURNING id, product_id, batch_number, remaining_quantity, cost_price`,
       [params.productId, costPrice]
     );
 
-    logger.info('Created MAIN batch for product', {
+    logger.info('Created/reactivated MAIN batch for product', {
       productId: params.productId,
       batchId: result.rows[0].id,
     });
@@ -490,9 +510,27 @@ export class StockMovementHandler {
   }
 
   /**
-   * Update product quantity_on_hand from batch aggregation
+   * Update product quantity_on_hand from batch aggregation.
+   * Also corrects batch status: reactivates DEPLETED batches that have stock,
+   * and marks ACTIVE batches with zero remaining as DEPLETED.
    */
   private async updateProductQuantity(client: PoolClient, productId: string): Promise<void> {
+    // Fix batch statuses before aggregating
+    await client.query(
+      `UPDATE inventory_batches
+       SET status = CASE
+         WHEN remaining_quantity > 0 THEN 'ACTIVE'::batch_status
+         ELSE 'DEPLETED'::batch_status
+       END,
+       updated_at = CURRENT_TIMESTAMP
+       WHERE product_id = $1
+         AND (
+           (remaining_quantity > 0 AND status != 'ACTIVE') OR
+           (remaining_quantity <= 0 AND status = 'ACTIVE')
+         )`,
+      [productId]
+    );
+
     // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
     await client.query(
       `WITH new_qty AS (
