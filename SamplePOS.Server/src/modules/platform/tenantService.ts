@@ -10,6 +10,7 @@ import bcrypt from 'bcrypt';
 import { execSync } from 'child_process';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from './tenantRepository.js';
+import { getAllPermissions } from '../../rbac/permissions.js';
 import { normalizeTenant, PLAN_LIMITS } from '../../../../shared/types/tenant.js';
 import type {
   Tenant,
@@ -451,7 +452,7 @@ export const tenantService = {
 
       // Seed essential reference data into template so every tenant starts ready.
       // Like Odoo/SAP: template includes chart of accounts, UOMs, RBAC roles/permissions.
-      const seedTables = ['accounts', 'uoms'];
+      const seedTables = ['accounts', 'uoms', 'rbac_permissions_catalog', 'rbac_roles', 'rbac_role_permissions'];
       for (const table of seedTables) {
         try {
           const dumpDataCmd =
@@ -468,14 +469,8 @@ export const tenantService = {
         }
       }
 
-      // Seed RBAC permissions catalog + default system roles (Super Admin, Admin, Manager, Cashier, Auditor)
-      // This mirrors what Odoo/SAP do: every tenant gets pre-configured roles out of the box.
-      try {
-        this.seedTemplateRbac(dbHost, dbPort, dbUser, dbPassword);
-        logger.info('Template seeded with RBAC roles and permissions');
-      } catch {
-        logger.warn('Could not seed RBAC data into template (non-fatal)');
-      }
+      // RBAC data is now seeded via pg_dump (included in seedTables above).
+      // The seedDefaultRbac() fallback in createTenant() handles any gaps.
 
       // Seed internal system user required for automated GL journal entry audit trail
       try {
@@ -764,144 +759,6 @@ export const tenantService = {
   },
 
   /**
-   * Seed RBAC permissions catalog + default system roles into template DB.
-   * Every tenant gets: Super Administrator, Administrator, Manager, Cashier, Auditor roles.
-   * Like Odoo groups / SAP activity groups — pre-configured, ready-to-use.
-   */
-  seedTemplateRbac(dbHost: string, dbPort: string, dbUser: string, dbPassword: string): void {
-    const rbacSql = `
-      INSERT INTO rbac_permissions_catalog (key, module, action, description) VALUES
-        ('sales.read', 'sales', 'read', 'View sales transactions'),
-        ('sales.create', 'sales', 'create', 'Create new sales'),
-        ('sales.update', 'sales', 'update', 'Modify existing sales'),
-        ('sales.delete', 'sales', 'delete', 'Delete sales transactions'),
-        ('sales.void', 'sales', 'void', 'Void completed sales'),
-        ('sales.export', 'sales', 'export', 'Export sales data'),
-        ('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
-        ('inventory.read', 'inventory', 'read', 'View inventory levels'),
-        ('inventory.create', 'inventory', 'create', 'Create inventory items'),
-        ('inventory.update', 'inventory', 'update', 'Modify inventory items'),
-        ('inventory.delete', 'inventory', 'delete', 'Delete inventory items'),
-        ('inventory.import', 'inventory', 'import', 'Import inventory data'),
-        ('inventory.export', 'inventory', 'export', 'Export inventory data'),
-        ('inventory.approve', 'inventory', 'approve', 'Approve stock adjustments'),
-        ('pos.read', 'pos', 'read', 'Access point of sale'),
-        ('pos.create', 'pos', 'create', 'Process transactions'),
-        ('pos.void', 'pos', 'void', 'Void POS transactions'),
-        ('pos.approve', 'pos', 'approve', 'Approve POS overrides'),
-        ('purchasing.read', 'purchasing', 'read', 'View purchase orders'),
-        ('purchasing.create', 'purchasing', 'create', 'Create purchase orders'),
-        ('purchasing.update', 'purchasing', 'update', 'Modify purchase orders'),
-        ('purchasing.delete', 'purchasing', 'delete', 'Delete purchase orders'),
-        ('purchasing.approve', 'purchasing', 'approve', 'Approve purchase orders'),
-        ('purchasing.post', 'purchasing', 'post', 'Post goods receipts'),
-        ('customers.read', 'customers', 'read', 'View customers'),
-        ('customers.create', 'customers', 'create', 'Create customers'),
-        ('customers.update', 'customers', 'update', 'Modify customers'),
-        ('customers.delete', 'customers', 'delete', 'Delete customers'),
-        ('customers.export', 'customers', 'export', 'Export customer data'),
-        ('suppliers.read', 'suppliers', 'read', 'View suppliers'),
-        ('suppliers.create', 'suppliers', 'create', 'Create suppliers'),
-        ('suppliers.update', 'suppliers', 'update', 'Modify suppliers'),
-        ('suppliers.delete', 'suppliers', 'delete', 'Delete suppliers'),
-        ('accounting.read', 'accounting', 'read', 'View accounting data'),
-        ('accounting.create', 'accounting', 'create', 'Create journal entries'),
-        ('accounting.update', 'accounting', 'update', 'Modify accounting records'),
-        ('accounting.delete', 'accounting', 'delete', 'Delete accounting records'),
-        ('accounting.post', 'accounting', 'post', 'Post journal entries'),
-        ('accounting.approve', 'accounting', 'approve', 'Approve accounting transactions'),
-        ('accounting.void', 'accounting', 'void', 'Void posted entries'),
-        ('accounting.export', 'accounting', 'export', 'Export accounting data'),
-        ('reports.read', 'reports', 'read', 'View reports'),
-        ('reports.create', 'reports', 'create', 'Create custom reports'),
-        ('reports.export', 'reports', 'export', 'Export reports'),
-        ('admin.read', 'admin', 'read', 'View admin panel'),
-        ('admin.create', 'admin', 'create', 'Create admin resources'),
-        ('admin.update', 'admin', 'update', 'Modify admin settings'),
-        ('admin.delete', 'admin', 'delete', 'Delete admin resources'),
-        ('system.read', 'system', 'read', 'View system configuration'),
-        ('system.update', 'system', 'update', 'Modify system settings'),
-        ('system.audit_read', 'system', 'read', 'View audit logs'),
-        ('system.users_read', 'system', 'read', 'View users'),
-        ('system.users_create', 'system', 'create', 'Create users'),
-        ('system.users_update', 'system', 'update', 'Modify users'),
-        ('system.users_delete', 'system', 'delete', 'Delete users'),
-        ('system.roles_read', 'system', 'read', 'View roles'),
-        ('system.roles_create', 'system', 'create', 'Create roles'),
-        ('system.roles_update', 'system', 'update', 'Modify roles'),
-        ('system.roles_delete', 'system', 'delete', 'Delete roles'),
-        ('system.permissions_read', 'system', 'read', 'View permissions catalog')
-      ON CONFLICT (key) DO NOTHING;
-
-      DO $$
-      DECLARE
-        sys UUID := '00000000-0000-0000-0000-000000000001';
-        rid UUID;
-      BEGIN
-        -- Super Administrator (all permissions)
-        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
-        VALUES ('Super Administrator', 'Full system access', true, sys, sys)
-        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-        RETURNING id INTO rid;
-        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
-        SELECT rid, key, sys FROM rbac_permissions_catalog
-        ON CONFLICT DO NOTHING;
-
-        -- Administrator
-        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
-        VALUES ('Administrator', 'Administrative access - user and role management', true, sys, sys)
-        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-        RETURNING id INTO rid;
-        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
-        SELECT rid, key, sys FROM rbac_permissions_catalog
-        WHERE module IN ('system', 'admin', 'reports') OR action = 'read'
-        ON CONFLICT DO NOTHING;
-
-        -- Manager
-        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
-        VALUES ('Manager', 'Operational management - sales, inventory, purchasing', true, sys, sys)
-        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-        RETURNING id INTO rid;
-        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
-        SELECT rid, key, sys FROM rbac_permissions_catalog
-        WHERE module IN ('sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos')
-        ON CONFLICT DO NOTHING;
-
-        -- Cashier
-        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
-        VALUES ('Cashier', 'Point of sale operations', true, sys, sys)
-        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-        RETURNING id INTO rid;
-        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
-        SELECT rid, key, sys FROM rbac_permissions_catalog
-        WHERE key IN ('pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'inventory.read')
-        ON CONFLICT DO NOTHING;
-
-        -- Auditor
-        INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
-        VALUES ('Auditor', 'Read-only access for auditing purposes', true, sys, sys)
-        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-        RETURNING id INTO rid;
-        INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
-        SELECT rid, key, sys FROM rbac_permissions_catalog
-        WHERE action = 'read'
-        ON CONFLICT DO NOTHING;
-      END $$;
-    `;
-
-    const psqlCmd =
-      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-      `-d ${TEMPLATE_DB_NAME} -v ON_ERROR_STOP=0`;
-
-    execSync(`echo ${JSON.stringify(rbacSql)} | ${psqlCmd}`, {
-      encoding: 'utf-8',
-      timeout: 15_000,
-      shell: '/bin/sh',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  },
-
-  /**
    * Seed default UOMs into a tenant when template didn't include them.
    */
   async seedDefaultUoms(tenantPool: pg.Pool): Promise<void> {
@@ -921,117 +778,105 @@ export const tenantService = {
 
   /**
    * Seed RBAC roles + permissions into a tenant DB directly (fallback when template lacks them).
+   * Uses getAllPermissions() from permissions.ts as single source of truth.
    */
   async seedDefaultRbac(tenantPool: pg.Pool): Promise<void> {
     const sysUser = '00000000-0000-0000-0000-000000000001';
+    const permissions = getAllPermissions();
 
-    // 1. Seed permissions catalog
-    await tenantPool.query(`
-      INSERT INTO rbac_permissions_catalog (key, module, action, description) VALUES
-        ('sales.read', 'sales', 'read', 'View sales transactions'),
-        ('sales.create', 'sales', 'create', 'Create new sales'),
-        ('sales.update', 'sales', 'update', 'Modify existing sales'),
-        ('sales.delete', 'sales', 'delete', 'Delete sales transactions'),
-        ('sales.void', 'sales', 'void', 'Void completed sales'),
-        ('sales.export', 'sales', 'export', 'Export sales data'),
-        ('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
-        ('inventory.read', 'inventory', 'read', 'View inventory levels'),
-        ('inventory.create', 'inventory', 'create', 'Create inventory items'),
-        ('inventory.update', 'inventory', 'update', 'Modify inventory items'),
-        ('inventory.delete', 'inventory', 'delete', 'Delete inventory items'),
-        ('inventory.import', 'inventory', 'import', 'Import inventory data'),
-        ('inventory.export', 'inventory', 'export', 'Export inventory data'),
-        ('inventory.approve', 'inventory', 'approve', 'Approve stock adjustments'),
-        ('pos.read', 'pos', 'read', 'Access point of sale'),
-        ('pos.create', 'pos', 'create', 'Process transactions'),
-        ('pos.void', 'pos', 'void', 'Void POS transactions'),
-        ('pos.approve', 'pos', 'approve', 'Approve POS overrides'),
-        ('purchasing.read', 'purchasing', 'read', 'View purchase orders'),
-        ('purchasing.create', 'purchasing', 'create', 'Create purchase orders'),
-        ('purchasing.update', 'purchasing', 'update', 'Modify purchase orders'),
-        ('purchasing.delete', 'purchasing', 'delete', 'Delete purchase orders'),
-        ('purchasing.approve', 'purchasing', 'approve', 'Approve purchase orders'),
-        ('purchasing.post', 'purchasing', 'post', 'Post goods receipts'),
-        ('customers.read', 'customers', 'read', 'View customers'),
-        ('customers.create', 'customers', 'create', 'Create customers'),
-        ('customers.update', 'customers', 'update', 'Modify customers'),
-        ('customers.delete', 'customers', 'delete', 'Delete customers'),
-        ('customers.export', 'customers', 'export', 'Export customer data'),
-        ('suppliers.read', 'suppliers', 'read', 'View suppliers'),
-        ('suppliers.create', 'suppliers', 'create', 'Create suppliers'),
-        ('suppliers.update', 'suppliers', 'update', 'Modify suppliers'),
-        ('suppliers.delete', 'suppliers', 'delete', 'Delete suppliers'),
-        ('accounting.read', 'accounting', 'read', 'View accounting data'),
-        ('accounting.create', 'accounting', 'create', 'Create journal entries'),
-        ('accounting.update', 'accounting', 'update', 'Modify accounting records'),
-        ('accounting.delete', 'accounting', 'delete', 'Delete accounting records'),
-        ('accounting.post', 'accounting', 'post', 'Post journal entries'),
-        ('accounting.approve', 'accounting', 'approve', 'Approve accounting transactions'),
-        ('accounting.void', 'accounting', 'void', 'Void posted entries'),
-        ('accounting.export', 'accounting', 'export', 'Export accounting data'),
-        ('reports.read', 'reports', 'read', 'View reports'),
-        ('reports.create', 'reports', 'create', 'Create custom reports'),
-        ('reports.export', 'reports', 'export', 'Export reports'),
-        ('admin.read', 'admin', 'read', 'View admin panel'),
-        ('admin.create', 'admin', 'create', 'Create admin resources'),
-        ('admin.update', 'admin', 'update', 'Modify admin settings'),
-        ('admin.delete', 'admin', 'delete', 'Delete admin resources'),
-        ('system.read', 'system', 'read', 'View system configuration'),
-        ('system.update', 'system', 'update', 'Modify system settings'),
-        ('system.audit_read', 'system', 'read', 'View audit logs'),
-        ('system.users_read', 'system', 'read', 'View users'),
-        ('system.users_create', 'system', 'create', 'Create users'),
-        ('system.users_update', 'system', 'update', 'Modify users'),
-        ('system.users_delete', 'system', 'delete', 'Delete users'),
-        ('system.roles_read', 'system', 'read', 'View roles'),
-        ('system.roles_create', 'system', 'create', 'Create roles'),
-        ('system.roles_update', 'system', 'update', 'Modify roles'),
-        ('system.roles_delete', 'system', 'delete', 'Delete roles'),
-        ('system.permissions_read', 'system', 'read', 'View permissions catalog')
-      ON CONFLICT (key) DO NOTHING
-    `);
+    // 1. Seed ALL permissions from the canonical catalog
+    for (const perm of permissions) {
+      await tenantPool.query(
+        `INSERT INTO rbac_permissions_catalog (key, module, action, description)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (key) DO UPDATE SET
+           module = EXCLUDED.module, action = EXCLUDED.action, description = EXCLUDED.description`,
+        [perm.key, perm.module, perm.action, perm.description]
+      );
+    }
 
-    // 2. Seed default roles
-    const roleConfigs = [
-      { name: 'Super Administrator', desc: 'Full system access', filter: () => true },
+    // 2. Seed all 9 system roles matching production
+    const roleConfigs: Array<{
+      name: string;
+      desc: string;
+      filter: (perm: { key: string; module: string; action: string }) => boolean;
+    }> = [
+      {
+        name: 'Super Administrator',
+        desc: 'Full system access - all permissions',
+        filter: () => true,
+      },
       {
         name: 'Administrator',
-        desc: 'Administrative access',
-        filter: (mod: string, act: string) =>
-          ['system', 'admin', 'reports'].includes(mod) || act === 'read',
+        desc: 'Administrative access - user and role management',
+        filter: (p) =>
+          ['system', 'admin', 'reports', 'settings'].includes(p.module) || p.action === 'read',
       },
       {
         name: 'Manager',
-        desc: 'Operational management',
-        filter: (mod: string) =>
-          ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos'].includes(
-            mod
-          ),
+        desc: 'Operational management - sales, inventory, purchasing',
+        filter: (p) =>
+          [
+            'sales', 'inventory', 'purchasing', 'customers', 'suppliers',
+            'reports', 'pos', 'banking', 'delivery', 'settings', 'crm',
+            'expenses', 'quotations',
+          ].includes(p.module),
       },
       {
         name: 'Cashier',
         desc: 'Point of sale operations',
-        filter: (_mod: string, _act: string, key: string) =>
+        filter: (_p) =>
           [
-            'pos.read',
-            'pos.create',
-            'sales.read',
-            'sales.create',
-            'customers.read',
+            'pos.read', 'pos.create',
+            'sales.read', 'sales.create',
+            'customers.read', 'customers.create',
             'inventory.read',
-          ].includes(key),
+            'delivery.read',
+            'settings.read',
+            'quotations.read', 'quotations.create',
+            'reports.sales_view',
+          ].includes(_p.key),
       },
       {
         name: 'Auditor',
-        desc: 'Read-only access',
-        filter: (_mod: string, act: string) => act === 'read',
+        desc: 'Read-only access for auditing purposes',
+        filter: (p) => p.action === 'read',
+      },
+      {
+        name: 'Accountant',
+        desc: 'Financial operations - accounting, banking, payments, and reporting',
+        filter: (p) =>
+          ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
+          [
+            'sales.read', 'sales.export',
+            'purchasing.read', 'purchasing.create',
+            'customers.read', 'customers.export',
+            'suppliers.read', 'suppliers.create', 'suppliers.update',
+            'inventory.read', 'settings.read', 'quotations.read',
+          ].includes(p.key),
+      },
+      {
+        name: 'Warehouse Clerk',
+        desc: 'Inventory and warehouse operations - receiving, stock counts, deliveries',
+        filter: (p) =>
+          ['inventory', 'delivery'].includes(p.module) ||
+          ['purchasing.read', 'purchasing.post', 'suppliers.read', 'settings.read', 'reports.read'].includes(p.key),
+      },
+      {
+        name: 'Sales Representative',
+        desc: 'Sales operations - sales, customers, CRM, and quotations',
+        filter: (p) =>
+          ['sales', 'customers', 'crm', 'reports', 'quotations'].includes(p.module) ||
+          ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(p.key),
+      },
+      {
+        name: 'HR Manager',
+        desc: 'Human resources and payroll management',
+        filter: (p) =>
+          ['hr', 'reports'].includes(p.module) ||
+          ['settings.read', 'accounting.read'].includes(p.key),
       },
     ];
-
-    // Get all permissions
-    const { rows: perms } = await tenantPool.query(
-      'SELECT key, module, action FROM rbac_permissions_catalog'
-    );
 
     for (const role of roleConfigs) {
       const { rows: roleRows } = await tenantPool.query(
@@ -1044,11 +889,9 @@ export const tenantService = {
       const roleId = roleRows[0]?.id;
       if (!roleId) continue;
 
-      const grantKeys = perms
-        .filter((p: { key: string; module: string; action: string }) =>
-          role.filter(p.module, p.action, p.key)
-        )
-        .map((p: { key: string }) => p.key);
+      const grantKeys = permissions
+        .filter((p) => role.filter(p))
+        .map((p) => p.key);
 
       for (const key of grantKeys) {
         await tenantPool.query(
