@@ -26,9 +26,9 @@ export default function ServerClock() {
   }, []);
 
   return (
-    <div className="flex items-center gap-2 text-xs tabular-nums select-none" title={`Business timezone: ${BUSINESS_TIMEZONE}`}>
+    <div className="flex items-center gap-2 text-sm tabular-nums select-none" title={`Business timezone: ${BUSINESS_TIMEZONE}`}>
       <span className="text-gray-500 hidden sm:inline">{dateFmt.format(now)}</span>
-      <span className="font-medium text-gray-700">{timeFmt.format(now)}</span>
+      <span className="font-bold text-gray-900">{timeFmt.format(now)}</span>
     </div>
   );
 }
