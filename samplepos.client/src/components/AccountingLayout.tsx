@@ -7,6 +7,7 @@ import {
   Landmark, FileCheck, AlertTriangle, Receipt, Package, ShieldCheck, Banknote, Globe,
   CalendarCheck, Percent, RefreshCw, Clock
 } from 'lucide-react';
+import ServerClock from './ServerClock';
 
 interface AccountingLayoutProps {
   children: React.ReactNode;
@@ -395,6 +396,9 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
               {currentPage?.description || 'Financial management and reporting'}
             </p>
           </div>
+
+          {/* Clock */}
+          <ServerClock />
         </header>
 
         {/* Page Content */}

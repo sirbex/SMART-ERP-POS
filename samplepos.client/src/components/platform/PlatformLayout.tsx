@@ -15,6 +15,7 @@ import {
     Menu,
     X,
 } from 'lucide-react';
+import ServerClock from '../ServerClock';
 
 const navItems = [
     { to: '/platform', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -118,9 +119,16 @@ export default function PlatformLayout() {
                         <Menu className="w-5 h-5" />
                     </button>
                     <span className="font-semibold text-sm">Platform Admin</span>
-                    <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
-                        {admin?.fullName?.charAt(0).toUpperCase() || 'A'}
+                    <div className="flex items-center gap-3">
+                        <ServerClock />
+                        <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
+                            {admin?.fullName?.charAt(0).toUpperCase() || 'A'}
+                        </div>
                     </div>
+                </header>
+                {/* Desktop Top Bar */}
+                <header className="h-12 bg-white border-b border-gray-200 items-center justify-end px-4 hidden lg:flex sticky top-0 z-10">
+                    <ServerClock />
                 </header>
                 <main className="flex-1 overflow-auto">
                     <Outlet />
