@@ -412,6 +412,7 @@ export const api = {
       apiClient.get<ApiResponse>('inventory/batches', { params: { productId } }),
     expiringSoon: (days?: number) =>
       apiClient.get<ApiResponse>('inventory/batches/expiring', { params: { daysThreshold: days } }),
+    batchesAll: () => apiClient.get<ApiResponse>('inventory/batches-all'),
     needingReorder: () => apiClient.get<ApiResponse>('inventory/reorder'),
     inventoryValue: (productId?: string) =>
       apiClient.get<ApiResponse>('inventory/value', { params: productId ? { productId } : {} }),

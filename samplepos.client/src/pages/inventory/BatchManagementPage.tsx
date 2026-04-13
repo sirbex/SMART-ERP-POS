@@ -6,8 +6,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { useStockLevels } from '../../hooks/useInventory';
-import { useProducts } from '../../hooks/useProducts';
+import { useAllBatches } from '../../hooks/useInventory';
 import { getBusinessDate } from '../../utils/businessDate';
 import Decimal from 'decimal.js';
 
@@ -30,6 +29,7 @@ interface InventoryBatch {
   id: string;
   product_id: string;
   product_name: string;
+  sku: string;
   batch_number: string;
   quantity: number;
   remaining_quantity: number;
@@ -38,14 +38,14 @@ interface InventoryBatch {
   status: 'ACTIVE' | 'DEPLETED' | 'EXPIRED';
   created_at: string;
   updated_at: string;
+  unit_of_measure: string;
 }
 
 // Expiry urgency levels matching backend calculation
 type ExpiryUrgency = 'CRITICAL' | 'WARNING' | 'NORMAL' | 'NONE';
 
 export default function BatchManagementPage() {
-  const { data: stockLevelsData, isLoading, error, refetch } = useStockLevels();
-  const { data: productsData } = useProducts();
+  const { data: batchesData, isLoading, error, refetch } = useAllBatches();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'DEPLETED' | 'EXPIRED'>(
@@ -55,60 +55,29 @@ export default function BatchManagementPage() {
   const [selectedBatch, setSelectedBatch] = useState<InventoryBatch | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
-  // Extract products for quick lookup
-  const products = useMemo(() => {
-    if (!productsData?.data) return [];
-    return Array.isArray(productsData.data) ? productsData.data : [];
-  }, [productsData]);
-
-  const productMap = useMemo(() => {
-    const map = new Map<string, unknown>();
-    products.forEach((p: { id: string }) => {
-      map.set(p.id, p);
-    });
-    return map;
-  }, [products]);
-
-  // Create batch list from stock levels
-  // In production, this would come from a dedicated /api/inventory/batches endpoint
+  // Normalize backend batch rows to typed InventoryBatch array
   const batches = useMemo((): InventoryBatch[] => {
-    if (!stockLevelsData?.data) return [];
-    const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
+    if (!batchesData?.data) return [];
+    const rows = Array.isArray(batchesData.data) ? batchesData.data : [];
 
-    // Mock batches from stock levels (simplified for demo)
-    // Filter out products with 0 stock - they have no batches
-    return levels
-      .filter((level: { total_stock?: number; total_quantity?: number }) => {
-        const stock = Number(level.total_stock || level.total_quantity || 0);
-        return stock > 0; // Only show products that have actual stock/batches
+    return rows.map(
+      (row: Record<string, unknown>) => ({
+        id: String(row.id),
+        product_id: String(row.product_id),
+        product_name: String(row.product_name || ''),
+        sku: String(row.sku || ''),
+        batch_number: String(row.batch_number || 'MAIN'),
+        quantity: Number(row.quantity || 0),
+        remaining_quantity: Number(row.remaining_quantity || 0),
+        expiry_date: row.expiry_date ? String(row.expiry_date) : null,
+        cost_price: Number(row.cost_price || 0),
+        status: String(row.status || 'ACTIVE') as InventoryBatch['status'],
+        created_at: String(row.created_at || ''),
+        updated_at: String(row.updated_at || ''),
+        unit_of_measure: String(row.unit_of_measure || 'PCS'),
       })
-      .map(
-        (level: {
-          product_id: string;
-          product_name: string;
-          sku?: string;
-          total_stock?: number;
-          total_quantity?: number;
-          nearest_expiry?: string | null;
-          average_cost?: number;
-        }) => ({
-          id: `batch-${level.product_id}`,
-          product_id: level.product_id,
-          product_name: level.product_name,
-          batch_number: level.sku || 'MAIN',
-          quantity: Number(level.total_stock || level.total_quantity || 0),
-          remaining_quantity: Number(level.total_stock || level.total_quantity || 0),
-          expiry_date: level.nearest_expiry || null,
-          cost_price: Number(level.average_cost || 0),
-          status:
-            Number(level.total_stock || level.total_quantity || 0) === 0
-              ? ('DEPLETED' as const)
-              : ('ACTIVE' as const),
-          created_at: getBusinessDate(),
-          updated_at: getBusinessDate(),
-        })
-      );
-  }, [stockLevelsData]);
+    );
+  }, [batchesData]);
 
   // Calculate expiry urgency for a batch
   const calculateExpiryUrgency = (expiryDate: string | null): ExpiryUrgency => {
@@ -142,7 +111,8 @@ export default function BatchManagementPage() {
       filtered = filtered.filter(
         (batch) =>
           batch.product_name.toLowerCase().includes(term) ||
-          batch.batch_number.toLowerCase().includes(term)
+          batch.batch_number.toLowerCase().includes(term) ||
+          batch.sku.toLowerCase().includes(term)
       );
     }
 
@@ -381,7 +351,7 @@ export default function BatchManagementPage() {
                   Product
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Category
+                  SKU
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Batch Number
@@ -417,9 +387,6 @@ export default function BatchManagementPage() {
                 </tr>
               ) : (
                 sortedBatches.map((batch, index) => {
-                  const product = productMap.get(batch.product_id) as
-                    | { unitOfMeasure?: string; category?: string }
-                    | undefined;
                   const urgency = calculateExpiryUrgency(batch.expiry_date);
                   const urgencyBadge = getUrgencyBadge(urgency);
                   const daysUntilExpiry = getDaysUntilExpiry(batch.expiry_date);
@@ -443,13 +410,10 @@ export default function BatchManagementPage() {
                         </div>
                       </td>
 
-                      {/* Category */}
+                      {/* SKU */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-400'
-                          }`}>
-                          {product?.category || '\u2014'}
+                        <span className="text-sm text-gray-700 font-mono">
+                          {batch.sku || '\u2014'}
                         </span>
                       </td>
 
@@ -464,7 +428,7 @@ export default function BatchManagementPage() {
                           {batch.remaining_quantity.toFixed(2)}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {product?.unitOfMeasure || 'PCS'}
+                          {batch.unit_of_measure || 'PCS'}
                         </div>
                       </td>
 
@@ -571,11 +535,6 @@ export default function BatchManagementPage() {
       {showDetailsModal && selectedBatch && (
         <BatchDetailsModal
           batch={selectedBatch}
-          product={
-            productMap.get(selectedBatch.product_id) as
-            | { name?: string; sku?: string; unitOfMeasure?: string }
-            | undefined
-          }
           onClose={() => setShowDetailsModal(false)}
         />
       )}
@@ -588,11 +547,9 @@ export default function BatchManagementPage() {
  */
 function BatchDetailsModal({
   batch,
-  product,
   onClose,
 }: {
   batch: InventoryBatch;
-  product?: { name?: string; sku?: string; unitOfMeasure?: string };
   onClose: () => void;
 }) {
   const daysUntilExpiry = batch.expiry_date
@@ -635,7 +592,7 @@ function BatchDetailsModal({
                 </div>
                 <div>
                   <span className="text-gray-600">SKU:</span>
-                  <span className="ml-2 font-medium text-gray-900">{product?.sku || 'N/A'}</span>
+                  <span className="ml-2 font-medium text-gray-900">{batch.sku || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="text-gray-600">Batch Number:</span>
@@ -646,7 +603,7 @@ function BatchDetailsModal({
                 <div>
                   <span className="text-gray-600">Unit:</span>
                   <span className="ml-2 font-medium text-gray-900">
-                    {product?.unitOfMeasure || 'PCS'}
+                    {batch.unit_of_measure || 'PCS'}
                   </span>
                 </div>
               </div>

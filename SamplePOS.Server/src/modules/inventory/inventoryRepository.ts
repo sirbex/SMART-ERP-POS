@@ -31,12 +31,15 @@ export const inventoryRepository = {
    */
   async getAllActiveBatches(pool: Pool): Promise<Record<string, unknown>[]> {
     const result = await pool.query(
-      `SELECT ib.id, ib.product_id, p.name AS product_name,
+      `SELECT ib.id, ib.product_id, p.name AS product_name, p.sku,
               ib.batch_number, ib.expiry_date,
-              ib.remaining_quantity, ib.cost_price AS unit_cost
+              ib.quantity, ib.remaining_quantity, ib.cost_price,
+              ib.status, ib.created_at, ib.updated_at,
+              COALESCE(u.name, 'PCS') AS unit_of_measure
        FROM inventory_batches ib
        JOIN products p ON p.id = ib.product_id
-       WHERE ib.remaining_quantity > 0
+       LEFT JOIN uoms u ON u.id = p.base_uom_id
+       WHERE ib.status = 'ACTIVE' AND ib.remaining_quantity > 0
        ORDER BY p.name ASC, ib.expiry_date ASC NULLS LAST`
     );
     return result.rows;

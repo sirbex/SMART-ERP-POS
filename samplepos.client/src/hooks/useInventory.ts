@@ -15,6 +15,7 @@ export const inventoryKeys = {
   stockLevels: () => [...inventoryKeys.all, 'stock-levels'] as const,
   stockLevelByProduct: (productId: string) => [...inventoryKeys.all, 'stock-level', productId] as const,
   batches: () => [...inventoryKeys.all, 'batches'] as const,
+  batchesAll: () => [...inventoryKeys.all, 'batches-all'] as const,
   batchesByProduct: (productId: string) => [...inventoryKeys.batches(), productId] as const,
   expiringSoon: (days?: number) => [...inventoryKeys.all, 'expiring-soon', days || 7] as const,
   needingReorder: () => [...inventoryKeys.all, 'needing-reorder'] as const,
@@ -31,6 +32,20 @@ export function useStockLevels() {
       return response.data;
     },
     staleTime: 30000, // 30 seconds
+  });
+}
+
+/**
+ * Fetch all active batches across all products
+ */
+export function useAllBatches() {
+  return useQuery({
+    queryKey: inventoryKeys.batchesAll(),
+    queryFn: async () => {
+      const response = await api.inventory.batchesAll();
+      return response.data;
+    },
+    staleTime: 30000,
   });
 }
 

@@ -26,9 +26,9 @@ import { PoolClient } from 'pg';
  * @param productId - UUID of the product to sync
  */
 export async function syncProductQuantity(client: PoolClient, productId: string): Promise<void> {
-  // Step 1: Fix batch statuses before aggregating — prevents the DEPLETED-with-stock bug
-  await client.query(
-    `UPDATE inventory_batches
+    // Step 1: Fix batch statuses before aggregating — prevents the DEPLETED-with-stock bug
+    await client.query(
+        `UPDATE inventory_batches
      SET status = CASE
        WHEN remaining_quantity > 0 THEN 'ACTIVE'::batch_status
        ELSE 'DEPLETED'::batch_status
@@ -39,12 +39,12 @@ export async function syncProductQuantity(client: PoolClient, productId: string)
          (remaining_quantity > 0 AND status != 'ACTIVE') OR
          (remaining_quantity <= 0 AND status = 'ACTIVE')
        )`,
-    [productId]
-  );
+        [productId]
+    );
 
-  // Step 2-4: Aggregate ACTIVE batches → update product_inventory + products atomically
-  await client.query(
-    `WITH new_qty AS (
+    // Step 2-4: Aggregate ACTIVE batches → update product_inventory + products atomically
+    await client.query(
+        `WITH new_qty AS (
        SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
        FROM inventory_batches
        WHERE product_id = $1 AND status = 'ACTIVE'
@@ -58,6 +58,6 @@ export async function syncProductQuantity(client: PoolClient, productId: string)
      SET quantity_on_hand = (SELECT qty FROM new_qty),
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $1`,
-    [productId]
-  );
+        [productId]
+    );
 }
