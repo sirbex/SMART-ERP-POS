@@ -39,6 +39,7 @@ import { ServiceInfoBanner } from '../../components/pos/ServiceInfoBanner';
 import { ServiceBadge } from '../../components/pos/ServiceBadge';
 import AddServiceItemDialog from '../../components/pos/AddServiceItemDialog';
 import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/cash-register';
+import ServerClock from '../../components/ServerClock';
 import { useCurrentSession } from '../../hooks/useCashRegister';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
 import quotationApi from '../../api/quotations';
@@ -2919,6 +2920,7 @@ export default function POSPage() {
             </button>
           )}
           <span className="hidden lg:inline text-xs text-gray-500">Bank-grade precision</span>
+          <ServerClock />
         </div>
       </header>
       {/* Inline Offline Sync Panel — accessible to cashiers */}
