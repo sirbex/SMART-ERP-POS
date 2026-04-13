@@ -37,6 +37,7 @@ import type {
     CreateSupplierDebitNote,
 } from '../../../../shared/zod/creditDebitNote.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import { syncProductQuantity } from '../../utils/inventorySync.js';
 
 // ============================================================
 // CUSTOMER SIDE
@@ -281,23 +282,8 @@ export const creditDebitNoteService = {
                             );
                         }
 
-                        // Recalculate product_inventory.quantity_on_hand from batches
-                        await client.query(
-                            `UPDATE product_inventory
-                             SET quantity_on_hand = COALESCE(
-                               (SELECT SUM(remaining_quantity) FROM inventory_batches
-                                WHERE product_id = $1 AND status != 'EXHAUSTED'), 0
-                             ), updated_at = CURRENT_TIMESTAMP
-                             WHERE product_id = $1`,
-                            [line.productId]
-                        );
-                        // Sync products.quantity_on_hand for backward compat
-                        await client.query(
-                            `UPDATE products SET quantity_on_hand = (
-                               SELECT quantity_on_hand FROM product_inventory WHERE product_id = $1
-                             ), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-                            [line.productId]
-                        );
+                        // Recalculate product quantities from batches
+                        await syncProductQuantity(client, line.productId);
 
                         // Accumulate cost for inventory GL reversal
                         inventoryCostTotal = Money.add(

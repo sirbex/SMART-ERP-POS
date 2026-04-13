@@ -33,6 +33,7 @@ import {
   type ProductUomRow,
 } from '../../db/batchFetch.js';
 import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
+import { syncProductQuantity } from '../../utils/inventorySync.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -1094,23 +1095,7 @@ export const salesService = {
         }
 
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-        await client.query(
-          `WITH new_qty AS (
-             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ), upd_pi AS (
-             UPDATE product_inventory
-             SET quantity_on_hand = (SELECT qty FROM new_qty),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE product_id = $1
-           )
-           UPDATE products
-           SET quantity_on_hand = (SELECT qty FROM new_qty),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [item.productId]
-        );
+        await syncProductQuantity(client, item.productId);
       }
 
       // BR-SAL-002: Update customer balance for CREDIT sales (split payment support)
@@ -2288,23 +2273,7 @@ export const salesService = {
         }
 
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-        await client.query(
-          `WITH new_qty AS (
-             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ), upd_pi AS (
-             UPDATE product_inventory
-             SET quantity_on_hand = (SELECT qty FROM new_qty),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE product_id = $1
-           )
-           UPDATE products
-           SET quantity_on_hand = (SELECT qty FROM new_qty),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [productId]
-        );
+        await syncProductQuantity(client, productId);
 
         // 3. Record stock movement (VOID reversal)
         // Advisory lock prevents concurrent duplicate movement number generation
@@ -2878,23 +2847,7 @@ export const salesService = {
         }
 
         // 5c. Sync product_inventory and products.quantity_on_hand
-        await client.query(
-          `WITH new_qty AS (
-             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ), upd_pi AS (
-             UPDATE product_inventory
-             SET quantity_on_hand = (SELECT qty FROM new_qty),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE product_id = $1
-           )
-           UPDATE products
-           SET quantity_on_hand = (SELECT qty FROM new_qty),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [productId]
-        );
+        await syncProductQuantity(client, productId);
 
         // 5d. Record stock movement (RETURN type)
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);

@@ -19,6 +19,7 @@ import * as glEntryService from '../../services/glEntryService.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import logger from '../../utils/logger.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
+import { syncProductQuantity } from '../../utils/inventorySync.js';
 
 export type StockMovementType =
   | 'GOODS_RECEIPT'
@@ -511,43 +512,9 @@ export class StockMovementHandler {
 
   /**
    * Update product quantity_on_hand from batch aggregation.
-   * Also corrects batch status: reactivates DEPLETED batches that have stock,
-   * and marks ACTIVE batches with zero remaining as DEPLETED.
+   * Delegates to the shared syncProductQuantity() — single source of truth.
    */
   private async updateProductQuantity(client: PoolClient, productId: string): Promise<void> {
-    // Fix batch statuses before aggregating
-    await client.query(
-      `UPDATE inventory_batches
-       SET status = CASE
-         WHEN remaining_quantity > 0 THEN 'ACTIVE'::batch_status
-         ELSE 'DEPLETED'::batch_status
-       END,
-       updated_at = CURRENT_TIMESTAMP
-       WHERE product_id = $1
-         AND (
-           (remaining_quantity > 0 AND status != 'ACTIVE') OR
-           (remaining_quantity <= 0 AND status = 'ACTIVE')
-         )`,
-      [productId]
-    );
-
-    // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-    await client.query(
-      `WITH new_qty AS (
-         SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-         FROM inventory_batches
-         WHERE product_id = $1 AND status = 'ACTIVE'
-       ), upd_pi AS (
-         UPDATE product_inventory
-         SET quantity_on_hand = (SELECT qty FROM new_qty),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE product_id = $1
-       )
-       UPDATE products
-       SET quantity_on_hand = (SELECT qty FROM new_qty),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [productId]
-    );
+    await syncProductQuantity(client, productId);
   }
 }

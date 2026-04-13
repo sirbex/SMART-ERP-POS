@@ -28,6 +28,7 @@ import {
     supplierCreditDebitNoteRepository,
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
 import { recordSupplierCreditNoteToGL } from '../../services/glEntryService.js';
+import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 
@@ -250,23 +251,7 @@ export const returnGrnService = {
                 });
 
                 // 3d. App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-                await client.query(
-                    `WITH new_qty AS (
-                       SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-                       FROM inventory_batches
-                       WHERE product_id = $1 AND status = 'ACTIVE'
-                     ), upd_pi AS (
-                       UPDATE product_inventory
-                       SET quantity_on_hand = (SELECT qty FROM new_qty),
-                           updated_at = CURRENT_TIMESTAMP
-                       WHERE product_id = $1
-                     )
-                     UPDATE products
-                     SET quantity_on_hand = (SELECT qty FROM new_qty),
-                         updated_at = CURRENT_TIMESTAMP
-                     WHERE id = $1`,
-                    [line.productId]
-                );
+                await syncProductQuantity(client, line.productId);
             }
 
             // 4. Post the RGRN

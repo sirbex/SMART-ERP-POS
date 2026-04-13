@@ -28,6 +28,7 @@ import {
 } from '../../middleware/businessRules.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../utils/dateRange.js';
+import { syncProductQuantity } from '../../utils/inventorySync.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -507,23 +508,7 @@ export const goodsReceiptService = {
         });
 
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-        await client.query(
-          `WITH new_qty AS (
-             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ), upd_pi AS (
-             UPDATE product_inventory
-             SET quantity_on_hand = (SELECT qty FROM new_qty),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE product_id = $1
-           )
-           UPDATE products
-           SET quantity_on_hand = (SELECT qty FROM new_qty),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [productId]
-        );
+        await syncProductQuantity(client, productId);
 
         // Record stock movement (RECEIVE)
         // Generate movement number
@@ -1402,23 +1387,7 @@ export const goodsReceiptService = {
         });
 
         // Update product_inventory.quantity_on_hand from batch totals
-        await client.query(
-          `WITH new_qty AS (
-             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ), upd_pi AS (
-             UPDATE product_inventory
-             SET quantity_on_hand = (SELECT qty FROM new_qty),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE product_id = $1
-           )
-           UPDATE products
-           SET quantity_on_hand = (SELECT qty FROM new_qty),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [item.productId]
-        );
+        await syncProductQuantity(client, item.productId);
 
         // Collect cost layer data (processed inside transaction for atomicity)
         costLayerData.push({

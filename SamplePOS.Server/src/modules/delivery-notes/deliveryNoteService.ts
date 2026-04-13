@@ -10,6 +10,7 @@ import { deliveryNoteRepository } from './deliveryNoteRepository.js';
 import { recordMovement } from '../stock-movements/stockMovementRepository.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
+import { syncProductQuantity } from '../../utils/inventorySync.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
   DeliveryNoteWithLines,
@@ -453,23 +454,7 @@ export const deliveryNoteService = {
 
       // ── App-layer sync: update BOTH product_inventory and products.quantity_on_hand
       for (const productId of productsToSync) {
-        await client.query(
-          `WITH new_qty AS (
-             SELECT COALESCE(SUM(remaining_quantity), 0) AS qty
-             FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-           ), upd_pi AS (
-             UPDATE product_inventory
-             SET quantity_on_hand = (SELECT qty FROM new_qty),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE product_id = $1
-           )
-           UPDATE products
-           SET quantity_on_hand = (SELECT qty FROM new_qty),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [productId]
-        );
+        await syncProductQuantity(client, productId);
       }
 
       // ── Recalc total (safe: trigger allows DRAFT→POSTED and PICKED→POSTED) ──
