@@ -487,6 +487,20 @@ export const tenantService = {
       // RBAC data is now seeded via pg_dump (included in seedTables above).
       // The seedDefaultRbac() fallback in createTenant() handles any gaps.
 
+      // Zero out account balances — template must start clean.
+      // The accounts seed copies CurrentBalance from master (which has real data).
+      // New tenants must not inherit those balances.
+      try {
+        execSync(
+          `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+          `-d ${TEMPLATE_DB_NAME} -c "UPDATE accounts SET \\\"CurrentBalance\\\" = 0 WHERE \\\"CurrentBalance\\\" != 0;"`,
+          { encoding: 'utf-8', timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        logger.info('Template account balances zeroed out');
+      } catch {
+        logger.warn('Could not zero template account balances (non-fatal)');
+      }
+
       // Seed internal system user required for automated GL journal entry audit trail
       try {
         execSync(
@@ -816,82 +830,82 @@ export const tenantService = {
       desc: string;
       filter: (perm: { key: string; module: string; action: string }) => boolean;
     }> = [
-      {
-        name: 'Super Administrator',
-        desc: 'Full system access - all permissions',
-        filter: () => true,
-      },
-      {
-        name: 'Administrator',
-        desc: 'Administrative access - user and role management',
-        filter: (p) =>
-          ['system', 'admin', 'reports', 'settings'].includes(p.module) || p.action === 'read',
-      },
-      {
-        name: 'Manager',
-        desc: 'Operational management - sales, inventory, purchasing',
-        filter: (p) =>
-          [
-            'sales', 'inventory', 'purchasing', 'customers', 'suppliers',
-            'reports', 'pos', 'banking', 'delivery', 'settings', 'crm',
-            'expenses', 'quotations',
-          ].includes(p.module),
-      },
-      {
-        name: 'Cashier',
-        desc: 'Point of sale operations',
-        filter: (_p) =>
-          [
-            'pos.read', 'pos.create',
-            'sales.read', 'sales.create',
-            'customers.read', 'customers.create',
-            'inventory.read',
-            'delivery.read',
-            'settings.read',
-            'quotations.read', 'quotations.create',
-            'reports.sales_view',
-          ].includes(_p.key),
-      },
-      {
-        name: 'Auditor',
-        desc: 'Read-only access for auditing purposes',
-        filter: (p) => p.action === 'read',
-      },
-      {
-        name: 'Accountant',
-        desc: 'Financial operations - accounting, banking, payments, and reporting',
-        filter: (p) =>
-          ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
-          [
-            'sales.read', 'sales.export',
-            'purchasing.read', 'purchasing.create',
-            'customers.read', 'customers.export',
-            'suppliers.read', 'suppliers.create', 'suppliers.update',
-            'inventory.read', 'settings.read', 'quotations.read',
-          ].includes(p.key),
-      },
-      {
-        name: 'Warehouse Clerk',
-        desc: 'Inventory and warehouse operations - receiving, stock counts, deliveries',
-        filter: (p) =>
-          ['inventory', 'delivery'].includes(p.module) ||
-          ['purchasing.read', 'purchasing.post', 'suppliers.read', 'settings.read', 'reports.read'].includes(p.key),
-      },
-      {
-        name: 'Sales Representative',
-        desc: 'Sales operations - sales, customers, CRM, and quotations',
-        filter: (p) =>
-          ['sales', 'customers', 'crm', 'reports', 'quotations'].includes(p.module) ||
-          ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(p.key),
-      },
-      {
-        name: 'HR Manager',
-        desc: 'Human resources and payroll management',
-        filter: (p) =>
-          ['hr', 'reports'].includes(p.module) ||
-          ['settings.read', 'accounting.read'].includes(p.key),
-      },
-    ];
+        {
+          name: 'Super Administrator',
+          desc: 'Full system access - all permissions',
+          filter: () => true,
+        },
+        {
+          name: 'Administrator',
+          desc: 'Administrative access - user and role management',
+          filter: (p) =>
+            ['system', 'admin', 'reports', 'settings'].includes(p.module) || p.action === 'read',
+        },
+        {
+          name: 'Manager',
+          desc: 'Operational management - sales, inventory, purchasing',
+          filter: (p) =>
+            [
+              'sales', 'inventory', 'purchasing', 'customers', 'suppliers',
+              'reports', 'pos', 'banking', 'delivery', 'settings', 'crm',
+              'expenses', 'quotations',
+            ].includes(p.module),
+        },
+        {
+          name: 'Cashier',
+          desc: 'Point of sale operations',
+          filter: (_p) =>
+            [
+              'pos.read', 'pos.create',
+              'sales.read', 'sales.create',
+              'customers.read', 'customers.create',
+              'inventory.read',
+              'delivery.read',
+              'settings.read',
+              'quotations.read', 'quotations.create',
+              'reports.sales_view',
+            ].includes(_p.key),
+        },
+        {
+          name: 'Auditor',
+          desc: 'Read-only access for auditing purposes',
+          filter: (p) => p.action === 'read',
+        },
+        {
+          name: 'Accountant',
+          desc: 'Financial operations - accounting, banking, payments, and reporting',
+          filter: (p) =>
+            ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
+            [
+              'sales.read', 'sales.export',
+              'purchasing.read', 'purchasing.create',
+              'customers.read', 'customers.export',
+              'suppliers.read', 'suppliers.create', 'suppliers.update',
+              'inventory.read', 'settings.read', 'quotations.read',
+            ].includes(p.key),
+        },
+        {
+          name: 'Warehouse Clerk',
+          desc: 'Inventory and warehouse operations - receiving, stock counts, deliveries',
+          filter: (p) =>
+            ['inventory', 'delivery'].includes(p.module) ||
+            ['purchasing.read', 'purchasing.post', 'suppliers.read', 'settings.read', 'reports.read'].includes(p.key),
+        },
+        {
+          name: 'Sales Representative',
+          desc: 'Sales operations - sales, customers, CRM, and quotations',
+          filter: (p) =>
+            ['sales', 'customers', 'crm', 'reports', 'quotations'].includes(p.module) ||
+            ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(p.key),
+        },
+        {
+          name: 'HR Manager',
+          desc: 'Human resources and payroll management',
+          filter: (p) =>
+            ['hr', 'reports'].includes(p.module) ||
+            ['settings.read', 'accounting.read'].includes(p.key),
+        },
+      ];
 
     for (const role of roleConfigs) {
       const { rows: roleRows } = await tenantPool.query(
