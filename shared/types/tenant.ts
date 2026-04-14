@@ -40,6 +40,14 @@ export interface Tenant {
   timezone: string;
   customDomain?: string;
 
+  // PWA Branding
+  pwaName?: string;
+  pwaShortName?: string;
+  pwaThemeColor?: string;
+  pwaBackgroundColor?: string;
+  pwaIcon192Path?: string;
+  pwaIcon512Path?: string;
+
   // Edge sync
   edgeEnabled: boolean;
   lastSyncAt?: string;
@@ -72,6 +80,12 @@ export interface TenantDbRow {
   currency: string;
   timezone: string;
   custom_domain?: string;
+  pwa_name?: string;
+  pwa_short_name?: string;
+  pwa_theme_color?: string;
+  pwa_background_color?: string;
+  pwa_icon_192_path?: string;
+  pwa_icon_512_path?: string;
   edge_enabled: boolean;
   last_sync_at?: string;
   sync_status: string;
@@ -102,6 +116,12 @@ export function normalizeTenant(row: TenantDbRow): Tenant {
     currency: row.currency,
     timezone: row.timezone,
     customDomain: row.custom_domain,
+    pwaName: row.pwa_name,
+    pwaShortName: row.pwa_short_name,
+    pwaThemeColor: row.pwa_theme_color,
+    pwaBackgroundColor: row.pwa_background_color,
+    pwaIcon192Path: row.pwa_icon_192_path,
+    pwaIcon512Path: row.pwa_icon_512_path,
     edgeEnabled: row.edge_enabled,
     lastSyncAt: row.last_sync_at,
     syncStatus: row.sync_status as SyncEntityStatus,

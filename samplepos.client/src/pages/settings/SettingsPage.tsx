@@ -6,9 +6,10 @@ import InvoiceSettingsTab from './tabs/InvoiceSettingsTab';
 import UserManagementTab from './tabs/UserManagementTab';
 import SystemSettingsTab from './tabs/SystemSettingsTab';
 import DataManagementTab from './tabs/DataManagementTab';
+import BrandingSettingsTab from './tabs/BrandingSettingsTab';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 
-const VALID_TABS = ['invoice', 'company', 'users', 'system', 'data', 'offline'] as const;
+const VALID_TABS = ['invoice', 'company', 'users', 'system', 'branding', 'data', 'offline'] as const;
 
 export default function SettingsPage() {
   const [searchParams] = useSearchParams();
@@ -63,6 +64,12 @@ export default function SettingsPage() {
                 System
               </Tabs.Trigger>
               <Tabs.Trigger
+                value="branding"
+                className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
+              >
+                Branding
+              </Tabs.Trigger>
+              <Tabs.Trigger
                 value="data"
                 className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-red-600 data-[state=active]:border-red-600 transition-colors whitespace-nowrap"
               >
@@ -93,6 +100,10 @@ export default function SettingsPage() {
 
             <Tabs.Content value="system">
               <SystemSettingsTab />
+            </Tabs.Content>
+
+            <Tabs.Content value="branding">
+              <BrandingSettingsTab />
             </Tabs.Content>
 
             <Tabs.Content value="data">

@@ -132,6 +132,12 @@ export const tenantRepository = {
       storageLimitMb: 'storage_limit_mb',
       stripeCustomerId: 'stripe_customer_id',
       stripeSubscriptionId: 'stripe_subscription_id',
+      pwaName: 'pwa_name',
+      pwaShortName: 'pwa_short_name',
+      pwaThemeColor: 'pwa_theme_color',
+      pwaBackgroundColor: 'pwa_background_color',
+      pwaIcon192Path: 'pwa_icon_192_path',
+      pwaIcon512Path: 'pwa_icon_512_path',
     };
 
     for (const [key, column] of Object.entries(allowedFields)) {
