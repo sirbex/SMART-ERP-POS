@@ -16,6 +16,7 @@ interface NavItem {
   icon: string;
   color: string;
   permissions?: string[];  // RBAC permission keys — user needs ANY
+  feature?: string;        // Plan feature key — hidden if plan lacks it
 }
 
 export default function Layout({ children }: LayoutProps) {
@@ -29,20 +30,20 @@ export default function Layout({ children }: LayoutProps) {
 
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
-    { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600', permissions: ['pos.read', 'pos.create'] },
-    { name: 'Orders Queue', path: '/orders-queue', icon: '📋', color: 'text-orange-600', permissions: ['orders.read'] },
-    { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600', permissions: ['inventory.read'] },
-    { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600', permissions: ['customers.read'] },
-    { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600', permissions: ['suppliers.read'] },
-    { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600', permissions: ['sales.read'] },
-    { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500', permissions: ['quotations.read'] },
-    { name: 'CRM', path: '/crm', icon: '🤝', color: 'text-violet-600', permissions: ['crm.read'] },
-    { name: 'HR & Payroll', path: '/hr', icon: '📇', color: 'text-pink-600', permissions: ['hr.read'] },
-    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📋', color: 'text-orange-600', permissions: ['delivery.read'] },
-    { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600', permissions: ['delivery.read'] },
-    { name: 'Pricing', path: '/pricing', icon: '🏷️', color: 'text-rose-600', permissions: ['settings.read'] },
-    { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600', permissions: ['accounting.read'] },
-    { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600', permissions: ['reports.read', 'reports.sales_view', 'reports.financial_view'] },
+    { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600', permissions: ['pos.read', 'pos.create'], feature: 'pos' },
+    { name: 'Orders Queue', path: '/orders-queue', icon: '📋', color: 'text-orange-600', permissions: ['orders.read'], feature: 'pos' },
+    { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600', permissions: ['inventory.read'], feature: 'inventory' },
+    { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600', permissions: ['customers.read'], feature: 'customers' },
+    { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600', permissions: ['suppliers.read'], feature: 'customers' },
+    { name: 'Sales', path: '/sales', icon: '💰', color: 'text-emerald-600', permissions: ['sales.read'], feature: 'pos' },
+    { name: 'Quotations', path: '/quotations', icon: '💼', color: 'text-blue-500', permissions: ['quotations.read'], feature: 'invoices' },
+    { name: 'CRM', path: '/crm', icon: '🤝', color: 'text-violet-600', permissions: ['crm.read'], feature: 'customers' },
+    { name: 'HR & Payroll', path: '/hr', icon: '📇', color: 'text-pink-600', permissions: ['hr.read'], feature: 'hr' },
+    { name: 'Delivery Notes', path: '/delivery-notes', icon: '📋', color: 'text-orange-600', permissions: ['delivery.read'], feature: 'invoices' },
+    { name: 'Delivery', path: '/delivery', icon: '🚚', color: 'text-teal-600', permissions: ['delivery.read'], feature: 'invoices' },
+    { name: 'Pricing', path: '/pricing', icon: '🏷️', color: 'text-rose-600', permissions: ['settings.read'], feature: 'pos' },
+    { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600', permissions: ['accounting.read'], feature: 'accounting' },
+    { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600', permissions: ['reports.read', 'reports.sales_view', 'reports.financial_view'], feature: 'reports' },
   ];
 
   const adminNavItems: NavItem[] = [
@@ -54,9 +55,15 @@ export default function Layout({ children }: LayoutProps) {
   // Filter items: show if user has legacy role access OR RBAC permission
   const isAdminOrManager = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
+  const planFeatures = config.planFeatures ?? [];
+
   const allNavItems = useMemo(() => {
     const items = [...navItems, ...adminNavItems];
     return items.filter(item => {
+      // Plan feature gate — hide if plan doesn't include the feature
+      if (item.feature && planFeatures.length > 0 && !planFeatures.includes(item.feature)) {
+        return false;
+      }
       // Dashboard always visible
       if (!item.permissions) return true;
       // Legacy role: ADMIN sees everything, MANAGER sees non-admin items
@@ -66,7 +73,7 @@ export default function Layout({ children }: LayoutProps) {
       if (item.permissions.some(p => permissions.has(p))) return true;
       return false;
     });
-  }, [user?.role, permissions, isAdminOrManager]);
+  }, [user?.role, permissions, isAdminOrManager, planFeatures]);
 
   const handleLogout = () => {
     logout();

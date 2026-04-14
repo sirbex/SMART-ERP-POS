@@ -73,6 +73,7 @@ import { syncRoutes } from './modules/platform/syncRoutes.js';
 import { tenantConfigRoutes } from './modules/tenant/tenantConfigRoutes.js';
 import { tenantMiddleware } from './middleware/tenantMiddleware.js';
 import { tenantRateLimit } from './middleware/tenantRateLimit.js';
+import { requireFeature } from './middleware/requireFeature.js';
 import type { TenantPlan } from '../../shared/types/tenant.js';
 import { jobQueue } from './services/jobQueue.js';
 import { connectionManager } from './db/connectionManager.js';
@@ -307,62 +308,88 @@ app.use('/api/tenant', tenantConfigRoutes);
 app.use('/api/sync', syncRoutes);
 
 app.use('/api/auth', authRoutes);
-app.use('/api/accounting', accountingRoutes); // Move accounting routes early to avoid interference
-app.use('/api/accounting/comprehensive', comprehensiveAccountingRoutes); // Comprehensive accounting features
-app.use('/api/accounting/integrity', authenticate, integrityRoutes); // Accounting integrity checks
-app.use('/api/erp-accounting', erpAccountingRoutes); // ERP-grade financial reporting and controls
-app.use('/api/banking', bankingRoutes); // Banking module - accounts, transactions, reconciliation
-app.use('/api/documents', documentRoutes); // Document management for file uploads
-app.use('/api/expenses', expenseRoutes); // Expense management system
-app.use('/api/reports', businessReportRoutes); // Business performance reports
+
+// ── Accounting module (plan: PROFESSIONAL+) ──────────────────
+app.use('/api/accounting', requireFeature('accounting'), accountingRoutes);
+app.use('/api/accounting/comprehensive', requireFeature('accounting'), comprehensiveAccountingRoutes);
+app.use('/api/accounting/integrity', requireFeature('accounting'), authenticate, integrityRoutes);
+app.use('/api/erp-accounting', requireFeature('accounting'), erpAccountingRoutes);
+app.use('/api/banking', requireFeature('accounting'), bankingRoutes);
+app.use('/api/enterprise-accounting', requireFeature('accounting'), enterpriseAccountingRoutes);
+
+// ── Expenses (plan: STARTER+) ───────────────────────────────
+app.use('/api/expenses', requireFeature('expenses'), expenseRoutes);
+
+// ── Documents (always available) ─────────────────────────────
+app.use('/api/documents', documentRoutes);
+
+// ── Reports (plan: STARTER+ for general, PROFESSIONAL+ for financial) ──
+app.use('/api/reports', requireFeature('reports'), businessReportRoutes);
+
+// ── Products (always available — core POS dependency) ────────
 app.use('/api/products', productRoutes);
-app.use('/api/customers', customerRoutes);
-app.use('/api/suppliers', supplierRoutes);
-app.use('/api/sales', salesRoutes);
-app.use('/api/orders', ordersRoutes);
-app.use('/api/inventory', inventoryRoutes);
-app.use('/api/purchase-orders', purchaseOrderRoutes);
-app.use('/api/goods-receipts', goodsReceiptRoutes);
-app.use('/api/return-grn', returnGrnRoutes);
-app.use('/api/stock-movements', stockMovementRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/credit-debit-notes', creditDebitNoteRoutes);
-app.use('/api/document-flow', documentFlowRoutes);
+
+// ── Customers (plan: STARTER+) ──────────────────────────────
+app.use('/api/customers', requireFeature('customers'), customerRoutes);
+app.use('/api/suppliers', requireFeature('customers'), supplierRoutes);
+
+// ── POS & Sales (plan: FREE+) ───────────────────────────────
+app.use('/api/sales', requireFeature('pos'), salesRoutes);
+app.use('/api/orders', requireFeature('pos'), ordersRoutes);
+app.use('/api/pos/hold', requireFeature('pos'), createHoldRoutes(pool));
+app.use('/api/pos/sync-offline-sales', requireFeature('pos'), createOfflineSyncRoutes(pool));
+app.use('/api/cash-registers', requireFeature('pos'), cashRegisterRoutes);
+app.use('/api/discounts', requireFeature('pos'), authenticate, discountRoutes);
+app.use('/api/payments', requireFeature('pos'), createPaymentsRoutes());
+
+// ── Inventory (plan: STARTER+) ──────────────────────────────
+app.use('/api/inventory', requireFeature('inventory'), inventoryRoutes);
+app.use('/api/goods-receipts', requireFeature('inventory'), goodsReceiptRoutes);
+app.use('/api/return-grn', requireFeature('inventory'), returnGrnRoutes);
+app.use('/api/stock-movements', requireFeature('inventory'), stockMovementRoutes);
+
+// ── Purchase Orders (plan: PROFESSIONAL+) ───────────────────
+app.use('/api/purchase-orders', requireFeature('purchase_orders'), purchaseOrderRoutes);
+app.use('/api/supplier-payments', requireFeature('purchase_orders'), createSupplierPaymentRoutes(pool));
+
+// ── Invoices & Credit Notes (plan: STARTER+) ────────────────
+app.use('/api/invoices', requireFeature('invoices'), invoiceRoutes);
+app.use('/api/credit-debit-notes', requireFeature('invoices'), creditDebitNoteRoutes);
+app.use('/api/document-flow', requireFeature('invoices'), documentFlowRoutes);
+app.use('/api/deposits', requireFeature('customers'), depositsRoutes);
+
+// ── Settings & Admin (always available) ─────────────────────
 app.use('/api/settings/invoice', invoiceSettingsRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
-app.use('/api/reports', createReportsRouter(pool));
+app.use('/api/reports', requireFeature('reports'), createReportsRouter(pool));
 app.use('/api/users', createUserRoutes());
 app.use('/api/admin', adminRoutes);
-app.use('/api/system', systemManagementRoutes); // ERP-grade backup, reset, restore
-app.use('/api/discounts', authenticate, discountRoutes);
-app.use('/api/payments', createPaymentsRoutes());
+app.use('/api/system', systemManagementRoutes);
 app.use('/api/audit', authenticate, auditRoutes);
-app.use('/api/deposits', depositsRoutes); // Customer deposits management
-app.use('/api/pos/hold', createHoldRoutes(pool));
-app.use('/api/pos/sync-offline-sales', createOfflineSyncRoutes(pool)); // Offline sales sync
-app.use('/api/supplier-payments', createSupplierPaymentRoutes(pool)); // Supplier payments and bills
-app.use('/api/cash-registers', cashRegisterRoutes); // Cash register management
-app.use('/api/rbac', createRbacRoutes(pool)); // Role-based access control
-app.use('/api', quotationRoutes);
-app.use('/api/delivery', deliveryRoutes);
-app.use('/api/delivery-notes', deliveryNoteRoutes);
+app.use('/api/rbac', createRbacRoutes(pool));
 app.use('/api/import', importRoutes);
-app.use('/api/crm', crmRoutes);
-app.use('/api/pricing', pricingEngineRoutes);
-app.use('/api/hr', hrRoutes);
+
+// ── Quotations & Delivery (plan: STARTER+) ──────────────────
+app.use('/api', requireFeature('invoices'), quotationRoutes);
+app.use('/api/delivery', requireFeature('invoices'), deliveryRoutes);
+app.use('/api/delivery-notes', requireFeature('invoices'), deliveryNoteRoutes);
+
+// ── CRM & HR (plan: STARTER+) ──────────────────────────────
+app.use('/api/crm', requireFeature('customers'), crmRoutes);
+app.use('/api/pricing', requireFeature('pos'), pricingEngineRoutes);
+app.use('/api/hr', requireFeature('hr'), hrRoutes);
 console.log('  HR & Payroll module loaded');
-// SAP-gap feature modules
-app.use('/api/cost-centers', costCenterRoutes);
-app.use('/api/period-control', periodControlRoutes);
-app.use('/api/grir-clearing', grirClearingRoutes);
-app.use('/api/dunning', dunningRoutes);
-app.use('/api/withholding-tax', whtRoutes);
-app.use('/api/assets', assetRoutes);
-app.use('/api/je-approval', jeApprovalRoutes);
-app.use('/api/payment-program', paymentProgramRoutes);
-app.use('/api/currency', currencyRoutes);
-app.use('/api/enterprise-accounting', enterpriseAccountingRoutes); // Enterprise-grade accounting features
-// Accounting routes moved above for better priority
+
+// ── SAP-gap feature modules (plan: PROFESSIONAL+) ──────────
+app.use('/api/cost-centers', requireFeature('accounting'), costCenterRoutes);
+app.use('/api/period-control', requireFeature('accounting'), periodControlRoutes);
+app.use('/api/grir-clearing', requireFeature('accounting'), grirClearingRoutes);
+app.use('/api/dunning', requireFeature('accounting'), dunningRoutes);
+app.use('/api/withholding-tax', requireFeature('accounting'), whtRoutes);
+app.use('/api/assets', requireFeature('accounting'), assetRoutes);
+app.use('/api/je-approval', requireFeature('accounting'), jeApprovalRoutes);
+app.use('/api/payment-program', requireFeature('accounting'), paymentProgramRoutes);
+app.use('/api/currency', requireFeature('accounting'), currencyRoutes);
 
 // ============================================================
 // ERROR HANDLERS

@@ -57,6 +57,8 @@ export interface TenantConfig {
   tenantId: string;
   slug: string;
   name: string;
+  plan: string;                // FREE | STARTER | PROFESSIONAL | ENTERPRISE
+  planFeatures: string[];      // Module-level features derived from PLAN_LIMITS
   currency: TenantCurrencyConfig;
   branding: TenantBrandingConfig;
   locale: TenantLocaleConfig;

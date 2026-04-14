@@ -19,6 +19,7 @@ import { join } from 'path';
 import multer from 'multer';
 import type { TenantConfig } from '../../../../shared/types/tenantConfig.js';
 import type { Request, Response } from 'express';
+import { PLAN_LIMITS, type TenantPlan } from '../../../../shared/types/tenant.js';
 import logger from '../../utils/logger.js';
 import { authenticate } from '../../middleware/auth.js';
 import { connectionManager } from '../../db/connectionManager.js';
@@ -67,6 +68,7 @@ function buildConfigFromTenant(tenant: {
   slug: string;
   name: string;
   id: string;
+  plan: string;
   currency: string;
   timezone: string;
   country: string;
@@ -74,10 +76,15 @@ function buildConfigFromTenant(tenant: {
   // Start with defaults, override with tenant DB fields
   const fileConfig = loadFileConfig(tenant.slug) || loadFileConfig('default');
 
+  const plan = (tenant.plan || 'FREE') as TenantPlan;
+  const planFeatures = PLAN_LIMITS[plan]?.features ?? PLAN_LIMITS.FREE.features;
+
   return {
     tenantId: tenant.id,
     slug: tenant.slug,
     name: tenant.name,
+    plan,
+    planFeatures,
     currency: fileConfig?.currency || {
       code: tenant.currency || 'UGX',
       symbol: tenant.currency || 'UGX',
@@ -132,6 +139,7 @@ router.get('/config', (req: Request, res: Response) => {
           slug: string;
           name: string;
           id: string;
+          plan: string;
           currency: string;
           timezone: string;
           country: string;
@@ -156,6 +164,8 @@ router.get('/config', (req: Request, res: Response) => {
         tenantId: 'default',
         slug: 'default',
         name: 'SMART ERP',
+        plan: 'ENTERPRISE',
+        planFeatures: PLAN_LIMITS.ENTERPRISE.features,
         currency: {
           code: 'UGX',
           symbol: 'UGX',

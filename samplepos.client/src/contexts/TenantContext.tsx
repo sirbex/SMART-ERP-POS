@@ -22,6 +22,8 @@ const DEFAULT_CONFIG: TenantConfig = {
   tenantId: 'default',
   slug: 'default',
   name: 'SMART ERP',
+  plan: 'ENTERPRISE',
+  planFeatures: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses', 'hr', 'accounting', 'purchase_orders', 'edge_sync', 'api_access', 'custom_domain', 'priority_support'],
   currency: {
     code: 'UGX',
     symbol: 'UGX',
