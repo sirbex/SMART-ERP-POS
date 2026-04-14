@@ -154,6 +154,21 @@ export const tenantService = {
 
       await this.validateTenantSchema(tenantPool, databaseName);
 
+      // 4b. Ensure schema_version is set so migration service skips re-running
+      await tenantPool.query(`
+        CREATE TABLE IF NOT EXISTS schema_version (
+          id SERIAL PRIMARY KEY,
+          version INTEGER NOT NULL,
+          applied_at TIMESTAMPTZ DEFAULT now()
+        )
+      `);
+      const { rows: svRows } = await tenantPool.query(
+        'SELECT COALESCE(MAX(version), 0) AS v FROM schema_version'
+      );
+      if ((svRows[0]?.v ?? 0) < 1) {
+        await tenantPool.query('INSERT INTO schema_version (version) VALUES (1)');
+      }
+
       // 5. Seed the admin user
       await this.seedAdminUser(tenantPool, {
         email: input.ownerEmail,
@@ -452,7 +467,7 @@ export const tenantService = {
 
       // Seed essential reference data into template so every tenant starts ready.
       // Like Odoo/SAP: template includes chart of accounts, UOMs, RBAC roles/permissions.
-      const seedTables = ['accounts', 'uoms', 'rbac_permissions_catalog', 'rbac_roles', 'rbac_role_permissions'];
+      const seedTables = ['accounts', 'uoms', 'rbac_permissions_catalog', 'rbac_roles', 'rbac_role_permissions', 'schema_version', 'schema_migrations'];
       for (const table of seedTables) {
         try {
           const dumpDataCmd =
