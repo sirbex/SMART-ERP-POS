@@ -251,7 +251,7 @@ function App() {
                   <Route
                     path="/pos"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['pos.read', 'pos.create']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['pos.read', 'pos.create']} requiredFeature="pos">
                         <POSPage />
                       </ProtectedRoute>
                     }
@@ -261,7 +261,7 @@ function App() {
                   <Route
                     path="/orders-queue"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['orders.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['orders.read']} requiredFeature="pos">
                         <OrdersQueuePage />
                       </ProtectedRoute>
                     }
@@ -271,7 +271,7 @@ function App() {
                   <Route
                     path="/orders/:id/pay"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['orders.pay']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['orders.pay']} requiredFeature="pos">
                         <OrderPaymentPage />
                       </ProtectedRoute>
                     }
@@ -281,7 +281,7 @@ function App() {
                   <Route
                     path="/sales"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.read']} requiredFeature="pos">
                         <SalesPage />
                       </ProtectedRoute>
                     }
@@ -291,7 +291,7 @@ function App() {
                   <Route
                     path="/customers"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['customers.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['customers.read']} requiredFeature="customers">
                         <CustomersPage />
                       </ProtectedRoute>
                     }
@@ -299,7 +299,7 @@ function App() {
                   <Route
                     path="/customers/:id"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['customers.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['customers.read']} requiredFeature="customers">
                         <CustomerDetailPage />
                       </ProtectedRoute>
                     }
@@ -309,7 +309,7 @@ function App() {
                   <Route
                     path="/suppliers"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['suppliers.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['suppliers.read']} requiredFeature="customers">
                         <SuppliersPage />
                       </ProtectedRoute>
                     }
@@ -319,7 +319,7 @@ function App() {
                   <Route
                     path="/quotations"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']} requiredFeature="invoices">
                         <QuotationsPage />
                       </ProtectedRoute>
                     }
@@ -327,7 +327,7 @@ function App() {
                   <Route
                     path="/quotations/new"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.create']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.create']} requiredFeature="invoices">
                         <NewQuotationPage />
                       </ProtectedRoute>
                     }
@@ -335,7 +335,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber/edit"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.update']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.update']} requiredFeature="invoices">
                         <EditQuotationPage />
                       </ProtectedRoute>
                     }
@@ -343,7 +343,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber/convert"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.create']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.create']} requiredFeature="invoices">
                         <QuoteConversionPage />
                       </ProtectedRoute>
                     }
@@ -351,7 +351,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']} requiredFeature="invoices">
                         <QuoteDetailPage />
                       </ProtectedRoute>
                     }
@@ -361,7 +361,7 @@ function App() {
                   <Route
                     path="/crm"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['crm.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['crm.read']} requiredFeature="customers">
                         <CRMPage />
                       </ProtectedRoute>
                     }
@@ -385,7 +385,7 @@ function App() {
                   <Route
                     path="/pricing/rules"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pos">
                         <PriceRulesPage />
                       </ProtectedRoute>
                     }
@@ -393,7 +393,7 @@ function App() {
                   <Route
                     path="/pricing/categories"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pos">
                         <CategoriesPage />
                       </ProtectedRoute>
                     }
@@ -401,7 +401,7 @@ function App() {
                   <Route
                     path="/pricing/preview"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pos">
                         <PricePreviewPage />
                       </ProtectedRoute>
                     }
@@ -848,7 +848,7 @@ function App() {
                   <Route
                     path="/delivery"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']} requiredFeature="invoices">
                         <DeliveryPage />
                       </ProtectedRoute>
                     }
@@ -858,7 +858,7 @@ function App() {
                   <Route
                     path="/delivery-notes"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']} requiredFeature="invoices">
                         <DeliveryNotesPage />
                       </ProtectedRoute>
                     }
@@ -878,7 +878,7 @@ function App() {
                   <Route
                     path="/inventory"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <StockLevelsPage />
                         </InventoryLayout>
@@ -888,7 +888,7 @@ function App() {
                   <Route
                     path="/inventory/products"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.create']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.create']} requiredFeature="inventory">
                         <InventoryLayout>
                           <ProductsPage />
                         </InventoryLayout>
@@ -898,7 +898,7 @@ function App() {
                   <Route
                     path="/inventory/batches"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <BatchManagementPage />
                         </InventoryLayout>
@@ -908,7 +908,7 @@ function App() {
                   <Route
                     path="/inventory/stock-movements"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <StockMovementsPage />
                         </InventoryLayout>
@@ -918,7 +918,7 @@ function App() {
                   <Route
                     path="/inventory/adjustments"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.adjust']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.adjust']} requiredFeature="inventory">
                         <InventoryLayout>
                           <InventoryAdjustmentsPage />
                         </InventoryLayout>
@@ -948,7 +948,7 @@ function App() {
                   <Route
                     path="/inventory/uoms"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <UomManagementPage />
                         </InventoryLayout>
@@ -958,7 +958,7 @@ function App() {
                   <Route
                     path="/inventory/barcode-lookup"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']}>
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <BarcodeLookupPage />
                         </InventoryLayout>
