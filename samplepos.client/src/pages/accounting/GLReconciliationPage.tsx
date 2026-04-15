@@ -235,7 +235,7 @@ export default function GLReconciliationPage() {
                   Apply
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="font-medium text-gray-500 mb-1">Debits</p>
                   {s.debitEntries.map(e => (
@@ -267,7 +267,7 @@ export default function GLReconciliationPage() {
           </div>
 
           {lockDates && (
-            <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Current Advisor Lock</p>
                 <p className="text-lg font-semibold">{lockDates.advisorLockDate || 'Not set'}</p>
@@ -279,7 +279,7 @@ export default function GLReconciliationPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Advisor Lock Date

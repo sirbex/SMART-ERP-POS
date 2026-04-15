@@ -351,7 +351,7 @@ const TrialBalancePage = () => {
                     </div>
 
                     <div className="overflow-x-auto">
-                      <table className="w-full">
+                      <table className="w-full min-w-[600px]">
                         <thead className="border-b">
                           <tr className="text-left">
                             <th className="pb-2 font-medium text-gray-500">Account #</th>

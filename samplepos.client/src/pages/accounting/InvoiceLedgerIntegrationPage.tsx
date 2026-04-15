@@ -310,15 +310,15 @@ const InvoiceLedgerIntegrationPage = () => {
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center">
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-600">Total Sales</p>
-                                <p className="text-2xl font-bold text-gray-900">{sales.length}</p>
+                                <p className="text-2xl font-bold text-gray-900 truncate">{sales.length}</p>
                             </div>
-                            <FileText className="h-8 w-8 text-gray-400" />
+                            <FileText className="h-8 w-8 text-gray-400 flex-shrink-0" />
                         </div>
                     </CardContent>
                 </Card>
@@ -326,13 +326,13 @@ const InvoiceLedgerIntegrationPage = () => {
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center">
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-600">Completed Sales</p>
-                                <p className="text-2xl font-bold text-green-900">
+                                <p className="text-2xl font-bold text-green-900 truncate">
                                     {sales.filter(s => s.status === 'COMPLETED').length}
                                 </p>
                             </div>
-                            <DollarSign className="h-8 w-8 text-green-400" />
+                            <DollarSign className="h-8 w-8 text-green-400 flex-shrink-0" />
                         </div>
                     </CardContent>
                 </Card>
@@ -340,13 +340,13 @@ const InvoiceLedgerIntegrationPage = () => {
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center">
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                                <p className="text-2xl font-bold text-blue-900">
+                                <p className="text-2xl font-bold text-blue-900 truncate">
                                     {formatCurrency(sales.reduce((sum, sale) => sum + (sale.status === 'COMPLETED' ? sale.totalAmount : 0), 0))}
                                 </p>
                             </div>
-                            <DollarSign className="h-8 w-8 text-blue-400" />
+                            <DollarSign className="h-8 w-8 text-blue-400 flex-shrink-0" />
                         </div>
                     </CardContent>
                 </Card>
@@ -354,11 +354,11 @@ const InvoiceLedgerIntegrationPage = () => {
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center">
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-600">Ledger Transactions</p>
-                                <p className="text-2xl font-bold text-purple-900">{transactions.length}</p>
+                                <p className="text-2xl font-bold text-purple-900 truncate">{transactions.length}</p>
                             </div>
-                            <FileText className="h-8 w-8 text-purple-400" />
+                            <FileText className="h-8 w-8 text-purple-400 flex-shrink-0" />
                         </div>
                     </CardContent>
                 </Card>

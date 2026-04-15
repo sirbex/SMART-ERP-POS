@@ -645,7 +645,7 @@ export default function GrirClearingPage() {
             threshold will be matched with variance postings to account 5020.
           </p>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Supplier (optional)</label>
               <input

@@ -220,7 +220,7 @@ function CustomerNotesTab() {
                                             )}
                                             {note.reason && <span className="ml-2">• {note.reason}</span>}
                                         </div>
-                                        <div className="mt-1 grid grid-cols-3 gap-4 text-sm">
+                                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                                             <div>
                                                 <span className="text-gray-500">Total:</span>{' '}
                                                 <span className="font-semibold">{formatCurrency(note.totalAmount)}</span>
@@ -291,7 +291,7 @@ function CustomerNotesTab() {
                     </DialogHeader>
                     {selectedNote && (
                         <div className="space-y-3 text-sm">
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div><span className="text-gray-500">Customer:</span> {selectedNote.customerName}</div>
                                 <div><span className="text-gray-500">Status:</span> {selectedNote.status}</div>
                                 <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>
@@ -448,7 +448,7 @@ function SupplierNotesTab() {
                                             )}
                                             {note.reason && <span className="ml-2">• {note.reason}</span>}
                                         </div>
-                                        <div className="mt-1 grid grid-cols-3 gap-4 text-sm">
+                                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                                             <div>
                                                 <span className="text-gray-500">Total:</span>{' '}
                                                 <span className="font-semibold">{formatCurrency(note.totalAmount)}</span>
@@ -519,7 +519,7 @@ function SupplierNotesTab() {
                     </DialogHeader>
                     {selectedNote && (
                         <div className="space-y-3 text-sm">
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div><span className="text-gray-500">Supplier:</span> {selectedNote.supplierName}</div>
                                 <div><span className="text-gray-500">Status:</span> {selectedNote.status}</div>
                                 <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>

@@ -476,7 +476,7 @@ const GeneralLedgerPage = () => {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full min-w-[800px]">
                     <thead className="border-b">
                       <tr className="text-left">
                         <th className="pb-3 font-medium">

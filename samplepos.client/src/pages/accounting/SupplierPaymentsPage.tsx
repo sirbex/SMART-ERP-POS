@@ -1352,7 +1352,7 @@ const SupplierPaymentsPage: React.FC = () => {
                     </DialogHeader>
 
                     <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="supplier" className="text-right">Supplier</Label>
                             <div className="col-span-3 space-y-2">
                                 {/* Supplier search filter */}
@@ -1459,7 +1459,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="amount" className="text-right">Amount</Label>
                             <div className="col-span-3 space-y-2">
                                 <Input
@@ -1520,7 +1520,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="method" className="text-right">Method</Label>
                             <div className="col-span-3">
                                 <Select
@@ -1541,7 +1541,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="date" className="text-right">Date</Label>
                             <div className="col-span-3">
                                 <DatePicker
@@ -1552,7 +1552,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="reference" className="text-right">Reference</Label>
                             <Input
                                 id="reference"
@@ -1586,7 +1586,7 @@ const SupplierPaymentsPage: React.FC = () => {
                     </DialogHeader>
 
                     <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="supplier" className="text-right">Supplier</Label>
                             <div className="col-span-3">
                                 <Select
@@ -1607,7 +1607,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="billNumber" className="text-right">Bill Number</Label>
                             <Input
                                 id="billNumber"
@@ -1618,7 +1618,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             />
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="billDate" className="text-right">Bill Date</Label>
                             <div className="col-span-3">
                                 <DatePicker
@@ -1629,7 +1629,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="dueDate" className="text-right">Due Date</Label>
                             <div className="col-span-3">
                                 <DatePicker

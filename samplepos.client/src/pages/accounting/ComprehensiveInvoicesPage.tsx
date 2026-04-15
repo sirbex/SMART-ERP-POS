@@ -656,7 +656,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                     </DialogHeader>
 
                     <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="customer" className="text-right">Customer</Label>
                             <div className="col-span-3">
                                 <Select
@@ -677,7 +677,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="dueDate" className="text-right">Due Date</Label>
                             <div className="col-span-3">
                                 <DatePicker
@@ -764,7 +764,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="notes" className="text-right">Notes</Label>
                             <Textarea
                                 id="notes"
@@ -798,7 +798,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                     </DialogHeader>
 
                     <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="amount" className="text-right">Amount</Label>
                             <Input
                                 id="amount"
@@ -811,7 +811,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                             />
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="method" className="text-right">Method</Label>
                             <div className="col-span-3">
                                 <Select
@@ -832,7 +832,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-4 items-center gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                             <Label htmlFor="reference" className="text-right">Reference</Label>
                             <Input
                                 id="reference"
@@ -867,7 +867,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
 
                     {selectedInvoice && (
                         <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <Label className="text-sm font-medium text-gray-600">Customer</Label>
                                     <div className="font-medium">{selectedInvoice.customerName}</div>

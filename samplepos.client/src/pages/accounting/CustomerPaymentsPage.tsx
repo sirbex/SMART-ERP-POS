@@ -299,7 +299,7 @@ const CustomerPaymentsPage: React.FC = () => {
                         </DialogHeader>
 
                         <div className="grid gap-4 py-4">
-                            <div className="grid grid-cols-4 items-center gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                                 <Label htmlFor="customer" className="text-right">Customer</Label>
                                 <div className="col-span-3">
                                     <Select
@@ -320,7 +320,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-4 items-center gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                                 <Label htmlFor="amount" className="text-right">Amount</Label>
                                 <Input
                                     id="amount"
@@ -333,7 +333,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                 />
                             </div>
 
-                            <div className="grid grid-cols-4 items-center gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                                 <Label htmlFor="method" className="text-right">Method</Label>
                                 <div className="col-span-3">
                                     <Select
@@ -354,7 +354,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-4 items-center gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                                 <Label htmlFor="date" className="text-right">Date</Label>
                                 <div className="col-span-3">
                                     <DatePicker
@@ -365,7 +365,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-4 items-center gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                                 <Label htmlFor="reference" className="text-right">Reference</Label>
                                 <Input
                                     id="reference"
@@ -376,7 +376,7 @@ const CustomerPaymentsPage: React.FC = () => {
                                 />
                             </div>
 
-                            <div className="grid grid-cols-4 items-center gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
                                 <Label htmlFor="notes" className="text-right">Notes</Label>
                                 <Textarea
                                     id="notes"
