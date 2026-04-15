@@ -61,3 +61,9 @@ CREATE TABLE IF NOT EXISTS pin_attempts (
   locked_until TIMESTAMPTZ,
   PRIMARY KEY (user_id)
 );
+
+-- ============================================================
+-- 5. Bump schema version so tenant auto-migration detects this
+-- ============================================================
+INSERT INTO schema_version (version) VALUES (2)
+ON CONFLICT DO NOTHING;

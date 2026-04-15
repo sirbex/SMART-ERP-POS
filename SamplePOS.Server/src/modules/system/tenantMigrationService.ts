@@ -18,7 +18,8 @@ const { Pool: PgPool } = pg;
 // We try the Docker path first, then fall back to local development path.
 function resolveSqlDir(): string {
     const candidates = [
-        '/app/shared/sql',                                               // Docker production
+        '/app/shared/sql',                                               // Docker production (if mounted)
+        '/shared/sql',                                                   // Docker production (Dockerfile COPY ../shared/sql)
         path.resolve(process.cwd(), '..', 'shared', 'sql'),             // Local (cwd = SamplePOS.Server)
         path.resolve(process.cwd(), 'shared', 'sql'),                   // Local (cwd = repo root)
     ];
