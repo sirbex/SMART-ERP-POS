@@ -589,6 +589,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
           productName: item.productName,
           quantity: parseFloat(item.quantity),
           unitCost: parseFloat(item.unitCost),
+          lineTotal: parseFloat(item.lineTotal),
           uomId: item.selectedUomId || null,
         })),
       };
@@ -1028,6 +1029,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
             productName: item.productName,
             quantity: parseFloat(item.quantity),
             unitCost: parseFloat(item.unitCost),
+            lineTotal: parseFloat(item.lineTotal),
             uomId: item.selectedUomId || null,
           })),
         },

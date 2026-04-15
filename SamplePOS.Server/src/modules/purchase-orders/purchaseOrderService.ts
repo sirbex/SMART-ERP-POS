@@ -29,6 +29,7 @@ export interface CreatePOInput {
     productName: string;
     quantity: number;
     unitCost: number;
+    lineTotal?: number;
     uomId?: string | null;
   }[];
 }
@@ -42,6 +43,7 @@ export interface UpdateDraftPOInput {
     productName: string;
     quantity: number;
     unitCost: number;
+    lineTotal?: number;
     uomId?: string | null;
   }[];
 }
@@ -195,6 +197,7 @@ export const purchaseOrderService = {
           productName: item.productName,
           quantity: item.quantity,
           unitCost: Money.toNumber(new Decimal(item.unitCost)), // Bank-grade precision
+          lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : undefined,
           uomId: item.uomId || null,
           baseQty,
           baseUomId,
@@ -324,6 +327,7 @@ export const purchaseOrderService = {
             productName: item.productName,
             quantity: item.quantity,
             unitCost: Money.toNumber(new Decimal(item.unitCost)),
+            lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : undefined,
             uomId: item.uomId || null,
             baseQty,
             baseUomId,

@@ -45,6 +45,7 @@ export interface CreatePOItemData {
   productName: string;
   quantity: number;
   unitCost: number;
+  lineTotal?: number; // Frontend-authoritative total (preserves user's intended total)
   uomId?: string | null;
   baseQty?: number | null; // SAP UoM snapshot: quantity in base unit
   baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
@@ -162,7 +163,11 @@ export const purchaseOrderRepository = {
 
     items.forEach((item, index) => {
       const offset = index * 9; // 9 fields (added base_qty, base_uom_id, conversion_factor)
-      const lineTotal = new Decimal(item.quantity).times(item.unitCost).toNumber();
+      // Use frontend-provided lineTotal if available (preserves user's intended total),
+      // otherwise recalculate from qty × unitCost
+      const lineTotal = item.lineTotal != null
+        ? new Decimal(item.lineTotal).toNumber()
+        : new Decimal(item.quantity).times(item.unitCost).toNumber();
 
       placeholders.push(
         `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
