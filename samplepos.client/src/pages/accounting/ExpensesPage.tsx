@@ -194,7 +194,7 @@ const ExpensesPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-600">Total Amount</p>
-                  <p className="text-2xl font-bold text-gray-900 truncate">
+                  <p className="text-base sm:text-2xl font-bold text-gray-900">
                     {formatCurrency(data.summary.totalAmount)}
                   </p>
                 </div>
@@ -208,7 +208,7 @@ const ExpensesPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-600">Total Expenses</p>
-                  <p className="text-2xl font-bold text-gray-900 truncate">{data.summary.count}</p>
+                  <p className="text-base sm:text-2xl font-bold text-gray-900">{data.summary.count}</p>
                 </div>
                 <FileText className="h-8 w-8 text-green-600 flex-shrink-0" />
               </div>
@@ -220,7 +220,7 @@ const ExpensesPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-600">Pending Approval</p>
-                  <p className="text-2xl font-bold text-gray-900 truncate">
+                  <p className="text-base sm:text-2xl font-bold text-gray-900">
                     {data.summary.byStatus?.['PENDING_APPROVAL']?.count || 0}
                   </p>
                 </div>
@@ -234,7 +234,7 @@ const ExpensesPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-600">Paid</p>
-                  <p className="text-2xl font-bold text-gray-900 truncate">
+                  <p className="text-base sm:text-2xl font-bold text-gray-900">
                     {formatCurrency(data.summary.byStatus?.['PAID']?.total || 0)}
                   </p>
                 </div>

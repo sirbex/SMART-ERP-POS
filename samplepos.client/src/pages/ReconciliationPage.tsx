@@ -293,10 +293,10 @@ export default function ReconciliationPage() {
                             return (
                                 <div key={idx}>
                                     <div
-                                        className={`px-6 py-4 hover:bg-gray-50 ${hasDetails && account.status === 'DISCREPANCY' ? 'cursor-pointer' : ''}`}
+                                        className={`px-4 sm:px-6 py-4 hover:bg-gray-50 ${hasDetails && account.status === 'DISCREPANCY' ? 'cursor-pointer' : ''}`}
                                         onClick={() => hasDetails && account.status === 'DISCREPANCY' && toggleExpanded(code)}
                                     >
-                                        <div className="flex items-center justify-between">
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                             <div className="flex items-center space-x-4">
                                                 {hasDetails && account.status === 'DISCREPANCY' ? (
                                                     isExpanded ? (
@@ -312,30 +312,32 @@ export default function ReconciliationPage() {
                                                     <p className="text-sm text-gray-500">Account {code}</p>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center space-x-8">
-                                                <div className="text-right">
-                                                    <p className="text-sm text-gray-500">GL Balance</p>
-                                                    <p className="font-semibold">{formatCurrency(account.glBalance)}</p>
+                                            <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:space-x-8 ml-9 sm:ml-0">
+                                                <div className="text-left sm:text-right">
+                                                    <p className="text-xs sm:text-sm text-gray-500">GL Balance</p>
+                                                    <p className="text-sm sm:text-base font-semibold">{formatCurrency(account.glBalance)}</p>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="text-sm text-gray-500">Subledger</p>
-                                                    <p className="font-semibold">{formatCurrency(account.subledgerBalance)}</p>
+                                                <div className="text-left sm:text-right">
+                                                    <p className="text-xs sm:text-sm text-gray-500">Subledger</p>
+                                                    <p className="text-sm sm:text-base font-semibold">{formatCurrency(account.subledgerBalance)}</p>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="text-sm text-gray-500">Difference</p>
-                                                    <p className={`font-semibold ${Math.abs(account.difference) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+                                                <div className="text-left sm:text-right">
+                                                    <p className="text-xs sm:text-sm text-gray-500">Difference</p>
+                                                    <p className={`text-sm sm:text-base font-semibold ${Math.abs(account.difference) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
                                                         {formatCurrency(account.difference)}
                                                     </p>
                                                 </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 ml-9 sm:ml-0">
                                                 <div>
                                                     {account.status === 'MATCHED' ? (
-                                                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                                                            <CheckCircle className="h-4 w-4 mr-1" />
+                                                        <span className="inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-green-100 text-green-800">
+                                                            <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                                                             Matched
                                                         </span>
                                                     ) : (
-                                                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                                                            <AlertTriangle className="h-4 w-4 mr-1" />
+                                                        <span className="inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-red-100 text-red-800">
+                                                            <AlertTriangle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                                                             Discrepancy
                                                         </span>
                                                     )}
@@ -422,23 +424,23 @@ export default function ReconciliationPage() {
                         <div className="space-y-6">
                             {/* Summary Cards */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div className="bg-gray-50 rounded-lg p-4">
+                                <div className="bg-gray-50 rounded-lg p-4 min-w-0">
                                     <p className="text-sm text-gray-500">GL Balance</p>
-                                    <p className="text-xl font-bold">{formatCurrency(accountDetail.glBalance)}</p>
+                                    <p className="text-base sm:text-xl font-bold">{formatCurrency(accountDetail.glBalance)}</p>
                                 </div>
-                                <div className="bg-gray-50 rounded-lg p-4">
+                                <div className="bg-gray-50 rounded-lg p-4 min-w-0">
                                     <p className="text-sm text-gray-500">Subledger Balance</p>
-                                    <p className="text-xl font-bold">{formatCurrency(accountDetail.subledgerBalance)}</p>
+                                    <p className="text-base sm:text-xl font-bold">{formatCurrency(accountDetail.subledgerBalance)}</p>
                                 </div>
-                                <div className="bg-gray-50 rounded-lg p-4">
+                                <div className="bg-gray-50 rounded-lg p-4 min-w-0">
                                     <p className="text-sm text-gray-500">Difference</p>
-                                    <p className={`text-xl font-bold ${Math.abs(accountDetail.difference) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+                                    <p className={`text-base sm:text-xl font-bold ${Math.abs(accountDetail.difference) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
                                         {formatCurrency(accountDetail.difference)}
                                     </p>
                                 </div>
-                                <div className="bg-gray-50 rounded-lg p-4">
+                                <div className="bg-gray-50 rounded-lg p-4 min-w-0">
                                     <p className="text-sm text-gray-500">Status</p>
-                                    <p className={`text-xl font-bold ${accountDetail.status === 'RECONCILED' ? 'text-green-600' : 'text-red-600'}`}>
+                                    <p className={`text-base sm:text-xl font-bold ${accountDetail.status === 'RECONCILED' ? 'text-green-600' : 'text-red-600'}`}>
                                         {accountDetail.status}
                                     </p>
                                 </div>

@@ -87,18 +87,18 @@ export default function CurrencyRevaluationPage() {
               <TrendingUp className="h-4 w-4" />
               <span className="text-xs font-medium uppercase">Unrealized Gain</span>
             </div>
-            <p className="text-2xl font-bold text-green-900 truncate">{totalGain.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <p className="text-base sm:text-2xl font-bold text-green-900">{totalGain.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
           </div>
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 min-w-0">
             <div className="flex items-center gap-2 text-red-700 mb-1">
               <TrendingDown className="h-4 w-4" />
               <span className="text-xs font-medium uppercase">Unrealized Loss</span>
             </div>
-            <p className="text-2xl font-bold text-red-900 truncate">{totalLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <p className="text-base sm:text-2xl font-bold text-red-900">{totalLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 min-w-0">
             <span className="text-xs font-medium uppercase text-blue-700">Net FX Impact</span>
-            <p className={`text-2xl font-bold truncate ${totalGain - totalLoss >= 0 ? 'text-green-900' : 'text-red-900'}`}>
+            <p className={`text-base sm:text-2xl font-bold ${totalGain - totalLoss >= 0 ? 'text-green-900' : 'text-red-900'}`}>
               {(totalGain - totalLoss).toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </p>
           </div>

@@ -62,7 +62,7 @@ const BankingPage: React.FC = () => {
                         <Building2 className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold truncate">{formatCurrency(totalBalance)}</div>
+                        <div className="text-base sm:text-2xl font-bold">{formatCurrency(totalBalance)}</div>
                         <p className="text-xs text-muted-foreground">
                             Across {activeAccountsCount} active account{activeAccountsCount !== 1 ? 's' : ''}
                         </p>
@@ -76,7 +76,7 @@ const BankingPage: React.FC = () => {
                             <CreditCard className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold truncate">{formatCurrency(account.currentBalance || 0)}</div>
+                            <div className="text-base sm:text-2xl font-bold">{formatCurrency(account.currentBalance || 0)}</div>
                             <p className="text-xs text-muted-foreground truncate">
                                 {account.bankName || 'Bank Account'}
                                 {account.isDefault && ' • Default'}
