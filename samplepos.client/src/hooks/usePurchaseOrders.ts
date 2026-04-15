@@ -156,6 +156,7 @@ export function useUpdateDraftPO() {
           productName: string;
           quantity: number;
           unitCost: number;
+          lineTotal?: number;
           uomId?: string | null;
         }>;
       };

@@ -95,6 +95,7 @@ export interface CreatePurchaseOrderItemInput {
   productId: string;
   quantity: number | string;
   unitCost: number | string;
+  lineTotal?: number | string;
   notes?: string;
 }
 

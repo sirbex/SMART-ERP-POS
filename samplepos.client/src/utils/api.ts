@@ -439,7 +439,7 @@ export const api = {
       apiClient.post<ApiResponse>(`purchase-orders/${id}/send-to-supplier`),
     cancel: (id: string) => apiClient.post<ApiResponse>(`purchase-orders/${id}/cancel`),
     delete: (id: string) => apiClient.delete<ApiResponse>(`purchase-orders/${id}`),
-    update: (id: string, data: { supplierId?: string; expectedDate?: string | null; notes?: string | null; items?: Array<{ productId: string; productName: string; quantity: number; unitCost: number; uomId?: string | null }> }) =>
+    update: (id: string, data: { supplierId?: string; expectedDate?: string | null; notes?: string | null; items?: Array<{ productId: string; productName: string; quantity: number; unitCost: number; lineTotal?: number; uomId?: string | null }> }) =>
       apiClient.put<ApiResponse>(`purchase-orders/${id}`, data),
     createInvoice: (data: CreatePOInvoiceInput) =>
       apiClient.post<ApiResponse>('purchase-orders/invoices', data),
