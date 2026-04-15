@@ -103,8 +103,31 @@ export function useIdleTimeout({
                     // Tab was hidden longer than idle threshold → fire warning, give 60s grace
                     onWarningRef.current?.();
                     idleTimerRef.current = setTimeout(() => onIdleRef.current(), WARNING_BEFORE_MS);
+                } else if (hiddenAt) {
+                    // Tab was hidden briefly — subtract elapsed hidden time from timers
+                    // instead of resetting to zero (prevents indefinite session extension)
+                    const elapsed = Date.now() - hiddenAt;
+                    const remaining = timeoutMs - elapsed;
+                    if (remaining <= 0) {
+                        // Already past idle threshold while hidden
+                        onWarningRef.current?.();
+                        idleTimerRef.current = setTimeout(() => onIdleRef.current(), WARNING_BEFORE_MS);
+                    } else if (remaining <= WARNING_BEFORE_MS) {
+                        // Past warning threshold — fire warning, set short idle timer
+                        onWarningRef.current?.();
+                        idleTimerRef.current = setTimeout(() => onIdleRef.current(), remaining);
+                    } else {
+                        // Still within budget — set timers for the remaining time
+                        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+                        if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+                        warningFiredRef.current = false;
+                        warningTimerRef.current = setTimeout(() => {
+                            warningFiredRef.current = true;
+                            onWarningRef.current?.();
+                        }, remaining - WARNING_BEFORE_MS);
+                        idleTimerRef.current = setTimeout(() => onIdleRef.current(), remaining);
+                    }
                 } else {
-                    // Tab was hidden briefly → reset (user came back quickly)
                     resetTimers();
                 }
                 hiddenAt = null;

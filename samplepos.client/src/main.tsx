@@ -100,8 +100,8 @@ const queryClient = new QueryClient({
   },
 });
 
-// ── Service Worker Registration ─────────────────────────────
-if ('serviceWorker' in navigator) {
+// ── Service Worker Registration (skip in dev — self-signed certs block SW) ──
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')
@@ -131,7 +131,7 @@ if ('serviceWorker' in navigator) {
     if (event.data?.type === 'SW_REQUEST_SYNC_DATA') {
       const queue = JSON.parse(localStorage.getItem('pos_offline_sales') || '[]');
       const authToken = localStorage.getItem('auth_token');
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+      const apiBase = import.meta.env.VITE_API_URL || '/api';
       // Reply via the MessageChannel port the SW sent
       if (event.ports[0]) {
         event.ports[0].postMessage({ queue, authToken, apiBase });

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../utils/api';
 import { TwoFactorVerifyModal } from '../components/auth/TwoFactorVerifyModal';
 import type { UserRole } from '../types';
-import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff } from 'lucide-react';
+import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff, Fingerprint } from 'lucide-react';
 import { useTenant } from '../contexts/TenantContext';
 import { MathCaptcha } from '../components/auth/MathCaptcha';
 
@@ -497,6 +497,17 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {/* Quick Login link */}
+          <div className="mt-4 text-center">
+            <Link
+              to="/quick-login"
+              className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+            >
+              <Fingerprint className="w-4 h-4" />
+              POS Quick Login
+            </Link>
+          </div>
 
           {/* Footer */}
           <div className="mt-6 flex items-center justify-center gap-1.5 text-xs text-gray-400">

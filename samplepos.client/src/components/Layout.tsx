@@ -163,6 +163,14 @@ export default function Layout({ children }: LayoutProps) {
               </div>
             )}
           </div>
+          <Link
+            to="/my/quick-login"
+            className={`${sidebarOpen ? 'w-full flex items-center gap-2' : 'w-10 justify-center flex'
+              } mt-3 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors`}
+            title={!sidebarOpen ? 'Quick Login Setup' : undefined}
+          >
+            {sidebarOpen ? '🔑 Quick Login Setup' : '🔑'}
+          </Link>
           <button
             onClick={handleLogout}
             className={`${sidebarOpen ? 'w-full' : 'w-10'

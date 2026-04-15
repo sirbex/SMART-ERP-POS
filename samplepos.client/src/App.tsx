@@ -110,6 +110,8 @@ const HRPage = lazyWithRetry(() => import('./pages/hr/HRPage'));
 const PriceRulesPage = lazyWithRetry(() => import('./pages/pricing/PriceRulesPage'));
 const CategoriesPage = lazyWithRetry(() => import('./pages/pricing/CategoriesPage'));
 const PricePreviewPage = lazyWithRetry(() => import('./pages/pricing/PricePreviewPage'));
+const QuickLoginScreen = lazyWithRetry(() => import('./pages/pos/QuickLoginScreen'));
+const MyQuickLoginPage = lazyWithRetry(() => import('./pages/settings/MyQuickLoginPage'));
 
 // Platform (Super Admin) imports
 import { PlatformAuthProvider, usePlatformAuth } from './contexts/PlatformAuthContext';
@@ -215,6 +217,7 @@ function App() {
           }>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/quick-login" element={<QuickLoginScreen />} />
 
               {/* Platform (Super Admin) Routes — own auth context */}
               <Route path="/platform/login" element={<PlatformLoginPage />} />
@@ -743,6 +746,16 @@ function App() {
                             <AgedBalancePage />
                           </Suspense>
                         </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Quick Login Setup - ALL authenticated users */}
+                  <Route
+                    path="/my/quick-login"
+                    element={
+                      <ProtectedRoute>
+                        <MyQuickLoginPage />
                       </ProtectedRoute>
                     }
                   />

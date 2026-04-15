@@ -168,7 +168,7 @@ class ResilientApiClient {
 
 // Singleton instance
 export const resilientApiClient = new ResilientApiClient(
-    import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+    import.meta.env.VITE_API_URL || '/api'
 );
 
 /**

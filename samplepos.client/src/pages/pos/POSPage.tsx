@@ -2864,10 +2864,10 @@ export default function POSPage() {
                 </div>
               </div>
               <button
-                onClick={() => { setShowNavDrawer(false); logout(); navigate('/login'); }}
+                onClick={() => { setShowNavDrawer(false); logout(); navigate('/quick-login'); }}
                 className="w-full px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
               >
-                Logout
+                Switch User
               </button>
             </div>
           </aside>

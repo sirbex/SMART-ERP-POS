@@ -21,28 +21,28 @@ import { useTenant } from '../contexts/TenantContext';
  * Falls back to true in single-tenant / dev mode (no plan resolved).
  */
 export function useFeatureAccess(feature: string): boolean {
-  const { config } = useTenant();
+    const { config } = useTenant();
 
-  // Single-tenant / dev fallback — no plan means all features enabled
-  if (!config.planFeatures || config.planFeatures.length === 0) {
-    return true;
-  }
+    // Single-tenant / dev fallback — no plan means all features enabled
+    if (!config.planFeatures || config.planFeatures.length === 0) {
+        return true;
+    }
 
-  return config.planFeatures.includes(feature);
+    return config.planFeatures.includes(feature);
 }
 
 /**
  * Returns the full list of plan features for bulk checks.
  */
 export function usePlanFeatures(): string[] {
-  const { config } = useTenant();
-  return config.planFeatures ?? [];
+    const { config } = useTenant();
+    return config.planFeatures ?? [];
 }
 
 /**
  * Returns the current tenant plan name.
  */
 export function useTenantPlan(): string {
-  const { config } = useTenant();
-  return config.plan ?? 'FREE';
+    const { config } = useTenant();
+    return config.plan ?? 'FREE';
 }

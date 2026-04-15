@@ -7,6 +7,7 @@
 import { useLocation } from 'react-router-dom';
 import { TwoFactorSetup } from '../../components/auth/TwoFactorSetup';
 import { ChangePasswordForm } from '../../components/auth/ChangePasswordForm';
+import QuickLoginSettings from './QuickLoginSettings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Shield, AlertTriangle, Key, Lock } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -63,6 +64,9 @@ export default function SecuritySettingsPage() {
                 <div className="space-y-6">
                     {/* Two-Factor Authentication */}
                     <TwoFactorSetup />
+
+                    {/* Quick Login (POS PIN / Biometric) */}
+                    <QuickLoginSettings />
 
                     {/* Password Section */}
                     <Card>

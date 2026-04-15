@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
-import { storeTokens, clearTokens, setupAxiosInterceptors } from '../hooks/useTokenRefresh';
+import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors } from '../hooks/useTokenRefresh';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
 import type { UserRole } from '../types';
 
@@ -63,7 +63,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
 
   // Memoize the Set so consumers don't re-render unnecessarily
@@ -71,15 +70,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (permissionKeys.length === 0) return EMPTY_PERMISSIONS;
     return new Set(permissionKeys);
   }, [permissionKeys]);
-
-  // Track online/offline state for idle timeout
-  useEffect(() => {
-    const goOnline = () => setIsOnline(true);
-    const goOffline = () => setIsOnline(false);
-    window.addEventListener('online', goOnline);
-    window.addEventListener('offline', goOffline);
-    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
-  }, []);
 
   useEffect(() => {
     // Initialize authentication state from localStorage
@@ -181,6 +171,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = useCallback(() => {
     try {
+      // Revoke refresh token server-side (fire-and-forget)
+      const refreshToken = getRefreshToken();
+      if (refreshToken) {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+        const token = localStorage.getItem('auth_token');
+        fetch(`${baseUrl}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ refreshToken }),
+          credentials: 'include',
+        }).catch(() => { /* best-effort — don't block local cleanup */ });
+      }
+
       // Clear all tokens using the new system
       clearTokens();
       localStorage.removeItem('user');
@@ -211,7 +217,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.dispatchEvent(new CustomEvent('app:session-warning'));
       console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
     },
-    enabled: isAuthenticated && isOnline, // Don't idle-logout when offline
+    enabled: isAuthenticated, // Keep idle timeout active even when offline
   });
 
   return (

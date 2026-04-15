@@ -123,13 +123,8 @@ export default defineConfig({
             }
         },
         host: '127.0.0.1',  // Use IPv4 to avoid dual-stack issues
-        port: 5173,  // Use default Vite port since 3000 is taken
-        strictPort: false, // Allow Vite to find an available port
-        // Disable HTTPS for development to avoid WebSocket issues
-        // https: {
-        //     key: fs.readFileSync(keyFilePath),
-        //     cert: fs.readFileSync(certFilePath),
-        // },
+        port: 5173,
+        strictPort: false,
         hmr: {
             overlay: true
         }

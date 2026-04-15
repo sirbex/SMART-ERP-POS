@@ -16,6 +16,7 @@ import { productRoutes } from './modules/products/productRoutes.js';
 import { customerRoutes } from './modules/customers/customerRoutes.js';
 import { supplierRoutes } from './modules/suppliers/supplierRoutes.js';
 import { authRoutes } from './modules/auth/authRoutes.js';
+import { quickLoginRoutes } from './modules/auth/quickLoginRoutes.js';
 import { salesRoutes } from './modules/sales/salesRoutes.js';
 import { inventoryRoutes } from './modules/inventory/inventoryRoutes.js';
 import { purchaseOrderRoutes } from './modules/purchase-orders/purchaseOrderRoutes.js';
@@ -309,6 +310,9 @@ app.use('/api/sync', syncRoutes);
 
 app.use('/api/auth', authRoutes);
 
+// ── Quick Login (SAP-style POS fast auth — PIN/biometric on trusted devices)
+app.use('/api/auth/quick-login', quickLoginRoutes);
+
 // ── Accounting module (plan: PROFESSIONAL+) ──────────────────
 app.use('/api/accounting', requireFeature('accounting'), accountingRoutes);
 app.use('/api/accounting/comprehensive', requireFeature('accounting'), comprehensiveAccountingRoutes);
@@ -568,7 +572,7 @@ async function startServer() {
               };
 
               // Resolve tenant pool for multi-tenant isolation
-              let workerPool = payload.tenantId
+              const workerPool = payload.tenantId
                 ? connectionManager.getPoolById(payload.tenantId)
                 : undefined;
               if (payload.tenantId && !workerPool) {
