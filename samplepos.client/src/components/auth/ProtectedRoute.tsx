@@ -10,12 +10,14 @@
 
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { FeatureGate } from './FeatureGate';
 import { UserRole } from '../../types';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
     requiredRoles?: UserRole[];
     requiredPermissions?: string[];
+    requiredFeature?: string;
     requireAnyRole?: boolean;
     fallbackPath?: string;
     showUnauthorized?: boolean;
@@ -25,6 +27,7 @@ export function ProtectedRoute({
     children,
     requiredRoles,
     requiredPermissions,
+    requiredFeature,
     requireAnyRole = true,
     fallbackPath = '/login',
     showUnauthorized = false
@@ -56,6 +59,10 @@ export function ProtectedRoute({
 
     // Grant access if EITHER check passes
     if (hasRequiredRole || hasRbacPermission) {
+        // Plan feature gate — wrap in FeatureGate if a feature is required
+        if (requiredFeature) {
+            return <FeatureGate feature={requiredFeature}>{children}</FeatureGate>;
+        }
         return <>{children}</>;
     }
 

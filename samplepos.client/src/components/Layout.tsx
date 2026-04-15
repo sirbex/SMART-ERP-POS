@@ -25,7 +25,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const { config } = useTenant();
+  const { config, loading: tenantLoading } = useTenant();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
 
   const navItems: NavItem[] = [
@@ -61,8 +61,10 @@ export default function Layout({ children }: LayoutProps) {
     const items = [...navItems, ...adminNavItems];
     return items.filter(item => {
       // Plan feature gate — hide if plan doesn't include the feature
-      if (item.feature && planFeatures.length > 0 && !planFeatures.includes(item.feature)) {
-        return false;
+      // While tenant config is loading, hide gated items to prevent flash
+      if (item.feature) {
+        if (tenantLoading) return false;
+        if (planFeatures.length > 0 && !planFeatures.includes(item.feature)) return false;
       }
       // Dashboard always visible
       if (!item.permissions) return true;
@@ -73,7 +75,7 @@ export default function Layout({ children }: LayoutProps) {
       if (item.permissions.some(p => permissions.has(p))) return true;
       return false;
     });
-  }, [user?.role, permissions, isAdminOrManager, planFeatures]);
+  }, [user?.role, permissions, isAdminOrManager, planFeatures, tenantLoading]);
 
   const handleLogout = () => {
     logout();
