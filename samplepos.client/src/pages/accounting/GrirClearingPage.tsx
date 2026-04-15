@@ -794,10 +794,10 @@ export default function GrirClearingPage() {
 
 function SummaryCard({ label, value, color, sub }: { label: string; value: string; color: string; sub: string }) {
   return (
-    <div className="bg-white border rounded-lg p-4 shadow-sm">
+    <div className="bg-white border rounded-lg p-4 shadow-sm min-w-0">
       <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">{label}</div>
-      <div className={`text-xl font-bold ${color}`}>{value}</div>
-      <div className="text-xs text-gray-400 mt-1">{sub}</div>
+      <div className={`text-xl font-bold truncate ${color}`}>{value}</div>
+      <div className="text-xs text-gray-400 mt-1 truncate">{sub}</div>
     </div>
   );
 }

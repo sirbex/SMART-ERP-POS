@@ -81,24 +81,24 @@ export default function CurrencyRevaluationPage() {
 
       {/* Summary */}
       {balances.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 min-w-0">
             <div className="flex items-center gap-2 text-green-700 mb-1">
               <TrendingUp className="h-4 w-4" />
               <span className="text-xs font-medium uppercase">Unrealized Gain</span>
             </div>
-            <p className="text-2xl font-bold text-green-900">{totalGain.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <p className="text-2xl font-bold text-green-900 truncate">{totalGain.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
           </div>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 min-w-0">
             <div className="flex items-center gap-2 text-red-700 mb-1">
               <TrendingDown className="h-4 w-4" />
               <span className="text-xs font-medium uppercase">Unrealized Loss</span>
             </div>
-            <p className="text-2xl font-bold text-red-900">{totalLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <p className="text-2xl font-bold text-red-900 truncate">{totalLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
           </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 min-w-0">
             <span className="text-xs font-medium uppercase text-blue-700">Net FX Impact</span>
-            <p className={`text-2xl font-bold ${totalGain - totalLoss >= 0 ? 'text-green-900' : 'text-red-900'}`}>
+            <p className={`text-2xl font-bold truncate ${totalGain - totalLoss >= 0 ? 'text-green-900' : 'text-red-900'}`}>
               {(totalGain - totalLoss).toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </p>
           </div>
@@ -106,7 +106,7 @@ export default function CurrencyRevaluationPage() {
       )}
 
       {/* Detail Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-lg shadow overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>

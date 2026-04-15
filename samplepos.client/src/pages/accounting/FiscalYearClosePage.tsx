@@ -87,7 +87,7 @@ export default function FiscalYearClosePage() {
           </div>
 
           {/* Details */}
-          <div className="p-6 grid grid-cols-2 gap-4">
+          <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase">Total Periods</p>
               <p className="text-xl font-semibold text-gray-900">{status.totalPeriods}</p>

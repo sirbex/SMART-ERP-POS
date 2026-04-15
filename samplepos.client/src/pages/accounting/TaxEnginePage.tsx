@@ -99,7 +99,7 @@ export default function TaxEnginePage() {
 
       {/* Definitions Tab */}
       {tab === 'definitions' && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="bg-white rounded-lg shadow overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -146,7 +146,7 @@ export default function TaxEnginePage() {
 
       {/* Calculator Tab */}
       {tab === 'calculator' && (
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white rounded-lg shadow p-6 space-y-4">
             <h3 className="font-semibold text-gray-900">Input</h3>
             <div>
@@ -198,7 +198,7 @@ export default function TaxEnginePage() {
             <h3 className="font-semibold text-gray-900">Result</h3>
             {computeResult ? (
               <>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="p-3 bg-gray-50 rounded">
                     <p className="text-xs text-gray-500 uppercase">Untaxed Amount</p>
                     <p className="text-lg font-semibold">{computeResult.untaxedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>

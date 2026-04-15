@@ -175,25 +175,25 @@ const AccountingIntegrationDashboard: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="bg-gray-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-gray-600">Transactions</div>
-              <div className="text-2xl font-bold text-gray-900">{data.sales.totalSales}</div>
+              <div className="text-2xl font-bold text-gray-900 truncate">{data.sales.totalSales}</div>
             </div>
-            <div className="bg-green-50 p-4 rounded-lg">
+            <div className="bg-green-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-green-600">Revenue</div>
-              <div className="text-2xl font-bold text-green-700">{formatCurrency(data.sales.totalRevenue)}</div>
+              <div className="text-2xl font-bold text-green-700 truncate">{formatCurrency(data.sales.totalRevenue)}</div>
             </div>
-            <div className="bg-orange-50 p-4 rounded-lg">
+            <div className="bg-orange-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-orange-600">Cost of Goods</div>
-              <div className="text-2xl font-bold text-orange-700">{formatCurrency(data.sales.totalCOGS)}</div>
+              <div className="text-2xl font-bold text-orange-700 truncate">{formatCurrency(data.sales.totalCOGS)}</div>
             </div>
-            <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="bg-blue-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-blue-600">Gross Profit</div>
-              <div className="text-2xl font-bold text-blue-700">{formatCurrency(data.sales.totalProfit)}</div>
+              <div className="text-2xl font-bold text-blue-700 truncate">{formatCurrency(data.sales.totalProfit)}</div>
             </div>
-            <div className="bg-purple-50 p-4 rounded-lg">
+            <div className="bg-purple-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-purple-600">Profit Margin</div>
-              <div className="text-2xl font-bold text-purple-700">{data.sales.profitMargin.toFixed(1)}%</div>
+              <div className="text-2xl font-bold text-purple-700 truncate">{data.sales.profitMargin.toFixed(1)}%</div>
             </div>
           </div>
         </CardContent>
@@ -208,7 +208,7 @@ const AccountingIntegrationDashboard: React.FC = () => {
             <BookOpen className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-purple-600">{data.chartOfAccounts.total}</div>
+            <div className="text-2xl font-bold text-purple-600 truncate truncate">{data.chartOfAccounts.total}</div>
             <div className="space-y-1 mt-2">
               <div className="text-xs space-y-0.5">
                 {Object.entries(data.chartOfAccounts.byType).map(([type, count]) => (
@@ -229,7 +229,7 @@ const AccountingIntegrationDashboard: React.FC = () => {
             <Users className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{formatCurrency(data.receivables.totalAmount)}</div>
+            <div className="text-2xl font-bold text-blue-600 truncate truncate">{formatCurrency(data.receivables.totalAmount)}</div>
             <div className="space-y-1 mt-2">
               <p className="text-xs text-gray-600">
                 From {data.receivables.customerCount} customers
@@ -248,7 +248,7 @@ const AccountingIntegrationDashboard: React.FC = () => {
             <Building2 className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{formatCurrency(data.payables.totalAmount)}</div>
+            <div className="text-2xl font-bold text-orange-600 truncate truncate">{formatCurrency(data.payables.totalAmount)}</div>
             <div className="space-y-1 mt-2">
               <p className="text-xs text-gray-600">
                 {data.payables.supplierCount} active suppliers
@@ -267,7 +267,7 @@ const AccountingIntegrationDashboard: React.FC = () => {
             <Receipt className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{data.journalEntries.recentCount}</div>
+            <div className="text-2xl font-bold text-green-600 truncate truncate">{data.journalEntries.recentCount}</div>
             <div className="space-y-1 mt-2">
               <p className="text-xs text-gray-600">
                 Last 30 days
@@ -293,29 +293,29 @@ const AccountingIntegrationDashboard: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-green-50 p-4 rounded-lg">
+            <div className="bg-green-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-green-600 font-medium">Total Debits</div>
-              <div className="text-2xl font-bold text-green-700">
+              <div className="text-2xl font-bold text-green-700 truncate">
                 {formatCurrency(data.trialBalance.totalDebits)}
               </div>
             </div>
-            <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="bg-blue-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-blue-600 font-medium">Total Credits</div>
-              <div className="text-2xl font-bold text-blue-700">
+              <div className="text-2xl font-bold text-blue-700 truncate">
                 {formatCurrency(data.trialBalance.totalCredits)}
               </div>
             </div>
-            <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="bg-gray-50 p-4 rounded-lg min-w-0">
               <div className="text-sm text-gray-600 font-medium">Difference</div>
-              <div className="text-2xl font-bold text-gray-700">
+              <div className="text-2xl font-bold text-gray-700 truncate">
                 {formatCurrency(data.trialBalance.difference)}
               </div>
             </div>
-            <div className={`p-4 rounded-lg ${data.trialBalance.isBalanced ? 'bg-green-50' : 'bg-red-50'}`}>
+            <div className={`p-4 rounded-lg min-w-0 ${data.trialBalance.isBalanced ? 'bg-green-50' : 'bg-red-50'}`}>
               <div className={`text-sm font-medium ${data.trialBalance.isBalanced ? 'text-green-600' : 'text-red-600'}`}>
                 Status
               </div>
-              <div className={`text-2xl font-bold ${data.trialBalance.isBalanced ? 'text-green-700' : 'text-red-700'}`}>
+              <div className={`text-2xl font-bold truncate ${data.trialBalance.isBalanced ? 'text-green-700' : 'text-red-700'}`}>
                 {data.trialBalance.isBalanced ? '✓ Balanced' : '✗ Unbalanced'}
               </div>
             </div>

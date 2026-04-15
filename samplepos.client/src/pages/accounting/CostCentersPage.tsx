@@ -160,7 +160,7 @@ export default function CostCentersPage() {
       {isLoading ? (
         <div className="text-center py-12 text-gray-500">Loading cost centers...</div>
       ) : viewMode === 'list' ? (
-        <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+        <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>

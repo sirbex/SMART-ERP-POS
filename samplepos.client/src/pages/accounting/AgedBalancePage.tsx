@@ -102,7 +102,7 @@ export default function AgedBalancePage() {
       ) : report ? (
         <>
           {/* Summary Cards */}
-          <div className="grid grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             {[
               { label: 'Current', value: report.summary.current, color: 'text-green-600' },
               { label: '1–30 Days', value: report.summary.days1to30, color: 'text-yellow-600' },

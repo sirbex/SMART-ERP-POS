@@ -168,7 +168,7 @@ export default function DunningPage() {
       )}
 
       {/* Dunning Levels Table */}
-      <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+      <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
         <div className="px-6 py-4 border-b bg-gray-50">
           <h3 className="text-sm font-semibold text-gray-700">Dunning Levels</h3>
         </div>
