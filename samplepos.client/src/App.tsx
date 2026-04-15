@@ -309,7 +309,7 @@ function App() {
                   <Route
                     path="/suppliers"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['suppliers.read']} requiredFeature="customers">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['suppliers.read']} requiredFeature="purchase_orders">
                         <SuppliersPage />
                       </ProtectedRoute>
                     }
