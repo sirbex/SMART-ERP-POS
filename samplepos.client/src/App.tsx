@@ -361,7 +361,7 @@ function App() {
                   <Route
                     path="/crm"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['crm.read']} requiredFeature="customers">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['crm.read']} requiredFeature="crm">
                         <CRMPage />
                       </ProtectedRoute>
                     }
@@ -385,7 +385,7 @@ function App() {
                   <Route
                     path="/pricing/rules"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pos">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pricing">
                         <PriceRulesPage />
                       </ProtectedRoute>
                     }
@@ -393,7 +393,7 @@ function App() {
                   <Route
                     path="/pricing/categories"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pos">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pricing">
                         <CategoriesPage />
                       </ProtectedRoute>
                     }
@@ -401,7 +401,7 @@ function App() {
                   <Route
                     path="/pricing/preview"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pos">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pricing">
                         <PricePreviewPage />
                       </ProtectedRoute>
                     }

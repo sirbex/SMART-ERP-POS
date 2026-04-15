@@ -154,21 +154,21 @@ export const PLAN_LIMITS: Record<TenantPlan, {
     maxProducts: 1000,
     maxLocations: 2,
     storageLimitMb: 500,
-    features: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses', 'hr'],
+    features: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses'],
   },
   PROFESSIONAL: {
     maxUsers: 20,
     maxProducts: 10000,
     maxLocations: 5,
     storageLimitMb: 2000,
-    features: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses', 'hr', 'accounting', 'purchase_orders', 'edge_sync'],
+    features: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses', 'hr', 'crm', 'pricing', 'accounting', 'purchase_orders', 'edge_sync'],
   },
   ENTERPRISE: {
     maxUsers: 999,
     maxProducts: 999999,
     maxLocations: 999,
     storageLimitMb: 50000,
-    features: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses', 'hr', 'accounting', 'purchase_orders', 'edge_sync', 'api_access', 'custom_domain', 'priority_support'],
+    features: ['pos', 'inventory', 'customers', 'basic_reports', 'reports', 'invoices', 'expenses', 'hr', 'crm', 'pricing', 'accounting', 'purchase_orders', 'edge_sync', 'api_access', 'custom_domain', 'priority_support'],
   },
 };
 
