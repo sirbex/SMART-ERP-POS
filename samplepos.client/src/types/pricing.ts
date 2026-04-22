@@ -40,6 +40,35 @@ export interface CustomerGroupOption {
 }
 
 // ============================================================================
+// Price Group (controls pricing MODE for a customer)
+// ============================================================================
+
+export type PricingMode = 'STANDARD' | 'AT_COST';
+
+export interface PriceGroup {
+  id: string;
+  name: string;
+  pricingMode: PricingMode;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePriceGroupInput {
+  name: string;
+  pricingMode: PricingMode;
+  description?: string;
+}
+
+export interface UpdatePriceGroupInput {
+  name?: string;
+  pricingMode?: PricingMode;
+  description?: string | null;
+  isActive?: boolean;
+}
+
+// ============================================================================
 // Price Rule
 // ============================================================================
 
@@ -104,7 +133,7 @@ export interface ResolvedPrice {
     ruleName: string | null;
     ruleType: PriceRuleType | null;
     ruleValue: number | null;
-    scope: 'tier' | 'product' | 'category' | 'global' | 'group_discount' | 'formula' | 'base';
+    scope: 'tier' | 'product' | 'category' | 'global' | 'group_discount' | 'formula' | 'base' | 'at_cost';
   };
 }
 

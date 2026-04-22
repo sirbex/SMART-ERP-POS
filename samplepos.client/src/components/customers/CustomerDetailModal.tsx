@@ -8,6 +8,8 @@ import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
 import { AxiosError } from 'axios';
 import { getBusinessDate, formatTimestampDate } from '../../utils/businessDate';
+import { pricingApi } from '../../api/pricing';
+import type { PriceGroup } from '../../api/pricing';
 
 interface CustomerData {
     id: string;
@@ -142,6 +144,14 @@ export default function CustomerDetailModal({
     const toggleActiveM = useToggleCustomerActive();
     const deleteCustomerM = useDeleteCustomer();
 
+    // Price groups for edit form
+    const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
+    useEffect(() => {
+        if (tab === 'edit') {
+            pricingApi.listPriceGroups(true).then(setPriceGroups).catch(() => {});
+        }
+    }, [tab]);
+
     const c = customer as CustomerData;
     const sum = summary as SummaryData;
 
@@ -175,6 +185,7 @@ export default function CustomerDetailModal({
             phone: formData.get('phone')?.toString() || undefined,
             address: formData.get('address')?.toString() || undefined,
             creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+            priceGroupId: formData.get('priceGroupId')?.toString() || null,
         };
         try {
             await updateCustomer.mutateAsync({ id: customerId, data: payload });
@@ -909,6 +920,25 @@ export default function CustomerDetailModal({
                                                 step={1000}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                             />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="customerPriceGroup" className="block text-sm font-medium text-gray-700 mb-1">Price Group</label>
+                                            <select
+                                                id="customerPriceGroup"
+                                                name="priceGroupId"
+                                                defaultValue={(c as unknown as { priceGroupId?: string }).priceGroupId ?? ''}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                            >
+                                                <option value="">— Standard pricing —</option>
+                                                {priceGroups.map((pg) => (
+                                                    <option key={pg.id} value={pg.id}>
+                                                        {pg.name}{pg.pricingMode === 'AT_COST' ? ' (At Cost — 0% margin)' : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                Set to <strong>At Cost</strong> to always sell to this customer at inventory cost price (zero margin).
+                                            </p>
                                         </div>
                                         <div className="flex gap-3 pt-4">
                                             <button

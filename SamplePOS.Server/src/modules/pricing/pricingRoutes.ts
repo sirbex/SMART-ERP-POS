@@ -20,6 +20,10 @@ import {
     createPriceRule,
     updatePriceRule,
     deletePriceRule,
+    listPriceGroups,
+    createPriceGroup,
+    updatePriceGroup,
+    deletePriceGroup,
 } from './pricingController.js';
 
 const router = Router();
@@ -43,5 +47,11 @@ router.get('/rules/:id', authenticate, getPriceRuleById);
 router.post('/rules', authenticate, requirePermission('pricing.manage'), createPriceRule);
 router.put('/rules/:id', authenticate, requirePermission('pricing.manage'), updatePriceRule);
 router.delete('/rules/:id', authenticate, requirePermission('pricing.manage'), deletePriceRule);
+
+// ── Price Groups ──
+router.get('/price-groups', authenticate, listPriceGroups);
+router.post('/price-groups', authenticate, requirePermission('pricing.manage'), createPriceGroup);
+router.put('/price-groups/:id', authenticate, requirePermission('pricing.manage'), updatePriceGroup);
+router.delete('/price-groups/:id', authenticate, requirePermission('pricing.manage'), deletePriceGroup);
 
 export const pricingEngineRoutes = router;

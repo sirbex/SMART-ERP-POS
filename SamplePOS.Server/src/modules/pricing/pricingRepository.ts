@@ -551,6 +551,116 @@ export async function getProductFormula(
 }
 
 // ============================================================================
+// PRICE GROUPS — master table for pricing modes
+// ============================================================================
+
+export type PricingMode = 'STANDARD' | 'AT_COST';
+
+export interface PriceGroupDbRow {
+    id: string;
+    name: string;
+    pricing_mode: PricingMode;
+    description: string | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export function normalisePriceGroup(r: PriceGroupDbRow) {
+    return {
+        id: r.id,
+        name: r.name,
+        pricingMode: r.pricing_mode as PricingMode,
+        description: r.description,
+        isActive: r.is_active,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+    };
+}
+
+/**
+ * Returns the pricing mode for a given customer (via their price_group_id).
+ * Returns null when the customer has no price group → treat as STANDARD.
+ */
+export async function getCustomerPricingMode(
+    client: Pool | PoolClient,
+    customerId: string,
+): Promise<PricingMode | null> {
+    const res = await client.query(
+        `SELECT pg.pricing_mode
+         FROM customers c
+         JOIN price_groups pg ON pg.id = c.price_group_id
+         WHERE c.id = $1
+           AND pg.is_active = TRUE`,
+        [customerId],
+    );
+    return (res.rows[0]?.pricing_mode as PricingMode) ?? null;
+}
+
+export async function listPriceGroups(
+    client: Pool | PoolClient,
+    isActive?: boolean,
+): Promise<PriceGroupDbRow[]> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (isActive !== undefined) {
+        params.push(isActive);
+        conditions.push(`is_active = $${params.length}`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const res = await client.query(
+        `SELECT id, name, pricing_mode, description, is_active, created_at, updated_at
+         FROM price_groups ${where}
+         ORDER BY name`,
+        params,
+    );
+    return res.rows;
+}
+
+export async function createPriceGroup(
+    client: Pool | PoolClient,
+    data: { name: string; pricingMode: PricingMode; description?: string },
+): Promise<PriceGroupDbRow> {
+    const res = await client.query(
+        `INSERT INTO price_groups (name, pricing_mode, description)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [data.name, data.pricingMode, data.description ?? null],
+    );
+    return res.rows[0];
+}
+
+export async function updatePriceGroup(
+    client: Pool | PoolClient,
+    id: string,
+    data: { name?: string; pricingMode?: PricingMode; description?: string | null; isActive?: boolean },
+): Promise<PriceGroupDbRow | null> {
+    const sets: string[] = ['updated_at = NOW()'];
+    const values: unknown[] = [id];
+    let idx = 2;
+    if (data.name !== undefined) { sets.push(`name = $${idx++}`); values.push(data.name); }
+    if (data.pricingMode !== undefined) { sets.push(`pricing_mode = $${idx++}`); values.push(data.pricingMode); }
+    if (data.description !== undefined) { sets.push(`description = $${idx++}`); values.push(data.description); }
+    if (data.isActive !== undefined) { sets.push(`is_active = $${idx++}`); values.push(data.isActive); }
+    const res = await client.query(
+        `UPDATE price_groups SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+        values,
+    );
+    return res.rows[0] ?? null;
+}
+
+export async function deletePriceGroup(
+    client: Pool | PoolClient,
+    id: string,
+): Promise<void> {
+    // Soft-delete: deactivate so existing customer links remain intact
+    await client.query(
+        `UPDATE price_groups SET is_active = FALSE, updated_at = NOW() WHERE id = $1`,
+        [id],
+    );
+}
+
+// ============================================================================
 // Entity existence checks (used by service-layer validation)
 // ============================================================================
 

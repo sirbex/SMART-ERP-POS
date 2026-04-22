@@ -9,6 +9,9 @@ import type {
   CreateProductCategoryInput,
   UpdateProductCategoryInput,
   CustomerGroupOption,
+  PriceGroup,
+  CreatePriceGroupInput,
+  UpdatePriceGroupInput,
   PriceRule,
   CreatePriceRuleInput,
   UpdatePriceRuleInput,
@@ -32,6 +35,29 @@ export const pricingApi = {
     if (isActive !== undefined) params.isActive = String(isActive);
     const response = await apiClient.get('/pricing/customer-groups', { params });
     return response.data.data;
+  },
+
+  // ── Price Groups ─────────────────────────────────────
+
+  async listPriceGroups(isActive?: boolean): Promise<PriceGroup[]> {
+    const params: Record<string, string> = {};
+    if (isActive !== undefined) params.isActive = String(isActive);
+    const response = await apiClient.get('/pricing/price-groups', { params });
+    return response.data.data;
+  },
+
+  async createPriceGroup(data: CreatePriceGroupInput): Promise<PriceGroup> {
+    const response = await apiClient.post('/pricing/price-groups', data);
+    return response.data.data;
+  },
+
+  async updatePriceGroup(id: string, data: UpdatePriceGroupInput): Promise<PriceGroup> {
+    const response = await apiClient.put(`/pricing/price-groups/${id}`, data);
+    return response.data.data;
+  },
+
+  async deletePriceGroup(id: string): Promise<void> {
+    await apiClient.delete(`/pricing/price-groups/${id}`);
   },
 
   // ── Product Categories ───────────────────────────────

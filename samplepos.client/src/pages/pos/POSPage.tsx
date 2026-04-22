@@ -3291,19 +3291,26 @@ export default function POSPage() {
                       </div>
                     )}
                     {item.pricingRule && (
-                      <div className="flex items-center gap-1 mt-0.5 text-xs text-blue-600">
-                        <span className="inline-block w-2 h-2 bg-blue-500 rounded-full" />
-                        <span>
-                          {item.pricingRule.scope === 'group_discount'
-                            ? 'Group discount'
-                            : item.pricingRule.ruleName || item.pricingRule.scope}
-                          {item.pricingRule.discount > 0 && (
-                            <span className="ml-1 text-blue-500">
-                              (-{formatCurrency(item.pricingRule.discount)})
-                            </span>
-                          )}
-                        </span>
-                      </div>
+                      item.pricingRule.scope === 'at_cost' ? (
+                        <div className="flex items-center gap-1 mt-0.5 text-xs text-orange-700 font-semibold">
+                          <span className="inline-block w-2 h-2 bg-orange-500 rounded-full" />
+                          <span>AT COST</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 mt-0.5 text-xs text-blue-600">
+                          <span className="inline-block w-2 h-2 bg-blue-500 rounded-full" />
+                          <span>
+                            {item.pricingRule.scope === 'group_discount'
+                              ? 'Group discount'
+                              : item.pricingRule.ruleName || item.pricingRule.scope}
+                            {item.pricingRule.discount > 0 && (
+                              <span className="ml-1 text-blue-500">
+                                (-{formatCurrency(item.pricingRule.discount)})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )
                     )}
                     {item.discount && (
                       <div className="flex items-center justify-between mt-1 text-xs">
@@ -3320,7 +3327,7 @@ export default function POSPage() {
                       <span className={`text-xs ${item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600'}`}>
                         Margin: {item.marginPct.toFixed(1)}%
                       </span>
-                      {!item.discount && (
+                      {!item.discount && item.pricingRule?.scope !== 'at_cost' && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleOpenDiscountDialog('item', idx); }}
                           className="text-amber-600 hover:text-amber-800 text-xs px-1.5 py-0.5 rounded border border-amber-200"
@@ -3462,7 +3469,7 @@ export default function POSPage() {
                               >
                                 ✕%
                               </button>
-                            ) : (
+                            ) : item.pricingRule?.scope !== 'at_cost' && (
                               <button
                                 onClick={() => handleOpenDiscountDialog('item', idx)}
                                 onFocus={() => setFocusedCartIndex(idx)}

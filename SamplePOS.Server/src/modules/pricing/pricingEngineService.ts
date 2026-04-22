@@ -82,7 +82,7 @@ export interface ResolvedPrice {
         ruleName: string | null;
         ruleType: string | null;
         ruleValue: number | null;
-        scope: 'tier' | 'product' | 'category' | 'global' | 'group_discount' | 'formula' | 'base';
+        scope: 'tier' | 'product' | 'category' | 'global' | 'group_discount' | 'formula' | 'base' | 'at_cost';
     };
 }
 
@@ -103,6 +103,34 @@ export async function getFinalPrice(
     let groupId = customerGroupId ?? null;
     if (!groupId && customerId) {
         groupId = await repo.getCustomerGroupId(pool, customerId);
+    }
+
+    // ── AT_COST override: customer's price group supersedes ALL other pricing ──
+    // Check before cache — AT_COST is customer-specific, not group-specific,
+    // so the engine cache (keyed by productId+groupId+qty) is not safe to use.
+    if (customerId) {
+        const pricingMode = await repo.getCustomerPricingMode(pool, customerId);
+        if (pricingMode === 'AT_COST') {
+            const product = await repo.getProductBasePrice(pool, productId);
+            if (!product) throw new NotFoundError(`Product ${productId}`);
+            const costPrice = Money.parseDb(product.costPrice);
+            const basePriceForMode = Money.parseDb(product.sellingPrice);
+            const discountAmt = basePriceForMode.minus(costPrice).greaterThan(0)
+                ? basePriceForMode.minus(costPrice)
+                : Money.zero();
+            return {
+                finalPrice: Money.toNumber(Money.round(costPrice)),
+                basePrice: Money.toNumber(Money.round(basePriceForMode)),
+                discount: Money.toNumber(Money.round(discountAmt)),
+                appliedRule: {
+                    ruleId: null,
+                    ruleName: 'At Cost',
+                    ruleType: 'at_cost',
+                    ruleValue: null,
+                    scope: 'at_cost',
+                },
+            };
+        }
     }
 
     // C1: Engine-private cache stores full ResolvedPrice (not just a number)
@@ -268,6 +296,36 @@ export async function getFinalPricesBulk(
     let groupId = customerGroupId ?? null;
     if (!groupId && customerId) {
         groupId = await repo.getCustomerGroupId(pool, customerId);
+    }
+
+    // ── AT_COST override: resolve once for the whole cart ──────────────────
+    if (customerId) {
+        const pricingMode = await repo.getCustomerPricingMode(pool, customerId);
+        if (pricingMode === 'AT_COST') {
+            const productIds = items.map(i => i.productId);
+            const basePriceMap = await repo.getProductBasePricesBulk(pool, productIds);
+            return items.map(item => {
+                const baseData = basePriceMap.get(item.productId);
+                if (!baseData) throw new NotFoundError(`Product ${item.productId}`);
+                const costPrice = Money.parseDb(baseData.costPrice);
+                const basePrice = Money.parseDb(baseData.sellingPrice);
+                const discountAmt = basePrice.minus(costPrice).greaterThan(0)
+                    ? basePrice.minus(costPrice)
+                    : Money.zero();
+                return {
+                    finalPrice: Money.toNumber(Money.round(costPrice)),
+                    basePrice: Money.toNumber(Money.round(basePrice)),
+                    discount: Money.toNumber(Money.round(discountAmt)),
+                    appliedRule: {
+                        ruleId: null,
+                        ruleName: 'At Cost',
+                        ruleType: 'at_cost',
+                        ruleValue: null,
+                        scope: 'at_cost' as const,
+                    },
+                };
+            });
+        }
     }
 
     const productIds = items.map(i => i.productId);
@@ -689,6 +747,43 @@ export async function deletePriceRule(pool: Pool | PoolClient, id: string) {
     pricingCache.invalidateCustomerGroup(existing.customer_group_id);
 
     logger.info('Price rule deactivated', { ruleId: id });
+}
+
+// ============================================================================
+// PRICE GROUPS CRUD
+// ============================================================================
+
+export async function listPriceGroups(
+    pool: Pool | PoolClient,
+    isActive?: boolean,
+) {
+    const rows = await repo.listPriceGroups(pool, isActive);
+    return rows.map(repo.normalisePriceGroup);
+}
+
+export async function createPriceGroup(
+    pool: Pool | PoolClient,
+    data: { name: string; pricingMode: repo.PricingMode; description?: string },
+) {
+    const row = await repo.createPriceGroup(pool, data);
+    logger.info('Price group created', { priceGroupId: row.id, name: row.name, pricingMode: row.pricing_mode });
+    return repo.normalisePriceGroup(row);
+}
+
+export async function updatePriceGroup(
+    pool: Pool | PoolClient,
+    id: string,
+    data: { name?: string; pricingMode?: repo.PricingMode; description?: string | null; isActive?: boolean },
+) {
+    const row = await repo.updatePriceGroup(pool, id, data);
+    if (!row) throw new NotFoundError(`Price group ${id}`);
+    logger.info('Price group updated', { priceGroupId: id });
+    return repo.normalisePriceGroup(row);
+}
+
+export async function deletePriceGroup(pool: Pool | PoolClient, id: string) {
+    await repo.deletePriceGroup(pool, id);
+    logger.info('Price group deactivated', { priceGroupId: id });
 }
 
 // ============================================================================

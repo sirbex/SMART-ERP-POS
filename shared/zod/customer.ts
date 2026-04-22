@@ -11,6 +11,7 @@ export const CustomerSchema = z.object({
   phone: z.string().max(50).optional().nullable(),
   address: z.string().optional().nullable(),
   customerGroupId: z.string().uuid().optional().nullable(),
+  priceGroupId: z.string().uuid().optional().nullable(),
   balance: z.number().default(0),
   creditLimit: z.number().nonnegative().default(0),
   depositBalance: z.number().default(0).optional(),
@@ -25,7 +26,8 @@ export const CreateCustomerSchema = z.object({
   email: z.union([z.string().email('Invalid email format'), z.literal('')]).optional().transform(v => v === '' ? undefined : v),
   phone: z.union([z.string().max(50), z.literal('')]).optional().transform(v => v === '' ? undefined : v),
   address: z.string().optional(),
-  customerGroupId: z.string().uuid().optional(),
+  customerGroupId: z.string().uuid().optional().nullable(),
+  priceGroupId: z.string().uuid().optional().nullable(),
   creditLimit: z.number().nonnegative().default(0),
 }).strict();
 

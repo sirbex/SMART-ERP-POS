@@ -17,6 +17,7 @@ export async function findAllCustomers(
     `SELECT 
       c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
       c.customer_group_id as "customerGroupId",
+      c.price_group_id as "priceGroupId",
       c.balance, c.credit_limit as "creditLimit",
       c.is_active as "isActive",
       c.created_at as "createdAt",
@@ -44,6 +45,7 @@ export async function findCustomerById(id: string, dbPool?: pg.Pool | pg.PoolCli
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -63,6 +65,7 @@ export async function findCustomerByEmail(email: string, dbPool?: pg.Pool | pg.P
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -92,11 +95,12 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
   const customerNumber = await generateCustomerNumber(pool);
   const result = await pool.query(
     `INSERT INTO customers (
-      customer_number, name, email, phone, address, customer_group_id, credit_limit
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      customer_number, name, email, phone, address, customer_group_id, price_group_id, credit_limit
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -109,6 +113,7 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
       data.phone || null,
       data.address || null,
       data.customerGroupId || null,
+      data.priceGroupId || null,
       data.creditLimit || 0,
     ]
   );
@@ -143,6 +148,10 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
     fields.push(`customer_group_id = $${paramIndex++}`);
     values.push(data.customerGroupId);
   }
+  if (data.priceGroupId !== undefined) {
+    fields.push(`price_group_id = $${paramIndex++}`);
+    values.push(data.priceGroupId);
+  }
   if (data.creditLimit !== undefined) {
     fields.push(`credit_limit = $${paramIndex++}`);
     values.push(data.creditLimit);
@@ -170,6 +179,7 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
      RETURNING 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -201,6 +211,7 @@ export async function toggleCustomerActive(id: string, isActive: boolean, dbPool
      RETURNING 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -221,6 +232,7 @@ export async function updateCustomerBalance(id: string, amount: number, dbPool?:
      RETURNING 
       id, name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -242,6 +254,7 @@ export async function findCustomerByNumber(customerNumber: string, dbPool?: pg.P
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",
@@ -261,6 +274,7 @@ export async function searchCustomers(searchTerm: string, limit: number = 20, db
     `SELECT 
       id, customer_number as "customerNumber", name, email, phone, address,
       customer_group_id as "customerGroupId",
+      price_group_id as "priceGroupId",
       balance, credit_limit as "creditLimit",
       is_active as "isActive",
       created_at as "createdAt",

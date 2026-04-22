@@ -206,3 +206,60 @@ export const deletePriceRule = asyncHandler(async (req: Request, res: Response) 
     await pricingEngine.deletePriceRule(pool, id);
     res.json({ success: true, message: 'Price rule deactivated' });
 });
+
+// ============================================================================
+// PRICE GROUPS
+// ============================================================================
+
+const CreatePriceGroupSchema = z.object({
+    name: z.string().min(1).max(255),
+    pricingMode: z.enum(['STANDARD', 'AT_COST']),
+    description: z.string().max(1000).optional(),
+});
+
+const UpdatePriceGroupSchema = CreatePriceGroupSchema.partial().extend({
+    isActive: z.boolean().optional(),
+});
+
+/**
+ * GET /api/pricing/price-groups
+ */
+export const listPriceGroups = asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const isActive = req.query.isActive === 'true' ? true
+        : req.query.isActive === 'false' ? false
+            : undefined;
+    const data = await pricingEngine.listPriceGroups(pool, isActive);
+    res.json({ success: true, data });
+});
+
+/**
+ * POST /api/pricing/price-groups
+ */
+export const createPriceGroup = asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const data = CreatePriceGroupSchema.parse(req.body);
+    const result = await pricingEngine.createPriceGroup(pool, data);
+    res.status(201).json({ success: true, data: result, message: 'Price group created' });
+});
+
+/**
+ * PUT /api/pricing/price-groups/:id
+ */
+export const updatePriceGroup = asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const data = UpdatePriceGroupSchema.parse(req.body);
+    const result = await pricingEngine.updatePriceGroup(pool, id, data);
+    res.json({ success: true, data: result, message: 'Price group updated' });
+});
+
+/**
+ * DELETE /api/pricing/price-groups/:id
+ */
+export const deletePriceGroup = asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    await pricingEngine.deletePriceGroup(pool, id);
+    res.json({ success: true, message: 'Price group deactivated' });
+});
