@@ -408,28 +408,23 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
     }
 
     // Record inventory cost (excludes service items)
-    if (invCostNum > 0) {
-      ledgerLines.push(
-        {
-          accountCode: AccountCodes.COGS,
-          description: `Cost of goods sold for ${sale.saleNumber}`,
-          debitAmount: invCostNum,
-          creditAmount: 0
-        },
-        {
-          accountCode: AccountCodes.INVENTORY,
-          description: `Inventory reduction for ${sale.saleNumber}`,
-          debitAmount: 0,
-          creditAmount: invCostNum
-        }
-      );
-
-      logger.info('COGS entry created (service items excluded)', {
-        saleNumber: sale.saleNumber,
-        inventoryCost: invCostNum,
-        originalCostAmount: sale.costAmount
-      });
-    }
+    //
+    // SAP-GOVERNANCE SPLIT (migration 013):
+    //   Previously, the COGS/Inventory lines were appended to the SAME
+    //   journal as the revenue lines (single journal under source
+    //   'SALES_INVOICE'). That violated the SAP rule that account 1300
+    //   (Inventory) must only be posted under source INVENTORY_MOVE.
+    //
+    //   The sale journal is now split in two:
+    //     1. Revenue journal  — source=SALES_INVOICE, key=SALE-<id>
+    //        (Cash/AR  +  Revenue  +  Tax)               ← this block below
+    //     2. Goods-issue journal — source=INVENTORY_MOVE, key=SALE-COGS-<id>
+    //        (DR COGS  /  CR Inventory)                   ← posted after revenue journal
+    //
+    //   Both journals share the same SALE.referenceId so reports that
+    //   aggregate by reference remain correct. Idempotency keys differ
+    //   so the two entries never collide.
+    const shouldPostCogs = invCostNum > 0;
 
     // Use AccountingCore for audit-safe, idempotent journal entry creation
     await AccountingCore.createJournalEntry({
@@ -443,6 +438,40 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
       idempotencyKey: `SALE-${sale.saleId}`,  // Deterministic key prevents duplicates
       source: 'SALES_INVOICE' as const,
     }, pool);
+
+    // Post the separate INVENTORY_MOVE journal for the goods-issue leg.
+    if (shouldPostCogs) {
+      await AccountingCore.createJournalEntry({
+        entryDate: sale.saleDate,
+        description: `Sale goods issue (COGS): ${sale.saleNumber}`,
+        referenceType: 'SALE',
+        referenceId: sale.saleId,
+        referenceNumber: sale.saleNumber,
+        lines: [
+          {
+            accountCode: AccountCodes.COGS,
+            description: `Cost of goods sold for ${sale.saleNumber}`,
+            debitAmount: invCostNum,
+            creditAmount: 0,
+          },
+          {
+            accountCode: AccountCodes.INVENTORY,
+            description: `Inventory reduction for ${sale.saleNumber}`,
+            debitAmount: 0,
+            creditAmount: invCostNum,
+          },
+        ],
+        userId: SYSTEM_USER_ID,
+        idempotencyKey: `SALE-COGS-${sale.saleId}`,
+        source: 'INVENTORY_MOVE' as const,
+      }, pool);
+
+      logger.info('COGS entry created under INVENTORY_MOVE (service items excluded)', {
+        saleNumber: sale.saleNumber,
+        inventoryCost: invCostNum,
+        originalCostAmount: sale.costAmount,
+      });
+    }
 
     logger.info('Recorded sale to GL', {
       saleId: sale.saleId,
@@ -752,7 +781,9 @@ export async function recordGoodsReceiptToGL(
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `GOODS_RECEIPT-${gr.grId}`,
-      source: 'PURCHASE_BILL' as const,
+      // SAP governance (migration 013): inventory leg controls the source.
+      // Account 2100 (AP) accepts INVENTORY_MOVE for composite GR journals.
+      source: 'INVENTORY_MOVE' as const,
     }, pool, txClient);
 
     logger.info('Recorded goods receipt to GL', {
@@ -821,7 +852,8 @@ export async function recordReturnGrnToGL(
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `RETURN_GRN-${data.returnGrnId}`,
-      source: 'PURCHASE_BILL' as const,
+      // SAP governance (migration 013): inventory leg controls the source.
+      source: 'INVENTORY_MOVE' as const,
     }, pool, txClient);
 
     logger.info('Recorded return GRN to GL', {
@@ -1397,8 +1429,19 @@ export async function recordSaleRefundToGL(
         creditAccountCode = AccountCodes.CASH; // 1010
     }
 
-    // Build journal entries for the refund
-    const entries: Array<{
+    // Build journal entries for the refund.
+    //
+    // SAP-GOVERNANCE SPLIT (migration 013):
+    //   Inventory restoration lines (DR 1300 / CR 5000) must live in a
+    //   separate INVENTORY_MOVE journal from the revenue reversal journal.
+    //   We build two parallel line arrays and post two journals below.
+    const revenueEntries: Array<{
+      accountCode: string;
+      debitAmount: number;
+      creditAmount: number;
+      description: string;
+    }> = [];
+    const inventoryEntries: Array<{
       accountCode: string;
       debitAmount: number;
       creditAmount: number;
@@ -1407,7 +1450,7 @@ export async function recordSaleRefundToGL(
 
     // 1. DR Revenue — reverse the revenue
     if (data.totalAmount > 0) {
-      entries.push({
+      revenueEntries.push({
         accountCode: AccountCodes.SALES_REVENUE, // 4000
         debitAmount: data.totalAmount,
         creditAmount: 0,
@@ -1415,7 +1458,7 @@ export async function recordSaleRefundToGL(
       });
 
       // 2. CR Cash/AR — pay back customer
-      entries.push({
+      revenueEntries.push({
         accountCode: creditAccountCode,
         debitAmount: 0,
         creditAmount: data.totalAmount,
@@ -1425,7 +1468,7 @@ export async function recordSaleRefundToGL(
 
     // 3. DR Inventory — restore inventory asset
     if (data.totalCost > 0) {
-      entries.push({
+      inventoryEntries.push({
         accountCode: AccountCodes.INVENTORY, // 1300
         debitAmount: data.totalCost,
         creditAmount: 0,
@@ -1433,7 +1476,7 @@ export async function recordSaleRefundToGL(
       });
 
       // 4. CR COGS — reverse cost of goods sold
-      entries.push({
+      inventoryEntries.push({
         accountCode: AccountCodes.COGS, // 5000
         debitAmount: 0,
         creditAmount: data.totalCost,
@@ -1441,7 +1484,7 @@ export async function recordSaleRefundToGL(
       });
     }
 
-    if (entries.length === 0) {
+    if (revenueEntries.length === 0 && inventoryEntries.length === 0) {
       logger.warn('No GL entries to create for refund (zero amounts)', {
         refundId: data.refundId,
         refundNumber: data.refundNumber,
@@ -1449,23 +1492,52 @@ export async function recordSaleRefundToGL(
       return undefined;
     }
 
-    // Post via AccountingCore for proper double-entry validation
-    const journalResult = await AccountingCore.createJournalEntry({
-      entryDate: data.refundDate,
-      description: `REFUND: ${data.refundNumber} for Sale ${data.saleNumber} — ${data.reason}`,
-      referenceType: 'SALE_REFUND',
-      referenceId: data.refundId,
-      referenceNumber: data.refundNumber,
-      lines: entries.map((e) => ({
-        accountCode: e.accountCode,
-        debitAmount: e.debitAmount,
-        creditAmount: e.creditAmount,
-        description: e.description,
-      })),
-      userId: SYSTEM_USER_ID,
-      idempotencyKey: `SALE_REFUND-${data.refundId}`,
-      source: 'SALES_INVOICE' as const,
-    }, pool, txClient);
+    // Post revenue-reversal journal (source: SALES_INVOICE) if applicable.
+    let primaryTransactionId: string | undefined;
+    if (revenueEntries.length > 0) {
+      const journalResult = await AccountingCore.createJournalEntry({
+        entryDate: data.refundDate,
+        description: `REFUND: ${data.refundNumber} for Sale ${data.saleNumber} — ${data.reason}`,
+        referenceType: 'SALE_REFUND',
+        referenceId: data.refundId,
+        referenceNumber: data.refundNumber,
+        lines: revenueEntries.map((e) => ({
+          accountCode: e.accountCode,
+          debitAmount: e.debitAmount,
+          creditAmount: e.creditAmount,
+          description: e.description,
+        })),
+        userId: SYSTEM_USER_ID,
+        idempotencyKey: `SALE_REFUND-${data.refundId}`,
+        source: 'SALES_INVOICE' as const,
+      }, pool, txClient);
+      primaryTransactionId = journalResult.transactionId;
+    }
+
+    // Post inventory-restoration journal (source: INVENTORY_MOVE) if applicable.
+    if (inventoryEntries.length > 0) {
+      const inventoryResult = await AccountingCore.createJournalEntry({
+        entryDate: data.refundDate,
+        description: `REFUND goods return: ${data.refundNumber} for Sale ${data.saleNumber}`,
+        referenceType: 'SALE_REFUND',
+        referenceId: data.refundId,
+        referenceNumber: data.refundNumber,
+        lines: inventoryEntries.map((e) => ({
+          accountCode: e.accountCode,
+          debitAmount: e.debitAmount,
+          creditAmount: e.creditAmount,
+          description: e.description,
+        })),
+        userId: SYSTEM_USER_ID,
+        idempotencyKey: `SALE_REFUND-INV-${data.refundId}`,
+        source: 'INVENTORY_MOVE' as const,
+      }, pool, txClient);
+      if (!primaryTransactionId) {
+        primaryTransactionId = inventoryResult.transactionId;
+      }
+    }
+
+    const journalResult = { transactionId: primaryTransactionId ?? '' };
 
     logger.info('Recorded sale refund to GL', {
       refundId: data.refundId,

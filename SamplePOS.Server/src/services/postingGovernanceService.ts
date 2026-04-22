@@ -326,6 +326,46 @@ export class PostingGovernanceService {
                 }
             }
         }
+
+        // ------------------------------------------------------------------
+        // Rule H: Inventory (tag = 'INVENTORY') — SAP-STRICT single source.
+        //
+        //   Any account tagged 'INVENTORY' (canonically 1300) may be posted
+        //   to ONLY via the inventory movement engine (INVENTORY_MOVE),
+        //   an auditor-controlled SYSTEM_CORRECTION, or the initial
+        //   OPENING_BALANCE_WIZARD data load.
+        //
+        //   This defends the Inventory ↔ GL integrity invariant:
+        //     SUM(cost_layers.remaining_quantity * unit_cost) == GL 1300
+        //
+        //   If a journal from any other source (SALES_INVOICE, PURCHASE_BILL,
+        //   MANUAL_JOURNAL, etc.) attempts to touch 1300, throw immediately
+        //   — this is a defense-in-depth check that runs even if an
+        //   operator loosens the AllowedSources array in the DB.
+        // ------------------------------------------------------------------
+        const INVENTORY_ALLOWED_SOURCES: PostingSource[] = [
+            'INVENTORY_MOVE',
+            'SYSTEM_CORRECTION',
+            'OPENING_BALANCE_WIZARD',
+        ];
+        for (const line of lines) {
+            if (line.debitAmount > 0 || line.creditAmount > 0) {
+                const account = findAccount(accounts, line.accountCode);
+                if (account?.systemAccountTag === 'INVENTORY') {
+                    if (!INVENTORY_ALLOWED_SOURCES.includes(source)) {
+                        throw new PostingGovernanceError(
+                            `Account ${account.accountCode} (${account.accountName}) is SAP-controlled Inventory. ` +
+                            `Only the inventory movement engine (INVENTORY_MOVE), SYSTEM_CORRECTION, ` +
+                            `or OPENING_BALANCE_WIZARD may post to it. Received source: '${source}'. ` +
+                            `If this is a sale/GR/return flow, route the inventory leg through the ` +
+                            `INVENTORY_MOVE engine instead of bundling it into a business-document journal.`,
+                            'GOV_RULE_H_INVENTORY_STRICT',
+                            { accountCode: account.accountCode, source }
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // ===========================================================================

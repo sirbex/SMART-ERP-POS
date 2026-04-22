@@ -85,6 +85,7 @@ import { sessionService } from './services/sessionService.js';
 import { authenticate } from './middleware/auth.js';
 import { correlationId } from './middleware/correlationId.js';
 import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
+import { initInventoryGLIntegrityJobs } from './services/inventoryGLIntegrityJobs.js';
 import healthRoutes, { incrementMetric, closeHealthRedis } from './routes/health.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
@@ -542,6 +543,15 @@ async function startServer() {
         initDemandForecastJobs(pool);
       } catch (err) {
         logger.warn('Demand forecast jobs not started (Redis may be offline)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // Initialize SAP-style Inventory ↔ GL nightly integrity check (requires Redis)
+      try {
+        initInventoryGLIntegrityJobs(pool);
+      } catch (err) {
+        logger.warn('Inventory/GL integrity jobs not started (Redis may be offline)', {
           error: err instanceof Error ? err.message : String(err),
         });
       }

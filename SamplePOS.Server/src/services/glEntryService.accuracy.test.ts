@@ -125,31 +125,41 @@ describe('glEntryService — GL Posting Accuracy', () => {
                 ],
             });
 
-            expect(capturedEntries).toHaveLength(1);
-            const lines = capturedEntries[0].lines;
+            // Split-journal governance (migration 013): revenue journal + goods-issue journal
+            expect(capturedEntries).toHaveLength(2);
+            const revenueLines = capturedEntries[0].lines;
+            const cogsLines = capturedEntries[1].lines;
+
+            // Journal 1 — source: SALES_INVOICE
+            expect(capturedEntries[0].source).toBe('SALES_INVOICE');
 
             // DR Cash 10000
-            const cashLine = findLine(lines, AccountCodes.CASH);
+            const cashLine = findLine(revenueLines, AccountCodes.CASH);
             expect(cashLine).toBeDefined();
             expect(cashLine!.debitAmount).toBe(10000);
             expect(cashLine!.creditAmount).toBe(0);
 
             // CR Sales Revenue 10000
-            const revLine = findLine(lines, AccountCodes.SALES_REVENUE);
+            const revLine = findLine(revenueLines, AccountCodes.SALES_REVENUE);
             expect(revLine).toBeDefined();
             expect(revLine!.creditAmount).toBe(10000);
 
+            // Journal 2 — source: INVENTORY_MOVE
+            expect(capturedEntries[1].source).toBe('INVENTORY_MOVE');
+            expect(capturedEntries[1].idempotencyKey).toBe('SALE-COGS-sale-1');
+
             // DR COGS 6000
-            const cogsLine = findLine(lines, AccountCodes.COGS);
+            const cogsLine = findLine(cogsLines, AccountCodes.COGS);
             expect(cogsLine).toBeDefined();
             expect(cogsLine!.debitAmount).toBe(6000);
 
             // CR Inventory 6000
-            const invLine = findLine(lines, AccountCodes.INVENTORY);
+            const invLine = findLine(cogsLines, AccountCodes.INVENTORY);
             expect(invLine).toBeDefined();
             expect(invLine!.creditAmount).toBe(6000);
 
-            assertBalanced(lines);
+            assertBalanced(revenueLines);
+            assertBalanced(cogsLines);
         });
 
         it('should use correct idempotency key', async () => {
@@ -279,24 +289,28 @@ describe('glEntryService — GL Posting Accuracy', () => {
                 ],
             });
 
-            const lines = capturedEntries[0].lines;
+            // Split-journal: revenue [0] + goods-issue [1]
+            expect(capturedEntries).toHaveLength(2);
+            const revLines = capturedEntries[0].lines;
+            const cogsLines = capturedEntries[1].lines;
 
             // DR Cash 15000
-            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(15000);
+            expect(findLine(revLines, AccountCodes.CASH)!.debitAmount).toBe(15000);
 
             // CR Sales Revenue (4000) = 10000 (inventory)
-            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
+            expect(findLine(revLines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
 
             // CR Service Revenue (4100) = 5000 (service)
-            expect(findLine(lines, AccountCodes.SERVICE_REVENUE)!.creditAmount).toBe(5000);
+            expect(findLine(revLines, AccountCodes.SERVICE_REVENUE)!.creditAmount).toBe(5000);
 
             // DR COGS 10000 (inventory cost: 2 × 5000)
-            expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(10000);
+            expect(findLine(cogsLines, AccountCodes.COGS)!.debitAmount).toBe(10000);
 
             // CR Inventory 10000
-            expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(10000);
+            expect(findLine(cogsLines, AccountCodes.INVENTORY)!.creditAmount).toBe(10000);
 
-            assertBalanced(lines);
+            assertBalanced(revLines);
+            assertBalanced(cogsLines);
         });
 
         it('should NOT create COGS for service-only sale', async () => {
@@ -346,24 +360,28 @@ describe('glEntryService — GL Posting Accuracy', () => {
                 ],
             });
 
-            const lines = capturedEntries[0].lines;
+            // Split-journal: revenue+tax [0] + goods-issue [1]
+            expect(capturedEntries).toHaveLength(2);
+            const revLines = capturedEntries[0].lines;
+            const cogsLines = capturedEntries[1].lines;
 
             // DR Cash 11800 (tax-inclusive total)
-            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(11800);
+            expect(findLine(revLines, AccountCodes.CASH)!.debitAmount).toBe(11800);
 
             // CR Revenue 10000 (pre-tax)
-            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
+            expect(findLine(revLines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(10000);
 
             // CR Tax Payable 1800
-            const taxLine = findLine(lines, AccountCodes.TAX_PAYABLE);
+            const taxLine = findLine(revLines, AccountCodes.TAX_PAYABLE);
             expect(taxLine).toBeDefined();
             expect(taxLine!.creditAmount).toBe(1800);
 
-            // DR COGS 6000, CR Inventory 6000
-            expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(6000);
-            expect(findLine(lines, AccountCodes.INVENTORY)!.creditAmount).toBe(6000);
+            // DR COGS 6000, CR Inventory 6000 (separate INVENTORY_MOVE journal)
+            expect(findLine(cogsLines, AccountCodes.COGS)!.debitAmount).toBe(6000);
+            expect(findLine(cogsLines, AccountCodes.INVENTORY)!.creditAmount).toBe(6000);
 
-            assertBalanced(lines);
+            assertBalanced(revLines);
+            assertBalanced(cogsLines);
         });
     });
 

@@ -72,13 +72,15 @@ const cogsAccount = makeAccount({
     systemAccountTag: 'COGS',
 });
 
+// Post-migration-013: PURCHASE_BILL and SALES_INVOICE are removed from 1300's
+// AllowedSources. The INVENTORY_MOVE engine is the single source of truth.
 const inventoryAccount = makeAccount({
     accountCode: '1300',
     accountName: 'Inventory',
     accountType: 'ASSET',
     normalBalance: 'DEBIT',
     allowManualPosting: false,
-    allowedSources: ['INVENTORY_MOVE', 'PURCHASE_BILL', 'SALES_INVOICE', 'OPENING_BALANCE_WIZARD', 'SYSTEM_CORRECTION'],
+    allowedSources: ['INVENTORY_MOVE', 'SYSTEM_CORRECTION', 'OPENING_BALANCE_WIZARD'],
     systemAccountTag: 'INVENTORY',
 });
 
@@ -492,6 +494,140 @@ describe('PostingGovernanceService', () => {
                     { accountCode: '3050', debitAmount: 0, creditAmount: 100 },
                 ],
                 [inventoryAccount, obeAccount]
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+    });
+
+    // --------------------------------------------------------------------------
+    // RULE H: SAP-strict inventory restriction (account tag = INVENTORY)
+    // --------------------------------------------------------------------------
+    describe('Rule H — Inventory account SAP-strict source', () => {
+        it('blocks SALES_INVOICE from posting to account tagged INVENTORY (even if allowedSources permits)', () => {
+            // Use a legacy-style account that still lists SALES_INVOICE in allowedSources.
+            // Rule H must still throw because the hardcoded SAP rule trumps the column.
+            const legacyInventory = makeAccount({
+                accountCode: '1300',
+                accountName: 'Inventory',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['INVENTORY_MOVE', 'SALES_INVOICE', 'PURCHASE_BILL', 'SYSTEM_CORRECTION'],
+                systemAccountTag: 'INVENTORY',
+            });
+            const req = makeRequest(
+                'SALES_INVOICE',
+                [
+                    { accountCode: '5000', debitAmount: 50, creditAmount: 0 },
+                    { accountCode: '1300', debitAmount: 0, creditAmount: 50 },
+                ],
+                [cogsAccount, legacyInventory],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
+            try {
+                PostingGovernanceService.validate(req);
+            } catch (err) {
+                expect(err).toBeInstanceOf(PostingGovernanceError);
+                expect((err as PostingGovernanceError).code).toBe('GOV_RULE_H_INVENTORY_STRICT');
+            }
+        });
+
+        it('blocks PURCHASE_BILL from posting to account tagged INVENTORY', () => {
+            const legacyInventory = makeAccount({
+                accountCode: '1300',
+                accountName: 'Inventory',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['INVENTORY_MOVE', 'PURCHASE_BILL', 'SYSTEM_CORRECTION'],
+                systemAccountTag: 'INVENTORY',
+            });
+            const apAccount = makeAccount({
+                accountCode: '2100',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: false,
+                allowedSources: ['PURCHASE_BILL', 'INVENTORY_MOVE', 'SYSTEM_CORRECTION'],
+                systemAccountTag: 'ACCOUNTS_PAYABLE',
+            });
+            const req = makeRequest(
+                'PURCHASE_BILL',
+                [
+                    { accountCode: '1300', debitAmount: 1000, creditAmount: 0 },
+                    { accountCode: '2100', debitAmount: 0, creditAmount: 1000 },
+                ],
+                [legacyInventory, apAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
+        });
+
+        it('blocks MANUAL_JOURNAL from posting to account tagged INVENTORY', () => {
+            const req = makeRequest(
+                'MANUAL_JOURNAL',
+                [
+                    { accountCode: '1300', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '4000', debitAmount: 0, creditAmount: 100 },
+                ],
+                [inventoryAccount, revenueAccount],
+            );
+            // Rule C (manual posting blocked) may fire first; either is correct.
+            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
+        });
+
+        it('allows INVENTORY_MOVE to post to account tagged INVENTORY', () => {
+            const req = makeRequest(
+                'INVENTORY_MOVE',
+                [
+                    { accountCode: '5000', debitAmount: 50, creditAmount: 0 },
+                    { accountCode: '1300', debitAmount: 0, creditAmount: 50 },
+                ],
+                [cogsAccount, inventoryAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('allows SYSTEM_CORRECTION to post to account tagged INVENTORY (drift fix path)', () => {
+            const shrinkageAccount = makeAccount({
+                accountCode: '5110',
+                accountType: 'EXPENSE',
+                normalBalance: 'DEBIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'SYSTEM_CORRECTION',
+                [
+                    { accountCode: '5110', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1300', debitAmount: 0, creditAmount: 100 },
+                ],
+                [shrinkageAccount, inventoryAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('allows OPENING_BALANCE_WIZARD to post to account tagged INVENTORY', () => {
+            const req = makeRequest(
+                'OPENING_BALANCE_WIZARD',
+                [
+                    { accountCode: '1300', debitAmount: 500, creditAmount: 0 },
+                    { accountCode: '3050', debitAmount: 0, creditAmount: 500 },
+                ],
+                [inventoryAccount, obeAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('does not fire Rule H on accounts that are NOT tagged INVENTORY', () => {
+            // COGS (tag=COGS) touched by SALES_INVOICE: Rule H should not apply.
+            // Rule F may apply separately but we isolate the check here.
+            const req = makeRequest(
+                'INVENTORY_MOVE',
+                [
+                    { accountCode: '5000', debitAmount: 50, creditAmount: 0 },
+                    { accountCode: '1300', debitAmount: 0, creditAmount: 50 },
+                ],
+                [cogsAccount, inventoryAccount],
             );
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });

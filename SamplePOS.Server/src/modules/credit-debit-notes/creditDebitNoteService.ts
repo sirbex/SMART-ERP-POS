@@ -317,6 +317,8 @@ export const creditDebitNoteService = {
                             ],
                             userId: SYSTEM_USER_ID,
                             idempotencyKey: `CREDIT_NOTE_RETURN-${note.id}`,
+                            // SAP governance (migration 013): account 1300 requires INVENTORY_MOVE.
+                            source: 'INVENTORY_MOVE' as const,
                         }, undefined, client);
                     }
 
