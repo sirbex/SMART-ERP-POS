@@ -817,6 +817,9 @@ export const quotationService = {
       const paymentMethod: glEntryService.SaleData['paymentMethod'] =
         data.paymentOption === 'none' ? 'CREDIT' : (data.depositMethod || 'CASH');
       try {
+        // CRITICAL: pass `client` (the active UnitOfWork transaction) so GL journals
+        // are atomic with the sale. Without it, GL opens its own inner transaction
+        // and a phantom journal can survive if the outer TX rolls back.
         await glEntryService.recordSaleToGL(
           {
             saleId: saleRecord.id,
@@ -837,7 +840,8 @@ export const quotationService = {
               quantity: item.quantity,
             })),
           },
-          pool
+          pool,
+          client  // atomic: GL rolls back with sale if anything fails
         );
       } catch (glError: unknown) {
         console.error('GL posting failed for quote→sale conversion — transaction will rollback', {

@@ -426,11 +426,33 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
     //   so the two entries never collide.
     const shouldPostCogs = invCostNum > 0;
 
+    // CRITICAL: txClient MUST be provided so GL commits atomically with the sale.
+    // Without it, GL opens its own inner transaction — if the outer sale TX rolls
+    // back (e.g. after a retry), the GL entry persists as a phantom journal.
+    // Any call site that omits txClient is a latent data-integrity bug.
+    if (!txClient) {
+      logger.error(
+        'recordSaleToGL called WITHOUT txClient — GL will not be atomic with sale! ' +
+        'This is a latent phantom-journal risk. Pass the active PoolClient.',
+        { saleNumber: sale.saleNumber, saleId: sale.saleId }
+      );
+      // Do NOT throw here: the repost tool (glValidationService) intentionally
+      // calls outside a transaction for already-committed sales.
+    }
+
     // Use AccountingCore for audit-safe, idempotent journal entry creation.
     // txClient is forwarded when available so both GL journals commit atomically
     // inside the caller's transaction (SAP LUW pattern). Without txClient the
     // journals open their own UnitOfWork transaction, which can lead to phantom
     // GL entries if the outer sale transaction rolls back.
+    //
+    // IDEMPOTENCY KEY: Use saleNumber (business ID), NOT saleId (UUID).
+    // Each retry inside a rolled-back TX generates a NEW UUID for the sale row,
+    // so UUID-based keys are different on every retry → phantom GL slips through.
+    // saleNumber is generated with pg_advisory_xact_lock and is stable: when a TX
+    // rolls back, the next retry reclaims the same slot number. This means a phantom
+    // GL (if one somehow commits) will collide on the idempotency key on retry,
+    // causing AccountingCore to return the existing entry instead of creating a new one.
     await AccountingCore.createJournalEntry({
       entryDate: sale.saleDate,
       description: `Sale: ${sale.saleNumber}`,
@@ -439,7 +461,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
       referenceNumber: sale.saleNumber,
       lines: ledgerLines,
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `SALE-${sale.saleId}`,  // Deterministic key prevents duplicates
+      idempotencyKey: `SALE-${sale.saleNumber}`,  // saleNumber-based: stable across retries
       source: 'SALES_INVOICE' as const,
     }, pool, txClient);
 
@@ -469,7 +491,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
           },
         ],
         userId: SYSTEM_USER_ID,
-        idempotencyKey: `SALE-COGS-${sale.saleId}`,
+        idempotencyKey: `SALE-COGS-${sale.saleNumber}`,  // saleNumber-based: stable across retries
         source: 'INVENTORY_MOVE' as const,
       }, pool, txClient);
 

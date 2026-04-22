@@ -424,7 +424,7 @@ export class AccountingCore {
                 accounts: governanceAccounts,
             });
 
-            // 3b. Check idempotency - return existing if already processed
+            // 3b. Check idempotency by key - return existing if already processed
             const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
             if (idempotencyCheck.exists) {
                 // Fetch and return existing transaction (idempotent behavior)
@@ -441,6 +441,36 @@ export class AccountingCore {
                     request.idempotencyKey,
                     idempotencyCheck.transactionId!
                 );
+            }
+
+            // 3c. Second-layer duplicate guard: check by (ReferenceType, ReferenceNumber).
+            // This catches the case where the same business document was already posted
+            // under a DIFFERENT idempotency key (e.g. UUID-based keys from old code,
+            // or a different code path posting the same sale).  If found, return the
+            // existing transaction rather than creating a phantom duplicate.
+            if (request.referenceType && request.referenceNumber) {
+                const refCheck = await client.query<{ Id: string }>(
+                    `SELECT "Id" FROM ledger_transactions
+                     WHERE "ReferenceType" = $1 AND "ReferenceNumber" = $2
+                     LIMIT 1`,
+                    [request.referenceType, request.referenceNumber]
+                );
+                if (refCheck.rows.length > 0) {
+                    const existingById = await this.getTransaction(refCheck.rows[0].Id, dbPool);
+                    if (existingById) {
+                        logger.warn(
+                            'Duplicate GL posting blocked by reference check (different idempotency key). ' +
+                            'This indicates a code path that bypassed the primary idempotency guard.',
+                            {
+                                referenceType: request.referenceType,
+                                referenceNumber: request.referenceNumber,
+                                idempotencyKey: request.idempotencyKey,
+                                existingTransactionId: refCheck.rows[0].Id,
+                            }
+                        );
+                        return existingById;
+                    }
+                }
             }
 
             // 4. Check period is open
