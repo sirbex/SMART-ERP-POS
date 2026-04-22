@@ -440,11 +440,14 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
     }, pool);
 
     // Post the separate INVENTORY_MOVE journal for the goods-issue leg.
+    // NOTE: referenceType is 'SALE_COGS' (not 'SALE') to allow both journals
+    // to coexist for the same sale without conflicting on any unique reference index.
+    // Reports that need both legs should query by referenceId regardless of type.
     if (shouldPostCogs) {
       await AccountingCore.createJournalEntry({
         entryDate: sale.saleDate,
         description: `Sale goods issue (COGS): ${sale.saleNumber}`,
-        referenceType: 'SALE',
+        referenceType: 'SALE_COGS',
         referenceId: sale.saleId,
         referenceNumber: sale.saleNumber,
         lines: [
