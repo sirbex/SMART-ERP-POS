@@ -63,6 +63,7 @@ const ListMovementsQuerySchema = z.object({
   endDate: z
     .string()
     .optional(),
+  search: z.string().optional(),
 });
 
 /**
@@ -130,6 +131,7 @@ export const getAllMovements = asyncHandler(async (req, res) => {
     movementType: query.movementType,
     startDate: query.startDate,
     endDate: query.endDate,
+    search: query.search,
   });
 
   const pg = { page: query.page, limit: query.limit, offset: (query.page - 1) * query.limit };

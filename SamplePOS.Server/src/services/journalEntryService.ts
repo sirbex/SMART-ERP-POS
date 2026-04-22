@@ -172,7 +172,8 @@ export class JournalEntryService {
           );
         const accountResult = await client.query(
           `
-                    SELECT "Id", "AccountCode", "AccountName", "IsActive", "IsPostingAccount"
+                    SELECT "Id", "AccountCode", "AccountName", "IsActive", "IsPostingAccount",
+                           "AllowManualPosting", "AllowedSources", "SystemAccountTag"
                     FROM accounts
                     WHERE ${isUuid ? '"Id" = $1::UUID' : '"AccountCode" = $1'}
                 `,
@@ -313,6 +314,7 @@ export class JournalEntryService {
           lines: glLines,
           userId: resolveUserId(request.createdBy),
           idempotencyKey: `JE-${entryId}`,
+          source: 'MANUAL_JOURNAL',
         },
         this.pool
       );

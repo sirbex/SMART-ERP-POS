@@ -6,6 +6,7 @@ import { reportsRepository } from './reportsRepository.js';
 import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import { SystemSettings } from '../../../../shared/types/systemSettings.js';
 import Decimal from 'decimal.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 // Configure Decimal for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -167,6 +168,24 @@ export const reportsService = {
         .toNumber()
       : 0;
 
+    // ── Warnings (historical as-of not supported accurately, reconciliation drift) ──
+    const warnings: string[] = [];
+    const today = getBusinessDate();
+    const requestedDate = options.asOfDate
+      ? (typeof options.asOfDate === 'string' ? options.asOfDate.slice(0, 10) : options.asOfDate.toISOString().slice(0, 10))
+      : today;
+    if (requestedDate !== today) {
+      warnings.push(
+        `Historical as-of snapshots are not yet supported — showing CURRENT inventory. Requested date ${requestedDate} was ignored.`
+      );
+    }
+    if (!sqlSummary.isReconciled) {
+      const diff = sqlSummary.variance;
+      warnings.push(
+        `GL inventory (account 1300) balance of ${sqlSummary.glInventoryBalance.toLocaleString()} differs from this report by ${diff.toLocaleString()} (${sqlSummary.variancePercent.toFixed(2)}%). Run the inventory integrity check to investigate.`
+      );
+    }
+
     return {
       reportType: 'INVENTORY_VALUATION' as const,
       reportName: 'Inventory Valuation Report',
@@ -181,6 +200,7 @@ export const reportsService = {
       }),
       systemSettings: systemContext,
       parameters: options,
+      warnings,
       data,
       byCategory,
       summary: {
@@ -200,6 +220,24 @@ export const reportsService = {
         ),
         overallMargin,
         valuationMethod: options.valuationMethod || 'FIFO',
+        // ── GL reconciliation (account 1300 Inventory) ──
+        glInventoryBalance: sqlSummary.glInventoryBalance,
+        glInventoryBalanceFormatted: formatCurrency(sqlSummary.glInventoryBalance, systemContext.currencySymbol),
+        costLayersTotal: sqlSummary.costLayersTotal,
+        subledgerAvcoTotal: sqlSummary.subledgerAvcoTotal,
+        variance: sqlSummary.variance,
+        varianceFormatted: formatCurrency(sqlSummary.variance, systemContext.currencySymbol),
+        variancePercent: sqlSummary.variancePercent,
+        isReconciled: sqlSummary.isReconciled,
+        // ── SAP/Odoo enrichment counters ──
+        movementCounts: sqlSummary.movementCounts,
+        abcCounts: sqlSummary.abcCounts,
+        driftCount: sqlSummary.driftCount,
+        deadStockValue: sqlSummary.deadStockValue,
+        deadStockValueFormatted:
+          sqlSummary.deadStockValue !== undefined
+            ? formatCurrency(sqlSummary.deadStockValue, systemContext.currencySymbol)
+            : undefined,
       },
       recordCount: sqlSummary.totalItems,
       executionTimeMs: executionTime,

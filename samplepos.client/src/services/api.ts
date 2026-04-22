@@ -19,6 +19,7 @@ import type {
   CreatePurchaseOrderInput,
   CreateGoodsReceiptInput,
   InventoryAdjustmentInput,
+  BatchAdjustmentInput,
 } from '../types/inputs';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -267,6 +268,11 @@ export const inventoryApi = {
 
   adjustInventory: async (data: InventoryAdjustmentInput) => {
     const response = await api.post<ApiResponse<StockMovement>>('/inventory/adjust', data);
+    return response.data;
+  },
+
+  adjustBatch: async (data: BatchAdjustmentInput) => {
+    const response = await api.post<ApiResponse<{ documentId: string; movementId: string; movementNumber: string; previousQuantity: number; newQuantity: number }>>('/inventory/adjust-batch', data);
     return response.data;
   },
 };

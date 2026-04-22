@@ -28,6 +28,7 @@ import { formatCurrency } from '../../utils/currency';
 import toast from 'react-hot-toast';
 import { accountingApi } from '../../services/api';
 import { handleApiError } from '../../utils/errorHandler';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 interface Account {
   id: string;
@@ -250,6 +251,9 @@ const ChartOfAccountsPage = () => {
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  useSubmitOnEnter(showCreateDialog, !!formData.accountNumber && !!formData.accountName, handleCreateAccount);
+  useSubmitOnEnter(!!editingAccount, !!formData.accountNumber && !!formData.accountName, handleUpdateAccount);
 
   return (
     <>

@@ -5,7 +5,7 @@ import {
   Building, Truck, FileText, Calendar, Scale, ClipboardCheck,
   ChevronDown, ChevronRight, Home, ArrowLeft, Menu, X, Building2, FileMinus,
   Landmark, FileCheck, AlertTriangle, Receipt, Package, ShieldCheck, Banknote, Globe,
-  CalendarCheck, Percent, RefreshCw, Clock
+  CalendarCheck, Percent, RefreshCw, Clock, ArrowRightLeft
 } from 'lucide-react';
 import ServerClock from './ServerClock';
 
@@ -160,6 +160,12 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           path: '/accounting/grir-clearing',
           icon: <FileCheck className="h-4 w-4" />,
           description: 'Goods receipt & invoice matching'
+        },
+        {
+          name: 'Down Payment Clearing',
+          path: '/accounting/down-payment-clearing',
+          icon: <ArrowRightLeft className="h-4 w-4" />,
+          description: 'Clear customer deposits against invoices'
         },
         {
           name: 'Dunning',

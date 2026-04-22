@@ -43,6 +43,7 @@ const CompleteOrderSchema = z.object({
     amount: z.number().positive(),
     reference: z.string().optional(),
   })).optional(),
+  customerId: z.string().uuid().nullable().optional(),
   cashRegisterSessionId: z.string().uuid().optional(),
 });
 
@@ -188,8 +189,11 @@ router.post(
       uomId: item.uomId || undefined,
     }));
 
+    // Allow customer override at payment time (cashier can assign/change customer)
+    const effectiveCustomerId = paymentData.customerId ?? order.customerId;
+
     const saleInput: CreateSaleInput = {
-      customerId: order.customerId,
+      customerId: effectiveCustomerId,
       items: saleItems,
       subtotal: Money.toNumber(Money.parseDb(order.subtotal)),
       discountAmount: Money.toNumber(Money.parseDb(order.discountAmount)),

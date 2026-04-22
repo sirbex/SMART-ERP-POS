@@ -16,6 +16,7 @@ import {
 } from '../../hooks/usePricing';
 import { formatCurrency } from '../../utils/currency';
 import { extractApiError } from '../../utils/extractApiError';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import apiClient from '../../utils/api';
 import {
   Table,
@@ -347,6 +348,8 @@ export default function PriceRulesPage() {
   );
 
   const isMutating = createMutation.isPending || updateMutation.isPending;
+
+  useSubmitOnEnter(showCreateModal || !!editingRule, !isMutating, handleSubmit);
 
   return (
     <Layout>

@@ -200,7 +200,7 @@ export const deliveryNoteRepository = {
   async getById(pool: Pool | PoolClient, id: string): Promise<DeliveryNoteWithLines | null> {
     const dnResult = await pool.query(
       `SELECT dn.*, q.quote_number,
-              inv."Id" AS invoice_id, inv."InvoiceNumber" AS invoice_number
+              inv.id AS invoice_id, inv.invoice_number AS invoice_number
        FROM delivery_notes dn
        JOIN quotations q ON q.id = dn.quotation_id
        LEFT JOIN invoices inv ON inv.delivery_note_id = dn.id
@@ -291,7 +291,7 @@ export const deliveryNoteRepository = {
 
     const result = await pool.query(
       `SELECT dn.*, q.quote_number,
-              inv."Id" AS invoice_id, inv."InvoiceNumber" AS invoice_number
+              inv.id AS invoice_id, inv.invoice_number AS invoice_number
        FROM delivery_notes dn
        JOIN quotations q ON q.id = dn.quotation_id
        LEFT JOIN invoices inv ON inv.delivery_note_id = dn.id

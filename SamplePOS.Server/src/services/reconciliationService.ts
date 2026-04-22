@@ -212,13 +212,17 @@ export class ReconciliationService {
             const batchValue = items.find((i) => i.source === 'BATCH_VALUATION')?.amount || 0;
             const productValue = items.find((i) => i.source === 'PRODUCT_VALUATION')?.amount || 0;
 
-            // Use batch valuation as primary subledger (more accurate for FEFO)
-            const subledgerBalance = batchValue > 0 ? batchValue : productValue;
+            // SAP/Odoo pattern: product valuation (qty × standard cost) is the
+            // canonical inventory subledger because it uses the same cost source
+            // as the service layer's GL COGS postings.
+            // Batch valuation is informational (FEFO layer view) and may drift
+            // from product costs when prices are updated without retroactive
+            // batch cost corrections.
+            const subledgerBalance = productValue > 0 ? productValue : batchValue;
             const difference = new Decimal(glBalance).minus(subledgerBalance).toNumber();
-            // Materiality threshold: max(5000, 0.01% of GL balance).
-            // UGX is an integer currency — per-line rounding on multi-line GRs
-            // inevitably produces small GL-vs-subledger noise that is not actionable.
-            const materialityThreshold = Math.max(5000, Math.abs(glBalance) * 0.0001);
+            // Materiality threshold: 1 UGX — sub-unit residuals from NUMERIC(18,6)
+            // GL entries that cannot be expressed in UGX integer terms are noise.
+            const materialityThreshold = 1;
             const hasDiscrepancy = Math.abs(difference) > materialityThreshold;
 
             // Run integrity diagnostics (SAP Material Ledger Document Check)
@@ -489,12 +493,11 @@ export class ReconciliationService {
                         ),
                         customer_invoices AS (
                             SELECT 
-                                "CustomerId" as customer_id,
-                                SUM("OutstandingBalance") as invoice_balance
+                                customer_id,
+                                SUM(amount_due) as invoice_balance
                             FROM invoices
-                            -- Handle both PascalCase (PartiallyPaid) and SCREAMING_SNAKE_CASE (PARTIALLY_PAID) status values
-                            WHERE UPPER(REPLACE("Status", '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING')
-                            GROUP BY "CustomerId"
+                            WHERE status IN ('UNPAID', 'PARTIALLY_PAID')
+                            GROUP BY customer_id
                         )
                         SELECT 
                             'CUSTOMER' as entity_type,

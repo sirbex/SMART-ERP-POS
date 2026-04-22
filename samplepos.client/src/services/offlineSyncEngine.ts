@@ -2,8 +2,8 @@
  * Offline Sync Engine
  *
  * App-level sync logic that runs independently of page components.
- * Reads the offline sales queue from localStorage, attempts to POST
- * each pending sale to the server, and updates the queue.
+ * Reads the immutable event journal from localStorage, attempts to POST
+ * each PENDING/FAILED event to /api/pos/sync-events, and updates sync state.
  *
  * Uses a module-level lock (`syncing`) to prevent concurrent syncs
  * across all callers in the same tab.
@@ -13,11 +13,15 @@
  */
 
 import apiClient from '../utils/api';
-import type { OfflineSale, OfflineOrder } from '../hooks/useOfflineMode';
 import type { AxiosError } from 'axios';
+import {
+    getUnsyncedEvents,
+    markSynced,
+    markReview,
+    markFailed,
+    getAllSyncState,
+} from '../lib/offlineEventJournal';
 
-const OFFLINE_SALES_KEY = 'pos_offline_sales';
-const OFFLINE_ORDERS_KEY = 'pos_offline_orders';
 const OFFLINE_CUSTOMERS_KEY = 'pos_offline_customers';
 
 /** Module-level lock — only one sync at a time per tab */
@@ -38,29 +42,6 @@ export function releaseSyncLock(): void {
     syncing = false;
 }
 
-// ── Queue helpers ─────────────────────────────────────────────
-
-function loadQueue(): OfflineSale[] {
-    try {
-        const raw = localStorage.getItem(OFFLINE_SALES_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        return parsed.filter(
-            (s: unknown): s is OfflineSale =>
-                typeof s === 'object' && s !== null &&
-                'idempotencyKey' in s && 'offlineId' in s &&
-                'data' in s && 'status' in s
-        );
-    } catch {
-        return [];
-    }
-}
-
-function persistQueue(queue: OfflineSale[]): void {
-    localStorage.setItem(OFFLINE_SALES_KEY, JSON.stringify(queue));
-}
-
 // ── Public API ────────────────────────────────────────────────
 
 export interface SyncResult {
@@ -70,238 +51,36 @@ export interface SyncResult {
 }
 
 /**
- * Returns true if there are PENDING_SYNC sales in the queue.
+ * Returns true if there are PENDING or FAILED events in the journal.
  */
 export function hasPendingSales(): boolean {
     try {
-        const queue = loadQueue();
-        return queue.some((s) => s.status === 'PENDING_SYNC');
+        return getUnsyncedEvents().length > 0;
     } catch {
         return false;
     }
 }
 
-// ── Order Queue helpers ───────────────────────────────────────
-
-function loadOrderQueue(): OfflineOrder[] {
-    try {
-        const raw = localStorage.getItem(OFFLINE_ORDERS_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        return parsed.filter(
-            (o: unknown): o is OfflineOrder =>
-                typeof o === 'object' && o !== null &&
-                'idempotencyKey' in o && 'offlineId' in o &&
-                'data' in o && 'status' in o
-        );
-    } catch {
-        return [];
-    }
-}
-
-function persistOrderQueue(queue: OfflineOrder[]): void {
-    localStorage.setItem(OFFLINE_ORDERS_KEY, JSON.stringify(queue));
-}
-
 /**
- * Returns true if there are PENDING_SYNC orders in the queue.
+ * Returns true if there are PENDING ORDER_CREATED events in the journal.
  */
 export function hasPendingOrders(): boolean {
     try {
-        return loadOrderQueue().some((o) => o.status === 'PENDING_SYNC');
+        const syncState = getAllSyncState();
+        return getUnsyncedEvents().some(
+            (e) =>
+                e.eventType === 'ORDER_CREATED' &&
+                (syncState[e.key]?.status === 'PENDING' || syncState[e.key]?.status === 'FAILED')
+        );
     } catch {
         return false;
-    }
-}
-
-/**
- * Sync all PENDING_SYNC orders to the server.
- * Uses the standard POST /api/orders endpoint.
- * Idempotency keys prevent duplicate orders on retry.
- */
-export async function syncOfflineOrders(): Promise<SyncResult> {
-    if (!navigator.onLine || !acquireSyncLock()) return { synced: 0, failed: 0, review: 0 };
-
-    let syncedCount = 0;
-    let failedCount = 0;
-
-    try {
-        const queue = loadOrderQueue();
-        const pending = queue.filter((o) => o.status === 'PENDING_SYNC');
-        if (pending.length === 0) return { synced: 0, failed: 0, review: 0 };
-
-        for (const order of pending) {
-            try {
-                // Resolve offline customer IDs
-                if (order.data.customerId && order.data.customerId.startsWith('offline_cust_')) {
-                    try {
-                        const offlineCusts = JSON.parse(localStorage.getItem(OFFLINE_CUSTOMERS_KEY) || '[]') as Array<{ id: string; name: string }>;
-                        const custEntry = offlineCusts.find(c => c.id === order.data.customerId);
-                        if (custEntry?.name) {
-                            const searchResp = await apiClient.get('/customers/search', { params: { q: custEntry.name, limit: 1 } });
-                            const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
-                            if (found?.id) order.data.customerId = found.id;
-                            else order.data.customerId = undefined;
-                        } else {
-                            order.data.customerId = undefined;
-                        }
-                    } catch {
-                        order.data.customerId = undefined;
-                    }
-                }
-
-                const response = await apiClient.post('/orders', {
-                    ...order.data,
-                    idempotencyKey: order.idempotencyKey,
-                });
-
-                if (response.data?.success) {
-                    order.status = 'SYNCED';
-                    syncedCount++;
-                } else {
-                    order.status = 'FAILED';
-                    order.syncError = (response.data?.error as string) || 'Unknown error';
-                    failedCount++;
-                }
-            } catch (err: unknown) {
-                const axErr = err as AxiosError;
-                if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
-                    break; // Stop — still offline
-                }
-                // Treat 409 (duplicate/idempotency hit) as success — order already exists
-                if (axErr.response?.status === 409) {
-                    order.status = 'SYNCED';
-                    syncedCount++;
-                } else {
-                    order.status = 'FAILED';
-                    const serverMsg = (axErr.response?.data as Record<string, unknown>)?.error;
-                    order.syncError = (typeof serverMsg === 'string' ? serverMsg : '') || axErr.message || 'Sync error';
-                    failedCount++;
-                }
-            }
-        }
-
-        // Persist updated statuses, remove SYNCED entries
-        const updatedQueue = queue.filter((o) => o.status !== 'SYNCED');
-        persistOrderQueue(updatedQueue);
-
-        // Notify hooks to re-read
-        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
-
-        return { synced: syncedCount, failed: failedCount, review: 0 };
-    } finally {
-        releaseSyncLock();
-    }
-}
-
-/**
- * Attempt to sync all PENDING_SYNC sales to the server.
- *
- * - Safe to call from multiple places (module lock prevents overlapping runs)
- * - Idempotency keys on the backend prevent duplicate sales even if
- *   two callers race
- * - Dispatches `offline-queue-updated` event when done
- */
-export async function syncOfflineSales(): Promise<SyncResult> {
-    if (!navigator.onLine || !acquireSyncLock()) return { synced: 0, failed: 0, review: 0 };
-
-    let syncedCount = 0;
-    let failedCount = 0;
-    let reviewCount = 0;
-
-    try {
-        // Sync offline customers first so we can resolve temp IDs
-        let customerIdMap = new Map<string, string>();
-        try {
-            customerIdMap = await syncOfflineCustomers();
-        } catch {
-            // Customer sync failure is non-fatal
-        }
-
-        const queue = loadQueue();
-        const pending = queue.filter((s) => s.status === 'PENDING_SYNC');
-        if (pending.length === 0) return { synced: 0, failed: 0, review: 0 };
-
-        for (const sale of pending) {
-            try {
-                // Resolve offline customer IDs to real UUIDs
-                if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
-                    let realId = customerIdMap.get(sale.data.customerId);
-
-                    // If not in map (customer already synced previously), try to look up by name
-                    if (!realId) {
-                        try {
-                            const offlineCusts = JSON.parse(localStorage.getItem(OFFLINE_CUSTOMERS_KEY) || '[]') as Array<{ id: string; name: string }>;
-                            const custEntry = offlineCusts.find(c => c.id === sale.data.customerId);
-                            if (custEntry?.name) {
-                                const searchResp = await apiClient.get('/customers/search', { params: { q: custEntry.name, limit: 1 } });
-                                const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
-                                if (found?.id) realId = found.id;
-                            }
-                        } catch {
-                            // Search failed — will fall through to clearing the ID
-                        }
-                    }
-
-                    if (realId) {
-                        sale.data.customerId = realId;
-                    } else {
-                        // Can't resolve — clear the offline customer ID so the sale can still sync as walk-in
-                        sale.data.customerId = undefined;
-                    }
-                }
-
-                // Use the dedicated offline-sync endpoint (idempotency-protected)
-                const response = await apiClient.post('/pos/sync-offline-sales', {
-                    idempotencyKey: sale.idempotencyKey,
-                    offlineId: sale.offlineId,
-                    saleData: sale.data,
-                    offlineTimestamp: sale.timestamp,
-                });
-
-                if (response.data?.success) {
-                    sale.status = 'SYNCED';
-                    syncedCount++;
-                } else if (response.data?.requiresReview) {
-                    sale.status = 'REQUIRES_REVIEW';
-                    sale.syncError = (response.data.error as string) || 'Stock conflict';
-                    reviewCount++;
-                } else {
-                    sale.status = 'FAILED';
-                    sale.syncError = (response.data?.error as string) || 'Unknown error';
-                    failedCount++;
-                }
-            } catch (err: unknown) {
-                const axErr = err as AxiosError;
-                // Network still down — stop processing remainder
-                if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
-                    break;
-                }
-                sale.status = 'FAILED';
-                const serverMsg = (axErr.response?.data as Record<string, unknown>)?.error;
-                sale.syncError = (typeof serverMsg === 'string' ? serverMsg : '') || axErr.message || 'Sync error';
-                failedCount++;
-            }
-        }
-
-        // Persist updated statuses, remove SYNCED entries
-        const updatedQueue = queue.filter((s) => s.status !== 'SYNCED');
-        persistQueue(updatedQueue);
-
-        // Notify page-level hooks to re-read from localStorage
-        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
-
-        return { synced: syncedCount, failed: failedCount, review: reviewCount };
-    } finally {
-        releaseSyncLock();
     }
 }
 
 /**
  * Sync offline-created customers to the server.
  * Returns a map of temp offline IDs → real server UUIDs so that
- * pending sales can update their customerId before syncing.
+ * pending events can update their customerId before syncing.
  */
 export async function syncOfflineCustomers(): Promise<Map<string, string>> {
     const idMap = new Map<string, string>();
@@ -317,8 +96,6 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
 
         for (const cust of queue) {
             try {
-                // Send undefined (omitted) for empty optional fields – NOT null.
-                // Backend CreateCustomerSchema uses .optional() which rejects null.
                 const payload: Record<string, unknown> = {
                     name: cust.name,
                     creditLimit: cust.creditLimit ?? 0,
@@ -343,12 +120,10 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
                     (typeof errMsg === 'string' && (errMsg.includes('already exists') || errMsg.includes('duplicate')));
 
                 if (isDuplicate) {
-                    // Customer already on server — extract ID from error or search by name
                     const idMatch = typeof errMsg === 'string' && errMsg.match(/id:\s*([0-9a-f-]{36})/);
                     if (idMatch) {
                         idMap.set(cust.id, idMatch[1]);
                     } else {
-                        // Search by name to get the real ID
                         try {
                             const searchResp = await apiClient.get('customers/search', { params: { q: cust.name, limit: 1 } });
                             const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
@@ -356,10 +131,9 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
                                 idMap.set(cust.id, found.id);
                             }
                         } catch {
-                            // Search failed — still remove from queue to stop the loop
+                            // Search failed — still remove from queue
                         }
                     }
-                    // Don't re-queue — customer exists on server
                 } else {
                     remaining.push(cust);
                 }
@@ -374,6 +148,106 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
 }
 
 /**
+ * Attempt to sync all PENDING/FAILED events from the immutable journal.
+ * POSTs each event to /api/pos/sync-events (idempotency-protected).
+ * Dispatches `offline-queue-updated` event when done.
+ */
+export async function syncOfflineSales(): Promise<SyncResult> {
+    if (!navigator.onLine || !acquireSyncLock()) return { synced: 0, failed: 0, review: 0 };
+
+    let syncedCount = 0;
+    let failedCount = 0;
+    let reviewCount = 0;
+
+    try {
+        let customerIdMap = new Map<string, string>();
+        try {
+            customerIdMap = await syncOfflineCustomers();
+        } catch {
+            // Non-fatal
+        }
+
+        const unsyncedEvents = getUnsyncedEvents();
+        if (unsyncedEvents.length === 0) return { synced: 0, failed: 0, review: 0 };
+
+        for (const event of unsyncedEvents) {
+            // Resolve offline customer IDs
+            let resolvedCustomerId =
+                'customerId' in event ? event.customerId : undefined;
+            if (resolvedCustomerId?.startsWith('offline_cust_')) {
+                let realId = customerIdMap.get(resolvedCustomerId);
+                if (!realId) {
+                    try {
+                        const offlineCusts = JSON.parse(
+                            localStorage.getItem(OFFLINE_CUSTOMERS_KEY) || '[]'
+                        ) as Array<{ id: string; name: string }>;
+                        const custEntry = offlineCusts.find((c) => c.id === resolvedCustomerId);
+                        if (custEntry?.name) {
+                            const searchResp = await apiClient.get('/customers/search', {
+                                params: { q: custEntry.name, limit: 1 },
+                            });
+                            const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
+                            if (found?.id) realId = found.id;
+                        }
+                    } catch {
+                        // Fall through
+                    }
+                }
+                resolvedCustomerId = realId ?? undefined;
+            }
+
+            const resolvedEvent =
+                resolvedCustomerId !== ('customerId' in event ? event.customerId : undefined)
+                    ? { ...event, customerId: resolvedCustomerId }
+                    : event;
+
+            try {
+                const response = await apiClient.post('/pos/sync-events', { event: resolvedEvent });
+
+                if (response.data?.success || response.status === 409) {
+                    markSynced(event.key);
+                    syncedCount++;
+                } else if (response.data?.requiresReview) {
+                    markReview(event.key, response.data.error);
+                    reviewCount++;
+                } else {
+                    markFailed(event.key, response.data?.error);
+                    failedCount++;
+                }
+            } catch (err: unknown) {
+                const axErr = err as AxiosError;
+                if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
+                    break; // Stop — still offline
+                }
+                if (axErr.response?.status === 409) {
+                    markSynced(event.key);
+                    syncedCount++;
+                    continue;
+                }
+                const serverMsg = (axErr.response?.data as Record<string, unknown>)?.error;
+                const errMsg = (typeof serverMsg === 'string' ? serverMsg : '') || axErr.message || 'Sync error';
+                markFailed(event.key, errMsg);
+                failedCount++;
+            }
+        }
+
+        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
+
+        return { synced: syncedCount, failed: failedCount, review: reviewCount };
+    } finally {
+        releaseSyncLock();
+    }
+}
+
+/**
+ * Sync all PENDING ORDER_CREATED events from the journal.
+ * Delegates to syncOfflineSales — the event journal handles all event types.
+ */
+export async function syncOfflineOrders(): Promise<SyncResult> {
+    return syncOfflineSales();
+}
+
+/**
  * Register a Background Sync tag so the browser can retry sync
  * even after the tab is closed (Progressive Enhancement — no-op
  * in browsers that don't support SyncManager).
@@ -382,7 +256,6 @@ export async function registerBackgroundSync(): Promise<void> {
     if (!('serviceWorker' in navigator)) return;
     try {
         const reg = await navigator.serviceWorker.ready;
-        // SyncManager may not exist on all browsers
         if ('sync' in reg) {
             await (reg.sync as { register: (tag: string) => Promise<void> }).register('sync-offline-sales');
         }
@@ -390,3 +263,4 @@ export async function registerBackgroundSync(): Promise<void> {
         // Background Sync not available — app-level retry is the fallback
     }
 }
+

@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Link } from 'react-router-dom';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { formatTimestamp } from '../../utils/businessDate';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 const ExpensesPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -150,6 +151,9 @@ const ExpensesPage: React.FC = () => {
   const handlePageChange = (page: number) => {
     setFilter(prev => ({ ...prev, page }));
   };
+
+  useSubmitOnEnter(rejectDialogOpen, !rejectMutation.isPending, handleReject);
+  useSubmitOnEnter(paymentDialogOpen, !markPaidMutation.isPending, handleMarkPaid);
 
   if (error) {
     return (

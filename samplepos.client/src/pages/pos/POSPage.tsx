@@ -32,6 +32,7 @@ import {
 } from '../../services/offlineCatalogService';
 import apiClient from '../../utils/api';
 import { toast } from 'react-hot-toast';
+import { pricingApi } from '../../api/pricing';
 import DiscountDialog from '../../components/pos/DiscountDialog';
 import ManagerApprovalDialog from '../../components/pos/ManagerApprovalDialog';
 import { ResumeHoldDialog } from '../../components/pos/ResumeHoldDialog';
@@ -240,6 +241,7 @@ interface LineItem {
   marginPct: number;
   subtotal: number;
   productType?: 'inventory' | 'consumable' | 'service'; // NEW: Product type
+  stockOnHand?: number;
   // Tax support
   isTaxable: boolean;
   taxRate: number;
@@ -261,6 +263,13 @@ interface LineItem {
     value: number;
     amount: number;
     reason: string;
+  };
+  // Pricing engine metadata (shows when customer-group pricing is applied)
+  pricingRule?: {
+    scope: string;
+    ruleName: string | null;
+    basePrice: number;
+    discount: number;
   };
 }
 
@@ -581,6 +590,126 @@ export default function POSPage() {
     fetchCustomerDepositBalance();
   }, [selectedCustomer?.id]);
 
+  // Stable key of cart items for pricing — only changes when product IDs or quantities change
+  const itemsPricingKey = useMemo(
+    () => items
+      .filter((it) => !it.id.startsWith('custom_'))
+      .map((it) => `${it.id}:${it.quantity}`)
+      .join(','),
+    [items],
+  );
+
+  // ========== PRICING ENGINE: Reprice cart when customer changes ==========
+  // When a customer is selected/changed, resolve prices through the engine
+  // (tiers, price rules, group discounts) and update cart item prices.
+  // Also re-resolves when items change (new item added or quantity updated).
+  useEffect(() => {
+    if (items.length === 0 || !selectedCustomer?.id) return;
+
+    const repriceCart = async () => {
+      // Filter to real products only (not custom items)
+      const regularItems = items.filter((it) => !it.id.startsWith('custom_'));
+      if (regularItems.length === 0) return;
+
+      try {
+        const resolved = await pricingApi.calculateBulkPrices(
+          regularItems.map((it) => ({ productId: it.id, quantity: it.quantity })),
+          selectedCustomer?.id,
+        );
+
+        setItems((prev) => {
+          let changed = false;
+          const updated = prev.map((item) => {
+            if (item.id.startsWith('custom_')) return item;
+            const idx = regularItems.findIndex(
+              (r) => r.id === item.id && r.quantity === item.quantity
+            );
+            const price = idx >= 0 ? resolved[idx] : undefined;
+            if (!price) return item;
+
+            // Only update if the engine returned a non-base price or we need to revert
+            const hasPricingRule = price.appliedRule.scope !== 'base';
+            const priceChanged = item.unitPrice !== price.finalPrice;
+            const hadPricingRule = !!item.pricingRule;
+
+            if (!priceChanged && hasPricingRule === hadPricingRule) return item;
+            changed = true;
+
+            const newPrice = price.finalPrice;
+            const newSubtotal = new Decimal(item.quantity).times(newPrice).toNumber();
+            const newMargin =
+              newPrice > 0
+                ? new Decimal(newPrice)
+                  .minus(item.costPrice)
+                  .dividedBy(newPrice)
+                  .times(100)
+                  .toNumber()
+                : 0;
+
+            return {
+              ...item,
+              unitPrice: newPrice,
+              subtotal: newSubtotal,
+              marginPct: newMargin,
+              pricingRule: hasPricingRule
+                ? {
+                  scope: price.appliedRule.scope,
+                  ruleName: price.appliedRule.ruleName,
+                  basePrice: price.basePrice,
+                  discount: price.discount,
+                }
+                : undefined,
+            };
+          });
+          return changed ? updated : prev;
+        });
+      } catch (err) {
+        console.warn('Pricing engine bulk resolution failed, keeping current prices', err);
+      }
+    };
+
+    repriceCart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.id, itemsPricingKey]);
+
+  // ========== PRICING ENGINE: Revert prices when customer is cleared ==========
+  // When the customer is deselected, revert any engine-adjusted prices back to base.
+  const prevCustomerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prevId = prevCustomerRef.current;
+    prevCustomerRef.current = selectedCustomer?.id ?? null;
+
+    // Only revert when customer was removed (had a customer, now don't)
+    if (prevId && !selectedCustomer?.id && items.length > 0) {
+      setItems((prev) => {
+        let changed = false;
+        const reverted = prev.map((item) => {
+          if (!item.pricingRule) return item;
+          changed = true;
+          const basePrice = item.pricingRule.basePrice;
+          const newSubtotal = new Decimal(item.quantity).times(basePrice).toNumber();
+          const newMargin =
+            basePrice > 0
+              ? new Decimal(basePrice)
+                .minus(item.costPrice)
+                .dividedBy(basePrice)
+                .times(100)
+                .toNumber()
+              : 0;
+          return {
+            ...item,
+            unitPrice: basePrice,
+            subtotal: newSubtotal,
+            marginPct: newMargin,
+            pricingRule: undefined,
+          };
+        });
+        return changed ? reverted : prev;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.id]);
+
   // Pre-warm product cache AND sync full catalog on mount
   useEffect(() => {
     if (activeUser?.token) {
@@ -851,6 +980,9 @@ export default function POSPage() {
       // Clear localStorage offline data
       localStorage.removeItem('pos_persisted_cart_v1');
       localStorage.removeItem('pos_offline_sales');
+      localStorage.removeItem('pos_offline_orders');
+      localStorage.removeItem('pos_offline_events');
+      localStorage.removeItem('pos_sync_state');
       localStorage.removeItem('pos_product_catalog');
       localStorage.removeItem('pos_local_stock');
       localStorage.removeItem('pos_catalog_last_sync');
@@ -914,6 +1046,8 @@ export default function POSPage() {
               ? new Decimal(uom.price).minus(uom.cost).dividedBy(uom.price).times(100).toNumber()
               : 0,
           subtotal: uom.price,
+          productType: product.productType,
+          stockOnHand: product.stockOnHand,
           isTaxable: product.isTaxable ?? false,
           taxRate: product.taxRate || 0,
           availableUoms: product.uoms || [],
@@ -960,6 +1094,8 @@ export default function POSPage() {
               .toNumber()
             : 0,
         subtotal: row.sellingPrice,
+        productType: product.productType,
+        stockOnHand: product.stockOnHand,
         isTaxable: product.isTaxable ?? false,
         taxRate: product.taxRate || 0,
         availableUoms: product.uoms || [],
@@ -2294,6 +2430,17 @@ export default function POSPage() {
       return;
     }
 
+    // DEPOSIT payment requires a customer (deposits are tied to customer accounts)
+    const hasDepositPayment = paymentLines.some(line => line.paymentMethod === 'DEPOSIT');
+    if (hasDepositPayment && !selectedCustomer) {
+      isSubmittingRef.current = false;
+      setIsProcessingSale(false);
+      alert(
+        '❌ Cannot Complete Sale\n\n💰 Customer Required for Deposit Payment\n\nDeposit payments are tied to customer accounts.\nPlease select a customer before using deposit payment.'
+      );
+      return;
+    }
+
     // Validate payment lines
     // Allow 0 payment (full credit / "pay later") when customer is selected
     // The auto-credit logic below will create a CREDIT line for the full amount
@@ -3121,7 +3268,7 @@ export default function POSPage() {
                           value={item.quantity}
                           onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
                           onFocus={() => setFocusedCartIndex(idx)}
-                          className="w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className={`w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'bg-red-50' : ''}`}
                           aria-label={`Quantity for ${item.name}`}
                         />
                         <button
@@ -3138,6 +3285,26 @@ export default function POSPage() {
                         {formatCurrency(item.subtotal)}
                       </span>
                     </div>
+                    {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
+                      <div className="text-red-600 text-[10px] mt-0.5">
+                        Only {item.stockOnHand} available in stock
+                      </div>
+                    )}
+                    {item.pricingRule && (
+                      <div className="flex items-center gap-1 mt-0.5 text-xs text-blue-600">
+                        <span className="inline-block w-2 h-2 bg-blue-500 rounded-full" />
+                        <span>
+                          {item.pricingRule.scope === 'group_discount'
+                            ? 'Group discount'
+                            : item.pricingRule.ruleName || item.pricingRule.scope}
+                          {item.pricingRule.discount > 0 && (
+                            <span className="ml-1 text-blue-500">
+                              (-{formatCurrency(item.pricingRule.discount)})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
                     {item.discount && (
                       <div className="flex items-center justify-between mt-1 text-xs">
                         <span className="text-red-500">Discount: -{formatCurrency(item.discount.amount)}</span>
@@ -3243,9 +3410,14 @@ export default function POSPage() {
                               handleQuantityChange(idx, parseFloat(e.target.value) || 0)
                             }
                             onFocus={() => setFocusedCartIndex(idx)}
-                            className="w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
+                            className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'border-red-500 bg-red-50' : ''}`}
                             aria-label={`Quantity for ${item.name}`}
                           />
+                          {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
+                            <div className="text-red-600 text-[10px] mt-0.5 whitespace-nowrap">
+                              Only {item.stockOnHand} in stock
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2 text-right text-xs sm:text-sm">
                           {formatCurrency(item.unitPrice)}
@@ -3594,6 +3766,12 @@ export default function POSPage() {
         }}
         receiptData={receiptData}
         onAfterPrint={() => {
+          // Log receipt print to audit trail
+          if (lastSale?.id) {
+            api.post(`/sales/${lastSale.id}/reprint`).catch((err: unknown) => {
+              console.error('Failed to log receipt print:', err);
+            });
+          }
           // Close the receipt modal after printing
           setShowReceiptModal(false);
           // Refocus search after printing completes

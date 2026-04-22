@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStockMovements, exportStockMovementsCSV } from '../../hooks/useStockMovements';
 import { useProducts } from '../../hooks/useProducts';
@@ -46,7 +46,7 @@ interface StockMovementRow {
   movementType: string;
   quantity: number | string;
   unitCost: number | string;
-  balanceAfter: number | string;
+  balanceAfter: number | string | null;
   batchNumber?: string;
   referenceId?: string;
   referenceType?: string;
@@ -143,6 +143,7 @@ export default function StockMovementsPage() {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedType, setSelectedType] = useState<MovementType | 'ALL'>('ALL');
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('today');
   const [startDate, setStartDate] = useState(() => getDateRange('today').start);
@@ -150,13 +151,25 @@ export default function StockMovementsPage() {
   const [page, setPage] = useState(1);
   const limit = 50;
 
+  // Debounce search term (300ms) so we don't fire a request on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Reset to page 1 when search changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
   // API queries
-  const { data: movementsData, isLoading, error, refetch } = useStockMovements({
+  const { data: movementsData, isLoading, isFetching, error, refetch } = useStockMovements({
     page,
     limit,
     movementType: selectedType !== 'ALL' ? selectedType : undefined,
     startDate: startDate || undefined,
     endDate: endDate || undefined,
+    search: debouncedSearch || undefined,
   });
 
   const { data: productsData } = useProducts();
@@ -170,6 +183,12 @@ export default function StockMovementsPage() {
     if (Array.isArray(movementsData)) return movementsData;
     return [];
   }, [movementsData]);
+
+  // Total count from API pagination (for accurate "showing X of Y" display)
+  const totalCount: number = useMemo(() => {
+    if (!movementsData) return 0;
+    return movementsData.pagination?.total ?? movements.length;
+  }, [movementsData, movements.length]);
 
   const products = useMemo(() => {
     if (!productsData) return [];
@@ -188,23 +207,8 @@ export default function StockMovementsPage() {
     return map;
   }, [products]);
 
-  // Filter movements by search term
-  const filteredMovements = useMemo(() => {
-    if (!searchTerm) return movements;
-
-    const term = searchTerm.toLowerCase();
-    return movements.filter((m: StockMovementRow) => {
-      const product = productMap.get(m.productId);
-      return (
-        m.productName?.toLowerCase().includes(term) ||
-        product?.name?.toLowerCase().includes(term) ||
-        product?.sku?.toLowerCase().includes(term) ||
-        m.batchNumber?.toLowerCase().includes(term) ||
-        m.referenceId?.toLowerCase().includes(term) ||
-        m.notes?.toLowerCase().includes(term)
-      );
-    });
-  }, [movements, searchTerm, productMap]);
+  // Server already filtered by search — use movements directly
+  const filteredMovements = movements;
 
   // Calculate summary statistics (for filtered movements)
   const stats = useMemo(() => {
@@ -282,6 +286,7 @@ export default function StockMovementsPage() {
   // Reset filters
   const handleResetFilters = () => {
     setSearchTerm('');
+    setDebouncedSearch('');
     setSelectedType('ALL');
     setDateRangePreset('today');
     const todayRange = getDateRange('today');
@@ -309,8 +314,9 @@ export default function StockMovementsPage() {
     setPage(1);
   };
 
-  // Loading state
-  if (isLoading) {
+  // Initial load only — never show while user is typing a search term
+  const hasData = !!movementsData;
+  if (isLoading && !hasData) {
     return (
       <div className="p-6">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -320,8 +326,8 @@ export default function StockMovementsPage() {
     );
   }
 
-  // Error state
-  if (error) {
+  // Error state (only when no previous data to show)
+  if (error && !hasData) {
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -339,6 +345,10 @@ export default function StockMovementsPage() {
 
   return (
     <div className="p-6">
+      {/* Subtle fetching indicator — does NOT unmount or disrupt focus */}
+      {isFetching && (
+        <div className="fixed top-0 left-0 right-0 h-1 bg-blue-500 animate-pulse z-50" />
+      )}
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
@@ -501,7 +511,7 @@ export default function StockMovementsPage() {
         {/* Filter Actions */}
         <div className="flex justify-between items-center mt-4 pt-4 border-t">
           <div className="text-sm text-gray-600">
-            Showing {filteredMovements.length} of {movements.length} movements
+            Showing {filteredMovements.length} of {totalCount} movements
           </div>
           <button
             onClick={handleResetFilters}
@@ -620,7 +630,6 @@ export default function StockMovementsPage() {
                   const quantity = new Decimal(movement.quantity || 0);
                   const unitCost = new Decimal(movement.unitCost || 0);
                   const totalValue = quantity.times(unitCost);
-                  const balanceAfter = new Decimal(movement.balanceAfter || 0);
 
                   return (
                     <tr key={movement.id} className="hover:bg-gray-50">
@@ -654,8 +663,8 @@ export default function StockMovementsPage() {
                       {/* Category */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'text-gray-400'
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-400'
                           }`}>
                           {product?.category || '\u2014'}
                         </span>
@@ -691,12 +700,18 @@ export default function StockMovementsPage() {
 
                       {/* Balance After */}
                       <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-medium text-gray-900">
-                          {balanceAfter.toFixed(2)}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          after movement
-                        </div>
+                        {movement.balanceAfter != null ? (
+                          <>
+                            <div className="text-sm font-medium text-gray-900">
+                              {new Decimal(movement.balanceAfter).toFixed(2)}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              after movement
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-gray-400">—</div>
+                        )}
                       </td>
 
                       {/* Reference */}
@@ -735,10 +750,10 @@ export default function StockMovementsPage() {
       </div>
 
       {/* Pagination Controls */}
-      {filteredMovements.length > 0 && (
+      {totalCount > 0 && (
         <div className="mt-6 flex justify-between items-center">
           <div className="text-sm text-gray-600">
-            Page {page} • Showing {Math.min(page * limit, filteredMovements.length)} of {filteredMovements.length}
+            Page {page} • Showing {((page - 1) * limit) + 1}–{Math.min(page * limit, totalCount)} of {totalCount}
           </div>
           <div className="flex gap-2">
             <button
@@ -750,7 +765,7 @@ export default function StockMovementsPage() {
             </button>
             <button
               onClick={() => setPage(page + 1)}
-              disabled={page * limit >= filteredMovements.length}
+              disabled={page * limit >= totalCount}
               className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Next →

@@ -11,6 +11,7 @@ import SlideDrawer from '../ui/SlideDrawer';
 import deliveryNotesApi from '../../api/deliveryNotes';
 import type { CreateDeliveryNoteLine } from '../../api/deliveryNotes';
 import { formatCurrency } from '../../utils/currency';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 interface FulfillmentItem {
     quotationItemId: string;
@@ -137,6 +138,8 @@ export default function CreateDeliveryNoteDrawer({
             </button>
         </div>
     );
+
+    useSubmitOnEnter(open, !createMutation.isPending, handleSubmit);
 
     return (
         <SlideDrawer

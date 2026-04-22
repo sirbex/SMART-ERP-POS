@@ -2133,7 +2133,7 @@ export class BankingService {
 
         const glCodeMap: Record<string, string> = {
             CARD: '1020',
-            MOBILE_MONEY: '1020', // Could be customized
+            MOBILE_MONEY: '1040',
             BANK_TRANSFER: '1030',
             CREDIT: '1200', // AR account for credit sales
         };

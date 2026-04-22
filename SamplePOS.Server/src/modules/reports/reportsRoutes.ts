@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { Pool } from 'pg';
 import { reportsController } from './reportsController.js';
 import { cnDnReportsController } from './cnDnReportController.js';
+import { inventoryReportsController } from './inventory/inventoryReportsController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -47,6 +48,35 @@ export function createReportsRouter(pool: Pool) {
     requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.getInventoryValuation(req, res, p(req)))
   );
+
+  // ── SAP/Odoo-style inventory reports (refactored: one responsibility each) ──
+  // Valuation = finance truth (cost_layers only)
+  router.get(
+    '/inventory/valuation',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => inventoryReportsController.getValuation(req, res, p(req)))
+  );
+  // Reconciliation = accounting control (subledger vs GL 1300)
+  router.get(
+    '/inventory/reconciliation',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) =>
+      inventoryReportsController.getReconciliation(req, res, p(req))
+    )
+  );
+  // Analytics = operations insight (ABC, velocity, dead stock)
+  router.get(
+    '/inventory/analytics',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => inventoryReportsController.getAnalytics(req, res, p(req)))
+  );
+  // Margins = commercial insight (cost vs price)
+  router.get(
+    '/inventory/margins',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => inventoryReportsController.getMargins(req, res, p(req)))
+  );
+
   router.get(
     '/inventory-adjustments',
     requirePermission('reports.read'),

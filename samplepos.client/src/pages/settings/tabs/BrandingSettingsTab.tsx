@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../../../services/api';
+import { useSubmitOnEnter } from '../../../hooks/useSubmitOnEnter';
 
 interface BrandingData {
     pwaName: string;
@@ -92,6 +93,8 @@ export default function BrandingSettingsTab() {
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     }
+
+    useSubmitOnEnter(true, !saving, handleSave);
 
     if (loading) {
         return (

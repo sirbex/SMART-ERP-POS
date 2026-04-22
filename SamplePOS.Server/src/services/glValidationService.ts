@@ -40,7 +40,7 @@ export async function validateSaleGLEntries(
   try {
     // Get the sale
     const saleResult = await pool.query(
-      `SELECT id, sale_number, total_amount, payment_method, customer_id 
+      `SELECT id, sale_number, total_amount, payment_method, customer_id, amount_paid, tax_amount 
        FROM sales WHERE id = $1`,
       [saleId]
     );
@@ -51,21 +51,44 @@ export async function validateSaleGLEntries(
 
     const sale = saleResult.rows[0];
 
-    // For credit sales, check AR debit exists
-    if (sale.payment_method === 'CREDIT') {
+    const txResult = await pool.query(
+      `SELECT "Id" as id
+       FROM ledger_transactions
+       WHERE "ReferenceType" = 'SALE'
+         AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE
+       LIMIT 1`,
+      [saleId]
+    );
+
+    if (txResult.rows.length === 0) {
+      return {
+        isValid: false,
+        errors: [`No ledger transaction found for sale ${sale.sale_number}`],
+        warnings,
+      };
+    }
+
+    const transactionId = txResult.rows[0].id as string;
+    const totalAmount = new Decimal(sale.total_amount || 0);
+    const amountPaid = new Decimal(sale.amount_paid || 0);
+    const taxAmount = new Decimal(sale.tax_amount || 0);
+
+    // For CREDIT and DEPOSIT sales, AR should exist on the sale transaction.
+    if (sale.payment_method === 'CREDIT' || sale.payment_method === 'DEPOSIT') {
       const arEntry = await pool.query(
-        `SELECT SUM(jel."DebitAmount") as debit_total
-         FROM journal_entries je
-         JOIN journal_entry_lines jel ON jel."JournalEntryId" = je."Id"
-         JOIN accounts a ON a."Id" = jel."AccountId"
-         WHERE je."SourceEntityId" = $1
-           AND je."SourceEntityType" = 'Sale'
-           AND je."Status" != 'VOIDED'
+        `SELECT COALESCE(SUM(le."DebitAmount"), 0) as debit_total
+         FROM ledger_entries le
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE le."TransactionId" = $1
            AND a."AccountCode" = '1200'`,
-        [saleId]
+        [transactionId]
       );
 
-      const expectedAmount = new Decimal(sale.total_amount || 0).toNumber();
+      const outstandingAmount = totalAmount.minus(amountPaid);
+      const expectedAmount = sale.payment_method === 'CREDIT'
+        ? (outstandingAmount.greaterThan(0) ? outstandingAmount.toNumber() : 0)
+        : totalAmount.toNumber();
       const actualDebit = new Decimal(arEntry.rows[0]?.debit_total || 0).toNumber();
 
       if (new Decimal(actualDebit).minus(expectedAmount).abs().greaterThan('0.01')) {
@@ -77,18 +100,15 @@ export async function validateSaleGLEntries(
 
     // Check revenue credit exists
     const revenueEntry = await pool.query(
-      `SELECT SUM(jel."CreditAmount") as credit_total
-       FROM journal_entries je
-       JOIN journal_entry_lines jel ON jel."JournalEntryId" = je."Id"
-       JOIN accounts a ON a."Id" = jel."AccountId"
-       WHERE je."SourceEntityId" = $1
-         AND je."SourceEntityType" = 'Sale'
-         AND je."Status" != 'VOIDED'
-         AND a."AccountCode" = '4100'`,
-      [saleId]
+      `SELECT COALESCE(SUM(le."CreditAmount"), 0) as credit_total
+       FROM ledger_entries le
+       JOIN accounts a ON a."Id" = le."AccountId"
+       WHERE le."TransactionId" = $1
+         AND a."AccountCode" IN ('4000', '4100')`,
+      [transactionId]
     );
 
-    const expectedRevenue = new Decimal(sale.total_amount || 0).toNumber();
+    const expectedRevenue = totalAmount.minus(taxAmount).toNumber();
     const actualCredit = new Decimal(revenueEntry.rows[0]?.credit_total || 0).toNumber();
 
     if (new Decimal(actualCredit).minus(expectedRevenue).abs().greaterThan('0.01')) {
@@ -100,14 +120,11 @@ export async function validateSaleGLEntries(
     // Check journal entry is balanced
     const balanceCheck = await pool.query(
       `SELECT 
-         SUM(jel."DebitAmount") as total_debits,
-         SUM(jel."CreditAmount") as total_credits
-       FROM journal_entries je
-       JOIN journal_entry_lines jel ON jel."JournalEntryId" = je."Id"
-       WHERE je."SourceEntityId" = $1
-         AND je."SourceEntityType" = 'Sale'
-         AND je."Status" != 'VOIDED'`,
-      [saleId]
+         COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
+         COALESCE(SUM(le."CreditAmount"), 0) as total_credits
+       FROM ledger_entries le
+       WHERE le."TransactionId" = $1`,
+      [transactionId]
     );
 
     const debits = new Decimal(balanceCheck.rows[0]?.total_debits || 0).toNumber();
@@ -158,25 +175,41 @@ export async function validatePaymentGLEntries(
 
     const payment = paymentResult.rows[0];
 
-    // Check AR credit exists (payment reduces AR)
-    const arEntry = await pool.query(
-      `SELECT SUM(jel."CreditAmount") as credit_total
-       FROM journal_entries je
-       JOIN journal_entry_lines jel ON jel."JournalEntryId" = je."Id"
-       JOIN accounts a ON a."Id" = jel."AccountId"
-       WHERE je."SourceEntityId" = $1
-         AND je."SourceEntityType" IN ('CustomerPayment', 'InvoicePayment')
-         AND je."Status" != 'VOIDED'
-         AND a."AccountCode" = '1200'`,
+    const txResult = await pool.query(
+      `SELECT "Id" as id
+       FROM ledger_transactions
+       WHERE "ReferenceType" = 'CUSTOMER_PAYMENT'
+         AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE
+       LIMIT 1`,
       [paymentId]
     );
 
-    const expectedAmount = new Decimal(payment.Amount || 0).toNumber();
-    const actualCredit = new Decimal(arEntry.rows[0]?.credit_total || 0).toNumber();
+    if (txResult.rows.length === 0) {
+      return {
+        isValid: false,
+        errors: [`No ledger transaction found for payment ${payment.PaymentNumber}`],
+        warnings,
+      };
+    }
 
-    if (new Decimal(actualCredit).minus(expectedAmount).abs().greaterThan('0.01')) {
+    const transactionId = txResult.rows[0].id as string;
+
+    const balanceCheck = await pool.query(
+      `SELECT 
+         COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
+         COALESCE(SUM(le."CreditAmount"), 0) as total_credits
+       FROM ledger_entries le
+       WHERE le."TransactionId" = $1`,
+      [transactionId]
+    );
+
+    const debits = new Decimal(balanceCheck.rows[0]?.total_debits || 0).toNumber();
+    const credits = new Decimal(balanceCheck.rows[0]?.total_credits || 0).toNumber();
+
+    if (new Decimal(debits).minus(credits).abs().greaterThan('0.01')) {
       errors.push(
-        `AR credit mismatch for ${payment.PaymentNumber}: Expected ${expectedAmount}, Found ${actualCredit}`
+        `Journal entry not balanced for ${payment.PaymentNumber}: Debits ${debits}, Credits ${credits}`
       );
     }
 
@@ -325,12 +358,12 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
   const unbalanced = await pool.query(`
     SELECT COUNT(*) as count
     FROM (
-      SELECT je."Id"
-      FROM journal_entries je
-      JOIN journal_entry_lines jel ON jel."JournalEntryId" = je."Id"
-      WHERE je."Status" != 'VOIDED'
-      GROUP BY je."Id"
-      HAVING ABS(SUM(jel."DebitAmount") - SUM(jel."CreditAmount")) > 0.01
+      SELECT lt."Id"
+      FROM ledger_transactions lt
+      JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+      WHERE lt."IsReversed" = FALSE
+      GROUP BY lt."Id"
+      HAVING ABS(SUM(le."DebitAmount") - SUM(le."CreditAmount")) > 0.01
     ) sub
   `);
 
@@ -340,10 +373,10 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
     FROM sales s
     WHERE s.payment_method = 'CREDIT'
       AND NOT EXISTS (
-        SELECT 1 FROM journal_entries je 
-        WHERE je."SourceEntityId" = s.id::text 
-          AND je."SourceEntityType" = 'Sale'
-          AND je."Status" != 'VOIDED'
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'SALE'
+          AND lt."ReferenceId" = s.id
+          AND lt."IsReversed" = FALSE
       )
   `);
 
@@ -352,10 +385,10 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
     SELECT COUNT(*) as count
     FROM customer_payments cp
     WHERE NOT EXISTS (
-      SELECT 1 FROM journal_entries je 
-      WHERE je."SourceEntityId" = cp."Id"::text 
-        AND je."SourceEntityType" IN ('CustomerPayment', 'InvoicePayment')
-        AND je."Status" != 'VOIDED'
+      SELECT 1 FROM ledger_transactions lt
+      WHERE lt."ReferenceType" = 'CUSTOMER_PAYMENT'
+        AND lt."ReferenceId" = cp."Id"
+        AND lt."IsReversed" = FALSE
     )
   `);
 

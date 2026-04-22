@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
 import deliveryNotesApi from '../../api/deliveryNotes';
 import quotationApi from '../../api/quotations';
+import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
@@ -21,6 +22,7 @@ import type {
 } from '../../api/deliveryNotes';
 import type { Quotation, QuotationItem } from '@shared/types/quotation';
 import { formatTimestamp } from '../../utils/businessDate';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // ── Status helpers ─────────────────────────────────────────
 
@@ -59,7 +61,7 @@ export default function DeliveryNotesPage() {
     <Layout>
       <div className="p-6 lg:p-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Wholesale Delivery Notes</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Delivery Notes</h1>
           <p className="text-gray-600 mt-1">
             Create DN → Pick Confirm → Post Goods Issue (PGI) → Invoice
           </p>
@@ -165,7 +167,7 @@ function DeliveryNotesList({
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">DN #</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Quotation</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Order Ref</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Customer</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Date</th>
                   <th className="text-right py-3 px-4 text-sm font-semibold text-gray-700">Amount</th>
@@ -177,7 +179,7 @@ function DeliveryNotesList({
                 {deliveryNotes.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-gray-500">
-                      No delivery notes yet. Create one from a wholesale quotation.
+                      No delivery notes yet. Create one from a wholesale order.
                     </td>
                   </tr>
                 ) : (
@@ -266,6 +268,7 @@ function CreateDeliveryNote({
   const [warehouseNotes, setWarehouseNotes] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [lineQuantities, setLineQuantities] = useState<Record<string, number>>({});
+  const [productStockMap, setProductStockMap] = useState<Record<string, number>>({});
   const fulfillmentAppliedForRef = useRef<string | null>(null);
 
   // Search wholesale quotations
@@ -331,6 +334,29 @@ function CreateDeliveryNote({
     }
   }, [fulfillmentData, selectedQuotation]);
 
+  // Fetch stock levels for all products in the selected quotation
+  useEffect(() => {
+    if (!selectedQuotation) return;
+    const productItems = selectedQuotation.items.filter(
+      (item) => item.productType !== 'service' && item.productId
+    );
+    Promise.all(
+      productItems.map(async (item) => {
+        try {
+          const res = await api.inventory.stockLevelByProduct(item.productId!);
+          const stockData = res?.data?.data as Record<string, unknown> | undefined;
+          return { itemId: item.id, stock: Number(stockData?.quantity_on_hand ?? stockData?.total_stock ?? 0) };
+        } catch {
+          return { itemId: item.id, stock: 0 };
+        }
+      })
+    ).then((results) => {
+      const map: Record<string, number> = {};
+      results.forEach((r) => { map[r.itemId] = r.stock; });
+      setProductStockMap(map);
+    });
+  }, [selectedQuotation]);
+
   const selectQuotation = async (quotation: Quotation) => {
     try {
       const detail = await quotationApi.getQuotationById(quotation.id);
@@ -394,6 +420,8 @@ function CreateDeliveryNote({
     });
   };
 
+  useSubmitOnEnter(true, !!selectedQuotation && !createMutation.isPending, handleCreate);
+
   return (
     <>
       <button onClick={onBack} className="mb-4 text-gray-600 hover:text-gray-900 text-sm">
@@ -401,26 +429,26 @@ function CreateDeliveryNote({
       </button>
 
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-6">Create Delivery Note from Wholesale Quotation</h2>
+        <h2 className="text-xl font-semibold mb-6">Create Delivery Note from Wholesale Order</h2>
 
         {/* Quotation Selection */}
         {!selectedQuotation ? (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Search Wholesale Quotations
+              Search Wholesale Orders
             </label>
             <input
               type="text"
               value={quotationSearch}
               onChange={(e) => setQuotationSearch(e.target.value)}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-              placeholder="Search by quote number or customer name..."
+              placeholder="Search by order number or customer name..."
               autoFocus
             />
             <div className="mt-4 max-h-80 overflow-y-auto">
               {wholesaleQuotations.length === 0 ? (
                 <p className="text-gray-500 text-center py-8">
-                  No wholesale quotations found. Create one with &quot;Wholesale&quot; fulfillment mode.
+                  No wholesale orders found. Create one with &quot;Wholesale&quot; fulfillment mode.
                 </p>
               ) : (
                 wholesaleQuotations.map((q) => (
@@ -588,9 +616,14 @@ function CreateDeliveryNote({
                                   [item.id]: Math.min(Number(e.target.value) || 0, remaining),
                                 }))
                               }
-                              className="w-24 px-2 py-1 border border-gray-300 rounded text-right focus:ring-2 focus:ring-blue-500"
+                              className={`w-24 px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500 ${productStockMap[item.id] !== undefined && qty > productStockMap[item.id] ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
                               disabled={remaining === 0}
                             />
+                            {productStockMap[item.id] !== undefined && qty > productStockMap[item.id] && (
+                              <div className="text-red-600 text-[10px] mt-0.5 text-right">
+                                Only {productStockMap[item.id]} in stock
+                              </div>
+                            )}
                           </td>
                           <td className="py-2 px-3 text-right">{formatCurrency(item.unitPrice)}</td>
                           <td className="py-2 px-3 text-right font-semibold">
@@ -737,7 +770,7 @@ function DeliveryNoteDetail({
           <div>
             <h2 className="text-2xl font-bold text-gray-900">{dn.deliveryNoteNumber}</h2>
             <p className="text-gray-600 mt-1">
-              Quotation: <span className="font-mono font-semibold">{dn.quotationNumber || dn.quotationId}</span>
+              Order Ref: <span className="font-mono font-semibold">{dn.quotationNumber || dn.quotationId}</span>
               {dn.customerName && <span className="ml-3">· {dn.customerName}</span>}
             </p>
           </div>

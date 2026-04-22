@@ -174,26 +174,25 @@ export const analyzeDunningRun = async (
   }
 
   // Find all overdue invoices (credit sales with outstanding balance)
-  // invoices table uses PascalCase columns; customers table uses snake_case
   const overdueResult = await dbPool.query(
     `SELECT 
-       i."Id" as invoice_id,
-       i."InvoiceNumber" as invoice_number,
-       i."InvoiceDate" as invoice_date,
-       i."DueDate" as due_date,
-       i."TotalAmount" as amount,
-       COALESCE(i."AmountPaid", 0) as amount_paid,
-       i."TotalAmount" - COALESCE(i."AmountPaid", 0) as amount_due,
-       ($1::DATE - i."DueDate"::DATE) as days_overdue,
-       i."CustomerId" as customer_id,
+       i.id as invoice_id,
+       i.invoice_number as invoice_number,
+       i.issue_date as invoice_date,
+       i.due_date as due_date,
+       i.total_amount as amount,
+       COALESCE(i.amount_paid, 0) as amount_paid,
+       i.total_amount - COALESCE(i.amount_paid, 0) as amount_due,
+       ($1::DATE - i.due_date::DATE) as days_overdue,
+       i.customer_id as customer_id,
        c.name as customer_name,
        COALESCE(c.current_dunning_level, 0) as current_dunning_level
      FROM invoices i
-     JOIN customers c ON i."CustomerId" = c.id
-     WHERE i."Status" IN ('Unpaid', 'PartiallyPaid', 'Overdue')
-       AND i."DueDate" < $1
-       AND i."TotalAmount" > COALESCE(i."AmountPaid", 0)
-     ORDER BY i."CustomerId", i."DueDate"`,
+     JOIN customers c ON i.customer_id = c.id
+     WHERE i.status IN ('UNPAID', 'PARTIALLY_PAID')
+       AND i.due_date < $1
+       AND i.total_amount > COALESCE(i.amount_paid, 0)
+     ORDER BY i.customer_id, i.due_date`,
     [asOfDate]
   );
 

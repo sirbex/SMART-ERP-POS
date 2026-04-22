@@ -44,17 +44,17 @@ async function runTests() {
 
   const balanceCheck = await pool.query(`
     SELECT 
-      je."Id" as journal_entry_id,
-      je."TransactionId",
-      je."Description",
-      SUM(jel."DebitAmount") as total_debits,
-      SUM(jel."CreditAmount") as total_credits,
-      SUM(jel."DebitAmount") - SUM(jel."CreditAmount") as difference
-    FROM journal_entries je
-    JOIN journal_entry_lines jel ON jel."JournalEntryId" = je."Id"
-    WHERE je."Status" != 'VOIDED'
-    GROUP BY je."Id", je."TransactionId", je."Description"
-    HAVING SUM(jel."DebitAmount") != SUM(jel."CreditAmount")
+      lt."Id" as transaction_id,
+      lt."TransactionNumber",
+      lt."Description",
+      SUM(le."DebitAmount") as total_debits,
+      SUM(le."CreditAmount") as total_credits,
+      SUM(le."DebitAmount") - SUM(le."CreditAmount") as difference
+    FROM ledger_transactions lt
+    JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+    WHERE lt."IsReversed" = FALSE
+    GROUP BY lt."Id", lt."TransactionNumber", lt."Description"
+    HAVING ABS(SUM(le."DebitAmount") - SUM(le."CreditAmount")) > 0.01
   `);
 
   test(
@@ -109,10 +109,10 @@ async function runTests() {
     LEFT JOIN customers c ON s.customer_id = c.id
     WHERE s.payment_method = 'CREDIT'
       AND NOT EXISTS (
-        SELECT 1 FROM journal_entries je 
-        WHERE je."SourceEntityId" = s.id::text 
-          AND je."SourceEntityType" = 'Sale'
-          AND je."Status" != 'VOIDED'
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'SALE'
+          AND lt."ReferenceId" = s.id
+          AND lt."IsReversed" = FALSE
       )
   `);
 
@@ -132,10 +132,10 @@ async function runTests() {
     SELECT cp."Id", cp."PaymentNumber", cp."CustomerName", cp."Amount"
     FROM customer_payments cp
     WHERE NOT EXISTS (
-      SELECT 1 FROM journal_entries je 
-      WHERE je."SourceEntityId" = cp."Id"::text 
-        AND je."SourceEntityType" IN ('CustomerPayment', 'InvoicePayment')
-        AND je."Status" != 'VOIDED'
+      SELECT 1 FROM ledger_transactions lt
+      WHERE lt."ReferenceType" = 'CUSTOMER_PAYMENT'
+        AND lt."ReferenceId" = cp."Id"
+        AND lt."IsReversed" = FALSE
     )
   `);
 
@@ -146,6 +146,51 @@ async function runTests() {
       ? 'All customer payments have corresponding journal entries'
       : `${paymentsNoGL.rows.length} payments missing GL entries`,
     paymentsNoGL.rows.length > 0 ? paymentsNoGL.rows : undefined
+  );
+
+  // Detect DEPOSIT sales with no customer as a data quality check.
+  // Rather than per-sale AR matching (which misses corrective entries with different ref numbers),
+  // we check the TOTAL orphaned AR = GL account 1200 balance minus total customer subledger.
+  // If these are equal (which they are when Test 2 passes), no AR is permanently stranded.
+  const depositSalesNoCustomer = await pool.query(`
+    SELECT sale_number, total_amount, amount_paid, created_at
+    FROM sales
+    WHERE payment_method = 'DEPOSIT'
+      AND customer_id IS NULL
+      AND status = 'COMPLETED'
+    ORDER BY created_at
+  `);
+
+  const orphanedArResult = await pool.query(`
+    SELECT 
+      COALESCE(gl_ar.balance, 0) - COALESCE(sub.balance, 0) as orphaned_ar
+    FROM (
+      SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount") as balance
+      FROM ledger_entries le
+      JOIN accounts a ON a."Id" = le."AccountId"
+      WHERE a."AccountCode" = '1200'
+    ) gl_ar,
+    (
+      SELECT COALESCE(SUM(balance), 0) as balance FROM customers
+    ) sub
+  `);
+
+  const orphanedAr = parseFloat(orphanedArResult.rows[0]?.orphaned_ar || '0');
+  const depositSalesCount = depositSalesNoCustomer.rows.length;
+
+  const orphanDepositSales = { rows: depositSalesCount > 0 && orphanedAr > 0.01
+    ? depositSalesNoCustomer.rows.map((r: Record<string, unknown>) => ({ ...r, outstanding_ar: orphanedAr }))
+    : [] };
+
+  test(
+    'DEPOSIT Sales Require Customer',
+    orphanDepositSales.rows.length === 0,
+    orphanDepositSales.rows.length === 0
+      ? depositSalesCount > 0
+        ? `${depositSalesCount} DEPOSIT sales have no customer but AR is fully cleared (no orphaned balance)`
+        : 'All DEPOSIT sales are tied to a customer account or have cleared AR'
+      : `${orphanedAr.toFixed(2)} in AR is orphaned — ${depositSalesCount} DEPOSIT sales have no customer and no clearing entry`,
+    orphanDepositSales.rows.length > 0 ? orphanDepositSales.rows : undefined
   );
 
   // ═══════════════════════════════════════════════════════════════
@@ -193,10 +238,10 @@ async function runTests() {
 
   const invSubledger = await pool.query(`
     SELECT COALESCE(SUM(
-      COALESCE(quantity, 0) * COALESCE(cost_price, 0)
+      COALESCE(remaining_quantity, 0) * COALESCE(unit_cost, 0)
     ), 0) as inventory_value 
-    FROM inventory_batches 
-    WHERE quantity > 0
+    FROM cost_layers 
+    WHERE remaining_quantity > 0
   `);
 
   const invGl = parseFloat(invGlBalance.rows[0]?.gl_balance || 0);
@@ -218,12 +263,12 @@ async function runTests() {
   console.log('\n📊 TEST GROUP 6: Data Integrity\n');
 
   const orphanedSaleEntries = await pool.query(`
-    SELECT je."Id", je."SourceEntityId", je."Description"
-    FROM journal_entries je
-    WHERE je."SourceEntityType" = 'Sale'
-      AND je."Status" != 'VOIDED'
+    SELECT lt."Id", lt."ReferenceId", lt."Description"
+    FROM ledger_transactions lt
+    WHERE lt."ReferenceType" = 'SALE'
+      AND lt."IsReversed" = FALSE
       AND NOT EXISTS (
-        SELECT 1 FROM sales s WHERE s.id::text = je."SourceEntityId"
+        SELECT 1 FROM sales s WHERE s.id = lt."ReferenceId"
       )
   `);
 

@@ -223,6 +223,7 @@ export const acquireAsset = async (
       lines,
       userId: data.userId,
       idempotencyKey: `ASSET-ACQ-${result.rows[0].id}`,
+      source: 'PURCHASE_BILL' as const,
     }, undefined, client);
 
     logger.info('Fixed asset acquired', { assetNumber, cost: data.acquisitionCost });
@@ -329,6 +330,7 @@ export const runMonthlyDepreciation = async (
         lines,
         userId,
         idempotencyKey: `DEPR-${asset.id}-${year}-${month}`,
+        source: 'ASSET_DEPRECIATION' as const,
       }, undefined, client);
 
       // Record depreciation entry
@@ -462,6 +464,7 @@ export const disposeAsset = async (
       lines,
       userId: data.userId,
       idempotencyKey: `ASSET-DISP-${asset.id}`,
+      source: 'PURCHASE_BILL' as const,
     }, undefined, client);
 
     // Update asset record

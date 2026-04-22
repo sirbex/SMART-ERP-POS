@@ -209,4 +209,21 @@ router.get('/sale/:saleId/applications', asyncHandler(async (req, res) => {
     });
 }));
 
+/**
+ * POST /api/deposits/backfill-gl
+ * Backfill GL entries for orphaned deposits (admin only)
+ */
+router.post('/backfill-gl', requirePermission('accounting.approve'), asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const result = await depositsService.backfillOrphanedDepositGL(pool);
+
+    res.json({
+        success: true,
+        data: result,
+        message: result.backfilled > 0
+            ? `Backfilled GL entries for ${result.backfilled} deposit(s)`
+            : 'No orphaned deposits found — all deposits have GL entries'
+    });
+}));
+
 export default router;

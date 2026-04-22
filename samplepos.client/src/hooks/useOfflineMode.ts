@@ -7,15 +7,38 @@
  * Storage key: 'pos_offline_sales'
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useOfflineContext } from '../contexts/OfflineContext';
 import { decrementLocalStock, restoreLocalStock } from '../services/offlineCatalogService';
 import { syncOfflineCustomers, acquireSyncLock, releaseSyncLock } from '../services/offlineSyncEngine';
+import {
+  appendEvent,
+  getAllEvents,
+  getAllSyncState,
+  markSynced,
+  markReview,
+  markFailed,
+  markCancelled,
+  resetToPending,
+  generateEventKey,
+  clearEventJournal,
+  migrateLegacyOfflineSales,
+  migrateLegacyOfflineOrders,
+  type PosOfflineEvent,
+  type EventLine,
+  type EventPayment,
+  type SyncStateMap,
+} from '../lib/offlineEventJournal';
+import {
+  deriveCompletedSales,
+  deriveOpenOrders,
+  type DerivedSale,
+  type DerivedOrder,
+} from '../lib/offlineEventSelectors';
 import type { AxiosInstance, AxiosError } from 'axios';
 
-// ── Storage ───────────────────────────────────────────────────
-const OFFLINE_SALES_KEY = 'pos_offline_sales';
-const OFFLINE_ORDERS_KEY = 'pos_offline_orders';
+// ── Re-export derived types for consumers ─────────────────────
+export type { DerivedSale, DerivedOrder };
 
 // ── Types ─────────────────────────────────────────────────────
 export interface OfflineSaleLineItem {
@@ -92,342 +115,356 @@ export interface OfflineOrder {
   syncError?: string;
 }
 
-// ── Helpers ───────────────────────────────────────────────────
-function generateIdempotencyKey(): string {
-  return `ofl_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
-}
-
-function loadQueue(): OfflineSale[] {
-  try {
-    const raw = localStorage.getItem(OFFLINE_SALES_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Filter out corrupted entries
-    return parsed.filter(
-      (s: unknown): s is OfflineSale =>
-        typeof s === 'object' && s !== null &&
-        'idempotencyKey' in s && 'offlineId' in s &&
-        'data' in s && 'status' in s
-    );
-  } catch {
-    return [];
-  }
-}
-
-function saveQueue(queue: OfflineSale[]): void {
-  localStorage.setItem(OFFLINE_SALES_KEY, JSON.stringify(queue));
-}
-
-// ── Order Queue Helpers ───────────────────────────────────────
-function loadOrderQueue(): OfflineOrder[] {
-  try {
-    const raw = localStorage.getItem(OFFLINE_ORDERS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (o: unknown): o is OfflineOrder =>
-        typeof o === 'object' && o !== null &&
-        'idempotencyKey' in o && 'offlineId' in o &&
-        'data' in o && 'status' in o
-    );
-  } catch {
-    return [];
-  }
-}
-
-function saveOrderQueue(queue: OfflineOrder[]): void {
-  localStorage.setItem(OFFLINE_ORDERS_KEY, JSON.stringify(queue));
+// ── Internal snapshot helper ──────────────────────────────────
+function readJournalSnapshot(): { events: PosOfflineEvent[]; syncState: SyncStateMap } {
+  return { events: getAllEvents(), syncState: getAllSyncState() };
 }
 
 // ── Hook ──────────────────────────────────────────────────────
 export function useOfflineMode() {
   const { isOnline } = useOfflineContext();
-  const [syncQueue, setSyncQueue] = useState<OfflineSale[]>(() => loadQueue());
-  const [orderQueue, setOrderQueue] = useState<OfflineOrder[]>(() => loadOrderQueue());
   const isSyncingRef = useRef(false);
 
-  // Keep localStorage in sync with state
+  // Run legacy migration once on first mount
   useEffect(() => {
-    saveQueue(syncQueue);
-  }, [syncQueue]);
-
-  useEffect(() => {
-    saveOrderQueue(orderQueue);
-  }, [orderQueue]);
-
-  // Re-read queue when background or app-level sync updates localStorage
-  useEffect(() => {
-    const handleQueueUpdate = () => {
-      setSyncQueue(loadQueue());
-      setOrderQueue(loadOrderQueue());
-    };
-    window.addEventListener('offline-queue-updated', handleQueueUpdate);
-    return () => window.removeEventListener('offline-queue-updated', handleQueueUpdate);
+    migrateLegacyOfflineSales();
+    migrateLegacyOfflineOrders();
   }, []);
 
-  /**
-   * Save an order for offline sync (Order→Payment mode).
-   * – No stock deduction (orders don't deduct inventory)
-   * – No payment lines (payment happens later at the cashier)
-   * – Assigns idempotency key for server-side deduplication
-   */
-  const saveOrderOffline = useCallback(
-    (orderData: OfflineOrderData): string => {
-      const idempotencyKey = generateIdempotencyKey();
-      const offlineId = `OFFLINE-ORD-${Date.now().toString(36).toUpperCase()}`;
+  // ── Journal state: re-derive on every journal change ─────
+  const [snapshot, setSnapshot] = useState<{ events: PosOfflineEvent[]; syncState: SyncStateMap }>(
+    () => readJournalSnapshot()
+  );
 
-      const order: OfflineOrder = {
-        idempotencyKey,
-        offlineId,
-        timestamp: Date.now(),
-        data: orderData,
-        status: 'PENDING_SYNC',
-      };
+  const refreshSnapshot = useCallback(() => {
+    setSnapshot(readJournalSnapshot());
+  }, []);
 
-      setOrderQueue((prev) => [...prev, order]);
-      return offlineId;
-    },
-    []
+  useEffect(() => {
+    window.addEventListener('offline-queue-updated', refreshSnapshot);
+    return () => window.removeEventListener('offline-queue-updated', refreshSnapshot);
+  }, [refreshSnapshot]);
+
+  // ── Derived state ─────────────────────────────────────────
+  const syncQueue: DerivedSale[] = useMemo(
+    () => deriveCompletedSales(snapshot.events, snapshot.syncState),
+    [snapshot]
+  );
+
+  const orderQueue: DerivedOrder[] = useMemo(
+    () => deriveOpenOrders(snapshot.events, snapshot.syncState),
+    [snapshot]
+  );
+
+  const pendingCount = useMemo(
+    () => syncQueue.filter((s) => s.syncStatus === 'PENDING').length,
+    [syncQueue]
+  );
+
+  const reviewCount = useMemo(
+    () => syncQueue.filter((s) => s.syncStatus === 'REVIEW').length,
+    [syncQueue]
+  );
+
+  const failedCount = useMemo(
+    () => syncQueue.filter((s) => s.syncStatus === 'FAILED').length,
+    [syncQueue]
+  );
+
+  const pendingOrderCount = useMemo(
+    () => orderQueue.filter((o) => o.syncStatus === 'PENDING').length,
+    [orderQueue]
   );
 
   /**
-   * Save a sale for offline sync.
-   * – Assigns idempotency key
-   * – Decrements local stock
-   * – Tags sale as PENDING_SYNC with cashRegisterSessionId = null
+   * Save a pending order for offline sync (Dispenser → Cashier mode).
+   * Appends ORDER_CREATED event — no stock deduction.
+   */
+  const saveOrderOffline = useCallback(
+    (orderData: OfflineOrderData): string => {
+      const key = generateEventKey();
+      const orderId = `ofl_ord_${Date.now().toString(36)}`;
+      const offlineId = `OFFLINE-ORD-${Date.now().toString(36).toUpperCase()}`;
+
+      appendEvent({
+        eventType: 'ORDER_CREATED',
+        key,
+        orderId,
+        offlineId,
+        customerId: orderData.customerId,
+        notes: orderData.notes,
+        lines: orderData.items.map(
+          (item): EventLine => ({
+            productId: item.productId,
+            productName: item.productName,
+            sku: '',
+            uom: 'PIECE',
+            uomId: item.uomId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            costPrice: 0,
+            subtotal: item.quantity * item.unitPrice - (item.discountAmount ?? 0),
+            taxAmount: 0,
+            discountAmount: item.discountAmount,
+          })
+        ),
+        ts: Date.now(),
+      });
+
+      refreshSnapshot();
+      return offlineId;
+    },
+    [refreshSnapshot]
+  );
+
+  /**
+   * Save a completed sale for offline sync (Direct Sale mode).
+   * Deducts local stock and appends SALE_COMPLETED event.
    */
   const saveSaleOffline = useCallback(
     (saleData: OfflineSaleData): string => {
-      const idempotencyKey = generateIdempotencyKey();
+      const key = generateEventKey();
+      const orderId = `ofl_ord_${Date.now().toString(36)}`;
       const offlineId = `OFFLINE-${Date.now().toString(36).toUpperCase()}`;
 
-      // Decrement local stock for each line item
+      // Decrement local stock for inventory items
       const stockDeductions: Array<{ productId: string; quantity: number }> = [];
       for (const item of saleData.lineItems) {
-        // Skip custom / service items
         if (item.productId.startsWith('custom_')) continue;
         const ok = decrementLocalStock(item.productId, item.quantity);
         if (!ok) {
-          // Restore any already-decremented stock and throw
-          for (const d of stockDeductions) {
-            restoreLocalStock(d.productId, d.quantity);
-          }
+          for (const d of stockDeductions) restoreLocalStock(d.productId, d.quantity);
           throw new Error(`Insufficient offline stock for "${item.productName}"`);
         }
         stockDeductions.push({ productId: item.productId, quantity: item.quantity });
       }
 
-      // Strip disallowed offline payment methods (deposit requires server).
-      // Keep CREDIT lines when a customer is attached — the sync engine
-      // will resolve the offline customer first so the backend can create the invoice.
+      // Strip disallowed payment methods (DEPOSIT requires server)
       const hasCustomer = !!saleData.customerId;
-      const cleanedPaymentLines = saleData.paymentLines.filter(
-        (pl) =>
-          pl.paymentMethod === 'CASH' ||
-          pl.paymentMethod === 'CARD' ||
-          pl.paymentMethod === 'MOBILE_MONEY' ||
-          (pl.paymentMethod === 'CREDIT' && hasCustomer)
-      ) as OfflineSalePaymentLine[];
+      const cleanedPayments: EventPayment[] = saleData.paymentLines
+        .filter(
+          (pl) =>
+            pl.paymentMethod === 'CASH' ||
+            pl.paymentMethod === 'CARD' ||
+            pl.paymentMethod === 'MOBILE_MONEY' ||
+            (pl.paymentMethod === 'CREDIT' && hasCustomer)
+        )
+        .map((pl) => ({
+          paymentMethod: pl.paymentMethod,
+          amount: pl.amount,
+          reference: pl.reference,
+        }));
 
-      // Ensure at least one payment line (fallback to CASH for the total)
-      if (cleanedPaymentLines.length === 0) {
-        cleanedPaymentLines.push({ paymentMethod: 'CASH', amount: saleData.totalAmount });
+      if (cleanedPayments.length === 0) {
+        cleanedPayments.push({ paymentMethod: 'CASH', amount: saleData.totalAmount });
       }
 
-      const sale: OfflineSale = {
-        idempotencyKey,
+      appendEvent({
+        eventType: 'SALE_COMPLETED',
+        key,
+        orderId,
         offlineId,
-        timestamp: Date.now(),
-        data: {
-          ...saleData,
-          cashRegisterSessionId: null, // Will be assigned on sync
-          paymentLines: cleanedPaymentLines,
-        },
-        status: 'PENDING_SYNC',
+        customerId: saleData.customerId,
+        lines: saleData.lineItems.map(
+          (item): EventLine => ({
+            productId: item.productId,
+            productName: item.productName,
+            sku: item.sku,
+            uom: item.uom,
+            uomId: item.uomId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            costPrice: item.costPrice,
+            subtotal: item.subtotal,
+            taxAmount: item.taxAmount,
+          })
+        ),
+        payments: cleanedPayments,
+        subtotal: saleData.subtotal,
+        discountAmount: saleData.discountAmount,
+        taxAmount: saleData.taxAmount,
+        totalAmount: saleData.totalAmount,
         stockDeductions,
-      };
+        ts: Date.now(),
+      });
 
-      setSyncQueue((prev) => [...prev, sale]);
+      refreshSnapshot();
       return offlineId;
     },
-    []
+    [refreshSnapshot]
   );
 
   /**
-   * Sync all pending offline sales to the backend.
-   * Uses the dedicated /pos/sync-offline-sales endpoint
-   * which handles idempotency, stock re-validation, and accounting.
+   * Sync all PENDING / FAILED events to the backend via POST /api/pos/sync-events.
+   * Returns a results array for toast notifications.
    */
   const syncPendingSales = useCallback(
-    async (apiClient: AxiosInstance) => {
+    async (
+      apiClient: AxiosInstance
+    ): Promise<Array<{ offlineId: string; success: boolean; error?: string }>> => {
       if (!navigator.onLine || isSyncingRef.current) return [];
-
-      if (!acquireSyncLock()) return []; // Engine or another sync already in progress
-
-      const currentQueue = loadQueue(); // Read fresh from localStorage
-      const pending = currentQueue.filter((s) => s.status === 'PENDING_SYNC');
-      if (pending.length === 0) {
-        releaseSyncLock();
-        return [];
-      }
+      if (!acquireSyncLock()) return [];
 
       isSyncingRef.current = true;
-
       const results: Array<{ offlineId: string; success: boolean; error?: string }> = [];
 
       try {
-        // Sync offline customers first and resolve temp IDs
+        // Sync offline customers first so we can resolve temp IDs
         let customerIdMap = new Map<string, string>();
         try {
           customerIdMap = await syncOfflineCustomers();
         } catch {
-          // Customer sync failure is non-fatal — sales without offline customers still sync
+          // Non-fatal — sales without offline customers still sync
         }
 
-        for (const sale of pending) {
-          try {
-            // Resolve offline customer IDs to real UUIDs
-            if (sale.data.customerId && sale.data.customerId.startsWith('offline_cust_')) {
-              let realId = customerIdMap.get(sale.data.customerId);
+        const { events, syncState } = readJournalSnapshot();
+        const unsyncedEvents = events.filter((e) => {
+          const s = syncState[e.key]?.status ?? 'PENDING';
+          return s === 'PENDING' || s === 'FAILED';
+        });
 
-              // If not in map (customer already synced previously), try to look up by name
-              if (!realId) {
-                try {
-                  // Check localStorage for the original customer name
-                  const offlineCusts = JSON.parse(localStorage.getItem('pos_offline_customers') || '[]') as Array<{ id: string; name: string }>;
-                  const custEntry = offlineCusts.find(c => c.id === sale.data.customerId);
-                  if (custEntry?.name) {
-                    const searchResp = await apiClient.get('/customers/search', { params: { q: custEntry.name, limit: 1 } });
-                    const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
-                    if (found?.id) realId = found.id;
-                  }
-                } catch {
-                  // Search failed — will fall through to clearing the ID
+        if (unsyncedEvents.length === 0) return [];
+
+        for (const event of unsyncedEvents) {
+          // Resolve offline customer IDs in events that carry customerId
+          let resolvedCustomerId =
+            'customerId' in event ? event.customerId : undefined;
+          if (resolvedCustomerId?.startsWith('offline_cust_')) {
+            let realId = customerIdMap.get(resolvedCustomerId);
+            if (!realId) {
+              try {
+                const offlineCusts = JSON.parse(
+                  localStorage.getItem('pos_offline_customers') || '[]'
+                ) as Array<{ id: string; name: string }>;
+                const custEntry = offlineCusts.find((c) => c.id === resolvedCustomerId);
+                if (custEntry?.name) {
+                  const searchResp = await apiClient.get('/customers/search', {
+                    params: { q: custEntry.name, limit: 1 },
+                  });
+                  const found = (searchResp.data?.data as Array<{ id: string }>)?.[0];
+                  if (found?.id) realId = found.id;
                 }
-              }
-
-              if (realId) {
-                sale.data.customerId = realId;
-              } else {
-                // Can't resolve — clear the offline customer ID so the sale can still sync as walk-in
-                sale.data.customerId = undefined;
+              } catch {
+                // Search failed — will fall through
               }
             }
+            resolvedCustomerId = realId ?? undefined;
+          }
 
-            // Use the dedicated offline-sync endpoint (idempotency-protected)
-            const response = await apiClient.post('/pos/sync-offline-sales', {
-              idempotencyKey: sale.idempotencyKey,
-              offlineId: sale.offlineId,
-              saleData: sale.data,
-              offlineTimestamp: sale.timestamp,
+          // Build resolved event copy (avoid mutating journal)
+          const resolvedEvent =
+            resolvedCustomerId !== ('customerId' in event ? event.customerId : undefined)
+              ? { ...event, customerId: resolvedCustomerId }
+              : event;
+
+          try {
+            const response = await apiClient.post('/pos/sync-events', {
+              event: resolvedEvent,
             });
 
-            if (response.data?.success) {
-              sale.status = 'SYNCED';
-              results.push({ offlineId: sale.offlineId, success: true });
+            if (response.data?.success || response.status === 409) {
+              markSynced(event.key);
+              if (event.eventType === 'SALE_COMPLETED') {
+                results.push({ offlineId: event.offlineId, success: true });
+              }
             } else if (response.data?.requiresReview) {
-              sale.status = 'REQUIRES_REVIEW';
-              sale.syncError = response.data.error || 'Stock conflict';
-              results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
+              markReview(event.key, response.data.error);
+              if (event.eventType === 'SALE_COMPLETED') {
+                results.push({
+                  offlineId: event.offlineId,
+                  success: false,
+                  error: response.data.error ?? 'Requires review',
+                });
+              }
             } else {
-              sale.status = 'FAILED';
-              sale.syncError = response.data?.error || 'Unknown error';
-              results.push({ offlineId: sale.offlineId, success: false, error: sale.syncError });
+              markFailed(event.key, response.data?.error);
+              if (event.eventType === 'SALE_COMPLETED') {
+                results.push({
+                  offlineId: event.offlineId,
+                  success: false,
+                  error: response.data?.error ?? 'Unknown error',
+                });
+              }
             }
           } catch (error: unknown) {
-            // If server is still unreachable, leave as PENDING_SYNC
-            const axiosError = error as AxiosError;
-            const serverMsg = (axiosError.response?.data as Record<string, unknown>)?.error;
-            const errMsg = (typeof serverMsg === 'string' ? serverMsg : '') || axiosError.message || 'Unknown sync error';
-            if (axiosError.code === 'ERR_NETWORK' || !navigator.onLine) {
-              results.push({ offlineId: sale.offlineId, success: false, error: 'Still offline' });
-            } else {
-              sale.status = 'FAILED';
-              sale.syncError = errMsg;
-              results.push({ offlineId: sale.offlineId, success: false, error: errMsg });
+            const axErr = error as AxiosError;
+            if (axErr.code === 'ERR_NETWORK' || !navigator.onLine) {
+              if (event.eventType === 'SALE_COMPLETED') {
+                results.push({ offlineId: event.offlineId, success: false, error: 'Still offline' });
+              }
+              break;
+            }
+            // 409 = idempotency hit → treat as success
+            if (axErr.response?.status === 409) {
+              markSynced(event.key);
+              if (event.eventType === 'SALE_COMPLETED') {
+                results.push({ offlineId: event.offlineId, success: true });
+              }
+              continue;
+            }
+            const serverMsg = (axErr.response?.data as Record<string, unknown>)?.error;
+            const errMsg =
+              (typeof serverMsg === 'string' ? serverMsg : '') ||
+              axErr.message ||
+              'Sync error';
+            markFailed(event.key, errMsg);
+            if (event.eventType === 'SALE_COMPLETED') {
+              results.push({ offlineId: event.offlineId, success: false, error: errMsg });
             }
           }
         }
 
-        // Rebuild queue: remove synced, keep everything else
-        const updatedQueue = currentQueue.filter((s) => {
-          const synced = pending.find((p) => p.idempotencyKey === s.idempotencyKey);
-          return !synced || synced.status !== 'SYNCED';
-        });
-        // Update failed/review statuses
-        for (const p of pending) {
-          const idx = updatedQueue.findIndex((q) => q.idempotencyKey === p.idempotencyKey);
-          if (idx >= 0) {
-            updatedQueue[idx] = p;
-          }
-        }
-
-        setSyncQueue(updatedQueue);
+        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
       } finally {
         isSyncingRef.current = false;
         releaseSyncLock();
       }
+
+      refreshSnapshot();
       return results;
     },
-    [syncQueue]
+    [refreshSnapshot]
   );
 
   /**
-   * Cancel / remove an offline sale and restore stock.
+   * Cancel an unsynced sale: restore stock and mark the event CANCELLED.
+   * The event is NOT removed from the journal (immutable).
    */
   const cancelOfflineSale = useCallback(
-    (idempotencyKey: string) => {
-      setSyncQueue((prev) => {
-        const sale = prev.find((s) => s.idempotencyKey === idempotencyKey);
-        if (sale) {
-          for (const d of sale.stockDeductions) {
-            restoreLocalStock(d.productId, d.quantity);
-          }
+    (key: string) => {
+      const events = getAllEvents();
+      const event = events.find((e) => e.key === key && e.eventType === 'SALE_COMPLETED');
+      if (event && event.eventType === 'SALE_COMPLETED') {
+        for (const d of event.stockDeductions) {
+          restoreLocalStock(d.productId, d.quantity);
         }
-        return prev.filter((s) => s.idempotencyKey !== idempotencyKey);
-      });
+      }
+      markCancelled(key);
+      refreshSnapshot();
     },
-    []
+    [refreshSnapshot]
   );
 
+  /** Clear the entire journal (dev reset / "Clear All Data"). */
   const clearSyncQueue = useCallback(() => {
-    setSyncQueue([]);
-    localStorage.removeItem(OFFLINE_SALES_KEY);
-  }, []);
+    clearEventJournal();
+    refreshSnapshot();
+  }, [refreshSnapshot]);
 
-  /**
-   * Retry a single failed/review sale by resetting it to PENDING_SYNC.
-   */
-  const retryFailedSale = useCallback((idempotencyKey: string) => {
-    setSyncQueue((prev) =>
-      prev.map((s) =>
-        s.idempotencyKey === idempotencyKey &&
-          (s.status === 'FAILED' || s.status === 'REQUIRES_REVIEW')
-          ? { ...s, status: 'PENDING_SYNC' as const, syncError: undefined }
-          : s
-      )
-    );
-  }, []);
+  /** Retry a single FAILED or REVIEW sale by resetting it to PENDING. */
+  const retryFailedSale = useCallback(
+    (key: string) => {
+      resetToPending([key]);
+      refreshSnapshot();
+    },
+    [refreshSnapshot]
+  );
 
-  /**
-   * Retry all failed and requires-review sales at once.
-   */
+  /** Retry all FAILED and REVIEW sales at once. */
   const retryAllFailed = useCallback(() => {
-    setSyncQueue((prev) =>
-      prev.map((s) =>
-        s.status === 'FAILED' || s.status === 'REQUIRES_REVIEW'
-          ? { ...s, status: 'PENDING_SYNC' as const, syncError: undefined }
-          : s
-      )
-    );
-  }, []);
-
-  const pendingCount = syncQueue.filter((s) => s.status === 'PENDING_SYNC').length;
-  const reviewCount = syncQueue.filter((s) => s.status === 'REQUIRES_REVIEW').length;
-  const failedCount = syncQueue.filter((s) => s.status === 'FAILED').length;
-  const pendingOrderCount = orderQueue.filter((o) => o.status === 'PENDING_SYNC').length;
+    resetToPending();
+    refreshSnapshot();
+  }, [refreshSnapshot]);
 
   return {
     isOnline,
@@ -446,3 +483,4 @@ export function useOfflineMode() {
     failedCount,
   };
 }
+

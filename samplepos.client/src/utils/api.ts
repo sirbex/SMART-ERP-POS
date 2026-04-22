@@ -378,6 +378,7 @@ export const api = {
       paymentMethod: string;
       paymentReceived: number;
       paymentLines?: { paymentMethod: string; amount: number; reference?: string }[];
+      customerId?: string | null;
       cashRegisterSessionId?: string;
     }) => apiClient.post<ApiResponse>(`orders/${id}/complete`, data),
     cancel: (id: string, data: { reason: string }) =>
@@ -423,6 +424,16 @@ export const api = {
       reason: string;
       userId: string;
     }) => apiClient.post<ApiResponse>('inventory/adjust', data),
+    adjustBatch: (data: {
+      batchId?: string;
+      productId: string;
+      quantity: number;
+      direction: 'IN' | 'OUT';
+      reason: 'ADJUSTMENT' | 'DAMAGE' | 'EXPIRY' | 'PHYSICAL_COUNT' | 'WRITE_OFF';
+      notes: string;
+      userId: string;
+      documentId?: string;
+    }) => apiClient.post<ApiResponse>('inventory/adjust-batch', data),
   },
 
   // Purchase Orders
@@ -490,6 +501,7 @@ export const api = {
       movementType?: string;
       startDate?: string;
       endDate?: string;
+      search?: string;
     }) => apiClient.get<ApiResponse>('stock-movements', { params }),
     byProduct: (productId: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`stock-movements/product/${productId}`, { params }),

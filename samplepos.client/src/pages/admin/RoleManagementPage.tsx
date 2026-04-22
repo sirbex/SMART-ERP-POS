@@ -17,6 +17,7 @@ import {
 } from '../../hooks/useRbac';
 import type { Role, Permission } from '../../types/rbac';
 import toast from 'react-hot-toast';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // Module display order (enterprise: most critical first)
 const MODULE_ORDER: string[] = [
@@ -320,6 +321,10 @@ export default function RoleManagementPage() {
     setPermissionSearch('');
   };
 
+  useSubmitOnEnter(showCreateModal, !createRole.isPending, handleCreate);
+  useSubmitOnEnter(showEditModal, !updateRole.isPending, handleUpdate);
+  useSubmitOnEnter(showSystemRoleConfirm, !updateRole.isPending, doUpdate);
+
   if (rolesLoading || permissionsLoading) {
     return (
       <Layout>
@@ -567,9 +572,8 @@ export default function RoleManagementPage() {
                       return (
                         <div
                           key={module}
-                          className={`bg-gray-50 rounded-lg p-3 border ${
-                            selectedCount > 0 ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200'
-                          }`}
+                          className={`bg-gray-50 rounded-lg p-3 border ${selectedCount > 0 ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200'
+                            }`}
                         >
                           <div className="flex items-center justify-between mb-2">
                             <label className="flex items-center gap-2">

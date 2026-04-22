@@ -5,17 +5,22 @@
 
 import { useState } from 'react';
 import Decimal from 'decimal.js';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import type { QuotationStatus } from '@shared/types/quotation';
 import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge, normalizeStatus } from '@shared/types/quotation';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useAuthStore } from '../../stores/authStore';
 
 export default function QuotationsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { isAdmin } = useAuthStore();
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   // Default to showing active quotations (exclude CONVERTED and CANCELLED)
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | 'ALL' | 'ACTIVE'>('ACTIVE');
@@ -399,6 +404,39 @@ export default function QuotationsPage() {
                           >
                             Open in POS
                           </button>
+                        )}
+                        {normalizeStatus(quote.status) === 'CANCELLED' && isAdmin() && (
+                          deleteConfirmId === quote.id ? (
+                            <span className="inline-flex items-center gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  quotationApi.permanentlyDeleteQuotation(quote.id).then(() => {
+                                    toast.success('Quotation permanently deleted');
+                                    queryClient.invalidateQueries({ queryKey: ['quotations'] });
+                                    setDeleteConfirmId(null);
+                                  }).catch(() => toast.error('Failed to delete quotation'));
+                                }}
+                                className="text-red-600 hover:text-red-900 font-semibold"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }}
+                                className="text-gray-500 hover:text-gray-700"
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(quote.id); }}
+                              className="text-red-600 hover:text-red-900"
+                              title="Permanently delete this cancelled quotation"
+                            >
+                              Delete
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>

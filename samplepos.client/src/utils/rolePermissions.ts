@@ -17,9 +17,13 @@ export enum Permission {
     DELETE_SALES = 'DELETE_SALES',
     VOID_SALES = 'VOID_SALES',
     REFUND_SALES = 'REFUND_SALES',
+    REPRINT_RECEIPT = 'REPRINT_RECEIPT',
 
     // Inventory
     VIEW_INVENTORY = 'VIEW_INVENTORY',
+    CREATE_INVENTORY = 'CREATE_INVENTORY',
+    EDIT_INVENTORY = 'EDIT_INVENTORY',
+    DELETE_INVENTORY = 'DELETE_INVENTORY',
     MANAGE_INVENTORY = 'MANAGE_INVENTORY',
     ADJUST_STOCK = 'ADJUST_STOCK',
     VIEW_STOCK_MOVEMENTS = 'VIEW_STOCK_MOVEMENTS',
@@ -27,16 +31,19 @@ export enum Permission {
     // Purchase Orders
     VIEW_PURCHASE_ORDERS = 'VIEW_PURCHASE_ORDERS',
     CREATE_PURCHASE_ORDERS = 'CREATE_PURCHASE_ORDERS',
+    EDIT_PURCHASE_ORDERS = 'EDIT_PURCHASE_ORDERS',
     APPROVE_PURCHASE_ORDERS = 'APPROVE_PURCHASE_ORDERS',
     RECEIVE_GOODS = 'RECEIVE_GOODS',
 
     // Customers
     VIEW_CUSTOMERS = 'VIEW_CUSTOMERS',
+    CREATE_CUSTOMERS = 'CREATE_CUSTOMERS',
     MANAGE_CUSTOMERS = 'MANAGE_CUSTOMERS',
     MANAGE_CUSTOMER_GROUPS = 'MANAGE_CUSTOMER_GROUPS',
 
     // Suppliers
     VIEW_SUPPLIERS = 'VIEW_SUPPLIERS',
+    CREATE_SUPPLIERS = 'CREATE_SUPPLIERS',
     MANAGE_SUPPLIERS = 'MANAGE_SUPPLIERS',
 
     // Reports
@@ -48,10 +55,12 @@ export enum Permission {
     MANAGE_USERS = 'MANAGE_USERS',
     MANAGE_ROLES = 'MANAGE_ROLES',
     VIEW_AUDIT_LOG = 'VIEW_AUDIT_LOG',
+    VIEW_SETTINGS = 'VIEW_SETTINGS',
     MANAGE_SETTINGS = 'MANAGE_SETTINGS',
 
     // Accounting
     VIEW_ACCOUNTING = 'VIEW_ACCOUNTING',
+    MANAGE_ACCOUNTING = 'MANAGE_ACCOUNTING',
     MANAGE_CHART_OF_ACCOUNTS = 'MANAGE_CHART_OF_ACCOUNTS',
     POST_JOURNAL_ENTRIES = 'POST_JOURNAL_ENTRIES',
     VIEW_GENERAL_LEDGER = 'VIEW_GENERAL_LEDGER',
@@ -61,10 +70,44 @@ export enum Permission {
     CREATE_EXPENSES = 'CREATE_EXPENSES',
     APPROVE_EXPENSES = 'APPROVE_EXPENSES',
 
+    // POS
+    VIEW_POS = 'VIEW_POS',
+    USE_POS = 'USE_POS',
+    VOID_POS = 'VOID_POS',
+    APPROVE_POS = 'APPROVE_POS',
+
+    // Orders (POS order queue)
+    VIEW_ORDERS = 'VIEW_ORDERS',
+    CREATE_ORDERS = 'CREATE_ORDERS',
+    PAY_ORDERS = 'PAY_ORDERS',
+    CANCEL_ORDERS = 'CANCEL_ORDERS',
+
     // Quotations
     VIEW_QUOTATIONS = 'VIEW_QUOTATIONS',
     CREATE_QUOTATIONS = 'CREATE_QUOTATIONS',
     CONVERT_QUOTATIONS = 'CONVERT_QUOTATIONS',
+
+    // Distribution / Sales Orders
+    VIEW_DISTRIBUTION = 'VIEW_DISTRIBUTION',
+    CREATE_DISTRIBUTION = 'CREATE_DISTRIBUTION',
+    EDIT_DISTRIBUTION = 'EDIT_DISTRIBUTION',
+    APPROVE_DISTRIBUTION = 'APPROVE_DISTRIBUTION',
+
+    // Delivery
+    VIEW_DELIVERY = 'VIEW_DELIVERY',
+    CREATE_DELIVERY = 'CREATE_DELIVERY',
+
+    // Banking
+    VIEW_BANKING = 'VIEW_BANKING',
+    MANAGE_BANKING = 'MANAGE_BANKING',
+
+    // CRM
+    VIEW_CRM = 'VIEW_CRM',
+    MANAGE_CRM = 'MANAGE_CRM',
+
+    // HR & Payroll
+    VIEW_HR = 'VIEW_HR',
+    MANAGE_HR = 'MANAGE_HR',
 
     // Admin Panel
     ACCESS_ADMIN_PANEL = 'ACCESS_ADMIN_PANEL',
@@ -89,9 +132,13 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         Permission.DELETE_SALES,
         Permission.VOID_SALES,
         Permission.REFUND_SALES,
+        Permission.REPRINT_RECEIPT,
 
-        // Inventory
+        // Inventory (full CRUD + manage)
         Permission.VIEW_INVENTORY,
+        Permission.CREATE_INVENTORY,
+        Permission.EDIT_INVENTORY,
+        Permission.DELETE_INVENTORY,
         Permission.MANAGE_INVENTORY,
         Permission.ADJUST_STOCK,
         Permission.VIEW_STOCK_MOVEMENTS,
@@ -99,14 +146,17 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         // Purchase Orders
         Permission.VIEW_PURCHASE_ORDERS,
         Permission.CREATE_PURCHASE_ORDERS,
+        Permission.EDIT_PURCHASE_ORDERS,
         Permission.APPROVE_PURCHASE_ORDERS,
         Permission.RECEIVE_GOODS,
 
         // Customers & Suppliers
         Permission.VIEW_CUSTOMERS,
+        Permission.CREATE_CUSTOMERS,
         Permission.MANAGE_CUSTOMERS,
         Permission.MANAGE_CUSTOMER_GROUPS,
         Permission.VIEW_SUPPLIERS,
+        Permission.CREATE_SUPPLIERS,
         Permission.MANAGE_SUPPLIERS,
 
         // Reports
@@ -114,9 +164,12 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         Permission.VIEW_FINANCIAL_REPORTS,
         Permission.EXPORT_REPORTS,
 
-        // Accounting
+        // Accounting (full access except admin-level)
         Permission.VIEW_ACCOUNTING,
         Permission.VIEW_GENERAL_LEDGER,
+        Permission.MANAGE_ACCOUNTING,
+        Permission.MANAGE_CHART_OF_ACCOUNTS,
+        Permission.POST_JOURNAL_ENTRIES,
 
         // Expenses
         Permission.VIEW_EXPENSES,
@@ -128,6 +181,44 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         Permission.CREATE_QUOTATIONS,
         Permission.CONVERT_QUOTATIONS,
 
+        // Distribution (including approve)
+        Permission.VIEW_DISTRIBUTION,
+        Permission.CREATE_DISTRIBUTION,
+        Permission.EDIT_DISTRIBUTION,
+        Permission.APPROVE_DISTRIBUTION,
+
+        // POS
+        Permission.VIEW_POS,
+        Permission.USE_POS,
+        Permission.VOID_POS,
+        Permission.APPROVE_POS,
+
+        // Orders
+        Permission.VIEW_ORDERS,
+        Permission.CREATE_ORDERS,
+        Permission.PAY_ORDERS,
+        Permission.CANCEL_ORDERS,
+
+        // Delivery
+        Permission.VIEW_DELIVERY,
+        Permission.CREATE_DELIVERY,
+
+        // Banking
+        Permission.VIEW_BANKING,
+        Permission.MANAGE_BANKING,
+
+        // CRM
+        Permission.VIEW_CRM,
+        Permission.MANAGE_CRM,
+
+        // HR
+        Permission.VIEW_HR,
+        Permission.MANAGE_HR,
+
+        // Settings
+        Permission.VIEW_SETTINGS,
+        Permission.MANAGE_SETTINGS,
+
         // Audit
         Permission.VIEW_AUDIT_LOG,
     ],
@@ -136,26 +227,70 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         // Sales
         Permission.VIEW_SALES,
         Permission.CREATE_SALES,
+        Permission.REPRINT_RECEIPT,
+
+        // POS
+        Permission.VIEW_POS,
+        Permission.USE_POS,
 
         // Inventory (view only)
         Permission.VIEW_INVENTORY,
 
-        // Customers (view only)
+        // Customers (view + create only — no edit/delete)
         Permission.VIEW_CUSTOMERS,
+        Permission.CREATE_CUSTOMERS,
+
+        // Suppliers (view only)
+        Permission.VIEW_SUPPLIERS,
+
+        // Delivery (view only)
+        Permission.VIEW_DELIVERY,
+
+        // Settings (view only)
+        Permission.VIEW_SETTINGS,
 
         // Quotations
         Permission.VIEW_QUOTATIONS,
         Permission.CREATE_QUOTATIONS,
         Permission.CONVERT_QUOTATIONS,
+
+        // Orders
+        Permission.VIEW_ORDERS,
+        Permission.CREATE_ORDERS,
+        Permission.PAY_ORDERS,
+        Permission.CANCEL_ORDERS,
+
+        // Distribution
+        Permission.VIEW_DISTRIBUTION,
+        Permission.CREATE_DISTRIBUTION,
     ],
 
     STAFF: [
-        // Inventory (view only)
+        // All read permissions (matches backend: any key.endsWith('.read') = true)
+        Permission.VIEW_SALES,
         Permission.VIEW_INVENTORY,
         Permission.VIEW_STOCK_MOVEMENTS,
-
-        // Suppliers (view only)
+        Permission.VIEW_PURCHASE_ORDERS,
+        Permission.VIEW_CUSTOMERS,
         Permission.VIEW_SUPPLIERS,
+        Permission.VIEW_REPORTS,
+        Permission.VIEW_FINANCIAL_REPORTS,
+        Permission.VIEW_ACCOUNTING,
+        Permission.VIEW_GENERAL_LEDGER,
+        Permission.VIEW_EXPENSES,
+        Permission.VIEW_QUOTATIONS,
+        Permission.VIEW_DISTRIBUTION,
+        Permission.VIEW_DELIVERY,
+        Permission.VIEW_BANKING,
+        Permission.VIEW_CRM,
+        Permission.VIEW_HR,
+        Permission.VIEW_POS,
+        Permission.VIEW_ORDERS,
+        Permission.VIEW_SETTINGS,
+
+        // POS create + Orders create (dispenser workflow)
+        Permission.USE_POS,
+        Permission.CREATE_ORDERS,
     ],
 };
 

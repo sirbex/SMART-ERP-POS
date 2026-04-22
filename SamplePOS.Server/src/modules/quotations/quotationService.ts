@@ -408,7 +408,7 @@ export const quotationService = {
 
       // Allow updates to any non-terminal quote (OPEN status)
       const status = existing.rows[0].status;
-      if (status === 'CONVERTED' || status === 'CANCELLED') {
+      if (status === 'CONVERTED' || status === 'CANCELLED' || status === 'EXPIRED') {
         throw new Error(`Cannot update ${status} quotations`);
       }
 
@@ -927,7 +927,7 @@ export const quotationService = {
   /**
    * Delete quotation (cancel any non-terminal quote)
    */
-  async deleteQuotation(pool: Pool, id: string): Promise<void> {
+  async deleteQuotation(pool: Pool, id: string, permanent = false): Promise<void> {
     await UnitOfWork.run(pool, async (client) => {
       const result = await quotationRepository.getQuotationById(pool, id);
       if (!result) {
@@ -935,6 +935,16 @@ export const quotationService = {
       }
 
       const status = result.quotation.status;
+
+      if (permanent) {
+        // Hard delete — only allowed for CANCELLED quotations
+        if (status !== 'CANCELLED') {
+          throw new Error('Only cancelled quotations can be permanently deleted');
+        }
+        await quotationRepository.hardDeleteQuotation(client, id);
+        return;
+      }
+
       if (status === 'CONVERTED') {
         throw new Error('Cannot delete a converted quotation');
       }

@@ -93,6 +93,70 @@ export const InventoryAdjustmentSchema = z.object({
   userId: z.string().uuid('Invalid user ID'),
 }).strict();
 
+// ── Enterprise Adjustment Contract ───────────────────────────────────────
+// SAP/Odoo-style: reason drives movement, direction is explicit, quantity is
+// always positive. No sign-inference. No negative numbers in the API.
+
+/**
+ * The semantic reason for the adjustment.
+ * Each reason maps to a distinct movement_type in the stock ledger,
+ * ensuring inventory valuation and audit reports are correct.
+ *
+ * ADJUSTMENT  — Manual stock correction (IN or OUT)
+ * DAMAGE      — Physical damage write-off (always OUT)
+ * EXPIRY      — Expired stock write-off (always OUT)
+ * PHYSICAL_COUNT — Reconciliation from a physical count (IN or OUT)
+ * WRITE_OFF   — Financial write-off (always OUT)
+ */
+export const AdjustmentReasonEnum = z.enum([
+  'ADJUSTMENT',
+  'DAMAGE',
+  'EXPIRY',
+  'PHYSICAL_COUNT',
+  'WRITE_OFF',
+]);
+export type AdjustmentReason = z.infer<typeof AdjustmentReasonEnum>;
+
+/**
+ * Explicit stock direction. Never inferred from numeric sign.
+ */
+export const AdjustmentDirectionEnum = z.enum(['IN', 'OUT']);
+export type AdjustmentDirection = z.infer<typeof AdjustmentDirectionEnum>;
+
+/**
+ * Enterprise-grade batch adjustment contract.
+ *
+ * Rules enforced:
+ * - quantity is always positive (direction determined by `direction` field)
+ * - DAMAGE, EXPIRY, and WRITE_OFF are always OUT (schema refinement)
+ * - batchId is mandatory (batch-level audit trail)
+ * - documentId optionally links to an inventory_adjustment_document
+ */
+export const BatchAdjustmentSchema = z
+  .object({
+    batchId: z.string().uuid('Invalid batch ID').optional(), // Optional: backend auto-selects via FEFO when omitted
+    productId: z.string().uuid('Invalid product ID'),
+    quantity: z.number().positive('Quantity must be a positive number'),
+    direction: AdjustmentDirectionEnum,
+    reason: AdjustmentReasonEnum,
+    notes: z.string().min(5, 'Notes must be at least 5 characters'),
+    userId: z.string().uuid('Invalid user ID'),
+    documentId: z.string().uuid().optional(),
+  })
+  .refine(
+    (data) => {
+      // DAMAGE, EXPIRY, WRITE_OFF can only go OUT
+      const outOnly: AdjustmentReason[] = ['DAMAGE', 'EXPIRY', 'WRITE_OFF'];
+      if (outOnly.includes(data.reason) && data.direction !== 'OUT') {
+        return false;
+      }
+      return true;
+    },
+    { message: 'DAMAGE, EXPIRY, and WRITE_OFF adjustments must have direction OUT', path: ['direction'] }
+  );
+
+export type BatchAdjustment = z.infer<typeof BatchAdjustmentSchema>;
+
 export type Batch = z.infer<typeof BatchSchema>;
 export type CreateBatch = z.infer<typeof CreateBatchSchema>;
 export type UpdateBatch = z.infer<typeof UpdateBatchSchema>;

@@ -152,6 +152,21 @@ export interface InventoryAdjustmentInput {
   batchId?: string;
 }
 
+/**
+ * Enterprise-grade batch adjustment input.
+ * Quantity is always positive. Direction is explicit. Reason drives the movement type.
+ */
+export interface BatchAdjustmentInput {
+  batchId?: string;         // Optional: backend auto-selects via FEFO when omitted
+  productId: string;
+  quantity: number;
+  direction: 'IN' | 'OUT';
+  reason: 'ADJUSTMENT' | 'DAMAGE' | 'EXPIRY' | 'PHYSICAL_COUNT' | 'WRITE_OFF';
+  notes: string;
+  userId: string;
+  documentId?: string;
+}
+
 export interface RecordStockMovementInput {
   productId: string;
   batchId?: string;

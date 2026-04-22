@@ -141,6 +141,8 @@ export const inventoryRepository = {
          MIN(b.expiry_date) as nearest_expiry,
          pi.reorder_level,
          CASE WHEN COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) <= pi.reorder_level THEN true ELSE false END as needs_reorder,
+         COALESCE(po_agg.qty_on_order, 0) as qty_on_order,
+         COALESCE(so_agg.qty_reserved, 0) as qty_reserved,
          (
            SELECT json_agg(
              json_build_object(
@@ -161,8 +163,26 @@ export const inventoryRepository = {
        LEFT JOIN product_inventory pi ON pi.product_id = p.id
        LEFT JOIN product_valuation pv ON pv.product_id = p.id
        LEFT JOIN inventory_batches b ON p.id = b.product_id AND b.status = 'ACTIVE'
+       LEFT JOIN (
+         SELECT poi.product_id,
+                SUM(poi.ordered_quantity - poi.received_quantity) as qty_on_order
+         FROM purchase_order_items poi
+         JOIN purchase_orders po ON po.id = poi.purchase_order_id
+         WHERE po.status = 'PENDING'
+           AND poi.ordered_quantity > poi.received_quantity
+         GROUP BY poi.product_id
+       ) po_agg ON po_agg.product_id = p.id
+       LEFT JOIN (
+         SELECT sol.product_id,
+                SUM(sol.confirmed_qty - sol.delivered_qty) as qty_reserved
+         FROM dist_sales_order_lines sol
+         JOIN dist_sales_orders so ON so.id = sol.sales_order_id
+         WHERE so.status IN ('OPEN', 'PARTIALLY_DELIVERED')
+           AND sol.confirmed_qty > sol.delivered_qty
+         GROUP BY sol.product_id
+       ) so_agg ON so_agg.product_id = p.id
        WHERE p.is_active = true
-       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand
+       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand, po_agg.qty_on_order, so_agg.qty_reserved
        ORDER BY needs_reorder DESC, p.name ASC`
     );
     return result.rows;
@@ -324,5 +344,97 @@ export const inventoryRepository = {
       ]
     );
     return result.rows[0];
+  },
+
+  // ──────────────────────────────────────────────────────────────────
+  // Batch Expiry Management (SAP master data correction)
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Get a single batch by ID with product info (for governance & display).
+   */
+  async getBatchById(pool: Pool, batchId: string): Promise<Record<string, unknown> | null> {
+    const result = await pool.query(
+      `SELECT ib.id, ib.batch_number, ib.product_id, p.name AS product_name,
+              ib.expiry_date, ib.remaining_quantity, ib.quantity,
+              ib.cost_price, ib.status, ib.received_date,
+              ib.created_at, ib.updated_at
+       FROM inventory_batches ib
+       JOIN products p ON p.id = ib.product_id
+       WHERE ib.id = $1`,
+      [batchId]
+    );
+    return result.rows.length > 0 ? result.rows[0] : null;
+  },
+
+  /**
+   * Update expiry_date on a batch (inside a transaction).
+   * Uses FOR UPDATE to prevent concurrent edits.
+   */
+  async updateBatchExpiry(
+    client: PoolClient,
+    batchId: string,
+    newExpiryDate: string
+  ): Promise<void> {
+    await client.query('SELECT id FROM inventory_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    await client.query(
+      `UPDATE inventory_batches SET expiry_date = $1, updated_at = NOW() WHERE id = $2`,
+      [newExpiryDate, batchId]
+    );
+  },
+
+  /**
+   * Insert a row into batch_expiry_audit (inside a transaction).
+   */
+  async createExpiryAuditRecord(
+    client: PoolClient,
+    data: {
+      batchId: string;
+      batchNumber: string;
+      productId: string;
+      productName: string;
+      oldExpiryDate: string | null;
+      newExpiryDate: string;
+      changedById: string;
+      changedByName: string;
+      reason: string;
+      ipAddress?: string | null;
+    }
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO batch_expiry_audit
+         (batch_id, batch_number, product_id, product_name,
+          old_expiry_date, new_expiry_date,
+          changed_by_id, changed_by_name, reason, ip_address)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        data.batchId,
+        data.batchNumber,
+        data.productId,
+        data.productName,
+        data.oldExpiryDate ?? null,
+        data.newExpiryDate,
+        data.changedById,
+        data.changedByName,
+        data.reason,
+        data.ipAddress ?? null,
+      ]
+    );
+  },
+
+  /**
+   * Fetch expiry audit history for a batch (newest first).
+   */
+  async getExpiryAuditHistory(pool: Pool, batchId: string): Promise<Record<string, unknown>[]> {
+    const result = await pool.query(
+      `SELECT id, batch_id, batch_number, product_name,
+              old_expiry_date, new_expiry_date,
+              changed_by_id, changed_by_name, reason, changed_at, ip_address
+       FROM batch_expiry_audit
+       WHERE batch_id = $1
+       ORDER BY changed_at DESC`,
+      [batchId]
+    );
+    return result.rows;
   },
 };

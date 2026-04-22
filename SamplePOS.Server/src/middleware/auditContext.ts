@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { AuditContext } from '../../../shared/types/audit.js';
 
 // Extend Express Request to include audit context
+// eslint-disable-next-line @typescript-eslint/no-namespace
 declare global {
   namespace Express {
     interface Request {

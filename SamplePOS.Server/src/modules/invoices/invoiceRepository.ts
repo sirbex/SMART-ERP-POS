@@ -3,26 +3,26 @@ import { Money } from '../../utils/money.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessYear, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
-// Helper to normalize Pascal case database columns to camelCase
+// Normalize snake_case database columns to InvoiceRecord
 function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
-  const status = String(row.Status || '').toUpperCase();
+  const status = String(row.status || 'UNPAID').toUpperCase();
   return {
-    id: row.Id as string,
-    invoice_number: row.InvoiceNumber as string,
-    customer_id: row.CustomerId as string,
-    sale_id: (row.SaleId as string) || null,
-    issue_date: row.InvoiceDate as Date,
-    due_date: row.DueDate as Date,
-    status: status === 'PAID' ? 'PAID' : status === 'PARTIALLYPAID' ? 'PARTIALLY_PAID' : 'UNPAID',
-    subtotal: row.Subtotal as number,
-    tax_amount: row.TaxAmount as number,
-    total_amount: row.TotalAmount as number,
-    amount_paid: row.AmountPaid as number,
-    balance: row.OutstandingBalance as number,
-    notes: (row.Notes as string) || null,
-    created_by_id: null,
-    created_at: row.CreatedAt as Date,
-    updated_at: row.UpdatedAt as Date,
+    id: row.id as string,
+    invoice_number: row.invoice_number as string,
+    customer_id: row.customer_id as string,
+    sale_id: (row.sale_id as string) || null,
+    issue_date: row.issue_date as Date,
+    due_date: row.due_date as Date,
+    status: status === 'PAID' ? 'PAID' : status === 'PARTIALLY_PAID' ? 'PARTIALLY_PAID' : 'UNPAID',
+    subtotal: row.subtotal as number,
+    tax_amount: row.tax_amount as number,
+    total_amount: row.total_amount as number,
+    amount_paid: row.amount_paid as number,
+    balance: row.amount_due as number,
+    notes: (row.notes as string) || null,
+    created_by_id: (row.created_by_id as string) || null,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
   };
 }
 
@@ -61,7 +61,7 @@ export interface InvoicePaymentRecord {
 
 export const invoiceRepository = {
   async findBySaleId(pool: Pool | PoolClient, saleId: string): Promise<InvoiceRecord | null> {
-    const res = await pool.query('SELECT * FROM invoices WHERE "SaleId" = $1 LIMIT 1', [saleId]);
+    const res = await pool.query('SELECT * FROM invoices WHERE sale_id = $1 LIMIT 1', [saleId]);
     return res.rows[0] ? normalizeInvoiceRow(res.rows[0]) : null;
   },
   async generateInvoiceNumber(pool: Pool | PoolClient): Promise<string> {
@@ -70,9 +70,9 @@ export const invoiceRepository = {
     // NOTE: Only fully effective when caller wraps in a transaction (passes client as pool)
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext('invoice_number_seq'))`);
     const result = await pool.query(
-      `SELECT "InvoiceNumber" FROM invoices 
-       WHERE "InvoiceNumber" LIKE $1 
-       ORDER BY "InvoiceNumber" DESC 
+      `SELECT invoice_number FROM invoices 
+       WHERE invoice_number LIKE $1 
+       ORDER BY invoice_number DESC 
        LIMIT 1`,
       [`INV-${year}-%`]
     );
@@ -81,7 +81,7 @@ export const invoiceRepository = {
       return `INV-${year}-0001`;
     }
 
-    const last = result.rows[0].InvoiceNumber as string;
+    const last = result.rows[0].invoice_number as string;
     const seq = parseInt(last.split('-')[2]) + 1;
     return `INV-${year}-${seq.toString().padStart(4, '0')}`;
   },
@@ -126,20 +126,16 @@ export const invoiceRepository = {
   ): Promise<InvoiceRecord> {
     const invoiceNumber = await this.generateInvoiceNumber(pool);
 
-    // Generate UUID for Id column (EF Core/C# convention - no default in database)
-    const uuidResult = await pool.query('SELECT gen_random_uuid() as id');
-    const invoiceId = uuidResult.rows[0].id;
     const now = new Date();
 
     const result = await pool.query(
       `INSERT INTO invoices (
-        "Id", "InvoiceNumber", "CustomerId", "CustomerName", "SaleId", "InvoiceDate", "DueDate",
-        "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance", 
-        "Notes", "Status", "PaymentTerms", "CreatedAt", "UpdatedAt"
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$10,$11,'Draft',30,$12,$12)
+        invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
+        subtotal, tax_amount, total_amount, amount_paid, amount_due, 
+        notes, status, payment_terms, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$9,$10,'DRAFT',30,$11,$11)
       RETURNING *`,
       [
-        invoiceId,
         invoiceNumber,
         data.customerId,
         data.customerName,
@@ -172,21 +168,17 @@ export const invoiceRepository = {
   ): Promise<InvoiceRecord> {
     const invoiceNumber = await this.generateInvoiceNumber(pool);
 
-    // Generate UUID for Id column (EF Core/C# convention - no default in database)
-    const uuidResult = await pool.query('SELECT gen_random_uuid() as id');
-    const invoiceId = uuidResult.rows[0].id;
     const now = new Date();
 
     const result = await pool.query(
       `INSERT INTO invoices (
-        "Id", "InvoiceNumber", "CustomerId", "CustomerName", "SaleId", "InvoiceDate", "DueDate",
-        "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance", 
-        "Notes", "Status", "PaymentTerms", "CreatedAt", "UpdatedAt"
-      ) VALUES ($1,$2,$3,$4,$5,NOW(),NOW() + INTERVAL '30 days',
-                $6, 0, $6, 0, $6, $7, 'Draft', 30, $8, $8)
+        invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
+        subtotal, tax_amount, total_amount, amount_paid, amount_due, 
+        notes, status, payment_terms, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,NOW(),NOW() + INTERVAL '30 days',
+                $5, 0, $5, 0, $5, $6, 'DRAFT', 30, $7, $7)
       RETURNING *`,
       [
-        invoiceId,
         invoiceNumber,
         data.customerId,
         data.customerName,
@@ -202,7 +194,7 @@ export const invoiceRepository = {
   async getInvoiceById(pool: Pool | PoolClient, id: string): Promise<InvoiceRecord | null> {
     const result = await pool.query(
       `SELECT i.* FROM invoices i 
-       WHERE i."Id" = $1`,
+       WHERE i.id = $1`,
       [id]
     );
 
@@ -222,11 +214,11 @@ export const invoiceRepository = {
     let idx = 1;
 
     if (filters?.customerId) {
-      where.push(`i."CustomerId" = $${idx++}`);
+      where.push(`i.customer_id = $${idx++}`);
       values.push(filters.customerId);
     }
     if (filters?.status) {
-      where.push(`i."Status" = $${idx++}`);
+      where.push(`i.status = $${idx++}`);
       values.push(filters.status);
     }
 
@@ -236,7 +228,7 @@ export const invoiceRepository = {
     const res = await pool.query(
       `SELECT i.* FROM invoices i 
        ${whereClause} 
-       ORDER BY i."CreatedAt" DESC 
+       ORDER BY i.created_at DESC 
        LIMIT $${idx} OFFSET $${idx + 1}`,
       [...values, limit, offset]
     );
@@ -306,17 +298,17 @@ export const invoiceRepository = {
     const amountPaid = Money.toNumber(Money.parseDb(payAgg.rows[0].amount_paid));
     const updated = await pool.query(
       `UPDATE invoices
-         SET "AmountPaid" = $1,
-             "OutstandingBalance" = GREATEST("TotalAmount" - $1, 0),
-             "Status" = (
+         SET amount_paid = $1,
+             amount_due = GREATEST(total_amount - $1, 0),
+             status = (
                         CASE
-                          WHEN GREATEST("TotalAmount" - $1, 0) = 0 AND $1 > 0 THEN 'Paid'
-                          WHEN GREATEST("TotalAmount" - $1, 0) > 0 AND $1 > 0 THEN 'PartiallyPaid'
-                          ELSE 'Unpaid'
+                          WHEN GREATEST(total_amount - $1, 0) = 0 AND $1 > 0 THEN 'PAID'
+                          WHEN GREATEST(total_amount - $1, 0) > 0 AND $1 > 0 THEN 'PARTIALLY_PAID'
+                          ELSE 'UNPAID'
                         END
                       ),
-             "UpdatedAt" = NOW()
-       WHERE "Id" = $2
+             updated_at = NOW()
+       WHERE id = $2
        RETURNING *`,
       [amountPaid, invoiceId]
     );

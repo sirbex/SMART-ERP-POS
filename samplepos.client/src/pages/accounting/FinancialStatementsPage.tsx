@@ -95,6 +95,25 @@ interface CashFlowStatement {
 type ReportType = 'income-statement' | 'balance-sheet' | 'cash-flow';
 type ReportPeriod = 'current-month' | 'current-quarter' | 'current-year' | 'last-month' | 'last-quarter' | 'last-year' | 'custom';
 
+/** Integrity block attached to every financial statement */
+interface IntegrityCheck {
+  id: string;
+  name: string;
+  status: 'PASS' | 'WARN' | 'FAIL';
+  message: string;
+  glBalance?: number;
+  subledgerBalance?: number;
+  difference?: number;
+  threshold?: number;
+  remediation?: string;
+}
+interface IntegrityBlock {
+  overallStatus: 'HEALTHY' | 'WARNING' | 'DRIFT_DETECTED';
+  checkedAt: string;
+  checks: IntegrityCheck[];
+  summary: { totalChecks: number; passed: number; warnings: number; failed: number };
+}
+
 /** Raw item shape returned by the accounting API before frontend transformation */
 interface RawStatementItem {
   accountCode?: string;
@@ -105,6 +124,106 @@ interface RawStatementItem {
   balance?: string | number;
 }
 
+// ── Integrity Banner ──────────────────────────────────────────────────────────
+// Shows at the top of every financial statement so users immediately see
+// whether GL ties to sub-ledgers and journal entries are balanced.
+const IntegrityBanner = ({
+  block,
+  expanded,
+  onToggle,
+}: {
+  block: IntegrityBlock;
+  expanded: boolean;
+  onToggle: () => void;
+}) => {
+  const palette = {
+    HEALTHY: {
+      wrap: 'bg-green-50 border-green-200',
+      head: 'bg-green-100 text-green-900',
+      title: '✅ Report Integrity: Healthy',
+      desc: 'All reconciliation checks passed. Numbers tie to the general ledger.',
+    },
+    WARNING: {
+      wrap: 'bg-amber-50 border-amber-200',
+      head: 'bg-amber-100 text-amber-900',
+      title: '⚠️ Report Integrity: Warning',
+      desc: 'Minor drift below materiality threshold. Review recommended.',
+    },
+    DRIFT_DETECTED: {
+      wrap: 'bg-red-50 border-red-200',
+      head: 'bg-red-100 text-red-900',
+      title: '❌ Report Integrity: Drift Detected',
+      desc: 'Material drift found. Numbers may not tie to GL — investigate before acting.',
+    },
+  }[block.overallStatus];
+
+  const statusBadge = (s: 'PASS' | 'WARN' | 'FAIL') => {
+    const map = {
+      PASS: 'bg-green-100 text-green-800',
+      WARN: 'bg-amber-100 text-amber-800',
+      FAIL: 'bg-red-100 text-red-800',
+    } as const;
+    return (
+      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${map[s]}`}>{s}</span>
+    );
+  };
+
+  return (
+    <div className={`border-2 rounded-lg mb-6 ${palette.wrap}`}>
+      <button
+        type="button"
+        className={`w-full px-4 py-3 flex items-center justify-between ${palette.head}`}
+        onClick={onToggle}
+      >
+        <div className="text-left">
+          <div className="font-bold">{palette.title}</div>
+          <div className="text-xs opacity-80">{palette.desc}</div>
+        </div>
+        <div className="text-xs flex items-center gap-3">
+          <span>✔ {block.summary.passed}</span>
+          {block.summary.warnings > 0 && <span>⚠ {block.summary.warnings}</span>}
+          {block.summary.failed > 0 && <span>✗ {block.summary.failed}</span>}
+          <span className="font-bold">{expanded ? '▲' : '▼'}</span>
+        </div>
+      </button>
+      {expanded && (
+        <div className="p-4 space-y-2 bg-white/50">
+          {block.checks.map((c) => (
+            <div key={c.id} className="border border-gray-200 bg-white rounded p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    {statusBadge(c.status)}
+                    <div className="font-semibold text-sm text-gray-900">{c.name}</div>
+                  </div>
+                  <div className="text-xs text-gray-700 mt-1">{c.message}</div>
+                  {c.remediation && c.status !== 'PASS' && (
+                    <div className="text-xs text-red-700 mt-1 italic">→ {c.remediation}</div>
+                  )}
+                </div>
+                {typeof c.glBalance === 'number' && typeof c.subledgerBalance === 'number' && (
+                  <div className="text-right text-xs font-mono whitespace-nowrap">
+                    <div>GL: {c.glBalance.toLocaleString()}</div>
+                    <div>Sub: {c.subledgerBalance.toLocaleString()}</div>
+                    {typeof c.difference === 'number' && (
+                      <div className={Math.abs(c.difference) < 0.01 ? 'text-green-700' : 'text-red-700 font-bold'}>
+                        Δ {c.difference.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          <div className="text-xs text-gray-500 pt-2">
+            Checked at {new Date(block.checkedAt).toLocaleString()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const FinancialStatementsPage = () => {
   const [reportType, setReportType] = useState<ReportType>('income-statement');
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('current-month');
@@ -114,6 +233,8 @@ const FinancialStatementsPage = () => {
   const [incomeStatement, setIncomeStatement] = useState<IncomeStatement | null>(null);
   const [balanceSheet, setBalanceSheet] = useState<BalanceSheet | null>(null);
   const [cashFlow, setCashFlow] = useState<CashFlowStatement | null>(null);
+  const [integrity, setIntegrity] = useState<IntegrityBlock | null>(null);
+  const [integrityExpanded, setIntegrityExpanded] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
@@ -247,6 +368,7 @@ const FinancialStatementsPage = () => {
             setIncomeStatement(transformedIncomeStatement);
             setBalanceSheet(null);
             setCashFlow(null);
+            setIntegrity(data.integrity || null);
             break;
           case 'balance-sheet':
             // Transform the Node.js API response to match the expected frontend structure
@@ -289,6 +411,7 @@ const FinancialStatementsPage = () => {
             setBalanceSheet(transformedBalanceSheet);
             setIncomeStatement(null);
             setCashFlow(null);
+            setIntegrity(bsData.integrity || null);
             break;
           case 'cash-flow':
             // Transform the Node.js API response to match the expected frontend structure
@@ -319,6 +442,7 @@ const FinancialStatementsPage = () => {
             setCashFlow(transformedCashFlow);
             setIncomeStatement(null);
             setBalanceSheet(null);
+            setIntegrity(cfData.integrity || null);
             break;
         }
       } else {
@@ -332,6 +456,7 @@ const FinancialStatementsPage = () => {
       setIncomeStatement(null);
       setBalanceSheet(null);
       setCashFlow(null);
+      setIntegrity(null);
     } finally {
       setLoading(false);
     }
@@ -899,6 +1024,13 @@ const FinancialStatementsPage = () => {
               </div>
             ) : (
               <div>
+                {integrity && (
+                  <IntegrityBanner
+                    block={integrity}
+                    expanded={integrityExpanded}
+                    onToggle={() => setIntegrityExpanded((v) => !v)}
+                  />
+                )}
                 {reportType === 'income-statement' && renderIncomeStatement()}
                 {reportType === 'balance-sheet' && renderBalanceSheet()}
                 {reportType === 'cash-flow' && renderCashFlowStatement()}
@@ -915,6 +1047,13 @@ const FinancialStatementsPage = () => {
               <DialogDescription>{getReportDescription()}</DialogDescription>
             </DialogHeader>
             <div className="mt-4">
+              {integrity && (
+                <IntegrityBanner
+                  block={integrity}
+                  expanded={integrityExpanded}
+                  onToggle={() => setIntegrityExpanded((v) => !v)}
+                />
+              )}
               {reportType === 'income-statement' && renderIncomeStatement()}
               {reportType === 'balance-sheet' && renderBalanceSheet()}
               {reportType === 'cash-flow' && renderCashFlowStatement()}

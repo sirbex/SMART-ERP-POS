@@ -26,6 +26,7 @@ import type { QuotationStatus } from '@shared/types/quotation';
 import { AxiosError } from 'axios';
 import deliveryNotesApi from '../../api/deliveryNotes';
 import type { DeliveryNoteListItem } from '../../api/deliveryNotes';
+import distributionApi from '../../api/distribution';
 import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
@@ -96,6 +97,18 @@ export default function QuoteDetailPage() {
     queryKey: ['quotation-dns', quotationId],
     queryFn: () => deliveryNotesApi.list({ quotationId: quotationId!, limit: 50 }),
     enabled: isWholesaleQuote && !!quotationId,
+  });
+
+  // ── Convert wholesale quote to Sales Order ──
+  const convertToSOmutation = useMutation({
+    mutationFn: () => distributionApi.convertFromQuotation(quotationId!),
+    onSuccess: (result) => {
+      toast.success(`Converted to Sales Order ${result.order.orderNumber}`);
+      navigate(`/distribution/sales-orders/${result.order.id}`);
+    },
+    onError: (err: AxiosError<{ error?: string }>) => {
+      toast.error(err.response?.data?.error ?? 'Failed to convert to Sales Order');
+    },
   });
 
   // ── Loading / Error ──
@@ -259,7 +272,7 @@ export default function QuoteDetailPage() {
                 )}
               </div>
               <p className="text-gray-600 mt-1">
-                {quotation.quoteType === 'quick' ? 'Quick Quote' : 'Standard Quotation'} · Created {age}
+                {quotation.fulfillmentMode === 'WHOLESALE' ? 'Wholesale Order' : quotation.quoteType === 'quick' ? 'Quick Quote' : 'Standard Quotation'} · Created {age}
               </p>
             </div>
             <button onClick={() => navigate('/quotations')} className="px-4 py-2 text-gray-700 hover:text-gray-900">
@@ -284,6 +297,15 @@ export default function QuoteDetailPage() {
               className="px-5 py-2.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-semibold text-sm"
             >
               + Delivery Note
+            </button>
+          )}
+          {isWholesaleQuote && canConvert && !quotation.convertedToSaleId && (
+            <button
+              onClick={() => convertToSOmutation.mutate()}
+              disabled={convertToSOmutation.isPending}
+              className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold text-sm disabled:opacity-50"
+            >
+              {convertToSOmutation.isPending ? 'Converting…' : 'Convert to Sales Order'}
             </button>
           )}
           {canEdit && (

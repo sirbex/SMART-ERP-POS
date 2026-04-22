@@ -10,6 +10,7 @@ import { AuditLog } from '@shared/types/audit';
 import { DatePicker } from '../components/ui/date-picker';
 import Layout from '../components/Layout';
 import { formatTimestamp } from '../utils/businessDate';
+import apiClient from '../utils/api';
 
 // API function to fetch audit logs
 async function fetchAuditLogs(filters: {
@@ -22,20 +23,15 @@ async function fetchAuditLogs(filters: {
   startDate?: string;
   endDate?: string;
 }) {
-  const params = new URLSearchParams();
+  const params: Record<string, string> = {};
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== '') {
-      params.append(key, value.toString());
+      params[key] = value.toString();
     }
   });
 
-  const response = await fetch(`/api/audit/logs?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch audit logs');
-  }
-
-  const result = await response.json();
-  return result;
+  const response = await apiClient.get('/audit/logs', { params });
+  return response.data;
 }
 
 export default function AuditLogPage() {
@@ -72,12 +68,36 @@ export default function AuditLogPage() {
 
   // Action badge colors
   const getActionBadge = (action: string) => {
-    if (action === 'CREATE') return 'bg-green-100 text-green-800';
-    if (action === 'UPDATE') return 'bg-blue-100 text-blue-800';
-    if (action === 'DELETE' || action === 'VOID') return 'bg-red-100 text-red-800';
-    if (action === 'LOGIN') return 'bg-purple-100 text-purple-800';
-    if (action === 'LOGOUT') return 'bg-gray-100 text-gray-800';
-    return 'bg-gray-100 text-gray-800';
+    const colors: Record<string, string> = {
+      CREATE: 'bg-green-100 text-green-800',
+      UPDATE: 'bg-blue-100 text-blue-800',
+      DELETE: 'bg-red-100 text-red-800',
+      VOID: 'bg-red-100 text-red-800',
+      CANCEL: 'bg-red-100 text-red-800',
+      REFUND: 'bg-orange-100 text-orange-800',
+      EXCHANGE: 'bg-orange-100 text-orange-800',
+      APPROVE: 'bg-emerald-100 text-emerald-800',
+      REJECT: 'bg-rose-100 text-rose-800',
+      FINALIZE: 'bg-teal-100 text-teal-800',
+      STATUS_CHANGE: 'bg-indigo-100 text-indigo-800',
+      ADJUST_INVENTORY: 'bg-amber-100 text-amber-800',
+      PRICE_CHANGE: 'bg-cyan-100 text-cyan-800',
+      PRICE_OVERRIDE: 'bg-cyan-100 text-cyan-800',
+      LOGIN: 'bg-purple-100 text-purple-800',
+      LOGOUT: 'bg-gray-100 text-gray-800',
+      LOGIN_FAILED: 'bg-red-200 text-red-900',
+      PASSWORD_CHANGE: 'bg-violet-100 text-violet-800',
+      PERMISSION_CHANGE: 'bg-violet-100 text-violet-800',
+      OPEN_DRAWER: 'bg-yellow-100 text-yellow-800',
+      CLOSE_SHIFT: 'bg-slate-100 text-slate-800',
+      RESTORE: 'bg-lime-100 text-lime-800',
+      ARCHIVE: 'bg-stone-100 text-stone-800',
+      EXPORT: 'bg-sky-100 text-sky-800',
+      IMPORT: 'bg-sky-100 text-sky-800',
+      REMOVE: 'bg-red-100 text-red-800',
+      REPRINT: 'bg-amber-100 text-amber-800',
+    };
+    return colors[action] || 'bg-gray-100 text-gray-800';
   };
 
   return (
@@ -111,8 +131,28 @@ export default function AuditLogPage() {
                   <option value="PAYMENT">Payment</option>
                   <option value="PRODUCT">Product</option>
                   <option value="CUSTOMER">Customer</option>
+                  <option value="SUPPLIER">Supplier</option>
                   <option value="USER">User</option>
+                  <option value="PURCHASE_ORDER">Purchase Order</option>
+                  <option value="GOODS_RECEIPT">Goods Receipt</option>
                   <option value="INVENTORY_ADJUSTMENT">Inventory Adjustment</option>
+                  <option value="BATCH">Batch</option>
+                  <option value="PRICING">Pricing</option>
+                  <option value="DISCOUNT">Discount</option>
+                  <option value="SETTINGS">Settings</option>
+                  <option value="REPORT">Report</option>
+                  <option value="SYSTEM">System</option>
+                  <option value="LEAD">Lead</option>
+                  <option value="OPPORTUNITY">Opportunity</option>
+                  <option value="ACTIVITY">Activity</option>
+                  <option value="OPPORTUNITY_DOCUMENT">Opportunity Document</option>
+                  <option value="DEPARTMENT">Department</option>
+                  <option value="POSITION">Position</option>
+                  <option value="EMPLOYEE">Employee</option>
+                  <option value="PAYROLL_PERIOD">Payroll Period</option>
+                  <option value="PAYROLL_ENTRY">Payroll Entry</option>
+                  <option value="SALES_ORDER">Sales Order</option>
+                  <option value="DELIVERY">Delivery</option>
                 </select>
               </div>
 
@@ -132,8 +172,29 @@ export default function AuditLogPage() {
                   <option value="UPDATE">Update</option>
                   <option value="DELETE">Delete</option>
                   <option value="VOID">Void</option>
+                  <option value="CANCEL">Cancel</option>
+                  <option value="REFUND">Refund</option>
+                  <option value="EXCHANGE">Exchange</option>
+                  <option value="APPROVE">Approve</option>
+                  <option value="REJECT">Reject</option>
+                  <option value="FINALIZE">Finalize</option>
+                  <option value="STATUS_CHANGE">Status Change</option>
+                  <option value="ADJUST_INVENTORY">Adjust Inventory</option>
+                  <option value="PRICE_CHANGE">Price Change</option>
+                  <option value="PRICE_OVERRIDE">Price Override</option>
                   <option value="LOGIN">Login</option>
                   <option value="LOGOUT">Logout</option>
+                  <option value="LOGIN_FAILED">Login Failed</option>
+                  <option value="PASSWORD_CHANGE">Password Change</option>
+                  <option value="PERMISSION_CHANGE">Permission Change</option>
+                  <option value="OPEN_DRAWER">Open Drawer</option>
+                  <option value="CLOSE_SHIFT">Close Shift</option>
+                  <option value="RESTORE">Restore</option>
+                  <option value="ARCHIVE">Archive</option>
+                  <option value="EXPORT">Export</option>
+                  <option value="IMPORT">Import</option>
+                  <option value="REMOVE">Remove</option>
+                  <option value="REPRINT">Reprint</option>
                 </select>
               </div>
 

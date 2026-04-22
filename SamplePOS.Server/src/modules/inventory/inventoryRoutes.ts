@@ -2,11 +2,15 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { inventoryService } from './inventoryService.js';
+import { inventoryRepository } from './inventoryRepository.js';
 import { inventoryLedgerRepository } from './inventoryLedgerRepository.js';
+import { validateExpiryEdit } from './batchExpiryGovernanceService.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { stockCountRoutes } from './stockCountRoutes.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import { BatchAdjustmentSchema } from '../../../../shared/zod/inventory.js';
 
 // Validation schemas
 const AdjustInventorySchema = z
@@ -135,6 +139,32 @@ export const inventoryController = {
   },
 
   /**
+   * Enterprise-grade batch adjustment
+   * Accepts explicit direction + reason — no sign inference, no negative quantities.
+   * Creates an inventory_adjustment_document as the audit header.
+   */
+  async adjustBatch(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const validated = BatchAdjustmentSchema.parse(req.body);
+    const result = await inventoryService.adjustBatch(pool, {
+      batchId: validated.batchId,         // optional — FEFO auto-select when absent
+      productId: validated.productId,
+      quantity: validated.quantity,
+      direction: validated.direction,
+      reason: validated.reason,
+      notes: validated.notes,
+      userId: validated.userId,
+      documentId: validated.documentId,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      message: `${validated.reason} adjustment recorded (${validated.direction === 'IN' ? '+' : '-'}${validated.quantity})`,
+    });
+  },
+
+  /**
    * Get inventory value
    */
   async getInventoryValue(req: Request, res: Response): Promise<void> {
@@ -198,6 +228,14 @@ inventoryRoutes.post(
   authenticate,
   requirePermission('inventory.approve'),
   asyncHandler(inventoryController.adjustInventory)
+);
+
+// Enterprise batch adjustment route — direction + reason explicit, no sign inference
+inventoryRoutes.post(
+  '/adjust-batch',
+  authenticate,
+  requirePermission('inventory.approve'),
+  asyncHandler(inventoryController.adjustBatch)
 );
 
 // Stock count routes - nested under /api/inventory/stockcounts
@@ -275,3 +313,112 @@ inventoryRoutes.get('/movement-summary', authenticate, asyncHandler(async (req: 
   const summary = await inventoryLedgerRepository.getMovementSummary(globalPool, productId);
   res.json({ success: true, data: summary });
 }));
+
+// ── Batch Expiry Management (SAP master data correction) ─────────────────────
+
+const PatchExpirySchema = z.object({
+  newExpiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
+  reason: z.string().min(5, 'Reason must be at least 5 characters'),
+});
+
+// GET /api/inventory/batches/:id — get single batch by ID
+inventoryRoutes.get(
+  '/batches/:id',
+  authenticate,
+  requirePermission('inventory.read'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    if (!/^[0-9a-f-]{36}$/.test(id)) {
+      res.status(400).json({ success: false, error: 'Invalid batch ID' });
+      return;
+    }
+    const batch = await inventoryRepository.getBatchById(pool, id);
+    if (!batch) {
+      res.status(404).json({ success: false, error: 'Batch not found' });
+      return;
+    }
+    res.json({ success: true, data: batch });
+  })
+);
+
+// PATCH /api/inventory/batches/:id/expiry — update batch expiry (governance-gated)
+inventoryRoutes.patch(
+  '/batches/:id/expiry',
+  authenticate,
+  requirePermission('inventory.batch_expiry_edit'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    if (!/^[0-9a-f-]{36}$/.test(id)) {
+      res.status(400).json({ success: false, error: 'Invalid batch ID' });
+      return;
+    }
+    const body = PatchExpirySchema.parse(req.body);
+
+    // Fetch batch (must exist)
+    const batch = await inventoryRepository.getBatchById(pool, id);
+    if (!batch) {
+      res.status(404).json({ success: false, error: 'Batch not found' });
+      return;
+    }
+
+    // Build user context from JWT (req.user set by authenticate middleware)
+    // permissions come from req.authContext (loaded by requirePermission middleware)
+    // Fall back to full-grant for legacy ADMIN role if RBAC context is not available
+    const userPermissions: Set<string> = req.authContext?.permissions ?? new Set(['inventory.batch_expiry_edit']);
+    const userCtx = {
+      id: req.user!.id,
+      fullName: req.user!.fullName ?? req.user!.email,
+      permissions: userPermissions,
+    };
+
+    // Governance validation — throws ForbiddenError or ValidationError on violation
+    const validated = validateExpiryEdit(
+      batch as { id: string; batch_number: string; remaining_quantity: string; expiry_date: string | null; product_name: string },
+      userCtx,
+      body.newExpiryDate,
+      body.reason
+    );
+
+    // Atomic update + audit (single transaction)
+    await UnitOfWork.run(pool, async (client) => {
+      await inventoryRepository.updateBatchExpiry(client, id, validated.newExpiryDate);
+      await inventoryRepository.createExpiryAuditRecord(client, {
+        batchId: validated.batchId,
+        batchNumber: validated.batchNumber,
+        productId: batch.product_id as string,
+        productName: batch.product_name as string,
+        oldExpiryDate: validated.oldExpiryDate,
+        newExpiryDate: validated.newExpiryDate,
+        changedById: validated.userId,
+        changedByName: validated.userName,
+        reason: validated.reason,
+        ipAddress: req.ip ?? null,
+      });
+    });
+
+    res.json({
+      success: true,
+      data: { batchId: id, newExpiryDate: validated.newExpiryDate },
+      message: `Batch ${validated.batchNumber} expiry updated to ${validated.newExpiryDate}`,
+    });
+  })
+);
+
+// GET /api/inventory/batches/:id/expiry-audit — fetch audit history
+inventoryRoutes.get(
+  '/batches/:id/expiry-audit',
+  authenticate,
+  requirePermission('inventory.read'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = req.params;
+    if (!/^[0-9a-f-]{36}$/.test(id)) {
+      res.status(400).json({ success: false, error: 'Invalid batch ID' });
+      return;
+    }
+    const history = await inventoryRepository.getExpiryAuditHistory(pool, id);
+    res.json({ success: true, data: history });
+  })
+);

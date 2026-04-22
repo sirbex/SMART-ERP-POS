@@ -28,7 +28,8 @@ import {
   RefreshCw,
   ShoppingCart,
   Receipt,
-  BarChart3
+  BarChart3,
+  Landmark,
 } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
 import { accountingApi } from '../../services/api';
@@ -62,6 +63,11 @@ interface DashboardData {
   payables: {
     supplierCount: number;
     totalAmount: number;
+  };
+  depositLiabilities?: {
+    depositCount: number;
+    customerCount: number;
+    totalLiability: number;
   };
   journalEntries: {
     recentCount: number;
@@ -259,6 +265,27 @@ const AccountingIntegrationDashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Customer Deposits (Liability) Card */}
+        {data.depositLiabilities && data.depositLiabilities.totalLiability > 0 && (
+          <Card className="hover:shadow-md transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Customer Deposits</CardTitle>
+              <Landmark className="h-4 w-4 text-purple-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-base sm:text-2xl font-bold text-purple-600">{formatCurrency(data.depositLiabilities.totalLiability)}</div>
+              <div className="space-y-1 mt-2">
+                <p className="text-xs text-gray-600">
+                  {data.depositLiabilities.depositCount} active deposit(s)
+                </p>
+                <p className="text-xs font-medium text-purple-600">
+                  From {data.depositLiabilities.customerCount} customer(s)
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Journal Entries Card */}
         <Card className="hover:shadow-md transition-shadow">

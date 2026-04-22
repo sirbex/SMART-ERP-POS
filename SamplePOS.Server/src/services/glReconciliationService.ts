@@ -373,6 +373,7 @@ export class GLReconciliationService {
             lines: writeOffLines,
             userId,
             idempotencyKey: `writeoff-${reconcileId}`,
+            source: 'SYSTEM_CORRECTION' as const,
           },
           pool,
           client

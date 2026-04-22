@@ -340,27 +340,9 @@ export const invoiceService = {
         throw new Error('Failed to refresh invoice after creation');
       }
 
-      // BR-INV-003: Recalculate customer balance from invoices
-      // Draft/Cancelled invoices must NOT affect AR balance
-      await client.query(
-        `UPDATE customers 
-         SET balance = (
-           SELECT COALESCE(SUM("OutstandingBalance"), 0)
-           FROM invoices
-           WHERE "CustomerId" = $1
-           AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
-         )
-         WHERE id = $1`,
-        [input.customerId]
-      );
-
-      // Sync AR account balance (replaces trg_sync_customer_to_ar)
-      await client.query(`
-        UPDATE accounts SET "CurrentBalance" = COALESCE(
-          (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-        ), "UpdatedAt" = NOW()
-        WHERE "AccountCode" = '1200'
-      `);
+      // BR-INV-003: Recalculate customer balance from invoices (SSOT)
+      const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+      await syncCustomerBalanceFromInvoices(client, input.customerId, 'INVOICE_CREATED');
 
       return freshInvoice;
     });
@@ -687,39 +669,10 @@ export const invoiceService = {
         });
       }
 
-      // BR-INV-003: Recalculate customer balance from invoices (SINGLE SOURCE OF TRUTH)
-      // Customer balance = total outstanding across all their non-draft/cancelled invoices
-      // Draft/Cancelled invoices must NOT affect AR balance
+      // BR-INV-003: Recalculate customer balance from invoices (SSOT)
       if (inv.customer_id) {
-        const balanceResult = await client.query(
-          `UPDATE customers 
-           SET balance = (
-             SELECT COALESCE(SUM("OutstandingBalance"), 0)
-             FROM invoices
-             WHERE "CustomerId" = $1
-             AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
-           )
-           WHERE id = $1
-           RETURNING balance`,
-          [inv.customer_id]
-        );
-
-        const newBalance = balanceResult.rows[0]?.balance || 0;
-
-        // Sync AR account balance (replaces trg_sync_customer_to_ar)
-        await client.query(`
-          UPDATE accounts SET "CurrentBalance" = COALESCE(
-            (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-          ), "UpdatedAt" = NOW()
-          WHERE "AccountCode" = '1200'
-        `);
-
-        logger.info('Customer balance recalculated from invoices', {
-          invoiceId,
-          customerId: inv.customer_id,
-          newBalance,
-          paymentAmount: input.amount,
-        });
+        const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+        await syncCustomerBalanceFromInvoices(client, inv.customer_id, 'INVOICE_PAYMENT');
       }
 
       await client.query('COMMIT');

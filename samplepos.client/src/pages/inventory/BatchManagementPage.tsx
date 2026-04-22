@@ -5,9 +5,12 @@
  * @created 2025-11-04
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAllBatches } from '../../hooks/useInventory';
+import { useAuth } from '../../contexts/AuthContext';
 import { getBusinessDate } from '../../utils/businessDate';
+import { api } from '../../utils/api';
 import Decimal from 'decimal.js';
 
 // TIMEZONE STRATEGY: Display dates without conversion
@@ -535,26 +538,186 @@ export default function BatchManagementPage() {
       {showDetailsModal && selectedBatch && (
         <BatchDetailsModal
           batch={selectedBatch}
-          onClose={() => setShowDetailsModal(false)}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setSelectedBatch(null);
+          }}
+          onExpiryUpdated={(newExpiry) => {
+            // Optimistically update the local selectedBatch so the modal shows the new date
+            setSelectedBatch((prev) => prev ? { ...prev, expiry_date: newExpiry } : prev);
+          }}
         />
       )}
     </div>
   );
 }
 
-/**
- * Batch Details Modal Component
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Expiry Audit record type
+// ─────────────────────────────────────────────────────────────────────────────
+interface ExpiryAuditRecord {
+  id: string;
+  old_expiry_date: string | null;
+  new_expiry_date: string;
+  changed_by_name: string;
+  reason: string;
+  changed_at: string;
+  ip_address: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch Details Modal — SAP-style with keyboard workflow
+// Shortcuts: F2 = Edit Expiry, F8 = Save, Esc = Cancel/Close, Ctrl+H = History
+// ─────────────────────────────────────────────────────────────────────────────
 function BatchDetailsModal({
-  batch,
+  batch: initialBatch,
   onClose,
+  onExpiryUpdated,
 }: {
   batch: InventoryBatch;
   onClose: () => void;
+  onExpiryUpdated: (newExpiry: string) => void;
 }) {
+  const { permissions } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Local batch state (updates after successful expiry edit)
+  const [batch, setBatch] = useState<InventoryBatch>(initialBatch);
+
+  // Edit expiry dialog state
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editExpiry, setEditExpiry] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // History modal state
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Refs for keyboard focus management
+  const modalRef = useRef<HTMLDivElement>(null);
+  const editExpiryInputRef = useRef<HTMLInputElement>(null);
+  const editReasonRef = useRef<HTMLTextAreaElement>(null);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+
+  const canEdit =
+    permissions.has('inventory.batch_expiry_edit') && batch.remaining_quantity > 0;
+
+  // Fetch latest audit entry to show "Last changed by"
+  const { data: auditResponse, refetch: refetchAudit } = useQuery({
+    queryKey: ['batch-expiry-audit', batch.id],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: ExpiryAuditRecord[] }>(`/inventory/batches/${batch.id}/expiry-audit`);
+      return res.data;
+    },
+    staleTime: 30_000,
+  });
+
+  const auditHistory: ExpiryAuditRecord[] = auditResponse?.data ?? [];
+  const lastChange = auditHistory[0] ?? null;
+
+  // Mutation: PATCH /api/inventory/batches/:id/expiry
+  const updateExpiry = useMutation({
+    mutationFn: async (vars: { newExpiryDate: string; reason: string }) => {
+      const res = await api.patch<{ success: boolean; data: { newExpiryDate: string } }>(
+        `/inventory/batches/${batch.id}/expiry`,
+        vars
+      );
+      return res.data;
+    },
+    onSuccess: (res) => {
+      const newExpiry = res.data.newExpiryDate;
+      setBatch((prev) => ({ ...prev, expiry_date: newExpiry }));
+      onExpiryUpdated(newExpiry);
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'batches-all'] });
+      refetchAudit();
+      setShowEditDialog(false);
+      setEditExpiry('');
+      setEditReason('');
+      setEditError(null);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : 'Failed to update expiry';
+      setEditError(msg);
+    },
+  });
+
+  // Open edit dialog and auto-focus date input
+  const openEditDialog = useCallback(() => {
+    if (!canEdit) return;
+    setEditExpiry(batch.expiry_date ?? '');
+    setEditReason('');
+    setEditError(null);
+    setShowEditDialog(true);
+  }, [canEdit, batch.expiry_date]);
+
+  const closeEditDialog = useCallback(() => {
+    setShowEditDialog(false);
+    setEditExpiry('');
+    setEditReason('');
+    setEditError(null);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (!editExpiry) { setEditError('New expiry date is required.'); return; }
+    if (!editReason.trim()) { setEditError('A reason is required.'); return; }
+    updateExpiry.mutate({ newExpiryDate: editExpiry, reason: editReason });
+  }, [editExpiry, editReason, updateExpiry]);
+
+  // Auto-focus date input when edit dialog opens
+  useEffect(() => {
+    if (showEditDialog) {
+      setTimeout(() => editExpiryInputRef.current?.focus(), 50);
+    }
+  }, [showEditDialog]);
+
+  // Global keyboard shortcuts (active when this modal is mounted)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't intercept when typing in text inputs UNLESS it's a control key
+      const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as Element)?.tagName);
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (showHistory) { setShowHistory(false); return; }
+        if (showEditDialog) { closeEditDialog(); return; }
+        onClose();
+        return;
+      }
+
+      if (!inInput) {
+        if (e.key === 'F2') {
+          e.preventDefault();
+          openEditDialog();
+          return;
+        }
+        if (e.key === 'F8' && showEditDialog) {
+          e.preventDefault();
+          handleSave();
+          return;
+        }
+        if (e.ctrlKey && e.key === 'h') {
+          e.preventDefault();
+          setShowHistory(true);
+          return;
+        }
+      }
+
+      // F8 works even from inside the dialog inputs
+      if (e.key === 'F8' && showEditDialog) {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showEditDialog, showHistory, openEditDialog, closeEditDialog, handleSave, onClose]);
+
   const daysUntilExpiry = batch.expiry_date
     ? Math.ceil(
-      (new Date(batch.expiry_date + 'T12:00:00Z').getTime() - new Date(getBusinessDate() + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(batch.expiry_date + 'T12:00:00Z').getTime() -
+        new Date(getBusinessDate() + 'T12:00:00Z').getTime()) /
+      (1000 * 60 * 60 * 24)
     )
     : null;
 
@@ -565,172 +728,396 @@ function BatchDetailsModal({
       : 0;
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
+    <>
+      {/* ── Main Batch Details Modal ── */}
       <div
-        className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-2xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Batch details for ${batch.batch_number}`}
       >
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Batch Details</h3>
-          <p className="text-sm text-gray-600 mt-1">
-            {batch.product_name} - {batch.batch_number}
-          </p>
-        </div>
+        <div
+          ref={modalRef}
+          className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-2xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-start">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Batch Details</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                {batch.product_name} — <span className="font-mono">{batch.batch_number}</span>
+              </p>
+            </div>
+            {/* Keyboard shortcut hint bar */}
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              {canEdit && <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">F2 Edit</span>}
+              <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">Ctrl+H History</span>
+              <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">Esc Close</span>
+            </div>
+          </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          <div className="space-y-4">
-            {/* Product Info */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Product Information</h4>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-gray-600">Product:</span>
-                  <span className="ml-2 font-medium text-gray-900">{batch.product_name}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">SKU:</span>
-                  <span className="ml-2 font-medium text-gray-900">{batch.sku || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Batch Number:</span>
-                  <span className="ml-2 font-mono font-medium text-gray-900">
-                    {batch.batch_number}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Unit:</span>
-                  <span className="ml-2 font-medium text-gray-900">
-                    {batch.unit_of_measure || 'PCS'}
-                  </span>
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="space-y-4">
+              {/* Product Info */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Product Information</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Product:</span>
+                    <span className="ml-2 font-medium text-gray-900">{batch.product_name}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">SKU:</span>
+                    <span className="ml-2 font-medium text-gray-900">{batch.sku || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Batch Number:</span>
+                    <span className="ml-2 font-mono font-medium text-gray-900">{batch.batch_number}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Unit:</span>
+                    <span className="ml-2 font-medium text-gray-900">{batch.unit_of_measure || 'PCS'}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Quantity Info */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Quantity Information</h4>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-gray-600">Original Quantity:</span>
-                  <span className="ml-2 font-medium text-gray-900">
-                    {batch.quantity.toFixed(2)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Remaining:</span>
-                  <span className="ml-2 font-semibold text-green-600">
-                    {batch.remaining_quantity.toFixed(2)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Utilization:</span>
-                  <span className="ml-2 font-medium text-gray-900">
-                    {utilizationPercent.toFixed(1)}%
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Status:</span>
-                  <span
-                    className={`ml-2 font-semibold ${batch.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-600'
-                      }`}
-                  >
-                    {batch.status}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Expiry Info */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Expiry Information</h4>
-              {batch.expiry_date ? (
-                <div className="space-y-2">
-                  <div className="text-sm">
-                    <span className="text-gray-600">Expiry Date:</span>
-                    <span className="ml-2 font-medium text-gray-900">
-                      {formatDisplayDate(batch.expiry_date)}
+              {/* Quantity Info */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Quantity Information</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Original Quantity:</span>
+                    <span className="ml-2 font-medium text-gray-900">{batch.quantity.toFixed(2)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Remaining:</span>
+                    <span className="ml-2 font-semibold text-green-600">{batch.remaining_quantity.toFixed(2)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Utilization:</span>
+                    <span className="ml-2 font-medium text-gray-900">{utilizationPercent.toFixed(1)}%</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Status:</span>
+                    <span className={`ml-2 font-semibold ${batch.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-600'}`}>
+                      {batch.status}
                     </span>
                   </div>
-                  {daysUntilExpiry !== null && (
-                    <div
-                      className={`text-sm font-semibold ${daysUntilExpiry < 0
-                        ? 'text-red-600'
-                        : daysUntilExpiry <= 7
-                          ? 'text-red-600'
-                          : daysUntilExpiry <= 30
-                            ? 'text-yellow-600'
-                            : 'text-green-600'
-                        }`}
-                    >
-                      {daysUntilExpiry < 0
-                        ? `⚠️ EXPIRED ${Math.abs(daysUntilExpiry)} days ago`
-                        : daysUntilExpiry === 0
-                          ? '⚠️ EXPIRES TODAY'
-                          : `${daysUntilExpiry} days until expiry`}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">No expiry date set for this batch</p>
-              )}
-            </div>
-
-            {/* Cost Info */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Cost & Value</h4>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-gray-600">Unit Cost:</span>
-                  <span className="ml-2 font-medium text-gray-900">
-                    UGX {batch.cost_price.toFixed(2)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Total Value:</span>
-                  <span className="ml-2 font-semibold text-gray-900">
-                    UGX {batchValue.toFixed(0).toLocaleString()}
-                  </span>
                 </div>
               </div>
-            </div>
 
-            {/* Timestamps */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Timestamps</h4>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <span className="text-gray-600">Created:</span>
-                  <span className="ml-2 text-gray-900">
-                    {batch.created_at?.includes('T')
-                      ? `${formatDisplayDate(batch.created_at)} ${batch.created_at.split('T')[1].substring(0, 8)}`
-                      : formatDisplayDate(batch.created_at)}
-                  </span>
+              {/* Expiry Info — SAP-style with edit button + audit trail */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex justify-between items-start">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">Expiry Information</h4>
+                  {canEdit && (
+                    <button
+                      onClick={openEditDialog}
+                      className="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 px-2 py-1 rounded font-medium border border-blue-200"
+                      title="Edit Expiry (F2)"
+                      aria-label="Edit expiry date"
+                    >
+                      ✏️ Edit (F2)
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <span className="text-gray-600">Last Updated:</span>
-                  <span className="ml-2 text-gray-900">
-                    {batch.updated_at?.includes('T')
-                      ? `${formatDisplayDate(batch.updated_at)} ${batch.updated_at.split('T')[1].substring(0, 8)}`
-                      : formatDisplayDate(batch.updated_at)}
-                  </span>
+
+                {batch.expiry_date ? (
+                  <div className="space-y-1">
+                    <div className="text-sm">
+                      <span className="text-gray-600">Expiry Date:</span>
+                      <span className="ml-2 font-medium text-gray-900">
+                        {formatDisplayDate(batch.expiry_date)}
+                      </span>
+                    </div>
+                    {daysUntilExpiry !== null && (
+                      <div
+                        className={`text-sm font-semibold ${daysUntilExpiry < 0 ? 'text-red-600' :
+                            daysUntilExpiry <= 7 ? 'text-red-600' :
+                              daysUntilExpiry <= 30 ? 'text-yellow-600' : 'text-green-600'
+                          }`}
+                      >
+                        {daysUntilExpiry < 0
+                          ? `⚠️ EXPIRED ${Math.abs(daysUntilExpiry)} days ago`
+                          : daysUntilExpiry === 0
+                            ? '⚠️ EXPIRES TODAY'
+                            : `${daysUntilExpiry} days until expiry`}
+                      </div>
+                    )}
+                    {/* Audit trail — last changed by */}
+                    {lastChange && (
+                      <div className="mt-2 pt-2 border-t border-gray-200">
+                        <p className="text-xs text-gray-500">
+                          Last changed by{' '}
+                          <span className="font-medium text-gray-700">{lastChange.changed_by_name}</span>
+                          {' '}on{' '}
+                          <span className="font-medium text-gray-700">
+                            {lastChange.changed_at.includes('T')
+                              ? `${formatDisplayDate(lastChange.changed_at)} ${lastChange.changed_at.split('T')[1].substring(0, 5)}`
+                              : formatDisplayDate(lastChange.changed_at)}
+                          </span>
+                          {' — '}<span className="italic">{lastChange.reason}</span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No expiry date set for this batch</p>
+                )}
+              </div>
+
+              {/* Cost Info */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Cost & Value</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-gray-600">Unit Cost:</span>
+                    <span className="ml-2 font-medium text-gray-900">UGX {batch.cost_price.toFixed(2)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Total Value:</span>
+                    <span className="ml-2 font-semibold text-gray-900">UGX {batchValue.toFixed(0).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Timestamps */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Timestamps</h4>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-gray-600">Created:</span>
+                    <span className="ml-2 text-gray-900">
+                      {batch.created_at?.includes('T')
+                        ? `${formatDisplayDate(batch.created_at)} ${batch.created_at.split('T')[1].substring(0, 8)}`
+                        : formatDisplayDate(batch.created_at)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Last Updated:</span>
+                    <span className="ml-2 text-gray-900">
+                      {batch.updated_at?.includes('T')
+                        ? `${formatDisplayDate(batch.updated_at)} ${batch.updated_at.split('T')[1].substring(0, 8)}`
+                        : formatDisplayDate(batch.updated_at)}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
-          >
-            Close
-          </button>
+          <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
+            <button
+              onClick={() => setShowHistory(true)}
+              className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-1"
+              title="View expiry change history (Ctrl+H)"
+            >
+              📋 History <span className="text-xs text-gray-400 ml-1">(Ctrl+H)</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
+            >
+              Close (Esc)
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* ── Edit Expiry Dialog ── */}
+      {showEditDialog && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]"
+          onClick={closeEditDialog}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit batch expiry date"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-base font-semibold text-gray-900">Edit Expiry Date</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Batch: <span className="font-mono font-medium">{batch.batch_number}</span>
+                {' — '}{batch.product_name}
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-4">
+              {/* New Expiry Date */}
+              <div>
+                <label htmlFor="edit-expiry-date" className="block text-sm font-medium text-gray-700 mb-1">
+                  New Expiry Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="edit-expiry-date"
+                  ref={editExpiryInputRef}
+                  type="date"
+                  value={editExpiry}
+                  onChange={(e) => { setEditExpiry(e.target.value); setEditError(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      e.preventDefault();
+                      editReasonRef.current?.focus();
+                    }
+                    if (e.key === 'F8') { e.preventDefault(); handleSave(); }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  aria-required="true"
+                />
+                {batch.expiry_date && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Current: {formatDisplayDate(batch.expiry_date)}
+                  </p>
+                )}
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label htmlFor="edit-expiry-reason" className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason for Change <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  id="edit-expiry-reason"
+                  ref={editReasonRef}
+                  value={editReason}
+                  onChange={(e) => { setEditReason(e.target.value); setEditError(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      e.preventDefault();
+                      saveButtonRef.current?.focus();
+                    }
+                    if (e.key === 'Tab' && e.shiftKey) {
+                      e.preventDefault();
+                      editExpiryInputRef.current?.focus();
+                    }
+                    if (e.key === 'F8') { e.preventDefault(); handleSave(); }
+                  }}
+                  placeholder="e.g. Supplier provided updated expiry certificate"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                  aria-required="true"
+                />
+              </div>
+
+              {/* Error */}
+              {editError && (
+                <div className="bg-red-50 border border-red-200 rounded p-3">
+                  <p className="text-sm text-red-700">{editError}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
+              <p className="text-xs text-gray-400">F8 = Save &nbsp;·&nbsp; Esc = Cancel &nbsp;·&nbsp; Tab = Next field</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={closeEditDialog}
+                  className="px-3 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                >
+                  Cancel (Esc)
+                </button>
+                <button
+                  ref={saveButtonRef}
+                  onClick={handleSave}
+                  disabled={updateExpiry.isPending}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' && e.shiftKey) {
+                      e.preventDefault();
+                      editReasonRef.current?.focus();
+                    }
+                    if (e.key === 'F8') { e.preventDefault(); handleSave(); }
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg"
+                  aria-label="Save expiry date change"
+                >
+                  {updateExpiry.isPending ? 'Saving…' : 'Save (F8)'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Expiry History Modal (Ctrl+H) ── */}
+      {showHistory && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]"
+          onClick={() => setShowHistory(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Expiry change history"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-base font-semibold text-gray-900">Expiry Change History</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Batch: <span className="font-mono font-medium">{batch.batch_number}</span>
+                {' — '}{batch.product_name}
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {auditHistory.length === 0 ? (
+                <div className="px-6 py-8 text-center text-gray-500">
+                  <p>No expiry changes recorded for this batch.</p>
+                </div>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Changed On</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Changed By</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Old Expiry</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">New Expiry</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {auditHistory.map((record) => (
+                      <tr key={record.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">
+                          {record.changed_at.includes('T')
+                            ? `${formatDisplayDate(record.changed_at)} ${record.changed_at.split('T')[1].substring(0, 5)}`
+                            : formatDisplayDate(record.changed_at)}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">
+                          {record.changed_by_name}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                          {record.old_expiry_date ? formatDisplayDate(record.old_expiry_date) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-blue-700 whitespace-nowrap">
+                          {formatDisplayDate(record.new_expiry_date)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {record.reason}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setShowHistory(false)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
+              >
+                Close (Esc)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

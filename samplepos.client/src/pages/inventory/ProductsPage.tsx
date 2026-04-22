@@ -21,6 +21,7 @@ import {
   formatHistoryReference,
   type ProductHistoryType
 } from '../../hooks/useProductHistory';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -922,6 +923,8 @@ export default function ProductsPage() {
       }
     } catch { }
   }, [showAddUomForm, uomFormData.conversionFactor, formData.costPrice, formData.sellingPrice, productUoms]);
+
+  useSubmitOnEnter(showModal, !createProductMutation.isPending && !updateProductMutation.isPending, handleSave);
 
   return (
     <div className="p-6">

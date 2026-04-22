@@ -38,6 +38,7 @@ import toast from 'react-hot-toast';
 import { apiClient } from '../../utils/api';
 import { accountingApi, customersApi } from '../../services/api';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // Types based on existing C# API DTOs
 interface CustomerAccount {
@@ -430,6 +431,10 @@ const CustomerFinancialPage = () => {
         const diffTime = now.getTime() - due.getTime();
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     };
+
+    useSubmitOnEnter(showDepositDialog, true, handleCreateDeposit);
+    useSubmitOnEnter(showCreditDialog, true, handleCreateCredit);
+    useSubmitOnEnter(showReceivableDialog, true, handleCreateReceivable);
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

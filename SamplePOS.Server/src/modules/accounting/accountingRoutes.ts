@@ -22,6 +22,11 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
+import {
+  buildBalanceSheetIntegrity,
+  buildIncomeStatementIntegrity,
+  buildCashFlowIntegrity,
+} from '../../services/financialIntegrityService.js';
 
 // Zod schemas for accounting routes
 const ChartOfAccountsQuerySchema = z.object({
@@ -593,7 +598,10 @@ router.get(
     const query = DateQuerySchema.parse(req.query);
     const asOfDate = query.asOfDate || getBusinessDate();
 
-    const balanceSheet = await accountingRepository.getBalanceSheet(asOfDate, pool);
+    const [balanceSheet, integrity] = await Promise.all([
+      accountingRepository.getBalanceSheet(asOfDate, pool),
+      buildBalanceSheetIntegrity(pool, asOfDate),
+    ]);
 
     // Get company name from settings
     const settings = await getSettings(pool);
@@ -601,7 +609,7 @@ router.get(
 
     res.json({
       success: true,
-      data: { ...balanceSheet, companyName },
+      data: { ...balanceSheet, companyName, integrity },
     });
   })
 );
@@ -627,7 +635,10 @@ router.get(
     const startDate = query.startDate || firstDayOfMonth;
     const endDate = query.endDate || bizDate;
 
-    const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
+    const [incomeStatement, integrity] = await Promise.all([
+      accountingRepository.getIncomeStatement(startDate, endDate, pool),
+      buildIncomeStatementIntegrity(pool, startDate, endDate),
+    ]);
 
     // Get company name from settings
     const settings = await getSettings(pool);
@@ -635,7 +646,7 @@ router.get(
 
     res.json({
       success: true,
-      data: { ...incomeStatement, companyName },
+      data: { ...incomeStatement, companyName, integrity },
     });
   })
 );
@@ -821,6 +832,9 @@ router.get(
     const settings = await getSettings(pool);
     const companyName = settings.companyName || 'SMART ERP';
 
+    // Build integrity block (scoped to period)
+    const integrity = await buildCashFlowIntegrity(pool, startDate, endDate);
+
     res.json({
       success: true,
       data: {
@@ -838,6 +852,7 @@ router.get(
         netChangeInCash,
         beginningCashBalance,
         endingCashBalance,
+        integrity,
       },
     });
   })
@@ -866,6 +881,7 @@ router.get(
       receivablesSummaryResult,
       payablesSummaryResult,
       journalEntriesResult,
+      depositLiabilitiesResult,
     ] = await Promise.all([
       // Chart of accounts summary (using correct table and column names)
       pool.query(`
@@ -916,6 +932,15 @@ router.get(
     WHERE "TransactionDate" >= CURRENT_DATE - INTERVAL '30 days'
       AND "Status" = 'POSTED'
       `),
+      // Customer deposit liabilities (prepayments held)
+      pool.query(`
+    SELECT 
+      COUNT(*) as deposit_count,
+      COUNT(DISTINCT customer_id) as customer_count,
+      COALESCE(SUM(amount_available), 0) as total_liability
+    FROM pos_customer_deposits
+    WHERE status = 'ACTIVE' AND amount_available > 0
+      `),
     ]);
 
     // Process accounts by type
@@ -948,6 +973,9 @@ router.get(
     // Journal entries count
     const journalEntriesCount = parseInt(journalEntriesResult.rows[0]?.entry_count || '0');
 
+    // Deposit liabilities
+    const depositData = depositLiabilitiesResult.rows[0] || {};
+
     res.json({
       success: true,
       data: {
@@ -977,6 +1005,11 @@ router.get(
         payables: {
           supplierCount: parseInt(payablesData.supplier_count || '0'),
           totalAmount: Money.parseDb(payablesData.total_payables).toNumber(),
+        },
+        depositLiabilities: {
+          depositCount: parseInt(depositData.deposit_count || '0'),
+          customerCount: parseInt(depositData.customer_count || '0'),
+          totalLiability: Money.parseDb(depositData.total_liability).toNumber(),
         },
         journalEntries: {
           recentCount: journalEntriesCount,

@@ -7,11 +7,12 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { deliveryNoteRepository } from './deliveryNoteRepository.js';
-import { recordMovement } from '../stock-movements/stockMovementRepository.js';
+import { deductStockFEFO as sharedDeductStockFEFO } from '../../utils/fefoDeduction.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
-import { syncProductQuantity } from '../../utils/inventorySync.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { recordDeliveryNoteGoodsIssueToGL } from '../../services/glEntryService.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 import {
   DeliveryNoteWithLines,
   CreateDeliveryNoteData,
@@ -58,11 +59,46 @@ export const deliveryNoteService = {
         );
       }
 
+      // Guard: block if quotation is being fulfilled via Distribution SO
+      // Use SAVEPOINT so a query failure doesn't poison the transaction
+      let distSoCheck: { rows: Array<{ order_number: string }> } = { rows: [] };
+      try {
+        await client.query('SAVEPOINT dist_so_check');
+        distSoCheck = await client.query(
+          `SELECT order_number FROM dist_sales_orders
+           WHERE id IN (
+             SELECT reference_id::uuid FROM document_flow
+             WHERE from_entity_id = $1 AND from_entity_type = 'QUOTATION'
+             AND to_entity_type = 'ORDER'
+           )
+           AND status NOT IN ('CANCELLED')
+           LIMIT 1`,
+          [data.quotationId]
+        );
+        await client.query('RELEASE SAVEPOINT dist_so_check');
+      } catch {
+        await client.query('ROLLBACK TO SAVEPOINT dist_so_check');
+      }
+
+      if (distSoCheck.rows.length > 0) {
+        throw new ConflictError(
+          `Quotation ${quotation.quote_number} is being fulfilled via Distribution Sales Order ` +
+          `${distSoCheck.rows[0].order_number}. Cannot create delivery notes — use the Distribution module.`
+        );
+      }
+
       // ── Load quotation items ─────────────────────────────────
       const qiResult = await client.query(
-        `SELECT id, product_id, description, quantity, delivered_quantity,
-                unit_price, uom_id, uom_name, unit_cost, product_type
-         FROM quotation_items WHERE quotation_id = $1`,
+        `SELECT qi.id, qi.product_id, qi.description, qi.quantity, qi.delivered_quantity,
+                qi.unit_price, qi.uom_id, qi.uom_name, qi.unit_cost, qi.product_type,
+                COALESCE((
+                  SELECT SUM(dnl.quantity_delivered)
+                  FROM delivery_note_lines dnl
+                  JOIN delivery_notes dn ON dn.id = dnl.delivery_note_id
+                  WHERE dnl.quotation_item_id = qi.id
+                    AND dn.status IN ('DRAFT', 'PICKED')
+                ), 0) AS pending_quantity
+         FROM quotation_items qi WHERE qi.quotation_id = $1`,
         [data.quotationId]
       );
       const qiMap = new Map(qiResult.rows.map((r) => [r.id as string, r]));
@@ -87,14 +123,16 @@ export const deliveryNoteService = {
 
         const ordered = new Decimal(qi.quantity);
         const alreadyDelivered = new Decimal(qi.delivered_quantity);
-        const remaining = ordered.minus(alreadyDelivered);
+        const pending = new Decimal(qi.pending_quantity);
+        const remaining = ordered.minus(alreadyDelivered).minus(pending);
         const requested = new Decimal(line.quantityDelivered);
 
         if (requested.greaterThan(remaining)) {
           throw new ValidationError(
             `Cannot deliver ${requested.toFixed(2)} of "${qi.description}". ` +
-            `Ordered: ${ordered.toFixed(2)}, Already delivered: ${alreadyDelivered.toFixed(2)}, ` +
-            `Remaining: ${remaining.toFixed(2)}`
+            `Ordered: ${ordered.toFixed(2)}, Delivered: ${alreadyDelivered.toFixed(2)}, ` +
+            `Pending in other DNs: ${pending.toFixed(2)}, ` +
+            `Available: ${remaining.toFixed(2)}`
           );
         }
       }
@@ -292,7 +330,7 @@ export const deliveryNoteService = {
     deliveryNoteId: string,
     postedById: string
   ): Promise<DeliveryNoteWithLines> {
-    return UnitOfWork.run(pool, async (client: PoolClient) => {
+    const pgiResult = await UnitOfWork.run(pool, async (client: PoolClient) => {
       // ── Load & validate DN ───────────────────────────────────
       const dnResult = await client.query(
         `SELECT * FROM delivery_notes WHERE id = $1 FOR UPDATE`,
@@ -344,117 +382,31 @@ export const deliveryNoteService = {
         }
       }
 
-      // ── FEFO batch deduction per line ────────────────────────
-      const productsToSync = new Set<string>();
+      // ── FEFO batch deduction per line (shared utility) ───────
+      let totalCost = new Decimal(0);
 
       for (const line of linesResult.rows) {
         const productId = line.product_id as string;
-        let remainingQty = new Decimal(line.quantity_delivered);
-        productsToSync.add(productId);
 
-        if (line.batch_id) {
-          // ── Specific batch requested ─────────────────────────
-          const batchResult = await client.query(
-            `SELECT id, remaining_quantity, cost_price
-             FROM inventory_batches
-             WHERE id = $1 AND product_id = $2 AND status = 'ACTIVE'
-             FOR UPDATE`,
-            [line.batch_id, productId]
-          );
-          if (batchResult.rows.length === 0) {
-            throw new NotFoundError(`Batch ${line.batch_id} not found or not active for product ${productId}`);
-          }
+        // Look up product name for errors
+        const pResult = await client.query('SELECT name FROM products WHERE id = $1', [productId]);
+        const productName = pResult.rows[0]?.name || productId;
 
-          const batch = batchResult.rows[0];
-          const batchQty = new Decimal(batch.remaining_quantity);
-          if (remainingQty.greaterThan(batchQty)) {
-            throw new ValidationError(
-              `Batch ${line.batch_id} has only ${batchQty.toFixed(2)} remaining, ` +
-              `but ${remainingQty.toFixed(2)} required`
-            );
-          }
+        const fefoResult = await sharedDeductStockFEFO(client, {
+          productId,
+          quantity: new Decimal(line.quantity_delivered),
+          specificBatchId: line.batch_id || undefined,
+          movementType: 'DELIVERY',
+          referenceType: 'DELIVERY_NOTE',
+          referenceId: deliveryNoteId,
+          createdById: postedById,
+          productName,
+        });
 
-          await client.query(
-            `UPDATE inventory_batches
-             SET remaining_quantity = remaining_quantity - $1,
-                 status = CASE WHEN remaining_quantity - $1 <= 0 THEN 'DEPLETED'::batch_status ELSE status END,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [remainingQty.toFixed(4), line.batch_id]
-          );
-
-          await recordMovement(client, {
-            productId,
-            batchId: line.batch_id,
-            movementType: 'DELIVERY',
-            quantity: remainingQty.toNumber(),
-            unitCost: batch.cost_price ? Money.toNumber(Money.parseDb(batch.cost_price)) : null,
-            referenceType: 'DELIVERY_NOTE',
-            referenceId: deliveryNoteId,
-            notes: `DN ${dn.delivery_note_number} - batch delivery`,
-            createdBy: postedById,
-          });
-        } else {
-          // ── FEFO auto-select ─────────────────────────────────
-          const batchesResult = await client.query(
-            `SELECT id, remaining_quantity, expiry_date, cost_price
-             FROM inventory_batches
-             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
-             ORDER BY expiry_date ASC NULLS LAST, received_date ASC
-             FOR UPDATE`,
-            [productId]
-          );
-
-          for (const batch of batchesResult.rows) {
-            if (remainingQty.lessThanOrEqualTo(0)) break;
-
-            const batchQty = new Decimal(batch.remaining_quantity || 0);
-            const qtyToDeduct = Decimal.min(remainingQty, batchQty);
-
-            await client.query(
-              `UPDATE inventory_batches
-               SET remaining_quantity = remaining_quantity - $1,
-                   status = CASE WHEN remaining_quantity - $1 <= 0 THEN 'DEPLETED'::batch_status ELSE status END,
-                   updated_at = NOW()
-               WHERE id = $2`,
-              [qtyToDeduct.toFixed(4), batch.id]
-            );
-
-            await recordMovement(client, {
-              productId,
-              batchId: batch.id,
-              movementType: 'DELIVERY',
-              quantity: qtyToDeduct.toNumber(),
-              unitCost: batch.cost_price ? Money.toNumber(Money.parseDb(batch.cost_price)) : null,
-              referenceType: 'DELIVERY_NOTE',
-              referenceId: deliveryNoteId,
-              notes: `DN ${dn.delivery_note_number} - FEFO batch deduction`,
-              createdBy: postedById,
-            });
-
-            remainingQty = remainingQty.minus(qtyToDeduct);
-          }
-
-          if (remainingQty.greaterThan(0)) {
-            // Look up product name for error
-            const pResult = await client.query('SELECT name FROM products WHERE id = $1', [productId]);
-            const productName = pResult.rows[0]?.name || productId;
-            throw new ValidationError(
-              `Not enough stock for "${productName}". ` +
-              `Requested: ${new Decimal(line.quantity_delivered).toFixed(2)}, ` +
-              `Short by: ${remainingQty.toFixed(2)}`
-            );
-          }
-        }
+        totalCost = totalCost.plus(fefoResult.totalCost);
 
         // ── Update quotation_items.delivered_quantity ───────────
         await deliveryNoteRepository.syncDeliveredQuantity(client, line.quotation_item_id);
-      }
-
-      // ── App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-      for (const productId of productsToSync) {
-        await syncProductQuantity(client, productId);
       }
 
       // ── Recalc total (safe: trigger allows DRAFT→POSTED and PICKED→POSTED) ──
@@ -462,7 +414,7 @@ export const deliveryNoteService = {
       // ── Mark DN as POSTED ────────────────────────────────────
       await deliveryNoteRepository.markPosted(client, deliveryNoteId, postedById);
 
-      // Return final state
+      // Return final state + accumulated cost
       const result = await deliveryNoteRepository.getById(client, deliveryNoteId);
       if (!result) throw new NotFoundError('Failed to retrieve posted delivery note');
 
@@ -472,10 +424,33 @@ export const deliveryNoteService = {
         quotationId: dn.quotation_id,
         lineCount: linesResult.rows.length,
         totalAmount: result.totalAmount,
+        totalCost: totalCost.toNumber(),
       });
 
-      return result;
+      return { dn: result, totalCost: totalCost.toNumber() };
     });
+
+    // ── Post COGS GL entry after transaction commits ─────────
+    // SAP: Goods Issue posts DR COGS / CR Inventory in the same period
+    if (pgiResult.totalCost > 0) {
+      try {
+        await recordDeliveryNoteGoodsIssueToGL({
+          deliveryNoteId,
+          deliveryNoteNumber: pgiResult.dn.deliveryNoteNumber,
+          postingDate: getBusinessDate(),
+          totalCost: pgiResult.totalCost,
+        }, pool);
+      } catch (glError) {
+        logger.warn('GL COGS posting deferred for DN PGI', {
+          deliveryNoteId,
+          deliveryNoteNumber: pgiResult.dn.deliveryNoteNumber,
+          totalCost: pgiResult.totalCost,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+      }
+    }
+
+    return pgiResult.dn;
   },
 
   /**
@@ -527,23 +502,32 @@ export const deliveryNoteService = {
     const quotation = qResult.rows[0];
 
     const itemsResult = await pool.query(
-      `SELECT id, product_id, description, quantity, delivered_quantity,
-              unit_price, line_total, uom_name
-       FROM quotation_items WHERE quotation_id = $1
-       ORDER BY line_number`,
+      `SELECT qi.id, qi.product_id, qi.description, qi.quantity, qi.delivered_quantity,
+              qi.unit_price, qi.line_total, qi.uom_name,
+              COALESCE((
+                SELECT SUM(dnl.quantity_delivered)
+                FROM delivery_note_lines dnl
+                JOIN delivery_notes dn ON dn.id = dnl.delivery_note_id
+                WHERE dnl.quotation_item_id = qi.id
+                  AND dn.status IN ('DRAFT', 'PICKED')
+              ), 0) AS pending_quantity
+       FROM quotation_items qi WHERE qi.quotation_id = $1
+       ORDER BY qi.line_number`,
       [quotationId]
     );
 
     const items = itemsResult.rows.map((r) => {
       const ordered = Money.toNumber(Money.parseDb(r.quantity));
       const delivered = Money.toNumber(Money.parseDb(r.delivered_quantity));
+      const pending = Money.toNumber(Money.parseDb(r.pending_quantity));
       return {
         quotationItemId: r.id as string,
         productId: r.product_id as string,
         description: r.description as string,
         ordered,
         delivered,
-        remaining: Money.toNumber(new Decimal(ordered).minus(delivered)),
+        pending,
+        remaining: Money.toNumber(new Decimal(ordered).minus(delivered).minus(pending)),
         unitPrice: Money.toNumber(Money.parseDb(r.unit_price)),
         lineTotal: Money.toNumber(Money.parseDb(r.line_total)),
         uomName: r.uom_name as string | null,

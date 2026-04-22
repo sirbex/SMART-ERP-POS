@@ -67,6 +67,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { Money, Decimal } from '../utils/money.js';
 import logger from '../utils/logger.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
+import {
+    PostingGovernanceService,
+    type PostingSource,
+    type GovernanceJournalLine,
+} from './postingGovernanceService.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -86,6 +91,9 @@ export interface JournalLine {
     entityId?: string;
 }
 
+// Re-export PostingSource so callers only need this file
+export type { PostingSource } from './postingGovernanceService.js';
+
 export interface JournalEntryRequest {
     entryDate: string; // YYYY-MM-DD
     description: string;
@@ -95,6 +103,12 @@ export interface JournalEntryRequest {
     lines: JournalLine[];
     userId: string;
     idempotencyKey: string;
+    /**
+     * Posting source — identifies which module/workflow is creating this entry.
+     * Enforced by PostingGovernanceService before any DB write.
+     * Defaults to 'MANUAL_JOURNAL' when omitted (most restrictive).
+     */
+    source?: PostingSource;
 }
 
 export interface JournalEntryResult {
@@ -396,7 +410,21 @@ export class AccountingCore {
         // If caller provided a transactional client, execute directly (atomic with caller).
         // Otherwise, start our own UnitOfWork transaction (backward compatible).
         const doWork = async (client: pg.PoolClient): Promise<JournalEntryResult> => {
-            // 3. Check idempotency - return existing if already processed
+            // 3a. Posting Governance check — hard block, no warnings
+            //     Must run BEFORE idempotency check so a bad request is always rejected.
+            const governanceSource: PostingSource = request.source ?? 'MANUAL_JOURNAL';
+            const uniqueCodes = [...new Set(request.lines.map((l) => l.accountCode))];
+            const governanceAccounts = await PostingGovernanceService.fetchGovernanceAccounts(
+                client,
+                uniqueCodes
+            );
+            PostingGovernanceService.validate({
+                source: governanceSource,
+                lines: request.lines as GovernanceJournalLine[],
+                accounts: governanceAccounts,
+            });
+
+            // 3b. Check idempotency - return existing if already processed
             const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
             if (idempotencyCheck.exists) {
                 // Fetch and return existing transaction (idempotent behavior)
@@ -422,7 +450,14 @@ export class AccountingCore {
                 throw new PeriodLockedError(request.entryDate, periodStatus || 'UNKNOWN');
             }
 
-            // 5. Generate transaction number (deterministic based on count)
+            // 5. Serialize transaction number allocation within the current DB transaction.
+            // This prevents two concurrent journal entries from both reading the same MAX()
+            // and generating duplicate TXN- numbers.
+            await client.query(`
+        SELECT pg_advisory_xact_lock(hashtext('ledger_transactions.transaction_number'))
+      `);
+
+            // 6. Generate transaction number (sequential under advisory lock)
             const countResult = await client.query(`
         SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER)), 0) + 1 as next_num 
         FROM ledger_transactions
@@ -432,7 +467,7 @@ export class AccountingCore {
             const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
             const transactionId = uuidv4();
 
-            // 6. Create transaction header
+            // 7. Create transaction header
             await client.query(
                 `
         INSERT INTO ledger_transactions (
@@ -457,7 +492,13 @@ export class AccountingCore {
                 ]
             );
 
-            // 7. Create ledger entries
+            // Stamp the PostingSource on ledger_transactions for audit
+            await client.query(
+                `UPDATE ledger_transactions SET "PostingSource" = $2 WHERE "Id" = $1`,
+                [transactionId, governanceSource]
+            );
+
+            // 8. Create ledger entries
             let lineNumber = 1;
             for (const line of request.lines) {
                 // Resolve account
@@ -502,7 +543,7 @@ export class AccountingCore {
                     ]
                 );
 
-                // 8. Update account running balance
+                // 9. Update account running balance
                 const balanceChange =
                     account.NormalBalance === 'DEBIT'
                         ? Money.subtract(line.debitAmount, line.creditAmount).toNumber()
@@ -518,7 +559,7 @@ export class AccountingCore {
                     [account.Id, balanceChange]
                 );
 
-                // 8b. UPSERT gl_period_balances (SAP FAGLFLEXT pattern)
+                // 9b. UPSERT gl_period_balances (SAP FAGLFLEXT pattern)
                 //     Runs inside the SAME transaction — atomic with ledger entry.
                 //     Defense-in-depth: isPeriodOpen() already gates this function,
                 //     but the WHERE clause below provides a DB-level safety net.
@@ -548,7 +589,7 @@ export class AccountingCore {
                 }
             }
 
-            // 9. Create audit log entry
+            // 10. Create audit log entry
             await client.query(
                 `
         INSERT INTO audit_log (id, action, entity_type, entity_id, user_id, action_details)
@@ -615,59 +656,66 @@ export class AccountingCore {
      */
     static async reverseTransaction(
         request: ReversalRequest,
-        dbPool?: pg.Pool
+        dbPool?: pg.Pool,
+        /**
+         * Optional transactional PoolClient. When provided, the reversal runs
+         * inside the CALLER's transaction (SAP LUW pattern) — sale void and
+         * GL reversal commit or rollback atomically.
+         * When omitted, the method opens its own UnitOfWork transaction
+         * (backward-compatible default).
+         */
+        txClient?: pg.PoolClient,
     ): Promise<JournalEntryResult> {
         const pool = dbPool || globalPool;
 
-        try {
-            return await UnitOfWork.run(pool, async (client) => {
-                // 1. Check idempotency
-                const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
-                if (idempotencyCheck.exists) {
-                    const existing = await this.getTransaction(idempotencyCheck.transactionId!, dbPool);
-                    if (existing) return existing;
-                    throw new IdempotencyConflictError(
-                        request.idempotencyKey,
-                        idempotencyCheck.transactionId!
-                    );
-                }
+        const doReversal = async (client: pg.PoolClient) => {
+            // 1. Check idempotency
+            const idempotencyCheck = await this.checkIdempotencyKey(client, request.idempotencyKey);
+            if (idempotencyCheck.exists) {
+                const existing = await this.getTransaction(idempotencyCheck.transactionId!, dbPool);
+                if (existing) return existing;
+                throw new IdempotencyConflictError(
+                    request.idempotencyKey,
+                    idempotencyCheck.transactionId!
+                );
+            }
 
-                // 2. Get original transaction
-                const originalResult = await client.query(
-                    `
+            // 2. Get original transaction
+            const originalResult = await client.query(
+                `
         SELECT 
           lt."Id", lt."TransactionNumber", lt."Description", lt."Status",
           lt."ReferenceType", lt."ReferenceId", lt."ReferenceNumber"
         FROM ledger_transactions lt
         WHERE lt."Id" = $1
       `,
-                    [request.originalTransactionId]
-                );
+                [request.originalTransactionId]
+            );
 
-                if (originalResult.rows.length === 0) {
-                    throw new AccountingError('Original transaction not found', 'TRANSACTION_NOT_FOUND');
-                }
+            if (originalResult.rows.length === 0) {
+                throw new AccountingError('Original transaction not found', 'TRANSACTION_NOT_FOUND');
+            }
 
-                const original = originalResult.rows[0];
+            const original = originalResult.rows[0];
 
-                if (original.Status === 'REVERSED') {
-                    throw new AccountingError('Transaction already reversed', 'ALREADY_REVERSED');
-                }
+            if (original.Status === 'REVERSED') {
+                throw new AccountingError('Transaction already reversed', 'ALREADY_REVERSED');
+            }
 
-                if (original.Status === 'DRAFT') {
-                    throw new AccountingError('Cannot reverse draft transaction', 'INVALID_STATUS');
-                }
+            if (original.Status === 'DRAFT') {
+                throw new AccountingError('Cannot reverse draft transaction', 'INVALID_STATUS');
+            }
 
-                // 3. Check period is open for reversal date
-                const periodOpen = await this.isPeriodOpen(client, request.reversalDate);
-                if (!periodOpen) {
-                    const periodStatus = await this.getPeriodStatus(client, request.reversalDate);
-                    throw new PeriodLockedError(request.reversalDate, periodStatus || 'UNKNOWN');
-                }
+            // 3. Check period is open for reversal date
+            const periodOpen = await this.isPeriodOpen(client, request.reversalDate);
+            if (!periodOpen) {
+                const periodStatus = await this.getPeriodStatus(client, request.reversalDate);
+                throw new PeriodLockedError(request.reversalDate, periodStatus || 'UNKNOWN');
+            }
 
-                // 4. Get original entries
-                const entriesResult = await client.query(
-                    `
+            // 4. Get original entries
+            const entriesResult = await client.query(
+                `
         SELECT 
           le."AccountId", le."DebitAmount", le."CreditAmount", le."Description",
           a."AccountCode"
@@ -676,33 +724,33 @@ export class AccountingCore {
         WHERE le."TransactionId" = $1
         ORDER BY le."LineNumber"
       `,
-                    [request.originalTransactionId]
-                );
+                [request.originalTransactionId]
+            );
 
-                // 5. Create reversed lines (swap debits and credits)
-                const reversedLines: JournalLine[] = entriesResult.rows.map((entry) => ({
-                    accountCode: entry.AccountCode,
-                    description: `REVERSAL: ${entry.Description}`,
-                    debitAmount: Money.parseDb(entry.CreditAmount).toNumber(), // Swap!
-                    creditAmount: Money.parseDb(entry.DebitAmount).toNumber(), // Swap!
-                }));
+            // 5. Create reversed lines (swap debits and credits)
+            const reversedLines: JournalLine[] = entriesResult.rows.map((entry) => ({
+                accountCode: entry.AccountCode,
+                description: `REVERSAL: ${entry.Description}`,
+                debitAmount: Money.parseDb(entry.CreditAmount).toNumber(), // Swap!
+                creditAmount: Money.parseDb(entry.DebitAmount).toNumber(), // Swap!
+            }));
 
-                // 6. Generate reversal transaction number
-                const countResult = await client.query(`
+            // 6. Generate reversal transaction number
+            const countResult = await client.query(`
         SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER)), 0) + 1 as next_num 
         FROM ledger_transactions
         WHERE "TransactionNumber" LIKE 'TXN-%'
       `);
-                const nextNum = parseInt(countResult.rows[0].next_num);
-                const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
-                const transactionId = uuidv4();
+            const nextNum = parseInt(countResult.rows[0].next_num);
+            const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
+            const transactionId = uuidv4();
 
-                // Calculate totals
-                const validation = this.validateDoubleEntry(reversedLines);
+            // Calculate totals
+            const validation = this.validateDoubleEntry(reversedLines);
 
-                // 7. Create reversal transaction
-                await client.query(
-                    `
+            // 7. Create reversal transaction
+            await client.query(
+                `
         INSERT INTO ledger_transactions (
           "Id", "TransactionNumber", "TransactionDate", "ReferenceType",
           "ReferenceId", "ReferenceNumber", "Description",
@@ -710,78 +758,78 @@ export class AccountingCore {
           "ReversesTransactionId", "IdempotencyKey", "CreatedBy", "CreatedAt", "UpdatedAt", "IsReversed"
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POSTED', $10, $11, $12, NOW(), NOW(), FALSE)
       `,
-                    [
-                        transactionId,
-                        transactionNumber,
-                        request.reversalDate,
-                        'REVERSAL',
-                        original.ReferenceId,
-                        `REV-${original.ReferenceNumber}`,
-                        `REVERSAL of ${original.TransactionNumber}: ${request.reason}`,
-                        validation.totalDebits,
-                        validation.totalCredits,
-                        request.originalTransactionId,
-                        request.idempotencyKey,
-                        request.userId,
-                    ]
-                );
+                [
+                    transactionId,
+                    transactionNumber,
+                    request.reversalDate,
+                    'REVERSAL',
+                    original.ReferenceId,
+                    `REV-${original.ReferenceNumber}`,
+                    `REVERSAL of ${original.TransactionNumber}: ${request.reason}`,
+                    validation.totalDebits,
+                    validation.totalCredits,
+                    request.originalTransactionId,
+                    request.idempotencyKey,
+                    request.userId,
+                ]
+            );
 
-                // 8. Create reversal entries
-                let lineNumber = 1;
-                for (const line of reversedLines) {
-                    const accountResult = await client.query(
-                        `
+            // 8. Create reversal entries
+            let lineNumber = 1;
+            for (const line of reversedLines) {
+                const accountResult = await client.query(
+                    `
           SELECT "Id", "NormalBalance" FROM accounts WHERE "AccountCode" = $1
         `,
-                        [line.accountCode]
-                    );
+                    [line.accountCode]
+                );
 
-                    const account = accountResult.rows[0];
-                    const entryId = uuidv4();
-                    const entryType = line.debitAmount > 0 ? 'DEBIT' : 'CREDIT';
-                    const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
+                const account = accountResult.rows[0];
+                const entryId = uuidv4();
+                const entryType = line.debitAmount > 0 ? 'DEBIT' : 'CREDIT';
+                const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
 
-                    await client.query(
-                        `
+                await client.query(
+                    `
           INSERT INTO ledger_entries (
             "Id", "TransactionId", "AccountId", "EntryType", "Amount",
             "DebitAmount", "CreditAmount", "Description", "LineNumber", "CreatedAt"
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
         `,
-                        [
-                            entryId,
-                            transactionId,
-                            account.Id,
-                            entryType,
-                            amount,
-                            line.debitAmount,
-                            line.creditAmount,
-                            line.description,
-                            lineNumber++,
-                        ]
-                    );
+                    [
+                        entryId,
+                        transactionId,
+                        account.Id,
+                        entryType,
+                        amount,
+                        line.debitAmount,
+                        line.creditAmount,
+                        line.description,
+                        lineNumber++,
+                    ]
+                );
 
-                    // Update account balance
-                    const balanceChange =
-                        account.NormalBalance === 'DEBIT'
-                            ? Money.subtract(line.debitAmount, line.creditAmount).toNumber()
-                            : Money.subtract(line.creditAmount, line.debitAmount).toNumber();
+                // Update account balance
+                const balanceChange =
+                    account.NormalBalance === 'DEBIT'
+                        ? Money.subtract(line.debitAmount, line.creditAmount).toNumber()
+                        : Money.subtract(line.creditAmount, line.debitAmount).toNumber();
 
-                    await client.query(
-                        `
+                await client.query(
+                    `
           UPDATE accounts SET "CurrentBalance" = "CurrentBalance" + $2 WHERE "Id" = $1
         `,
-                        [account.Id, balanceChange]
-                    );
+                    [account.Id, balanceChange]
+                );
 
-                    // UPSERT gl_period_balances (SAP FAGLFLEXT) — reversal uses reversalDate
-                    //     Defense-in-depth: isPeriodOpen() already gates this function,
-                    //     but the WHERE clause below provides a DB-level safety net.
-                    const revYear = parseInt(request.reversalDate.substring(0, 4), 10);
-                    const revMonth = parseInt(request.reversalDate.substring(5, 7), 10);
+                // UPSERT gl_period_balances (SAP FAGLFLEXT) — reversal uses reversalDate
+                //     Defense-in-depth: isPeriodOpen() already gates this function,
+                //     but the WHERE clause below provides a DB-level safety net.
+                const revYear = parseInt(request.reversalDate.substring(0, 4), 10);
+                const revMonth = parseInt(request.reversalDate.substring(5, 7), 10);
 
-                    const revUpsertResult = await client.query(
-                        `INSERT INTO gl_period_balances
+                const revUpsertResult = await client.query(
+                    `INSERT INTO gl_period_balances
                             (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
                          SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
                          WHERE NOT EXISTS (
@@ -795,17 +843,17 @@ export class AccountingCore {
                             credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
                             running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
                             last_updated    = NOW()`,
-                        [account.Id, revYear, revMonth, line.debitAmount, line.creditAmount]
-                    );
+                    [account.Id, revYear, revMonth, line.debitAmount, line.creditAmount]
+                );
 
-                    if (revUpsertResult.rowCount === 0) {
-                        throw new PeriodLockedError(request.reversalDate, 'LOCKED');
-                    }
+                if (revUpsertResult.rowCount === 0) {
+                    throw new PeriodLockedError(request.reversalDate, 'LOCKED');
                 }
+            }
 
-                // 9. Mark original as reversed (but don't delete!)
-                await client.query(
-                    `
+            // 9. Mark original as reversed (but don't delete!)
+            await client.query(
+                `
         UPDATE ledger_transactions
         SET "Status" = 'REVERSED',
             "ReversedByTransactionId" = $2,
@@ -814,41 +862,47 @@ export class AccountingCore {
             "UpdatedAt" = NOW()
         WHERE "Id" = $1
       `,
-                    [request.originalTransactionId, transactionId]
-                );
+                [request.originalTransactionId, transactionId]
+            );
 
-                // 10. Audit log
-                await client.query(
-                    `
+            // 10. Audit log
+            await client.query(
+                `
         INSERT INTO audit_log (id, action, entity_type, entity_id, user_id, action_details)
         VALUES ($1, 'VOID', 'SYSTEM', $2, $3, $4)
       `,
-                    [
-                        uuidv4(),
-                        transactionId,
-                        request.userId,
-                        JSON.stringify({
-                            originalTransactionId: request.originalTransactionId,
-                            originalTransactionNumber: original.TransactionNumber,
-                            reversalReason: request.reason,
-                        }),
-                    ]
-                );
-
-                logger.info('Transaction reversed', {
-                    originalTransactionId: request.originalTransactionId,
-                    reversalTransactionId: transactionId,
-                    reason: request.reason,
-                });
-
-                return {
+                [
+                    uuidv4(),
                     transactionId,
-                    transactionNumber,
-                    status: 'POSTED',
-                    totalDebits: validation.totalDebits,
-                    totalCredits: validation.totalCredits,
-                };
+                    request.userId,
+                    JSON.stringify({
+                        originalTransactionId: request.originalTransactionId,
+                        originalTransactionNumber: original.TransactionNumber,
+                        reversalReason: request.reason,
+                    }),
+                ]
+            );
+
+            logger.info('Transaction reversed', {
+                originalTransactionId: request.originalTransactionId,
+                reversalTransactionId: transactionId,
+                reason: request.reason,
             });
+
+            return {
+                transactionId,
+                transactionNumber,
+                status: 'POSTED' as const,
+                totalDebits: validation.totalDebits,
+                totalCredits: validation.totalCredits,
+            };
+        };
+
+        try {
+            if (txClient) {
+                return await doReversal(txClient);
+            }
+            return await UnitOfWork.run(pool, doReversal);
         } catch (error) {
             logger.error('Failed to reverse transaction', { error, request });
             throw error;

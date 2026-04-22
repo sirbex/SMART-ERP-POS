@@ -227,17 +227,17 @@ function entityQuery(type: string, count: number): { sql: string } | null {
     DELIVERY_NOTE: `SELECT id, delivery_note_number AS document_number, status::text, delivery_date::text AS doc_date, total_amount::numeric AS amount
                     FROM delivery_notes WHERE id IN (${placeholders})`,
 
-    INVOICE: `SELECT "Id" AS id, "InvoiceNumber" AS document_number, "Status" AS status, "InvoiceDate"::text AS doc_date, "TotalAmount"::numeric AS amount
-              FROM invoices WHERE "Id" IN (${placeholders})`,
+    INVOICE: `SELECT id, invoice_number AS document_number, status, issue_date::text AS doc_date, total_amount::numeric AS amount
+              FROM invoices WHERE id IN (${placeholders})`,
 
     PAYMENT: `SELECT id, receipt_number AS document_number, NULL::text AS status, payment_date::text AS doc_date, amount::numeric AS amount
               FROM invoice_payments WHERE id IN (${placeholders})`,
 
-    CREDIT_NOTE: `SELECT "Id" AS id, "InvoiceNumber" AS document_number, "Status" AS status, "InvoiceDate"::text AS doc_date, "TotalAmount"::numeric AS amount
-                  FROM invoices WHERE "Id" IN (${placeholders}) AND document_type = 'CREDIT_NOTE'`,
+    CREDIT_NOTE: `SELECT id, invoice_number AS document_number, status, issue_date::text AS doc_date, total_amount::numeric AS amount
+                  FROM invoices WHERE id IN (${placeholders}) AND document_type = 'CREDIT_NOTE'`,
 
-    DEBIT_NOTE: `SELECT "Id" AS id, "InvoiceNumber" AS document_number, "Status" AS status, "InvoiceDate"::text AS doc_date, "TotalAmount"::numeric AS amount
-                 FROM invoices WHERE "Id" IN (${placeholders}) AND document_type = 'DEBIT_NOTE'`,
+    DEBIT_NOTE: `SELECT id, invoice_number AS document_number, status, issue_date::text AS doc_date, total_amount::numeric AS amount
+                 FROM invoices WHERE id IN (${placeholders}) AND document_type = 'DEBIT_NOTE'`,
 
     PURCHASE_ORDER: `SELECT id, order_number AS document_number, status::text, order_date::text AS doc_date, total_amount::numeric AS amount
                      FROM purchase_orders WHERE id IN (${placeholders})`,

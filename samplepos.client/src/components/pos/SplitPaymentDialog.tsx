@@ -6,6 +6,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // Payment segment type (replaces import from shared schema)
 interface PaymentSegment {
@@ -176,6 +177,8 @@ export default function SplitPaymentDialog({
       setEnteredAmount(remaining.toFixed(2));
     }
   };
+
+  useSubmitOnEnter(open, true, handleConfirm);
 
   if (!open) return null;
 

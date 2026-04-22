@@ -34,6 +34,7 @@ import {
 } from '../../db/batchFetch.js';
 import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
+import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -289,6 +290,19 @@ export const salesService = {
         );
       }
 
+      // BR-SAL-005: DEPOSIT payment requires a customer (covers both paymentMethod and paymentLines)
+      const hasDepositInMethod = input.paymentMethod === 'DEPOSIT';
+      const hasDepositInLines = input.paymentLines?.some(
+        (line) => line.paymentMethod === 'DEPOSIT'
+      ) ?? false;
+      if ((hasDepositInMethod || hasDepositInLines) && !input.customerId) {
+        throw new BusinessError(
+          'DEPOSIT payment requires a customer. Cannot apply deposit without a customer account.',
+          'ERR_SALE_005',
+          { paymentMethod: 'DEPOSIT' }
+        );
+      }
+
       // Calculate totals and costs using new cost layer service
       let totalAmount = new Decimal(0);
       let totalCost = new Decimal(0);
@@ -313,6 +327,43 @@ export const salesService = {
         batchFetchProducts(client, regularProductIds),
         batchFetchProductUoms(client, regularProductIds),
       ]);
+
+      // ========== PRICING ENGINE RESOLUTION ==========
+      // Resolve prices through the full cascade (tier → rule → group discount → formula → base)
+      // This ensures customer-group pricing, quantity breaks, and price rules are enforced server-side.
+      const resolvedPriceMap = new Map<string, ResolvedPrice>();
+      if (regularProductIds.length > 0) {
+        try {
+          const bulkItems = input.items
+            .filter((it) => !it.productId?.startsWith('custom_'))
+            .map((it) => ({ productId: it.productId, quantity: it.quantity }));
+
+          const resolved = await getFinalPricesBulk(
+            bulkItems,
+            input.customerId || undefined,
+            undefined, // groupId resolved internally from customerId
+            client,
+          );
+
+          for (let i = 0; i < bulkItems.length; i++) {
+            resolvedPriceMap.set(
+              `${bulkItems[i].productId}:${bulkItems[i].quantity}`,
+              resolved[i],
+            );
+          }
+
+          logger.info('Pricing engine resolved prices for sale', {
+            itemCount: resolved.length,
+            customerId: input.customerId,
+            hasCustomerPricing: resolved.some((r) => r.appliedRule.scope !== 'base'),
+          });
+        } catch (pricingError) {
+          // Non-blocking: if pricing engine fails, fall through to frontend-supplied prices
+          logger.warn('Pricing engine failed, using frontend-supplied prices', {
+            error: pricingError instanceof Error ? pricingError.message : String(pricingError),
+          });
+        }
+      }
 
       for (const item of input.items) {
         // ========== CUSTOM ITEM DETECTION ==========
@@ -420,7 +471,26 @@ export const salesService = {
         // BR-SAL-005: Validate product is active
         await SalesBusinessRules.validateProductActive(client, item.productId);
 
-        const lineTotal = new Decimal(item.quantity).times(item.unitPrice);
+        // ========== PRICING ENGINE OVERRIDE ==========
+        // If the pricing engine resolved a better price for this customer/quantity,
+        // use it instead of the frontend-supplied price.
+        const resolvedPrice = resolvedPriceMap.get(`${item.productId}:${item.quantity}`);
+        let effectiveUnitPrice = item.unitPrice;
+        if (resolvedPrice && resolvedPrice.appliedRule.scope !== 'base') {
+          // Engine found a tier/rule/group discount — enforce it
+          if (resolvedPrice.finalPrice !== item.unitPrice) {
+            logger.info('Pricing engine adjusted unit price', {
+              productId: item.productId,
+              frontendPrice: item.unitPrice,
+              enginePrice: resolvedPrice.finalPrice,
+              rule: resolvedPrice.appliedRule.scope,
+              ruleName: resolvedPrice.appliedRule.ruleName,
+            });
+          }
+          effectiveUnitPrice = resolvedPrice.finalPrice;
+        }
+
+        const lineTotal = new Decimal(item.quantity).times(effectiveUnitPrice);
         const itemDiscountAmount = new Decimal(item.discountAmount || 0);
         const lineTotalAfterDiscount = lineTotal.minus(itemDiscountAmount);
         totalAmount = totalAmount.plus(lineTotalAfterDiscount);
@@ -435,18 +505,18 @@ export const salesService = {
           | 'AVCO'
           | 'STANDARD';
         const originalPrice = Money.toNumber(
-          Money.parse(productData.selling_price || String(item.unitPrice))
+          Money.parse(productData.selling_price || String(effectiveUnitPrice))
         );
 
         // BR-SAL-004: Validate minimum price
-        await SalesBusinessRules.validateMinimumPrice(client, item.productId, item.unitPrice);
+        await SalesBusinessRules.validateMinimumPrice(client, item.productId, effectiveUnitPrice);
 
         // BR-SAL-006: Validate discount
-        if (item.unitPrice < originalPrice) {
+        if (effectiveUnitPrice < originalPrice) {
           await SalesBusinessRules.validateDiscount(
             client,
             item.productId,
-            item.unitPrice,
+            effectiveUnitPrice,
             originalPrice
           );
         }
@@ -497,7 +567,7 @@ export const salesService = {
         }
 
         // BR-SAL-007: Validate profit margin (warning only)
-        SalesBusinessRules.validateProfitMargin(unitCost, item.unitPrice, false);
+        SalesBusinessRules.validateProfitMargin(unitCost, effectiveUnitPrice, false);
 
         const itemCost = new Decimal(unitCost).times(baseQty);
         totalCost = totalCost.plus(itemCost);
@@ -519,7 +589,7 @@ export const salesService = {
           productId: item.productId,
           productName: item.productName,
           quantity: item.quantity,
-          unitPrice: item.unitPrice,
+          unitPrice: effectiveUnitPrice,
           lineTotal: Money.toNumber(lineTotalAfterDiscount),
           costPrice: costPerSellingUnit,
           profit: Money.toNumber(profit),
@@ -1181,6 +1251,13 @@ export const salesService = {
         const depositPaymentLines = input.paymentLines.filter(
           (line) => line.paymentMethod === 'DEPOSIT'
         );
+        if (depositPaymentLines.length > 0 && !input.customerId) {
+          throw new BusinessError(
+            'DEPOSIT payment requires a customer. Cannot apply deposit without a customer account.',
+            'ERR_SALE_005',
+            { paymentMethod: 'DEPOSIT' }
+          );
+        }
         if (depositPaymentLines.length > 0 && input.customerId) {
           const totalDepositAmount = depositPaymentLines
             .reduce((sum, line) => sum.plus(new Decimal(line.amount)), new Decimal(0))
@@ -1199,6 +1276,31 @@ export const salesService = {
                 totalDepositAmount,
                 input.soldBy
               );
+
+              // GL POSTING: Clear Customer Deposits liability and AR for each application
+              // MUST succeed — if GL fails, the entire sale rolls back to prevent discrepancies
+              const custRow = await client.query(
+                'SELECT name FROM customers WHERE id = $1',
+                [input.customerId]
+              );
+              const depositCustomerName = custRow.rows[0]?.name || 'Unknown';
+              for (const app of depositResult.applications) {
+                await glEntryService.recordDepositApplicationToGL(
+                  {
+                    applicationId: app.id,
+                    depositId: app.depositId,
+                    depositNumber: app.depositNumber || '',
+                    saleId: sale.id,
+                    saleNumber: sale.saleNumber,
+                    applicationDate: sale.saleDate || getBusinessDate(),
+                    amount: app.amountApplied,
+                    customerId: input.customerId,
+                    customerName: depositCustomerName,
+                  },
+                  pool,
+                  client
+                );
+              }
 
               logger.info('Customer deposits applied to sale', {
                 saleId: sale.id,
@@ -1345,27 +1447,9 @@ export const salesService = {
                 );
               }
 
-              // Recalculate customer balance from invoices (SINGLE SOURCE OF TRUTH)
-              // Canonical formula: exclude Paid, Cancelled, Voided, Draft
-              await client.query(
-                `UPDATE customers 
-                 SET balance = (
-                   SELECT COALESCE(SUM("OutstandingBalance"), 0)
-                   FROM invoices
-                   WHERE "CustomerId" = $1
-                   AND "Status" NOT IN ('Paid', 'Cancelled', 'Voided', 'Draft')
-                 )
-                 WHERE id = $1`,
-                [input.customerId]
-              );
-
-              // Sync AR account balance (replaces trg_sync_customer_to_ar)
-              await client.query(`
-                UPDATE accounts SET "CurrentBalance" = COALESCE(
-                  (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-                ), "UpdatedAt" = NOW()
-                WHERE "AccountCode" = '1200'
-              `);
+              // Recalculate customer balance from invoices (SSOT)
+              const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+              await syncCustomerBalanceFromInvoices(client, input.customerId, 'QUOTATION_CREDIT_SALE');
             }
           }
 
@@ -1515,32 +1599,9 @@ export const salesService = {
             workflow: 'Credit sale → Invoice with initial payment',
           });
 
-          // Recalculate customer balance from invoices (SINGLE SOURCE OF TRUTH)
-          // Canonical formula: exclude Paid, Cancelled, Voided, Draft
-          await client.query(
-            `UPDATE customers 
-             SET balance = (
-               SELECT COALESCE(SUM("OutstandingBalance"), 0)
-               FROM invoices
-               WHERE "CustomerId" = $1
-               AND "Status" NOT IN ('Paid', 'Cancelled', 'Voided', 'Draft')
-             )
-             WHERE id = $1`,
-            [input.customerId]
-          );
-
-          // Sync AR account balance (replaces trg_sync_customer_to_ar)
-          await client.query(`
-            UPDATE accounts SET "CurrentBalance" = COALESCE(
-              (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-            ), "UpdatedAt" = NOW()
-            WHERE "AccountCode" = '1200'
-          `);
-
-          logger.info('Customer balance synced from invoices', {
-            customerId: input.customerId,
-            saleId: sale.id,
-          });
+          // Recalculate customer balance from invoices (SSOT)
+          const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+          await syncCustomerBalanceFromInvoices(client, input.customerId, 'CREDIT_SALE');
         } catch (invoiceError) {
           logger.error('❌ Failed to create invoice for credit sale - ROLLING BACK TRANSACTION', {
             saleId: sale.id,
@@ -2134,12 +2195,24 @@ export const salesService = {
 
       const sale = saleResult.rows[0];
 
-      // Validate sale can be voided
-      if (sale.status !== 'COMPLETED') {
+      // ERP discipline: A completed POS sale is NEVER voided.
+      // Stock, invoice, and payment are already posted subsystems.
+      // Reverse via Return workflow (refundSale) which posts CREDIT_NOTE + RETURN_IN + refund payment.
+      if (sale.status === 'COMPLETED' || sale.status === 'PARTIALLY_RETURNED') {
         throw new BusinessError(
-          `Cannot void sale with status ${sale.status}. Only COMPLETED sales can be voided.`,
+          `Cannot void a completed POS sale (status: ${sale.status}). ` +
+          `Stock, invoice, and payment are already posted. ` +
+          `Use Return to reverse this sale — this restores inventory, posts a Credit Note, and issues a refund.`,
+          'ERR_SALE_COMPLETED_NO_VOID',
+          { saleId, currentStatus: sale.status }
+        );
+      }
+      // Block void for already-reversed or already-voided statuses
+      if (['VOID', 'REFUNDED', 'VOIDED_BY_RETURN'].includes(sale.status)) {
+        throw new BusinessError(
+          `Cannot void sale with status ${sale.status}.`,
           'ERR_SALE_008',
-          { saleId, currentStatus: sale.status, requiredStatus: 'COMPLETED' }
+          { saleId, currentStatus: sale.status }
         );
       }
 
@@ -2153,10 +2226,13 @@ export const salesService = {
       }
 
       // Check if manager approval is required
-      const totalAmount = parseFloat(sale.total_amount || 0);
+      const totalAmount = Money.toNumber(Money.parseDb(sale.total_amount ?? 0));
       const requiresApproval = totalAmount > amountThreshold;
 
-      if (requiresApproval && !approvedById) {
+      // ADMIN and MANAGER can self-approve high-value voids
+      const voiderIsPrivileged = await salesRepository.isManager(client, voidedById);
+
+      if (requiresApproval && !approvedById && !voiderIsPrivileged) {
         throw new BusinessError(
           `Manager approval required for sales over ${amountThreshold}. Total amount: ${totalAmount}`,
           'ERR_SALE_010',
@@ -2164,8 +2240,8 @@ export const salesService = {
         );
       }
 
-      // If approval provided, verify approver is manager
-      if (approvedById) {
+      // If approval provided by someone else, verify approver is manager/admin
+      if (approvedById && approvedById !== voidedById) {
         const isManager = await salesRepository.isManager(client, approvedById);
         if (!isManager) {
           throw new BusinessError('Approver must have MANAGER or ADMIN role', 'ERR_SALE_011', {
@@ -2186,7 +2262,7 @@ export const salesService = {
 
       // Restore inventory for each item
       for (const item of saleItems) {
-        const quantity = parseFloat(String(item.quantity || 0));
+        const quantity = Money.toNumber(Money.parseDb(item.quantity ?? 0));
         const productId = String(item.productId);
         const batchId = item.batchId;
 
@@ -2201,7 +2277,7 @@ export const salesService = {
         if (costingMethod === 'FIFO') {
           try {
             // Add back to cost layers
-            const unitCost = parseFloat(String(item.unitCost || 0));
+            const unitCost = Money.toNumber(Money.parseDb(item.unitCost ?? 0));
             await client.query(
               `INSERT INTO cost_layers (product_id, quantity, remaining_quantity, unit_cost, batch_number, created_at)
                VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
@@ -2280,7 +2356,7 @@ export const salesService = {
                 `VOID-RESTORE-${sale.sale_number}`,
                 quantity,
                 quantity,
-                item.unitCost || 0,
+                Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
                 `Restored from voided sale ${sale.sale_number}`,
               ]
             );
@@ -2320,7 +2396,7 @@ export const salesService = {
             batchId || null,
             'ADJUSTMENT_IN',
             quantity,
-            item.unitCost || 0,
+            Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
             'VOID',
             saleId,
             `Void sale ${sale.sale_number}: ${voidReason}`,
@@ -2332,20 +2408,20 @@ export const salesService = {
       // Cancel linked invoice if exists (SINGLE SOURCE OF TRUTH)
       // The invoice cancellation will trigger customer balance recalculation
       const linkedInvoiceResult = await client.query(
-        `SELECT "Id" FROM invoices WHERE "SaleId" = $1`,
+        `SELECT id FROM invoices WHERE sale_id = $1`,
         [saleId]
       );
 
       if (linkedInvoiceResult.rows.length > 0) {
-        const invoiceId = linkedInvoiceResult.rows[0].Id;
+        const invoiceId = linkedInvoiceResult.rows[0].id;
 
         // Set invoice to Cancelled with zero outstanding (customer no longer owes)
         await client.query(
           `UPDATE invoices 
-           SET "Status" = 'Cancelled', 
-               "OutstandingBalance" = 0,
-               "UpdatedAt" = NOW()
-           WHERE "Id" = $1`,
+           SET status = 'CANCELLED', 
+               amount_due = 0,
+               updated_at = NOW()
+           WHERE id = $1`,
           [invoiceId]
         );
 
@@ -2357,7 +2433,8 @@ export const salesService = {
         // NOTE: The trg_sync_customer_balance_on_invoice trigger will automatically
         // recalculate customer.balance from remaining unpaid invoices
       } else if (sale.customer_id) {
-        // No invoice exists - fallback to direct balance adjustment for legacy sales
+        // No invoice exists - recalculate customer balance from invoices (SSOT)
+        // Even legacy sales: the balance must always derive from invoices
         const paymentLinesResult = await client.query(
           `SELECT SUM(amount) as credit_amount 
            FROM payment_lines 
@@ -2365,34 +2442,13 @@ export const salesService = {
           [saleId]
         );
 
-        const creditAmount = parseFloat(paymentLinesResult.rows[0]?.credit_amount || 0);
+        const creditAmount = Money.toNumber(Money.parseDb(paymentLinesResult.rows[0]?.credit_amount ?? 0));
 
         if (creditAmount > 0) {
-          // Reduce customer balance (they no longer owe us this money)
-          // Capture old balance for audit (replaces trg_audit_customer_balance)
-          const oldBal = await client.query('SELECT balance, name FROM customers WHERE id = $1', [sale.customer_id]);
-          await client.query('UPDATE customers SET balance = balance - $1 WHERE id = $2', [
-            creditAmount,
-            sale.customer_id,
-          ]);
-          if (oldBal.rows[0]) {
-            const ob = parseFloat(oldBal.rows[0].balance ?? 0);
-            await client.query(
-              `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [sale.customer_id, oldBal.rows[0].name, ob, ob - creditAmount, -creditAmount, 'SALE_VOID']
-            );
-          }
+          const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+          await syncCustomerBalanceFromInvoices(client, sale.customer_id, 'SALE_VOID');
 
-          // Sync AR account balance (replaces trg_sync_customer_to_ar)
-          await client.query(`
-            UPDATE accounts SET "CurrentBalance" = COALESCE(
-              (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-            ), "UpdatedAt" = NOW()
-            WHERE "AccountCode" = '1200'
-          `);
-
-          logger.info('Customer balance adjusted for voided credit sale (no invoice)', {
+          logger.info('Customer balance recalculated for voided credit sale (no invoice)', {
             customerId: sale.customer_id,
             saleId,
             creditAmount,
@@ -2410,24 +2466,17 @@ export const salesService = {
       );
 
       // GL POSTING: Reverse the original sale GL entry
-      try {
-        await glEntryService.recordSaleVoidToGL(
-          {
-            saleId,
-            saleNumber: sale.sale_number,
-            voidDate: getBusinessDate(),
-            voidReason: voidReason || 'No reason provided',
-          },
-          pool
-        );
-      } catch (glError: unknown) {
-        logger.error('GL void reversal failed — sale void will still proceed', {
+      // MUST succeed — if GL fails, the entire void rolls back to prevent discrepancies
+      await glEntryService.recordSaleVoidToGL(
+        {
           saleId,
           saleNumber: sale.sale_number,
-          error: glError instanceof Error ? glError.message : String(glError),
-        });
-        // Allow void to proceed even if GL reversal fails (can be reconciled later)
-      }
+          voidDate: getBusinessDate(),
+          voidReason: voidReason || 'No reason provided',
+        },
+        pool,
+        client
+      );
 
       // ============================================================
       // SAP GLT0-EQUIVALENT: Atomically decrement daily summary rollup
@@ -2438,8 +2487,8 @@ export const salesService = {
         await client.query('SAVEPOINT void_daily_summary');
         const voidSaleDate = String(sale.sale_date).slice(0, 10);
         const isCredit = sale.payment_method === 'CREDIT';
-        const amountPaid = parseFloat(sale.amount_paid || 0);
-        const saleTotal = parseFloat(sale.total_amount || 0);
+        const amountPaid = Money.toNumber(Money.parseDb(sale.amount_paid ?? 0));
+        const saleTotal = Money.toNumber(Money.parseDb(sale.total_amount ?? 0));
         const isPartial = isCredit && amountPaid > 0 && amountPaid < saleTotal;
         await salesRepository.decrementDailySummary(
           client,
@@ -2639,11 +2688,13 @@ export const salesService = {
 
       const sale = saleResult.rows[0];
 
-      if (sale.status !== 'COMPLETED') {
+      // Allow return (refund) for COMPLETED and PARTIALLY_RETURNED sales
+      // PARTIALLY_RETURNED = some items already returned; further returns allowed
+      if (sale.status !== 'COMPLETED' && sale.status !== 'PARTIALLY_RETURNED') {
         throw new BusinessError(
-          `Cannot refund sale with status ${sale.status}. Only COMPLETED sales can be refunded.`,
+          `Cannot return sale with status ${sale.status}. Only COMPLETED or PARTIALLY_RETURNED sales can be returned.`,
           'ERR_REFUND_001',
-          { saleId, currentStatus: sale.status, requiredStatus: 'COMPLETED' }
+          { saleId, currentStatus: sale.status, requiredStatus: 'COMPLETED or PARTIALLY_RETURNED' }
         );
       }
 
@@ -2794,7 +2845,7 @@ export const salesService = {
         const productId = saleItem.productId;
         const batchId = saleItem.batchId;
         const quantity = refundQty.toNumber();
-        const unitCost = parseFloat(saleItem.unitCost);
+        const unitCost = Money.toNumber(Money.parseDb(saleItem.unitCost));
 
         // Skip custom items (no inventory)
         if (!productId || saleItem.itemType === 'custom') {
@@ -2905,75 +2956,33 @@ export const salesService = {
       // ── 6. Handle customer balance (credit sale refund) ─────────
 
       if (sale.customer_id && sale.payment_method === 'CREDIT') {
-        // Reduce customer balance if credit sale is being refunded
-        const oldBal = await client.query(
-          'SELECT balance, name FROM customers WHERE id = $1',
-          [sale.customer_id]
-        );
-
-        if (oldBal.rows[0]) {
-          const ob = parseFloat(oldBal.rows[0].balance ?? 0);
-          const refundAmt = refundTotalAmount.toNumber();
-
-          await client.query(
-            'UPDATE customers SET balance = balance - $1 WHERE id = $2',
-            [refundAmt, sale.customer_id]
-          );
-
-          // Audit trail
-          await client.query(
-            `INSERT INTO customer_balance_audit
-             (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [
-              sale.customer_id,
-              oldBal.rows[0].name,
-              ob,
-              ob - refundAmt,
-              -refundAmt,
-              'SALE_REFUND',
-            ]
-          );
-
-          // Sync AR account balance
-          await client.query(`
-            UPDATE accounts SET "CurrentBalance" = COALESCE(
-              (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-            ), "UpdatedAt" = NOW()
-            WHERE "AccountCode" = '1200'
-          `);
-        }
+        // Recalculate customer balance from invoices (SSOT) — never use incremental arithmetic
+        const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+        await syncCustomerBalanceFromInvoices(client, sale.customer_id, 'SALE_REFUND');
       }
 
       // ── 7. GL Posting: Refund journal entry ─────────────────────
 
-      try {
-        const glRefundData: SaleRefundData = {
-          refundId: refund.id,
-          refundNumber: refund.refundNumber,
-          saleId,
-          saleNumber: sale.sale_number,
-          refundDate: input.refundDate || getBusinessDate(),
-          reason: input.reason,
-          totalAmount: refundTotalAmount.toNumber(),
-          totalCost: refundTotalCost.toNumber(),
-          paymentMethod: sale.payment_method,
-          customerId: sale.customer_id || undefined,
-        };
+      // GL POSTING: Refund journal entry
+      // MUST succeed — if GL fails, the entire refund rolls back to prevent discrepancies
+      const glRefundData: SaleRefundData = {
+        refundId: refund.id,
+        refundNumber: refund.refundNumber,
+        saleId,
+        saleNumber: sale.sale_number,
+        refundDate: input.refundDate || getBusinessDate(),
+        reason: input.reason,
+        totalAmount: refundTotalAmount.toNumber(),
+        totalCost: refundTotalCost.toNumber(),
+        paymentMethod: sale.payment_method,
+        customerId: sale.customer_id || undefined,
+      };
 
-        const glTransactionId = await glEntryService.recordSaleRefundToGL(glRefundData, pool);
+      const glTransactionId = await glEntryService.recordSaleRefundToGL(glRefundData, pool, client);
 
-        // Link GL transaction to refund document
-        if (glTransactionId) {
-          await salesRepository.updateRefundGlTransaction(client, refund.id, glTransactionId);
-        }
-      } catch (glError: unknown) {
-        logger.error('GL posting failed for refund — refund will still proceed', {
-          refundId: refund.id,
-          refundNumber: refund.refundNumber,
-          error: glError instanceof Error ? glError.message : String(glError),
-        });
-        // Allow refund to proceed even if GL fails (can be reconciled later)
+      // Link GL transaction to refund document
+      if (glTransactionId) {
+        await salesRepository.updateRefundGlTransaction(client, refund.id, glTransactionId);
       }
 
       // ── 8. Check if sale is now fully refunded ──────────────────
@@ -2981,8 +2990,11 @@ export const salesService = {
       const isFullRefund = await salesRepository.isSaleFullyRefunded(client, saleId);
 
       if (isFullRefund) {
-        await salesRepository.markSaleRefunded(client, saleId);
-        logger.info('Sale fully refunded — status changed to REFUNDED', {
+        // Full return: COMPLETED/PARTIALLY_RETURNED → VOIDED_BY_RETURN
+        // (SAP/Odoo discipline: original sale document preserved in audit trail;
+        //  VOIDED_BY_RETURN signals it was fully reversed through the return workflow)
+        await salesRepository.markSaleVoidedByReturn(client, saleId);
+        logger.info('Sale fully returned — status changed to VOIDED_BY_RETURN', {
           saleId,
           saleNumber: sale.sale_number,
         });
@@ -2994,8 +3006,8 @@ export const salesService = {
           await client.query('SAVEPOINT refund_daily_summary');
           const refundSaleDate = String(sale.sale_date).slice(0, 10);
           const isCredit = sale.payment_method === 'CREDIT';
-          const amtPaid = parseFloat(sale.amount_paid || 0);
-          const saleTotalAmt = parseFloat(sale.total_amount || 0);
+          const amtPaid = Money.toNumber(Money.parseDb(sale.amount_paid ?? 0));
+          const saleTotalAmt = Money.toNumber(Money.parseDb(sale.total_amount ?? 0));
           const isPartial = isCredit && amtPaid > 0 && amtPaid < saleTotalAmt;
           await salesRepository.decrementDailySummary(
             client,
@@ -3009,17 +3021,27 @@ export const salesService = {
           );
         } catch (summaryError: unknown) {
           await client.query('ROLLBACK TO SAVEPOINT refund_daily_summary');
-          logger.error('Daily summary rollup decrement failed on full refund — will be healed by reconciliation', {
+          logger.error('Daily summary rollup decrement failed on full return — will be healed by reconciliation', {
             saleId,
             saleNumber: sale.sale_number,
             error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+          });
+        }
+      } else {
+        // Partial return: advance status from COMPLETED → PARTIALLY_RETURNED
+        // If already PARTIALLY_RETURNED (prior returns exist), leave status as-is
+        if (sale.status === 'COMPLETED') {
+          await salesRepository.markSalePartiallyReturned(client, saleId);
+          logger.info('Sale partially returned — status changed to PARTIALLY_RETURNED', {
+            saleId,
+            saleNumber: sale.sale_number,
           });
         }
       }
 
       await client.query('COMMIT');
 
-      logger.info('Sale refund completed successfully', {
+      logger.info('Sale return completed successfully', {
         refundId: refund.id,
         refundNumber: refund.refundNumber,
         saleId,

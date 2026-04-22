@@ -158,7 +158,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                 itemsRestored: data.itemsRestored,
             });
         } catch (err: unknown) {
-            setError(extractApiError(err, 'Failed to process refund'));
+            setError(extractApiError(err, 'Failed to process return'));
         } finally {
             setIsSubmitting(false);
         }
@@ -180,13 +180,16 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                         </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Refund Processed</h3>
-                        <p className="text-sm text-gray-600 mb-4">
-                            {successResult.isFullRefund ? 'Full' : 'Partial'} refund has been successfully processed.
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Return Processed</h3>
+                        <p className="text-sm text-gray-600 mb-2">
+                            {successResult.isFullRefund ? 'Full return' : 'Partial return'} completed successfully.
+                        </p>
+                        <p className="text-xs text-gray-500 mb-4">
+                            Stock restored &middot; Credit note posted &middot; Refund issued
                         </p>
                         <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4 space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-500">Refund Number</span>
+                                <span className="text-gray-500">Credit Note / Return #</span>
                                 <span className="font-mono font-semibold text-gray-900">{successResult.refundNumber}</span>
                             </div>
                             <div className="flex justify-between text-sm">
@@ -194,7 +197,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                 <span className="font-semibold text-gray-900">{formatCurrency(successResult.totalAmount)}</span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-500">Items Restored</span>
+                                <span className="text-gray-500">Items Restored to Stock</span>
                                 <span className="font-semibold text-gray-900">{successResult.itemsRestored}</span>
                             </div>
                         </div>
@@ -227,31 +230,46 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                         </svg>
                     </div>
                     <div className="flex-1">
-                        <h3 id="refund-modal-title" className="text-lg font-semibold text-amber-900">Refund Sale</h3>
+                        <h3 id="refund-modal-title" className="text-lg font-semibold text-amber-900">Return Sale</h3>
                         <p className="text-sm text-amber-700">{saleNumber} &middot; {formatCurrency(totalAmount)}</p>
                     </div>
                 </div>
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                    {/* Business-logic explainer */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900 flex gap-2">
+                        <svg className="h-5 w-5 flex-shrink-0 text-blue-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                            <p className="font-medium">What happens when you return a sale</p>
+                            <ul className="mt-1 list-disc list-inside text-xs space-y-0.5 text-blue-800">
+                                <li>Items are restored to stock at original cost</li>
+                                <li>A Credit Note is posted against this sale</li>
+                                <li>Refund is issued to the original payment method (cash drawer, card, or customer credit)</li>
+                                <li>The original sale remains in the audit trail — it is not deleted</li>
+                            </ul>
+                        </div>
+                    </div>
                     {refundItems.length === 0 ? (
                         <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
-                            <p className="font-medium">No refundable items</p>
-                            <p className="text-sm mt-1">All items in this sale have already been fully refunded.</p>
+                            <p className="font-medium">No items available for return</p>
+                            <p className="text-sm mt-1">All items in this sale have already been fully returned.</p>
                         </div>
                     ) : (
                         <>
                             {/* Select All */}
                             <div className="flex items-center justify-between">
                                 <span className="text-sm font-medium text-gray-700">
-                                    Select items to refund ({selectedItems.length} of {refundItems.length})
+                                    Select items to return ({selectedItems.length} of {refundItems.length})
                                 </span>
                                 <button
                                     type="button"
                                     onClick={selectAll}
                                     className="text-sm text-blue-600 hover:text-blue-800 font-medium"
                                 >
-                                    {refundItems.every((i) => i.selected) ? 'Deselect All' : 'Select All (Full Refund)'}
+                                    {refundItems.every((i) => i.selected) ? 'Deselect All' : 'Select All (Full Return)'}
                                 </button>
                             </div>
 
@@ -281,14 +299,14 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                                     <span>Unit price: {formatCurrency(item.unitPrice)}</span>
                                                     <span>Sold: {item.quantity}</span>
                                                     {item.refundedQty > 0 && (
-                                                        <span className="text-amber-600">Already refunded: {item.refundedQty}</span>
+                                                        <span className="text-amber-600">Already returned: {item.refundedQty}</span>
                                                     )}
-                                                    <span className="text-blue-600">Refundable: {item.maxRefundable}</span>
+                                                    <span className="text-blue-600">Available to return: {item.maxRefundable}</span>
                                                 </div>
                                                 {/* Quantity selector — visible when item is selected */}
                                                 {item.selected && (
                                                     <div className="mt-3 flex items-center gap-2">
-                                                        <label className="text-xs text-gray-600">Refund qty:</label>
+                                                        <label className="text-xs text-gray-600">Return qty:</label>
                                                         <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
                                                             <button
                                                                 type="button"
@@ -331,11 +349,21 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                     <div className="flex justify-between items-center">
                                         <div>
                                             <div className="text-sm text-gray-500">
-                                                {isFullRefund ? 'Full Refund' : 'Partial Refund'} &middot; {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''}
+                                                {isFullRefund ? 'Full Return' : 'Partial Return'} &middot; {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''}
                                             </div>
+                                            {isFullRefund && (
+                                                <div className="text-xs text-purple-700 mt-0.5">
+                                                    Sale status will change to <span className="font-semibold">RETURNED</span>
+                                                </div>
+                                            )}
+                                            {!isFullRefund && (
+                                                <div className="text-xs text-orange-700 mt-0.5">
+                                                    Sale status will change to <span className="font-semibold">PARTIAL RETURN</span>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="text-right">
-                                            <div className="text-sm text-gray-500">Refund Total</div>
+                                            <div className="text-sm text-gray-500">Refund Due</div>
                                             <div className="text-xl font-bold text-gray-900">{formatCurrency(refundTotal)}</div>
                                         </div>
                                     </div>
@@ -345,7 +373,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                             {/* Reason */}
                             <div>
                                 <label htmlFor="refund-reason" className="block text-sm font-medium text-gray-700 mb-1">
-                                    Reason for refund <span className="text-red-500">*</span>
+                                    Reason for return <span className="text-red-500">*</span>
                                 </label>
                                 <textarea
                                     id="refund-reason"
@@ -394,7 +422,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
                                     </svg>
-                                    Process Refund ({formatCurrency(refundTotal)})
+                                    Process Return ({formatCurrency(refundTotal)})
                                 </>
                             )}
                         </button>

@@ -10,6 +10,7 @@ import { findCustomerById } from '../customers/customerRepository.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
+import { Money } from '../../utils/money.js';
 
 // Type for either a Pool or PoolClient - allows reuse in transactions
 type DbConnection = Pool | PoolClient;
@@ -67,16 +68,16 @@ function normalizeDeposit(row: depositsRepository.DepositDbRow): Deposit {
         depositNumber: row.deposit_number,
         customerId: row.customer_id,
         customerName: row.customer_name,
-        amount: parseFloat(row.amount),
-        amountUsed: parseFloat(row.amount_used),
-        amountAvailable: parseFloat(row.amount_available),
+        amount: Money.toNumber(Money.parseDb(row.amount)),
+        amountUsed: Money.toNumber(Money.parseDb(row.amount_used)),
+        amountAvailable: Money.toNumber(Money.parseDb(row.amount_available)),
         paymentMethod: row.payment_method as Deposit['paymentMethod'],
         reference: row.reference || undefined,
         notes: row.notes || undefined,
         status: row.status,
         createdBy: row.created_by || undefined,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
+        createdAt: typeof row.created_at === 'string' ? row.created_at : new Date(row.created_at).toISOString(),
+        updatedAt: typeof row.updated_at === 'string' ? row.updated_at : new Date(row.updated_at).toISOString()
     };
 }
 
@@ -85,7 +86,7 @@ function normalizeApplication(row: depositsRepository.DepositApplicationDbRow): 
         id: row.id,
         depositId: row.deposit_id,
         saleId: row.sale_id,
-        amountApplied: parseFloat(row.amount_applied),
+        amountApplied: Money.toNumber(Money.parseDb(row.amount_applied)),
         appliedAt: row.applied_at,
         appliedBy: row.applied_by || undefined,
         depositNumber: row.deposit_number,
@@ -95,6 +96,7 @@ function normalizeApplication(row: depositsRepository.DepositApplicationDbRow): 
 
 /**
  * Create a new customer deposit
+ * Atomic: deposit row + GL posting in single transaction
  */
 export async function createDeposit(
     pool: Pool,
@@ -124,37 +126,34 @@ export async function createDeposit(
         paymentMethod: input.paymentMethod
     });
 
-    const depositRow = await depositsRepository.createDeposit(pool, input);
+    // Atomic: deposit row + GL posting in one transaction
+    const deposit = await UnitOfWork.run(pool, async (client) => {
+        const depositRow = await depositsRepository.createDeposit(client, input);
 
-    logger.info('Deposit created', {
-        depositNumber: depositRow.deposit_number,
-        amount: depositRow.amount
-    });
+        logger.info('Deposit created', {
+            depositNumber: depositRow.deposit_number,
+            amount: depositRow.amount
+        });
 
-    const deposit = normalizeDeposit(depositRow);
+        const normalized = normalizeDeposit(depositRow);
 
-    // ============================================================
-    // GL POSTING: Record customer deposit to ledger
-    // DR Cash/Bank  /  CR Customer Deposits (2200)
-    // ============================================================
-    try {
+        // GL POSTING: DR Cash/Bank  /  CR Customer Deposits (2200)
+        const depositDate = normalized.createdAt.includes('T')
+            ? normalized.createdAt.split('T')[0]
+            : normalized.createdAt.split(' ')[0];
+
         await glEntryService.recordCustomerDepositToGL({
-            depositId: deposit.id,
-            depositNumber: deposit.depositNumber,
-            depositDate: deposit.createdAt.split('T')[0],
-            amount: deposit.amount,
-            paymentMethod: deposit.paymentMethod,
+            depositId: normalized.id,
+            depositNumber: normalized.depositNumber,
+            depositDate,
+            amount: normalized.amount,
+            paymentMethod: normalized.paymentMethod,
             customerId: input.customerId,
             customerName: customer?.name || 'Unknown',
-        }, pool);
-    } catch (glError) {
-        logger.error('GL posting failed for customer deposit — will propagate error', {
-            depositId: deposit.id,
-            depositNumber: deposit.depositNumber,
-            error: glError instanceof Error ? glError.message : String(glError),
-        });
-        throw glError;
-    }
+        }, pool, client);
+
+        return normalized;
+    });
 
     return deposit;
 }
@@ -207,9 +206,9 @@ export async function getCustomerDepositBalance(
     return {
         customerId: summary.customer_id,
         customerName: summary.customer_name,
-        availableBalance: parseFloat(summary.available_deposit_balance),
-        totalDeposits: parseFloat(summary.total_deposits),
-        totalUsed: parseFloat(summary.total_deposits_used),
+        availableBalance: Money.toNumber(Money.parseDb(summary.available_deposit_balance)),
+        totalDeposits: Money.toNumber(Money.parseDb(summary.total_deposits)),
+        totalUsed: Money.toNumber(Money.parseDb(summary.total_deposits_used)),
         activeDepositCount: summary.active_deposit_count
     };
 }
@@ -449,4 +448,58 @@ export async function refundDeposit(
     });
 
     return normalizeDeposit(row);
+}
+
+/**
+ * Backfill GL entries for orphaned deposits that have no ledger_transactions.
+ * Finds deposits in pos_customer_deposits that lack a CUSTOMER_DEPOSIT
+ * entry in ledger_transactions, and posts the missing GL entry.
+ * Uses idempotency keys to prevent duplicates.
+ */
+export async function backfillOrphanedDepositGL(
+    pool: Pool
+): Promise<{ backfilled: number; errors: string[] }> {
+    // Find deposits missing GL entries
+    const orphanResult = await pool.query(`
+        SELECT d.id, d.deposit_number, d.customer_id, d.amount, d.payment_method,
+               d.created_at::text as created_at, c.name as customer_name
+        FROM pos_customer_deposits d
+        JOIN customers c ON d.customer_id = c.id
+        WHERE d.status IN ('ACTIVE', 'DEPLETED')
+          AND NOT EXISTS (
+            SELECT 1 FROM ledger_transactions lt
+            WHERE lt."IdempotencyKey" = 'CUSTOMER_DEPOSIT-' || d.id::text
+          )
+        ORDER BY d.created_at ASC
+    `);
+
+    const orphans = orphanResult.rows;
+    let backfilled = 0;
+    const errors: string[] = [];
+
+    for (const dep of orphans) {
+        try {
+            const depositDate = dep.created_at.includes('T')
+                ? dep.created_at.split('T')[0]
+                : dep.created_at.split(' ')[0];
+
+            await glEntryService.recordCustomerDepositToGL({
+                depositId: dep.id,
+                depositNumber: dep.deposit_number,
+                depositDate,
+                amount: Money.toNumber(Money.parseDb(dep.amount)),
+                paymentMethod: dep.payment_method as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
+                customerId: dep.customer_id,
+                customerName: dep.customer_name || 'Unknown',
+            }, pool);
+            backfilled++;
+            logger.info('Backfilled GL for orphaned deposit', { depositNumber: dep.deposit_number });
+        } catch (err) {
+            const msg = `Failed to backfill ${dep.deposit_number}: ${err instanceof Error ? err.message : String(err)}`;
+            errors.push(msg);
+            logger.error(msg);
+        }
+    }
+
+    return { backfilled, errors };
 }

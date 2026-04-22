@@ -232,17 +232,15 @@ self.addEventListener('sync', (event) => {
 });
 
 /**
- * Background Sync handler: reads the offline sales queue from
- * the Cache API (mirrored by the app) and POSTs each pending
- * sale to the server.
+ * Background Sync handler: reads the immutable event journal from
+ * the open client and POSTs each PENDING event to /api/pos/sync-events.
  *
- * NOTE: Service Workers cannot access localStorage. The queue
- * data is read by sending a message to any open client. If no
- * client is open, Background Sync will retry on the next
- * opportunity (the browser schedules retries automatically).
+ * NOTE: Service Workers cannot access localStorage. The journal data
+ * is read by sending a message to any open client. If no client is open,
+ * Background Sync will retry on the next opportunity.
  */
 async function syncPendingOfflineSales() {
-  // Ask an open client for the auth token and queue
+  // Ask an open client for the auth token and event journal
   const clients = await self.clients.matchAll({ type: 'window' });
   if (clients.length === 0) {
     // No open tabs — browser will retry Background Sync later
@@ -251,29 +249,43 @@ async function syncPendingOfflineSales() {
 
   // Request data from the first available client
   const data = await requestDataFromClient(clients[0]);
-  if (!data || !data.queue || data.queue.length === 0) return;
+  if (!data || !data.events || data.events.length === 0) return;
 
-  const { queue, authToken, apiBase } = data;
-  const pending = queue.filter((s) => s.status === 'PENDING_SYNC');
-  if (pending.length === 0) return;
+  const { events, syncState, authToken, apiBase } = data;
 
-  for (const sale of pending) {
+  // Filter to PENDING/FAILED events only
+  const unsyncedEvents = events.filter((e) => {
+    const status = syncState?.[e.key]?.status ?? 'PENDING';
+    return status === 'PENDING' || status === 'FAILED';
+  });
+  if (unsyncedEvents.length === 0) return;
+
+  const syncedKeys = [];
+  const reviewKeys = [];
+
+  for (const event of unsyncedEvents) {
     try {
-      const response = await fetch(`${apiBase}/pos/sync-offline-sales`, {
+      const response = await fetch(`${apiBase}/pos/sync-events`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
-        body: JSON.stringify({
-          idempotencyKey: sale.idempotencyKey,
-          offlineId: sale.offlineId,
-          saleData: sale.data,
-          offlineTimestamp: sale.timestamp,
-        }),
+        body: JSON.stringify({ event }),
       });
+
       if (response.ok) {
-        sale.status = 'SYNCED';
+        const body = await response.json().catch(() => ({}));
+        if (body.requiresReview) {
+          reviewKeys.push(event.key);
+        } else {
+          syncedKeys.push(event.key);
+        }
+      } else if (response.status === 409) {
+        // Idempotency hit — already exists
+        syncedKeys.push(event.key);
+      } else if (response.status === 422) {
+        reviewKeys.push(event.key);
       }
     } catch {
       // Network still flaky — Background Sync will retry
@@ -281,11 +293,12 @@ async function syncPendingOfflineSales() {
     }
   }
 
-  // Tell the client to update its localStorage queue
+  // Tell the client to update journal sync state
   for (const client of clients) {
     client.postMessage({
       type: 'BACKGROUND_SYNC_COMPLETE',
-      syncedKeys: pending.filter((s) => s.status === 'SYNCED').map((s) => s.idempotencyKey),
+      syncedKeys,
+      reviewKeys,
     });
   }
 }

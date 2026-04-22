@@ -14,28 +14,31 @@ type MockFn = (...args: unknown[]) => Promise<unknown>;
 
 // Capture journal entries passed to AccountingCore
 let capturedEntries: JournalEntryRequest[] = [];
+const createJournalEntryMock = jest.fn<MockFn>(async (request: unknown) => {
+    capturedEntries.push(request as JournalEntryRequest);
+    return {
+        transactionId: 'txn-test-id',
+        transactionNumber: 'TXN-000001',
+        status: 'POSTED',
+        totalDebits: 0,
+        totalCredits: 0,
+    };
+});
+
+const reverseTransactionMock = jest.fn<MockFn>(async () => {
+    return {
+        transactionId: 'txn-reversal-id',
+        transactionNumber: 'TXN-000002',
+        status: 'POSTED',
+        totalDebits: 0,
+        totalCredits: 0,
+    };
+});
 
 jest.unstable_mockModule('./accountingCore.js', () => ({
     AccountingCore: {
-        createJournalEntry: jest.fn<MockFn>(async (request: unknown) => {
-            capturedEntries.push(request as JournalEntryRequest);
-            return {
-                transactionId: 'txn-test-id',
-                transactionNumber: 'TXN-000001',
-                status: 'POSTED',
-                totalDebits: 0,
-                totalCredits: 0,
-            };
-        }),
-        reverseTransaction: jest.fn<MockFn>(async (request: unknown) => {
-            return {
-                transactionId: 'txn-reversal-id',
-                transactionNumber: 'TXN-000002',
-                status: 'POSTED',
-                totalDebits: 0,
-                totalCredits: 0,
-            };
-        }),
+        createJournalEntry: createJournalEntryMock,
+        reverseTransaction: reverseTransactionMock,
     },
     AccountingError: class extends Error {
         constructor(msg: string, public readonly code: string) {
@@ -65,6 +68,8 @@ jest.unstable_mockModule('../utils/constants.js', () => ({
 
 const {
     recordSaleToGL,
+    recordCustomerDepositToGL,
+    recordDepositApplicationToGL,
     recordCustomerPaymentToGL,
     recordExpenseToGL,
     recordGoodsReceiptToGL,
@@ -99,6 +104,8 @@ describe('glEntryService — GL Posting Accuracy', () => {
     beforeEach(() => {
         capturedEntries = [];
         jest.clearAllMocks();
+        createJournalEntryMock.mockClear();
+        reverseTransactionMock.mockClear();
     });
 
     // ========================================================================
@@ -451,6 +458,79 @@ describe('glEntryService — GL Posting Accuracy', () => {
             expect(findLine(lines, AccountCodes.CASH)).toBeUndefined();
 
             assertBalanced(lines);
+        });
+    });
+
+    // ========================================================================
+    // recordCustomerDepositToGL / recordDepositApplicationToGL
+    // ========================================================================
+    describe('deposit lifecycle GL postings', () => {
+        it('should post customer deposit as DR Cash / CR Customer Deposits', async () => {
+            await recordCustomerDepositToGL({
+                depositId: 'dep-1',
+                depositNumber: 'DEP-2026-0001',
+                depositDate: '2026-03-15',
+                amount: 8000,
+                paymentMethod: 'CASH',
+                customerId: 'cust-1',
+                customerName: 'John Doe',
+            });
+
+            const lines = capturedEntries[0].lines;
+            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(8000);
+            expect(findLine(lines, AccountCodes.CUSTOMER_DEPOSITS)!.creditAmount).toBe(8000);
+            expect(capturedEntries[0].idempotencyKey).toBe('CUSTOMER_DEPOSIT-dep-1');
+            assertBalanced(lines);
+        });
+
+        it('should clear deposit application as DR Customer Deposits / CR AR', async () => {
+            await recordDepositApplicationToGL({
+                applicationId: 'app-1',
+                depositId: 'dep-1',
+                depositNumber: 'DEP-2026-0001',
+                saleId: 'sale-1',
+                saleNumber: 'SALE-2026-0100',
+                applicationDate: '2026-03-15',
+                amount: 8000,
+                customerId: 'cust-1',
+                customerName: 'John Doe',
+            });
+
+            const lines = capturedEntries[0].lines;
+            expect(findLine(lines, AccountCodes.CUSTOMER_DEPOSITS)!.debitAmount).toBe(8000);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(8000);
+            expect(capturedEntries[0].idempotencyKey).toBe('DEPOSIT_APPLICATION-app-1');
+            expect(capturedEntries[0].referenceType).toBe('DEPOSIT_APPLICATION');
+            assertBalanced(lines);
+        });
+
+        it('should forward txClient when posting deposit application', async () => {
+            const txClient = { query: jest.fn<MockFn>() } as unknown as Parameters<typeof recordDepositApplicationToGL>[2];
+
+            await recordDepositApplicationToGL(
+                {
+                    applicationId: 'app-2',
+                    depositId: 'dep-2',
+                    depositNumber: '',
+                    saleId: 'sale-2',
+                    saleNumber: 'SALE-2026-0101',
+                    applicationDate: '2026-03-16',
+                    amount: 2500,
+                    customerId: 'cust-2',
+                    customerName: 'Jane Doe',
+                },
+                undefined,
+                txClient,
+            );
+
+            expect(createJournalEntryMock).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    idempotencyKey: 'DEPOSIT_APPLICATION-app-2',
+                    referenceType: 'DEPOSIT_APPLICATION',
+                }),
+                undefined,
+                txClient,
+            );
         });
     });
 

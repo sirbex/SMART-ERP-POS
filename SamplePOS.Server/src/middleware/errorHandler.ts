@@ -178,6 +178,45 @@ export function errorHandler(
   }
 
   // Handle unexpected errors
+  // Intercept PostgreSQL driver errors before string classification.
+  // pg sets error.code to a 5-character SQLSTATE code (e.g. 42P01 = undefined_table,
+  // 42703 = undefined_column, 42P07 = duplicate_table, 23505 = unique_violation).
+  // These are infrastructure / constraint errors — NEVER 404.
+  const pgError = error as Error & { code?: string };
+  if (typeof pgError.code === 'string' && /^[0-9A-Z]{5}$/.test(pgError.code)) {
+    const pgCode = pgError.code;
+    // Constraint violations are client errors (400)
+    if (pgCode === '23505') {
+      res.status(409).json({
+        success: false,
+        error: pgError.message,
+        error_code: 'ERR_DUPLICATE',
+        details: { pgCode },
+        requestId: req.requestId,
+      });
+      return;
+    }
+    if (pgCode.startsWith('23')) {
+      res.status(400).json({
+        success: false,
+        error: pgError.message,
+        error_code: 'ERR_CONSTRAINT',
+        details: { pgCode },
+        requestId: req.requestId,
+      });
+      return;
+    }
+    // All other PostgreSQL errors (42xxx undefined objects, 53xxx resources, etc.) → 500
+    res.status(500).json({
+      success: false,
+      error: pgError.message,
+      error_code: 'ERR_DATABASE',
+      details: { pgCode },
+      requestId: req.requestId,
+    });
+    return;
+  }
+
   // Classify plain Error throws: many are business errors that should be 400, not 500
   const errorMessage = error instanceof Error ? error.message : 'Internal server error';
   const classified = classifyPlainError(errorMessage);
@@ -204,10 +243,12 @@ function classifyPlainError(message: string): {
 } {
   const msg = message.toLowerCase();
 
-  // Not found patterns
+  // Not found patterns — application-level only.
+  // NOTE: 'does not exist' is intentionally excluded: PostgreSQL uses that phrase
+  // for missing DB objects (sequences, tables, columns) which should be 500 ERR_DATABASE,
+  // not 404. Those are caught before this function via the pgError.code check above.
   if (
     msg.includes('not found') ||
-    msg.includes('does not exist') ||
     msg.includes('no active deposits')
   ) {
     return { status: 404, errorCode: 'ERR_NOT_FOUND', details: { reason: message } };

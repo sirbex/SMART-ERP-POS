@@ -428,7 +428,7 @@ export default function SalesPage() {
           | 'CARD'
           | 'MOBILE_MONEY'
           | 'CREDIT',
-        status: String(sale.status || 'COMPLETED') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
+        status: String(sale.status || 'COMPLETED') as 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'VOID' | 'REFUNDED' | 'PARTIALLY_RETURNED' | 'VOIDED_BY_RETURN',
         notes: sale.notes ? String(sale.notes) : undefined,
       };
     });
@@ -797,6 +797,8 @@ export default function SalesPage() {
                 <option value="COMPLETED">Completed</option>
                 <option value="PENDING">Pending</option>
                 <option value="CANCELLED">Cancelled</option>
+                <option value="VOID">Voided</option>
+                <option value="REFUNDED">Refunded</option>
               </select>
             </div>
             <div>
@@ -1112,8 +1114,8 @@ function SalesTable({
                 <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH' ? 'bg-green-100 text-green-800' : sale.paymentMethod === 'CARD' ? 'bg-blue-100 text-blue-800' : sale.paymentMethod === 'CREDIT' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-800'}`}>
                   {sale.paymentMethod}
                 </span>
-                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${sale.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : sale.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                  {sale.status}
+                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${sale.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : sale.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : sale.status === 'VOID' ? 'bg-gray-100 text-gray-800' : sale.status === 'REFUNDED' ? 'bg-amber-100 text-amber-800' : sale.status === 'PARTIALLY_RETURNED' ? 'bg-orange-100 text-orange-800' : sale.status === 'VOIDED_BY_RETURN' ? 'bg-purple-100 text-purple-800' : 'bg-red-100 text-red-800'}`}>
+                  {sale.status === 'VOIDED_BY_RETURN' ? 'RETURNED' : sale.status === 'PARTIALLY_RETURNED' ? 'PARTIAL RETURN' : sale.status}
                 </span>
               </div>
             </div>
@@ -1223,10 +1225,18 @@ function SalesTable({
                       ? 'bg-green-100 text-green-800'
                       : sale.status === 'PENDING'
                         ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-red-100 text-red-800'
+                        : sale.status === 'VOID'
+                          ? 'bg-gray-100 text-gray-800'
+                          : sale.status === 'REFUNDED'
+                            ? 'bg-amber-100 text-amber-800'
+                            : sale.status === 'PARTIALLY_RETURNED'
+                              ? 'bg-orange-100 text-orange-800'
+                              : sale.status === 'VOIDED_BY_RETURN'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-red-100 text-red-800'
                       }`}
                   >
-                    {sale.status}
+                    {sale.status === 'VOIDED_BY_RETURN' ? 'RETURNED' : sale.status === 'PARTIALLY_RETURNED' ? 'PARTIAL RETURN' : sale.status}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm text-right">
@@ -1621,7 +1631,7 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
           customerName: String(sale.customerName || sale.customer_name || ''),
           customerId: String(sale.customerId || sale.customer_id || ''),
           paymentMethod: String(sale.paymentMethod || sale.payment_method || '') as 'CREDIT',
-          status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
+          status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'VOID' | 'REFUNDED' | 'PARTIALLY_RETURNED' | 'VOIDED_BY_RETURN',
           cashierId: String(sale.cashierId || sale.cashier_id || ''),
           cashierName: String(sale.cashierName || sale.cashier_name || ''),
           amountPaid: Number(sale.amountPaid || sale.amount_paid || 0),
@@ -1786,7 +1796,7 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
           customerName: String(sale.customerName || sale.customer_name || ''),
           customerId: String(sale.customerId || sale.customer_id || ''),
           paymentMethod: String(sale.paymentMethod || sale.payment_method || '') as 'CREDIT',
-          status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED',
+          status: String(sale.status || '') as 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'VOID' | 'REFUNDED' | 'PARTIALLY_RETURNED' | 'VOIDED_BY_RETURN',
           cashierId: String(sale.cashierId || sale.cashier_id || ''),
           cashierName: String(sale.cashierName || sale.cashier_name || ''),
           amountPaid: Number(sale.amountPaid || sale.amount_paid || 0),
@@ -1928,6 +1938,7 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
 function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps) {
   const canVoidSale = useBackendPermission('sales.void');
   const canRefundSale = useBackendPermission('sales.refund');
+  const canReprintReceipt = useBackendPermission('sales.reprint');
   const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2453,8 +2464,12 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
           <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex flex-col-reverse sm:flex-row justify-between gap-3 flex-shrink-0">
             {/* Left side: Void & Refund actions */}
             <div className="flex flex-col sm:flex-row gap-2">
-              {/* Void button — only for COMPLETED sales, requires sales.void permission */}
-              {(saleDetails?.status || sale.status) === 'COMPLETED' &&
+              {/* Void is FORBIDDEN for completed POS sales (ERP discipline: SAP/Odoo-style).
+                  Stock, invoice, and payment are already posted. Use Return instead.
+                  Only shown for non-posted statuses — none exist in current enum by design. */}
+              {!['COMPLETED', 'PARTIALLY_RETURNED', 'VOID', 'REFUNDED', 'VOIDED_BY_RETURN'].includes(
+                (saleDetails?.status || sale.status) as string
+              ) &&
                 canVoidSale && (
                   <button
                     onClick={() => setShowVoidModal(true)}
@@ -2466,19 +2481,31 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                     Void Sale
                   </button>
                 )}
-              {/* Refund button — for COMPLETED sales, requires sales.refund permission */}
-              {(saleDetails?.status || sale.status) === 'COMPLETED' &&
+              {/* Return button — for COMPLETED and PARTIALLY_RETURNED sales.
+                  PARTIALLY_RETURNED: prior returns exist; further returns allowed until fully reversed (VOIDED_BY_RETURN). */}
+              {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
+                (saleDetails?.status || sale.status) as string
+              ) &&
                 canRefundSale && (
                   <button
                     onClick={() => setShowRefundModal(true)}
+                    title="Reverse this sale by returning items. Stock will be restored, a Credit Note will be posted, and a refund will be issued."
                     className="w-full sm:w-auto px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
                     </svg>
-                    Refund
+                    {(saleDetails?.status || sale.status) === 'PARTIALLY_RETURNED' ? 'Return More Items' : 'Return'}
                   </button>
                 )}
+              {/* Hint: explain why Void is not available for posted sales */}
+              {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
+                (saleDetails?.status || sale.status) as string
+              ) && (
+                <span className="text-xs text-gray-500 italic self-center hidden sm:inline" title="ERP rule: a posted sale cannot be deleted. Use Return to reverse it — the original sale stays in the audit trail.">
+                  Void not allowed — sale is posted
+                </span>
+              )}
             </div>
             {/* Right side: Document flow, Close, Print */}
             <div className="flex flex-col sm:flex-row gap-2">
@@ -2489,9 +2516,18 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
               >
                 Close
               </button>
+              {canReprintReceipt && (
               <button
-                onClick={() => {
+                onClick={async () => {
                   const s = saleDetails ?? sale;
+
+                  // Log reprint to audit trail and increment print count
+                  try {
+                    await api.post(`/sales/${sale.id}/reprint`);
+                  } catch (err) {
+                    console.error('Failed to log receipt reprint:', err);
+                  }
+
                   // Compute effective discount from sale-level or item-level
                   const saleDisc = Number(s.discountAmount || 0);
                   const itemDiscTotal =
@@ -2547,8 +2583,9 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                     clipRule="evenodd"
                   />
                 </svg>
-                Print Receipt
+                Reprint Receipt
               </button>
+              )}
             </div>
           </div>
         </div>

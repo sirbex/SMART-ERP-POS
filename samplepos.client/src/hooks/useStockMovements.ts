@@ -3,7 +3,7 @@
  * Provides data fetching and caching for complete audit trail
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api, getErrorMessage } from '../utils/api';
 import type { RecordStockMovementInput } from '../types/inputs';
 
@@ -32,6 +32,7 @@ export function useStockMovements(params?: {
   endDate?: string;
   productId?: string;
   userId?: string;
+  search?: string;
 }) {
   return useQuery({
     queryKey: stockMovementKeys.list(params || {}),
@@ -40,6 +41,7 @@ export function useStockMovements(params?: {
       return response.data;
     },
     staleTime: 30000, // 30 seconds - audit data should be fresh
+    placeholderData: keepPreviousData, // keep old rows visible while new query loads
   });
 }
 

@@ -79,6 +79,7 @@ export interface StockMovementWithDetails extends StockMovement {
   batchNumber: string | null;
   saleNumber?: string | null;
   grNumber?: string | null;
+  balanceAfter?: number | null;
 }
 
 /**
@@ -88,6 +89,7 @@ export interface MovementFilters {
   movementType?: MovementType | MovementType[];
   startDate?: string;
   endDate?: string;
+  search?: string;
 }
 
 /**

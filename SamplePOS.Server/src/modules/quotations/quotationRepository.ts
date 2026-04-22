@@ -262,10 +262,10 @@ export const quotationRepository = {
     const quotationResult = await pool.query<QuotationDbRow & { converted_to_sale_number?: string; converted_to_invoice_number?: string }>(
       `SELECT q.*, 
               s.sale_number as converted_to_sale_number,
-              i."InvoiceNumber" as converted_to_invoice_number
+              i.invoice_number as converted_to_invoice_number
        FROM quotations q
        LEFT JOIN sales s ON q.converted_to_sale_id = s.id
-       LEFT JOIN invoices i ON q.converted_to_invoice_id = i."Id"
+       LEFT JOIN invoices i ON q.converted_to_invoice_id = i.id
        WHERE q.id = $1`,
       [id]
     );
@@ -310,10 +310,10 @@ export const quotationRepository = {
     const quotationResult = await pool.query<QuotationDbRow & { converted_to_sale_number?: string; converted_to_invoice_number?: string }>(
       `SELECT q.*, 
               s.sale_number as converted_to_sale_number,
-              i."InvoiceNumber" as converted_to_invoice_number
+              i.invoice_number as converted_to_invoice_number
        FROM quotations q
        LEFT JOIN sales s ON q.converted_to_sale_id = s.id
-       LEFT JOIN invoices i ON q.converted_to_invoice_id = i."Id"
+       LEFT JOIN invoices i ON q.converted_to_invoice_id = i.id
        WHERE q.quote_number = $1`,
       [quoteNumber]
     );
@@ -591,6 +591,15 @@ export const quotationRepository = {
        WHERE id = $1`,
       [id]
     );
+  },
+
+  /**
+   * Hard delete quotation and its items permanently from the database.
+   * Only for CANCELLED quotations — admin use only.
+   */
+  async hardDeleteQuotation(client: PoolClient, id: string): Promise<void> {
+    await client.query('DELETE FROM quotation_items WHERE quotation_id = $1', [id]);
+    await client.query('DELETE FROM quotations WHERE id = $1', [id]);
   },
 
   /**

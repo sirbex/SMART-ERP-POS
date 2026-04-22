@@ -15,7 +15,7 @@ import { useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
-import type { OfflineSale } from '../../hooks/useOfflineMode';
+import type { DerivedSale } from '../../hooks/useOfflineMode';
 import apiClient from '../../utils/api';
 import { formatTimestampTime } from '../../utils/businessDate';
 
@@ -172,33 +172,33 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
         {/* Queue Details */}
         {showQueue && syncQueue.length > 0 && (
           <div className="mt-3 max-h-60 overflow-y-auto border rounded-lg divide-y divide-gray-100">
-            {syncQueue.map((sale: OfflineSale) => (
-              <div key={sale.idempotencyKey} className="px-3 py-2 flex items-center justify-between">
+            {syncQueue.map((sale: DerivedSale) => (
+              <div key={sale.key} className="px-3 py-2 flex items-center justify-between">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900">{sale.offlineId}</p>
                   <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <span>{sale.data.lineItems.length} items</span>
+                    <span>{sale.lineCount} items</span>
                     <span>•</span>
-                    <span>{formatTimestampTime(String(sale.timestamp))}</span>
+                    <span>{formatTimestampTime(String(sale.ts))}</span>
                   </div>
                   {sale.syncError && (
                     <p className="text-xs text-red-500 mt-0.5 break-words whitespace-normal">{sale.syncError}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 ml-3">
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${sale.status === 'PENDING_SYNC' ? 'bg-yellow-100 text-yellow-700' :
-                    sale.status === 'SYNCED' ? 'bg-green-100 text-green-700' :
-                      sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
-                        'bg-red-100 text-red-700'
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${sale.syncStatus === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
+                      sale.syncStatus === 'SYNCED' ? 'bg-green-100 text-green-700' :
+                        sale.syncStatus === 'REVIEW' ? 'bg-orange-100 text-orange-700' :
+                          'bg-red-100 text-red-700'
                     }`}>
-                    {sale.status.replace('_', ' ')}
+                    {sale.syncStatus}
                   </span>
-                  {sale.status !== 'SYNCED' && (
+                  {sale.syncStatus !== 'SYNCED' && (
                     <>
-                      {(sale.status === 'FAILED' || sale.status === 'REQUIRES_REVIEW') && (
+                      {(sale.syncStatus === 'FAILED' || sale.syncStatus === 'REVIEW') && (
                         <button
                           onClick={() => {
-                            retryFailedSale(sale.idempotencyKey);
+                            retryFailedSale(sale.key);
                             toast.success(`${sale.offlineId} moved back to pending`);
                           }}
                           className="text-blue-500 hover:text-blue-700 text-xs font-medium"
@@ -210,7 +210,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                       <button
                         onClick={() => {
                           if (confirm(`Cancel offline sale ${sale.offlineId}? Stock will be restored.`)) {
-                            cancelOfflineSale(sale.idempotencyKey);
+                            cancelOfflineSale(sale.key);
                             toast.success(`Cancelled ${sale.offlineId}`);
                           }
                         }}

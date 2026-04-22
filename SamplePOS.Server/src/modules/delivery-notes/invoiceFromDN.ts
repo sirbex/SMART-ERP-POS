@@ -44,12 +44,12 @@ export async function invoiceFromDeliveryNote(
 
   // Check not already invoiced
   const existingInvoice = await pool.query(
-    `SELECT "Id", "InvoiceNumber" FROM invoices WHERE delivery_note_id = $1 LIMIT 1`,
+    `SELECT id, invoice_number FROM invoices WHERE delivery_note_id = $1 LIMIT 1`,
     [deliveryNoteId]
   );
   if (existingInvoice.rows.length > 0) {
     throw new ConflictError(
-      `Delivery note ${dn.deliveryNoteNumber} already invoiced as ${existingInvoice.rows[0].InvoiceNumber}`
+      `Delivery note ${dn.deliveryNoteNumber} already invoiced as ${existingInvoice.rows[0].invoice_number}`
     );
   }
 
@@ -71,7 +71,7 @@ export async function invoiceFromDeliveryNote(
   const invoice = await UnitOfWork.run(pool, async (client: PoolClient) => {
     // Re-check uniqueness inside transaction
     const check = await client.query(
-      `SELECT "Id" FROM invoices WHERE delivery_note_id = $1 LIMIT 1`,
+      `SELECT id FROM invoices WHERE delivery_note_id = $1 LIMIT 1`,
       [deliveryNoteId]
     );
     if (check.rows.length > 0) {
@@ -93,7 +93,7 @@ export async function invoiceFromDeliveryNote(
 
     // Link invoice to delivery note
     await client.query(
-      `UPDATE invoices SET delivery_note_id = $1 WHERE "Id" = $2`,
+      `UPDATE invoices SET delivery_note_id = $1 WHERE id = $2`,
       [deliveryNoteId, inv.id]
     );
 
@@ -101,36 +101,9 @@ export async function invoiceFromDeliveryNote(
     const freshInvoice = await invoiceRepository.recalcInvoice(client, inv.id);
     if (!freshInvoice) throw new Error('Failed to refresh invoice after creation');
 
-    // Recalculate customer balance from invoices (replaces trg_sync_customer_balance_on_invoice)
-    const balanceUpdate = await client.query(
-      `WITH old AS (SELECT balance, name FROM customers WHERE id = $1)
-       UPDATE customers SET balance = (
-        SELECT COALESCE(SUM("OutstandingBalance"), 0)
-        FROM invoices
-        WHERE "CustomerId" = $1
-        AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
-      ) WHERE id = $1
-      RETURNING balance, (SELECT balance FROM old) AS old_balance, (SELECT name FROM old) AS customer_name`,
-      [dn.customerId]
-    );
-    // Audit customer balance change (replaces trg_audit_customer_balance)
-    if (balanceUpdate.rows[0] && balanceUpdate.rows[0].old_balance !== balanceUpdate.rows[0].balance) {
-      const r = balanceUpdate.rows[0];
-      await client.query(
-        `INSERT INTO customer_balance_audit (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [dn.customerId, r.customer_name, r.old_balance ?? 0, r.balance ?? 0,
-        (r.balance ?? 0) - (r.old_balance ?? 0), 'INVOICE_FROM_DN']
-      );
-    }
-
-    // Sync AR account balance (replaces trg_sync_customer_to_ar)
-    await client.query(`
-      UPDATE accounts SET "CurrentBalance" = COALESCE(
-        (SELECT SUM(balance) FROM customers WHERE is_active = true), 0
-      ), "UpdatedAt" = NOW()
-      WHERE "AccountCode" = '1200'
-    `);
+    // Recalculate customer balance from invoices (SSOT)
+    const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
+    await syncCustomerBalanceFromInvoices(client, dn.customerId, 'INVOICE_FROM_DN');
 
     // Document flow: Delivery Note → Invoice
     await documentFlowService.linkDocuments(client, 'DELIVERY_NOTE', deliveryNoteId, 'INVOICE', freshInvoice.id, 'CREATED_FROM');

@@ -76,6 +76,16 @@ export const POSSaleSchema = z.object({
         message: `Overpayment (${sum.toFixed(2)}) without CASH payment. Only CASH can be overpaid to give change.`,
       });
     }
+
+    // DEPOSIT payment requires a customer (deposits are tied to customer accounts)
+    const hasDeposit = data.paymentLines.some(line => line.paymentMethod === 'DEPOSIT');
+    if (hasDeposit && !data.customerId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paymentLines'],
+        message: 'DEPOSIT payment requires a customer. Cannot apply deposit without a customer account.',
+      });
+    }
   }
 
   // CRITICAL: CASH sales MUST have amountTendered (legacy single payment)

@@ -363,15 +363,6 @@ interface ReportOption {
 
 const REPORT_OPTIONS: ReportOption[] = [
   {
-    value: 'INVENTORY_VALUATION',
-    label: 'Inventory Valuation',
-    description: 'Stock value using FIFO, AVCO, or LIFO methods',
-    requiresDateRange: false,
-    supportsFilters: ['valuationMethod', 'category'],
-    category: 'Inventory',
-    icon: '📦',
-  },
-  {
     value: 'SALES_REPORT',
     label: 'Sales Report',
     description: 'Revenue, profit, and transactions by period or category',
@@ -822,6 +813,8 @@ interface ReportDataSummary {
   netProfitMargin?: number;
   totalSupplierPayments?: number;
   supplierPaymentCount?: number;
+  depositReceipts?: number;
+  depositsPercent?: number;
   [key: string]: unknown;
 }
 
@@ -927,7 +920,6 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Filter states
-  const [valuationMethod, setValuationMethod] = useState<'FIFO' | 'AVCO' | 'LIFO'>('FIFO');
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method'>('day');
   const [daysAhead, setDaysAhead] = useState<number>(30);
   const [limit, setLimit] = useState<number>(20);
@@ -1007,9 +999,10 @@ export default function ReportsPage() {
     }
   }, [selectedReport]);
 
-  // Fetch categories when inventory valuation is selected
+  // Fetch categories whenever a category-filtered report is selected
   useEffect(() => {
-    if (selectedReport === 'INVENTORY_VALUATION') {
+    const option = REPORT_OPTIONS.find((r) => r.value === selectedReport);
+    if (option?.supportsFilters.includes('category')) {
       setCategoriesLoading(true);
       const token = localStorage.getItem('auth_token');
       api.get('/reports/product-categories', {
@@ -1058,10 +1051,7 @@ export default function ReportsPage() {
       if (endDate) params.endDate = endDate;
 
       // Add specific filters based on report type
-      if (selectedReport === 'INVENTORY_VALUATION') {
-        params.valuationMethod = valuationMethod;
-        if (categoryFilter) params.categoryId = categoryFilter;
-      } else if (selectedReport === 'SALES_REPORT' || selectedReport === 'PROFIT_LOSS') {
+      if (selectedReport === 'SALES_REPORT' || selectedReport === 'PROFIT_LOSS') {
         params.groupBy = groupBy;
         if (sessionId) params.sessionId = sessionId;
       } else if (selectedReport === 'EXPIRING_ITEMS') {
@@ -1208,10 +1198,7 @@ export default function ReportsPage() {
       if (endDate) params.append('end_date', endDate);
 
       // Add report-specific parameters
-      if (selectedReport === 'INVENTORY_VALUATION' && valuationMethod) {
-        params.append('valuation_method', valuationMethod);
-        if (categoryFilter) params.append('category_id', categoryFilter);
-      } else if (selectedReport === 'SALES_SUMMARY_BY_DATE' && groupBy) {
+      if (selectedReport === 'SALES_SUMMARY_BY_DATE' && groupBy) {
         params.append('group_by', groupBy);
       } else if (selectedReport === 'PROFIT_LOSS' && groupBy) {
         params.append('group_by', groupBy);
@@ -1340,26 +1327,6 @@ export default function ReportsPage() {
               onEndDateChange={setEndDate}
               defaultPreset="THIS_MONTH"
             />
-          </div>
-        )}
-
-        {/* Valuation Method */}
-        {selectedReportOption.supportsFilters.includes('valuationMethod') && (
-          <div>
-            <label htmlFor="valuationMethod" className="block text-sm font-semibold text-gray-700 mb-2">
-              💼 Valuation Method
-            </label>
-            <select
-              id="valuationMethod"
-              value={valuationMethod}
-              onChange={(e) => setValuationMethod(e.target.value as 'FIFO' | 'AVCO' | 'LIFO')}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white"
-              aria-label="Valuation method"
-            >
-              <option value="FIFO">FIFO (First In First Out)</option>
-              <option value="AVCO">AVCO (Average Cost)</option>
-              <option value="LIFO">LIFO (Last In First Out)</option>
-            </select>
           </div>
         )}
 
@@ -1869,6 +1836,29 @@ export default function ReportsPage() {
                             (reportData.summary.collectionsPercent || 0) >= 25 ? 'w-1/4' : 'w-1/12'
                         }`}></div>
                     </div>
+
+                    {/* Customer Deposits bar */}
+                    {(reportData.summary.depositReceipts ?? 0) > 0 && (
+                      <>
+                        <div className="flex items-center justify-between mt-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                            <span className="text-sm text-gray-600">Customer Deposits</span>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.depositReceipts ?? 0)}</div>
+                            <div className="text-xs text-gray-500">{reportData.summary.depositsPercent?.toFixed(1)}%</div>
+                          </div>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2 relative">
+                          <div className={`absolute left-0 top-0 bg-purple-500 h-2 rounded-full transition-all duration-300 ${(reportData.summary.depositsPercent || 0) >= 90 ? 'w-11/12' :
+                            (reportData.summary.depositsPercent || 0) >= 75 ? 'w-3/4' :
+                              (reportData.summary.depositsPercent || 0) >= 50 ? 'w-1/2' :
+                                (reportData.summary.depositsPercent || 0) >= 25 ? 'w-1/4' : 'w-1/12'
+                            }`}></div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1901,6 +1891,12 @@ export default function ReportsPage() {
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Credit Extended</p>
                     <p className="text-lg font-bold text-orange-600">{formatCurrency(reportData.summary.creditExtended ?? 0)}</p>
                   </div>
+                  {(reportData.summary.depositReceipts ?? 0) > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Deposit Receipts</p>
+                      <p className="text-lg font-bold text-purple-600">{formatCurrency(reportData.summary.depositReceipts ?? 0)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </details>
@@ -1962,88 +1958,7 @@ export default function ReportsPage() {
           )
         )}
 
-        {/* Inventory Valuation - Category Breakdown */}
-        {reportData.reportType === 'INVENTORY_VALUATION' && reportData.byCategory && reportData.byCategory.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <h4 className="text-base sm:text-lg font-semibold text-white">📦 Valuation by Category</h4>
-              <span className="text-teal-100 text-xs sm:text-sm">{reportData.byCategory.length} categories</span>
-            </div>
 
-            {/* Mobile Card View */}
-            <div className="block sm:hidden p-4 space-y-4">
-              {reportData.byCategory.map((cat, idx) => (
-                <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="font-semibold text-gray-900 text-sm">{cat.category || 'Uncategorized'}</div>
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-teal-100 text-teal-800">
-                      {cat.productCount} products
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Qty on Hand</div>
-                      <div className="text-sm font-bold text-gray-900">{cat.quantityOnHand.toLocaleString()}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Cost Value</div>
-                      <div className="text-sm font-bold text-orange-600">{formatCurrency(cat.costValue)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Revenue</div>
-                      <div className="text-sm font-bold text-green-600">{formatCurrency(cat.potentialRevenue)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Margin</div>
-                      <div className={`text-sm font-bold ${cat.profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {cat.profitMargin.toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Desktop Table View */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full min-w-full">
-                <thead className="bg-gray-100 border-b-2 border-gray-300">
-                  <tr>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Category</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Products</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Qty on Hand</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Cost Value</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Potential Revenue</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Potential Profit</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Margin</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {reportData.byCategory.map((cat, idx) => (
-                    <tr key={idx} className="hover:bg-blue-50 transition-colors">
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-900">{cat.category || 'Uncategorized'}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-blue-600 font-semibold">{cat.productCount}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-gray-900 font-semibold">{cat.quantityOnHand.toLocaleString()}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-orange-600 font-semibold">{formatCurrency(cat.costValue)}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-green-600 font-semibold">{formatCurrency(cat.potentialRevenue)}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-green-700 font-semibold">{formatCurrency(cat.potentialProfit)}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${cat.profitMargin >= 20
-                          ? 'bg-green-100 text-green-800'
-                          : cat.profitMargin >= 10
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
-                          }`}>
-                          {cat.profitMargin.toFixed(1)}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
         {/* Void Sales Report - Breakdown by Reason */}
         {reportData.reportType === 'VOID_SALES_REPORT' && reportData.byReason && reportData.byReason.length > 0 && (
@@ -3367,6 +3282,69 @@ export default function ReportsPage() {
                         </div>
                       </button>
                     ))}
+
+                    {/* SAP/Odoo Inventory Suite — link-cards rendered only under Inventory category */}
+                    {category === 'Inventory' && (
+                      <>
+                        {[
+                          {
+                            to: '/reports/inventory/valuation',
+                            icon: '📦',
+                            label: 'Inventory Valuation',
+                            desc: 'Book value from cost layers (subledger). Product | Qty | Unit Cost | Stock Value.',
+                            badge: 'Finance',
+                            badgeColor: 'bg-blue-100 text-blue-700',
+                          },
+                          {
+                            to: '/reports/inventory/reconciliation',
+                            icon: '⚖️',
+                            label: 'Inventory Reconciliation',
+                            desc: 'Subledger vs GL 1300 control account. Drift detection & internal consistency.',
+                            badge: 'Accounting',
+                            badgeColor: 'bg-purple-100 text-purple-700',
+                          },
+                          {
+                            to: '/reports/inventory/analytics',
+                            icon: '📊',
+                            label: 'Inventory Analytics',
+                            desc: 'ABC classification, movement velocity, dead-stock flags. No money columns.',
+                            badge: 'Operations',
+                            badgeColor: 'bg-emerald-100 text-emerald-700',
+                          },
+                          {
+                            to: '/reports/inventory/margins',
+                            icon: '📈',
+                            label: 'Price & Margin Analysis',
+                            desc: 'Per-product margin %, markup %, and potential profit on current stock.',
+                            badge: 'Commercial',
+                            badgeColor: 'bg-indigo-100 text-indigo-700',
+                          },
+                        ].map((card) => (
+                          <Link key={card.to} to={card.to} className="group relative bg-white p-4 sm:p-6 rounded-xl border-2 border-emerald-200 hover:border-emerald-400 hover:shadow-xl transition-all duration-200 text-left block">
+                            <div className="absolute -top-2 sm:-top-3 -right-2 sm:-right-3 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-lg group-hover:scale-110 transition-transform">
+                              {card.icon}
+                            </div>
+                            <div className="pr-6 sm:pr-8">
+                              <h3 className="font-bold text-gray-900 mb-1 sm:mb-2 text-base sm:text-lg group-hover:text-emerald-700 transition-colors">
+                                {card.label}
+                              </h3>
+                              <p className="text-xs sm:text-sm text-gray-600 mb-2 sm:mb-3 line-clamp-2">{card.desc}</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ${card.badgeColor}`}>
+                                  {card.badge}
+                                </span>
+                                <span className="inline-flex items-center text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-medium">
+                                  SAP/Odoo-style
+                                </span>
+                              </div>
+                            </div>
+                            <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                              →
+                            </div>
+                          </Link>
+                        ))}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

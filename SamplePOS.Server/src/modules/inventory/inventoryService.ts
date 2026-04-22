@@ -2,9 +2,11 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { inventoryRepository } from './inventoryRepository.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
-import { StockMovementHandler } from './stockMovementHandler.js';
+import { StockMovementHandler, StockMovementType } from './stockMovementHandler.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
+import type { AdjustmentReason, AdjustmentDirection } from '../../../../shared/zod/inventory.js';
 import logger from '../../utils/logger.js';
-import { getBusinessDate } from '../../utils/dateRange.js';
+import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
 export const inventoryService = {
   /**
@@ -172,6 +174,111 @@ export const inventoryService = {
     });
 
     return result;
+  },
+
+  /**
+   * Enterprise-grade batch adjustment.
+   *
+   * Reason drives the movement type — direction is explicit, quantity is always
+   * positive. No sign inference. No negative numbers.
+   *
+   * Creates an inventory_adjustment_document as the audit header, then
+   * delegates to StockMovementHandler which is the single authoritative handler
+   * for all stock changes.
+   *
+   * Mapping: reason + direction → StockMovementType
+   *   DAMAGE          (OUT) → DAMAGE
+   *   EXPIRY          (OUT) → EXPIRY
+   *   PHYSICAL_COUNT  (IN)  → ADJUSTMENT_IN  + referenceType=PHYSICAL_COUNT
+   *   PHYSICAL_COUNT  (OUT) → ADJUSTMENT_OUT + referenceType=PHYSICAL_COUNT
+   *   WRITE_OFF       (OUT) → ADJUSTMENT_OUT + referenceType=WRITE_OFF
+   *   ADJUSTMENT      (IN)  → ADJUSTMENT_IN
+   *   ADJUSTMENT      (OUT) → ADJUSTMENT_OUT
+   */
+  async adjustBatch(
+    pool: Pool,
+    params: {
+      batchId?: string; // Optional: StockMovementHandler auto-selects via FEFO when omitted
+      productId: string;
+      quantity: number; // Always positive
+      direction: AdjustmentDirection;
+      reason: AdjustmentReason;
+      notes: string;
+      userId: string;
+      documentId?: string; // If provided, links to an existing document
+    }
+  ) {
+    if (params.quantity <= 0) {
+      throw new ValidationError('Adjustment quantity must be positive');
+    }
+
+    // Map reason + direction to StockMovementHandler's movement type
+    let movementType: StockMovementType;
+    let referenceType: string = 'ADJ_DOC';
+
+    switch (params.reason) {
+      case 'DAMAGE':
+        movementType = 'DAMAGE';
+        break;
+      case 'EXPIRY':
+        movementType = 'EXPIRY';
+        break;
+      case 'PHYSICAL_COUNT':
+        movementType = params.direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+        referenceType = 'PHYSICAL_COUNT';
+        break;
+      case 'WRITE_OFF':
+        movementType = 'ADJUSTMENT_OUT';
+        referenceType = 'WRITE_OFF';
+        break;
+      case 'ADJUSTMENT':
+      default:
+        movementType = params.direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+        break;
+    }
+
+    // Create adjustment document (or reuse provided one)
+    let documentId = params.documentId;
+    if (!documentId) {
+      const year = getBusinessYear();
+      // Sequential document number
+      const seqResult = await pool.query(`SELECT nextval('adj_doc_seq') AS seq`);
+      const seq = String(seqResult.rows[0].seq).padStart(5, '0');
+      const documentNumber = `ADJ-${year}-${seq}`;
+
+      const docResult = await pool.query(
+        `INSERT INTO inventory_adjustment_documents (document_number, reason, notes, created_by)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [documentNumber, params.reason, params.notes, params.userId]
+      );
+      documentId = docResult.rows[0].id as string;
+    }
+
+    const handler = new StockMovementHandler(pool);
+    const result = await handler.processMovement({
+      productId: params.productId,
+      batchId: params.batchId,
+      movementType,
+      quantity: params.quantity,
+      reason: `${params.reason}: ${params.notes}`,
+      referenceType,
+      referenceId: documentId,
+      userId: params.userId,
+    });
+
+    logger.info('Batch adjusted via enterprise contract', {
+      documentId,
+      batchId: params.batchId,
+      productId: params.productId,
+      quantity: params.quantity,
+      direction: params.direction,
+      reason: params.reason,
+      movementType,
+      movementId: result.movementId,
+    });
+
+    return { documentId, ...result };
   },
 
   /**

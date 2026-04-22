@@ -34,9 +34,11 @@ import { createPaymentsRoutes } from './modules/payments/paymentsRoutes.js';
 import auditRoutes from './modules/audit/auditRoutes.js';
 import { createHoldRoutes } from './modules/pos/holdRoutes.js';
 import { createOfflineSyncRoutes } from './modules/pos/offlineSyncRoutes.js';
+import { createSyncEventsRoutes } from './modules/pos/syncEventsRoutes.js';
 import quotationRoutes from './modules/quotations/quotationRoutes.js';
 import deliveryRoutes from './modules/delivery/deliveryRoutes.js';
 import deliveryNoteRoutes from './modules/delivery-notes/deliveryNoteRoutes.js';
+import { distRoutes } from './modules/distribution/distRoutes.js';
 import { importRoutes } from './modules/import/importRoutes.js';
 import { accountingRoutes } from './modules/accounting/accountingRoutes.js';
 import depositsRoutes from './modules/deposits/depositsRoutes.js';
@@ -59,6 +61,7 @@ import ordersRoutes from './modules/orders/ordersRoutes.js';
 import { costCenterRoutes } from './modules/cost-centers/costCenterRoutes.js';
 import { periodControlRoutes } from './modules/period-control/periodControlRoutes.js';
 import { grirClearingRoutes } from './modules/grir-clearing/grirClearingRoutes.js';
+import { downPaymentClearingRoutes } from './modules/down-payment-clearing/clearingRoutes.js';
 import { dunningRoutes } from './modules/dunning/dunningRoutes.js';
 import { whtRoutes } from './modules/withholding-tax/whtRoutes.js';
 import { assetRoutes } from './modules/asset-accounting/assetRoutes.js';
@@ -342,6 +345,7 @@ app.use('/api/sales', requireFeature('pos'), salesRoutes);
 app.use('/api/orders', requireFeature('pos'), ordersRoutes);
 app.use('/api/pos/hold', requireFeature('pos'), createHoldRoutes(pool));
 app.use('/api/pos/sync-offline-sales', requireFeature('pos'), createOfflineSyncRoutes(pool));
+app.use('/api/pos/sync-events', requireFeature('pos'), createSyncEventsRoutes(pool));
 app.use('/api/cash-registers', requireFeature('pos'), cashRegisterRoutes);
 app.use('/api/discounts', requireFeature('pos'), authenticate, discountRoutes);
 app.use('/api/payments', requireFeature('pos'), createPaymentsRoutes());
@@ -361,6 +365,7 @@ app.use('/api/invoices', requireFeature('invoices'), invoiceRoutes);
 app.use('/api/credit-debit-notes', requireFeature('invoices'), creditDebitNoteRoutes);
 app.use('/api/document-flow', requireFeature('invoices'), documentFlowRoutes);
 app.use('/api/deposits', requireFeature('customers'), depositsRoutes);
+app.use('/api/down-payment-clearing', requireFeature('accounting'), downPaymentClearingRoutes);
 
 // ── Settings & Admin (always available) ─────────────────────
 app.use('/api/settings/invoice', invoiceSettingsRoutes);
@@ -383,6 +388,9 @@ app.use('/api/crm', requireFeature('customers'), crmRoutes);
 app.use('/api/pricing', requireFeature('pos'), pricingEngineRoutes);
 app.use('/api/hr', requireFeature('hr'), hrRoutes);
 console.log('  HR & Payroll module loaded');
+
+// ── Distribution Module (SAP-style document flow) ──────────
+app.use('/api/distribution', requireFeature('invoices'), distRoutes);
 
 // ── SAP-gap feature modules (plan: PROFESSIONAL+) ──────────
 app.use('/api/cost-centers', requireFeature('accounting'), costCenterRoutes);

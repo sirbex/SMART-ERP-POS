@@ -42,7 +42,7 @@ export function PasswordStrengthIndicator({ password, onChange }: PasswordStreng
                 const result = await validateMutation.mutateAsync(password);
                 setValidation(result);
                 onChange?.(result);
-            } catch (error) {
+            } catch {
                 // Client-side validation fallback
                 const result = validatePasswordLocally(password, policy);
                 setValidation(result);
@@ -76,7 +76,7 @@ export function PasswordStrengthIndicator({ password, onChange }: PasswordStreng
         { label: 'Contains uppercase letter', met: /[A-Z]/.test(password) },
         { label: 'Contains lowercase letter', met: /[a-z]/.test(password) },
         { label: 'Contains number', met: /[0-9]/.test(password) },
-        { label: 'Contains special character', met: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password) },
+        { label: 'Contains special character', met: /[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/.test(password) },
     ];
 
     return (
@@ -148,7 +148,7 @@ function validatePasswordLocally(password: string, policy?: { requirements: { mi
     if (/[0-9]/.test(password)) score += 20;
     else errors.push('Password must contain a number');
 
-    if (/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) score += 20;
+    if (/[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/.test(password)) score += 20;
     else errors.push('Password must contain a special character');
 
     let strength: 'weak' | 'fair' | 'good' | 'strong';

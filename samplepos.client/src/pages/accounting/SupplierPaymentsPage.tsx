@@ -58,6 +58,7 @@ import {
     supplierPaymentAllocationService
 } from '../../services/comprehensive-accounting';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import type {
     SupplierPayment,
     SupplierInvoice,
@@ -955,6 +956,10 @@ const SupplierPaymentsPage: React.FC = () => {
 
     // Combined loading state
     const isPageLoading = suppliersLoading || loading;
+
+    useSubmitOnEnter(isPaymentModalOpen, true, handleCreatePayment);
+    useSubmitOnEnter(isBillModalOpen, true, handleCreateBill);
+    useSubmitOnEnter(isAllocationModalOpen, !allocatingPayment, handleManualAllocate);
 
     if (isPageLoading && suppliers.length === 0) {
         return (

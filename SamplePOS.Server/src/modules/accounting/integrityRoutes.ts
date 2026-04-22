@@ -337,11 +337,11 @@ router.post(
  * corresponding GL entries, and reposts them via glEntryService.
  * Idempotency keys prevent double-posting.
  *
- * Requires: accounting.write permission (ADMIN/MANAGER only)
+ * Requires: accounting.update permission (ADMIN/MANAGER only)
  */
 router.post(
   '/repost-missing-gl',
-  requirePermission('accounting.write'),
+  requirePermission('accounting.update'),
   asyncHandler(async (req: Request, res: Response) => {
     const dbPool = (req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
 

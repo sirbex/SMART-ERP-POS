@@ -42,6 +42,7 @@ export const AccountCodes = {
   CASH: '1010',
   CREDIT_CARD_RECEIPTS: '1020',
   CHECKING_ACCOUNT: '1030',
+  MOBILE_MONEY: '1040',
   ACCOUNTS_RECEIVABLE: '1200',
   INVENTORY: '1300',
 
@@ -257,7 +258,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
     const ledgerLines: JournalLine[] = [];
 
     // DEPOSIT sales: DR Accounts Receivable, CR Revenue
-    // The deposit application trigger handles: DR Customer Deposits, CR AR
+    // recordDepositApplicationToGL handles: DR Customer Deposits, CR AR
     // Net effect on AR = 0 (debit from sale, credit from deposit application)
     if (sale.paymentMethod === 'DEPOSIT') {
       logger.info('DEPOSIT sale - debiting AR (cleared by deposit application)', {
@@ -357,7 +358,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
           paymentDescription = 'Credit card payment received';
           break;
         case 'MOBILE_MONEY':
-          debitAccountCode = AccountCodes.CASH; // Treat as cash equivalent
+          debitAccountCode = AccountCodes.MOBILE_MONEY;
           paymentDescription = 'Mobile money payment received';
           break;
         default:
@@ -439,7 +440,8 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
       referenceNumber: sale.saleNumber,
       lines: ledgerLines,
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `SALE-${sale.saleId}`  // Deterministic key prevents duplicates
+      idempotencyKey: `SALE-${sale.saleId}`,  // Deterministic key prevents duplicates
+      source: 'SALES_INVOICE' as const,
     }, pool);
 
     logger.info('Recorded sale to GL', {
@@ -510,6 +512,9 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       case 'BANK_TRANSFER':
         debitAccountCode = AccountCodes.CHECKING_ACCOUNT;
         break;
+      case 'MOBILE_MONEY':
+        debitAccountCode = AccountCodes.MOBILE_MONEY;
+        break;
       default:
         debitAccountCode = AccountCodes.CASH;
     }
@@ -551,7 +556,8 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
         }
       ],
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `CUSTOMER_PAYMENT-${payment.paymentId}`
+      idempotencyKey: `CUSTOMER_PAYMENT-${payment.paymentId}`,
+      source: 'PAYMENT_RECEIPT' as const,
     }, pool);
 
     logger.info('Recorded customer payment to GL', {
@@ -580,7 +586,7 @@ export interface ExpenseData {
   categoryCode: string; // Maps to expense account code
   categoryName: string;
   description: string;
-  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'PETTY_CASH';
+  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'PETTY_CASH' | 'MOBILE_MONEY';
   supplierId?: string;
   supplierName?: string;
 }
@@ -610,6 +616,9 @@ export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): P
       case 'BANK_TRANSFER':
         creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
         break;
+      case 'MOBILE_MONEY':
+        creditAccountCode = AccountCodes.MOBILE_MONEY;
+        break;
       default:
         creditAccountCode = AccountCodes.CASH;
     }
@@ -636,7 +645,8 @@ export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): P
         }
       ],
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `EXPENSE-${expense.expenseId}`
+      idempotencyKey: `EXPENSE-${expense.expenseId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool);
 
     logger.info('Recorded expense to GL', {
@@ -741,7 +751,8 @@ export async function recordGoodsReceiptToGL(
         }
       ],
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `GOODS_RECEIPT-${gr.grId}`
+      idempotencyKey: `GOODS_RECEIPT-${gr.grId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool, txClient);
 
     logger.info('Recorded goods receipt to GL', {
@@ -810,6 +821,7 @@ export async function recordReturnGrnToGL(
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `RETURN_GRN-${data.returnGrnId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool, txClient);
 
     logger.info('Recorded return GRN to GL', {
@@ -832,7 +844,7 @@ export interface SupplierPaymentData {
   paymentNumber: string;
   paymentDate: string;
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK';
+  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY';
   supplierId: string;
   supplierName: string;
 }
@@ -858,6 +870,9 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
         break;
       case 'CARD':
         creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
+        break;
+      case 'MOBILE_MONEY':
+        creditAccountCode = AccountCodes.MOBILE_MONEY;
         break;
       default:
         creditAccountCode = AccountCodes.CASH;
@@ -887,7 +902,8 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
         }
       ],
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `SUPPLIER_PAYMENT-${payment.paymentId}`
+      idempotencyKey: `SUPPLIER_PAYMENT-${payment.paymentId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool);
 
     logger.info('Recorded supplier payment to GL', {
@@ -971,7 +987,8 @@ export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData,
       referenceNumber: adjustment.adjustmentNumber,
       lines,
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `STOCK_ADJUSTMENT-${adjustment.adjustmentId}`
+      idempotencyKey: `STOCK_ADJUSTMENT-${adjustment.adjustmentId}`,
+      source: 'INVENTORY_MOVE' as const,
     }, pool);
 
     logger.info('Recorded stock adjustment to GL', {
@@ -1042,7 +1059,8 @@ export async function recordDeliveryChargeToGL(data: DeliveryChargeData, pool?: 
         }
       ],
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `DELIVERY_CHARGE-${data.deliveryId}`
+      idempotencyKey: `DELIVERY_CHARGE-${data.deliveryId}`,
+      source: 'SALES_INVOICE' as const,
     }, pool);
 
     logger.info('Recorded delivery charge to GL', {
@@ -1093,7 +1111,8 @@ export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData, p
         }
       ],
       userId: SYSTEM_USER_ID,
-      idempotencyKey: `DELIVERY_COST-${data.deliveryId}`
+      idempotencyKey: `DELIVERY_COST-${data.deliveryId}`,
+      source: 'SALES_INVOICE' as const,
     }, pool);
 
     logger.info('Recorded delivery cost to GL', {
@@ -1104,6 +1123,74 @@ export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData, p
   } catch (error: unknown) {
     logger.error('Failed to record delivery cost to GL', { error, data });
     throw new Error(`GL posting failed for delivery cost ${data.deliveryNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// DELIVERY NOTE GOODS ISSUE JOURNAL ENTRIES (DR COGS / CR Inventory)
+// =============================================================================
+
+export interface DeliveryNoteGoodsIssueData {
+  deliveryNoteId: string;
+  deliveryNoteNumber: string;
+  postingDate: string;
+  totalCost: number;
+}
+
+/**
+ * Record COGS at Post Goods Issue (PGI) for a delivery note.
+ * DR COGS (5000) / CR Inventory (1300)
+ *
+ * SAP equivalent: Goods Issue posting updates both inventory and COGS
+ * in the same period as the physical stock movement.
+ */
+export async function recordDeliveryNoteGoodsIssueToGL(
+  data: DeliveryNoteGoodsIssueData,
+  pool?: pg.Pool,
+): Promise<void> {
+  try {
+    if (data.totalCost <= 0) {
+      logger.debug('Skipping DN goods issue GL (zero cost)', {
+        deliveryNoteNumber: data.deliveryNoteNumber,
+      });
+      return;
+    }
+
+    const lines: JournalLine[] = [
+      {
+        accountCode: AccountCodes.COGS,
+        description: `COGS — DN ${data.deliveryNoteNumber} goods issue`,
+        debitAmount: data.totalCost,
+        creditAmount: 0,
+      },
+      {
+        accountCode: AccountCodes.INVENTORY,
+        description: `Inventory reduction — DN ${data.deliveryNoteNumber} goods issue`,
+        debitAmount: 0,
+        creditAmount: data.totalCost,
+      },
+    ];
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.postingDate,
+      description: `Delivery Note ${data.deliveryNoteNumber} — Post Goods Issue (COGS)`,
+      referenceType: 'DELIVERY_NOTE_PGI',
+      referenceId: data.deliveryNoteId,
+      referenceNumber: data.deliveryNoteNumber,
+      lines,
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DN_PGI_COGS-${data.deliveryNoteId}`,
+      source: 'INVENTORY_MOVE' as const,
+    }, pool);
+
+    logger.info('Recorded DN goods issue COGS to GL', {
+      deliveryNoteId: data.deliveryNoteId,
+      deliveryNoteNumber: data.deliveryNoteNumber,
+      totalCost: data.totalCost,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record DN goods issue to GL', { error, data });
+    throw new Error(`GL posting failed for DN PGI ${data.deliveryNoteNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -1163,6 +1250,7 @@ export async function recordDeliveryNoteInvoiceToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DN_INVOICE-${data.invoiceId}`,
+      source: 'SALES_INVOICE' as const,
     }, pool);
 
     logger.info('Recorded DN invoice to GL', {
@@ -1193,11 +1281,11 @@ export interface SaleVoidData {
  * Uses AccountingCore.reverseTransaction() which creates an exact mirror entry
  * (swaps debits/credits) and marks the original as REVERSED.
  */
-export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool): Promise<void> {
+export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     // Find the original SALE transaction
-    const dbPool = pool || globalPool;
-    const existing = await dbPool.query(
+    const queryTarget = txClient || pool || globalPool;
+    const existing = await queryTarget.query(
       `SELECT "Id" FROM ledger_transactions
        WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = $1
          AND "IsReversed" = FALSE
@@ -1206,11 +1294,11 @@ export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool): Pr
     );
 
     if (existing.rows.length === 0) {
-      logger.warn('No GL transaction found for voided sale — nothing to reverse', {
+      logger.error('No GL transaction found for voided sale — cannot reverse', {
         saleId: data.saleId,
         saleNumber: data.saleNumber,
       });
-      return; // No GL entry to reverse (sale may never have been posted)
+      throw new Error(`No GL transaction found for sale ${data.saleNumber} — cannot void without GL reversal`);
     }
 
     const originalTransactionId = existing.rows[0].Id;
@@ -1221,7 +1309,7 @@ export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool): Pr
       reason: `VOID: Sale ${data.saleNumber} — ${data.voidReason}`,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SALE_VOID-${data.saleId}`,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded sale void reversal to GL', {
       saleId: data.saleId,
@@ -1269,13 +1357,14 @@ export interface SaleRefundData {
  */
 export async function recordSaleRefundToGL(
   data: SaleRefundData,
-  pool?: pg.Pool
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
 ): Promise<string | undefined> {
   try {
-    const dbPool = pool || globalPool;
+    const queryTarget = txClient || pool || globalPool;
 
     // Find ALL non-reversed SALE transactions for this sale
-    const existing = await dbPool.query(
+    const existing = await queryTarget.query(
       `SELECT "Id" FROM ledger_transactions
        WHERE "ReferenceType" = 'SALE' AND "ReferenceId" = $1
          AND "IsReversed" = FALSE
@@ -1299,7 +1388,10 @@ export async function recordSaleRefundToGL(
         creditAccountCode = AccountCodes.ACCOUNTS_RECEIVABLE; // 1200
         break;
       case 'CARD':
-        creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS || '1040';
+        creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+        break;
+      case 'MOBILE_MONEY':
+        creditAccountCode = AccountCodes.MOBILE_MONEY;
         break;
       default:
         creditAccountCode = AccountCodes.CASH; // 1010
@@ -1372,7 +1464,8 @@ export async function recordSaleRefundToGL(
       })),
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SALE_REFUND-${data.refundId}`,
-    }, pool);
+      source: 'SALES_INVOICE' as const,
+    }, pool, txClient);
 
     logger.info('Recorded sale refund to GL', {
       refundId: data.refundId,
@@ -1386,7 +1479,7 @@ export async function recordSaleRefundToGL(
 
     return journalResult.transactionId;
   } catch (error: unknown) {
-    if (error instanceof AccountingError && error.code === 'DUPLICATE_IDEMPOTENCY_KEY') {
+    if (error instanceof AccountingError && error.code === 'IDEMPOTENCY_CONFLICT') {
       logger.info('Sale refund GL already posted (idempotent)', { refundId: data.refundId });
       return undefined;
     }
@@ -1418,7 +1511,7 @@ export interface CustomerDepositData {
  *   DR Cash / Bank (1010/1030)  amount
  *   CR Customer Deposits (2200) amount   (liability until applied to sale)
  */
-export async function recordCustomerDepositToGL(deposit: CustomerDepositData, pool?: pg.Pool): Promise<void> {
+export async function recordCustomerDepositToGL(deposit: CustomerDepositData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     let debitAccountCode: string;
     switch (deposit.paymentMethod) {
@@ -1427,6 +1520,9 @@ export async function recordCustomerDepositToGL(deposit: CustomerDepositData, po
         break;
       case 'CARD':
         debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+        break;
+      case 'MOBILE_MONEY':
+        debitAccountCode = AccountCodes.MOBILE_MONEY;
         break;
       default:
         debitAccountCode = AccountCodes.CASH;
@@ -1458,7 +1554,8 @@ export async function recordCustomerDepositToGL(deposit: CustomerDepositData, po
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CUSTOMER_DEPOSIT-${deposit.depositId}`,
-    }, pool);
+      source: 'PAYMENT_RECEIPT' as const,
+    }, pool, txClient);
 
     logger.info('Recorded customer deposit to GL', {
       depositId: deposit.depositId,
@@ -1468,6 +1565,87 @@ export async function recordCustomerDepositToGL(deposit: CustomerDepositData, po
   } catch (error: unknown) {
     logger.error('Failed to record customer deposit to GL', { error, deposit });
     throw new Error(`GL posting failed for customer deposit ${deposit.depositNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+  }
+}
+
+// =============================================================================
+// DEPOSIT APPLICATION JOURNAL ENTRIES (POS Sale → Deposit Clearing)
+// =============================================================================
+
+export interface DepositApplicationGLData {
+  applicationId: string;
+  depositId: string;
+  depositNumber: string;
+  saleId: string;
+  saleNumber: string;
+  applicationDate: string;
+  amount: number;
+  customerId: string;
+  customerName: string;
+}
+
+/**
+ * Record a deposit application to the general ledger.
+ * Called when a customer deposit is applied to a POS sale.
+ *
+ * Journal entry:
+ *   DR Customer Deposits (2200)    amount   — reduce liability (deposit consumed)
+ *   CR Accounts Receivable (1200)  amount   — clear the AR created by recordSaleToGL
+ *
+ * Net effect: the DEPOSIT sale's AR debit is fully offset by this credit.
+ */
+export async function recordDepositApplicationToGL(
+  data: DepositApplicationGLData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
+  try {
+    const depositLabel = data.depositNumber || `DEPOSIT-${data.depositId.slice(0, 8)}`;
+    const referenceNumber = data.depositNumber
+      ? `${data.depositNumber}->${data.saleNumber}`
+      : `DEP-APP-${data.applicationId.slice(0, 8)}`;
+
+    await AccountingCore.createJournalEntry({
+      entryDate: data.applicationDate,
+      description: `Deposit Application: ${depositLabel} applied to ${data.saleNumber} (${data.customerName})`,
+      referenceType: 'DEPOSIT_APPLICATION',
+      referenceId: data.applicationId,
+      referenceNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+          description: `Deposit liability cleared — ${depositLabel} applied to ${data.saleNumber}`,
+          debitAmount: data.amount,
+          creditAmount: 0,
+          entityType: 'customer',
+          entityId: data.customerId,
+        },
+        {
+          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+          description: `AR cleared via deposit — ${data.saleNumber}`,
+          debitAmount: 0,
+          creditAmount: data.amount,
+          entityType: 'customer',
+          entityId: data.customerId,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DEPOSIT_APPLICATION-${data.applicationId}`,
+      source: 'PAYMENT_RECEIPT' as const,
+    }, pool, txClient);
+
+    logger.info('Recorded deposit application to GL', {
+      applicationId: data.applicationId,
+      depositNumber: depositLabel,
+      saleNumber: data.saleNumber,
+      amount: data.amount,
+      customerId: data.customerId,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record deposit application to GL', { error, data });
+    throw new Error(
+      `GL posting failed for deposit application ${data.depositNumber || data.depositId} → ${data.saleNumber}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -1519,6 +1697,7 @@ export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData, po
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `INVOICE-${invoice.invoiceId}`,
+      source: 'SALES_INVOICE' as const,
     }, pool);
 
     logger.info('Recorded customer invoice to GL', {
@@ -1555,7 +1734,7 @@ export interface InvoicePaymentData {
  *
  * DEPOSIT payments are skipped (already posted via deposit lifecycle).
  */
-export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool?: pg.Pool): Promise<void> {
+export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     // Deposit payments: money already received via deposit, no Cash DR needed
     if (payment.paymentMethod === 'DEPOSIT') {
@@ -1572,6 +1751,9 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool
         break;
       case 'CARD':
         debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+        break;
+      case 'MOBILE_MONEY':
+        debitAccountCode = AccountCodes.MOBILE_MONEY;
         break;
       case 'CREDIT':
       case 'CASH':
@@ -1601,7 +1783,8 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `INVOICE_PAYMENT-${payment.paymentId}`,
-    }, pool);
+      source: 'PAYMENT_RECEIPT' as const,
+    }, pool, txClient);
 
     logger.info('Recorded invoice payment to GL', {
       paymentId: payment.paymentId,
@@ -1706,6 +1889,7 @@ export async function recordStockMovementToGL(movement: StockMovementData, pool?
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `STOCK_MOVEMENT-${movement.movementId}`,
+      source: 'INVENTORY_MOVE' as const,
     }, pool);
 
     logger.info('Recorded stock movement to GL', {
@@ -1803,6 +1987,7 @@ export async function recordOpeningStockToGL(data: OpeningStockData, pool?: pg.P
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `OPENING_STOCK-${data.productId}-${data.batchNumber}`,
+      source: 'OPENING_BALANCE_WIZARD' as const,
     }, pool);
 
     logger.info('Recorded opening stock to GL', {
@@ -1870,6 +2055,7 @@ export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, po
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE-${expense.expenseId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool);
 
     logger.info('Recorded expense approval to GL', {
@@ -1930,6 +2116,7 @@ export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE_PAYMENT-${payment.expenseId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool);
 
     logger.info('Recorded expense payment to GL', {
@@ -2225,6 +2412,71 @@ export async function recordSupplierDebitNoteToGL(
   }
 }
 
+// =============================================================================
+// DOWN PAYMENT CLEARING JOURNAL ENTRIES (SAP-STYLE)
+// =============================================================================
+
+export interface DownPaymentClearingData {
+  clearingId: string;
+  clearingNumber: string;
+  clearingDate: string;
+  amount: number;
+  depositNumber: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+}
+
+/**
+ * Record a down payment clearing in the general ledger
+ *
+ * When a deposit is applied to an invoice, the liability is transferred to AR:
+ *   DR Customer Deposits (2200)    amount   (reduce liability)
+ *   CR Accounts Receivable (1200)  amount   (reduce AR)
+ */
+export async function recordDownPaymentClearingToGL(data: DownPaymentClearingData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
+  try {
+    await AccountingCore.createJournalEntry({
+      entryDate: data.clearingDate,
+      description: `Down Payment Clearing: ${data.clearingNumber} — ${data.depositNumber} applied to ${data.invoiceNumber} (${data.customerName})`,
+      referenceType: 'DOWN_PAYMENT_CLEARING',
+      referenceId: data.clearingId,
+      referenceNumber: data.clearingNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+          description: `Deposit liability cleared — ${data.depositNumber}`,
+          debitAmount: data.amount,
+          creditAmount: 0,
+          entityType: 'customer',
+          entityId: data.customerId,
+        },
+        {
+          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
+          description: `AR reduced via deposit — ${data.invoiceNumber}`,
+          debitAmount: 0,
+          creditAmount: data.amount,
+          entityType: 'customer',
+          entityId: data.customerId,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `DOWN_PAYMENT_CLEARING-${data.clearingId}`,
+    }, pool, txClient);
+
+    logger.info('Recorded down payment clearing to GL', {
+      clearingId: data.clearingId,
+      clearingNumber: data.clearingNumber,
+      amount: data.amount,
+      depositNumber: data.depositNumber,
+      invoiceNumber: data.invoiceNumber,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record down payment clearing to GL', { error, data });
+    throw new Error(`GL posting failed for clearing ${data.clearingNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export default {
   AccountCodes,
   recordSaleToGL,
@@ -2237,8 +2489,10 @@ export default {
   recordDeliveryCompletedToGL,
   recordSaleVoidToGL,
   recordCustomerDepositToGL,
+  recordDepositApplicationToGL,
   recordCustomerInvoiceToGL,
   recordInvoicePaymentToGL,
+  recordDownPaymentClearingToGL,
   recordStockMovementToGL,
   recordExpenseApprovalToGL,
   recordExpensePaymentToGL,

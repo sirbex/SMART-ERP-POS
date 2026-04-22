@@ -238,6 +238,11 @@ export interface BusinessCashPosition {
     totalCashIn: number;
     newCreditExtended: number;
     outstandingReceivables: number;
+    depositLiability: number;
+    activeDepositCount: number;
+    customersWithDeposits: number;
+    totalDeposited: number;
+    totalCleared: number;
     profitMarginPercent: number;
     cashCollectionRate: number;
 }
@@ -409,6 +414,8 @@ export interface InventoryValuationRow {
     productName: string;
     sku: string;
     category: string | null;
+    productActive?: boolean;
+    costSource?: 'FIFO_LAYER' | 'AVCO_FALLBACK' | 'NO_COST_BASIS';
     quantityOnHand: number;
     unitCost: number;
     sellingPrice?: number;
@@ -418,6 +425,27 @@ export interface InventoryValuationRow {
     potentialProfit?: number;
     profitMargin?: number;
     lastUpdated: string | null;
+    // ── SAP/Odoo-grade enrichments ──
+    /** ABC classification by value: A = top 80%, B = next 15%, C = last 5% */
+    abcClass?: 'A' | 'B' | 'C';
+    /** % of total inventory value */
+    valueContribution?: number;
+    /** Days since oldest cost layer was received (stock age / FIFO age) */
+    daysInStock?: number | null;
+    /** Last sale date (YYYY-MM-DD) or null if never sold */
+    lastSaleDate?: string | null;
+    /** Days since last sale (null = never sold) */
+    daysSinceLastSale?: number | null;
+    /** Movement classification: FAST / SLOW / DEAD / NEW */
+    movementClass?: 'FAST' | 'SLOW' | 'DEAD' | 'NEW';
+    /** Qty in product_inventory (authoritative subledger) */
+    qtySubledger?: number;
+    /** Qty in cost_layers (FIFO layer sum) */
+    qtyCostLayers?: number;
+    /** Qty drift (subledger - cost_layers). Non-zero = needs investigation */
+    qtyDrift?: number;
+    /** Is qty drift material? */
+    hasDrift?: boolean;
 }
 
 // ── Expiring Items ──

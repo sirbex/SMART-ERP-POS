@@ -39,7 +39,7 @@ const PRESET_OPTIONS: PresetOption[] = [
  * Calculate date range based on preset
  * Uses precise date calculations with no timezone issues
  */
-export function getDateRange(preset: DateRangePreset): { startDate: string; endDate: string } {
+function getDateRange(preset: DateRangePreset): { startDate: string; endDate: string } {
   const today = getBusinessDate();
   const [year, month, date] = today.split('-').map(Number);
   const jsDate = new Date(year, month - 1, date);
@@ -59,18 +59,20 @@ export function getDateRange(preset: DateRangePreset): { startDate: string; endD
       end = new Date(year, month - 1, date - 1);
       break;
 
-    case 'this_week':
+    case 'this_week': {
       // Week starts on Monday (1), ends on Sunday (0)
       const daysFromMonday = day === 0 ? 6 : day - 1; // If Sunday, go back 6 days
       start = new Date(year, month - 1, date - daysFromMonday);
       end = new Date(year, month - 1, date + (6 - daysFromMonday));
       break;
+    }
 
-    case 'last_week':
+    case 'last_week': {
       const lastWeekDaysFromMonday = day === 0 ? 6 : day - 1;
       start = new Date(year, month - 1, date - lastWeekDaysFromMonday - 7);
       end = new Date(year, month - 1, date - lastWeekDaysFromMonday - 1);
       break;
+    }
 
     case 'this_month':
       start = new Date(year, month - 1, 1);

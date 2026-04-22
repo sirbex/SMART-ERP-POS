@@ -18,6 +18,7 @@ export const PERMISSIONS: Record<string, Permission> = {
   SALES_REFUND: p('sales.refund', 'sales', 'refund', 'Refund completed sales'),
   SALES_EXPORT: p('sales.export', 'sales', 'export', 'Export sales data'),
   SALES_APPROVE: p('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
+  SALES_REPRINT: p('sales.reprint', 'sales', 'reprint', 'Reprint sale receipts'),
 
   INVENTORY_READ: p('inventory.read', 'inventory', 'read', 'View inventory levels'),
   INVENTORY_CREATE: p('inventory.create', 'inventory', 'create', 'Create inventory items'),
@@ -26,6 +27,7 @@ export const PERMISSIONS: Record<string, Permission> = {
   INVENTORY_IMPORT: p('inventory.import', 'inventory', 'import', 'Import inventory data'),
   INVENTORY_EXPORT: p('inventory.export', 'inventory', 'export', 'Export inventory data'),
   INVENTORY_APPROVE: p('inventory.approve', 'inventory', 'approve', 'Approve stock adjustments'),
+  INVENTORY_BATCH_EXPIRY_EDIT: p('inventory.batch_expiry_edit', 'inventory', 'update', 'Edit batch expiry dates (SAP master data correction — Batch Management screen only)'),
 
   POS_READ: p('pos.read', 'pos', 'read', 'Access point of sale'),
   POS_CREATE: p('pos.create', 'pos', 'create', 'Process transactions'),
@@ -71,6 +73,7 @@ export const PERMISSIONS: Record<string, Permission> = {
   ACCOUNTING_PERIOD_MANAGE: p('accounting.period_manage', 'accounting', 'period_manage', 'Close, reopen, and lock accounting periods'),
   ACCOUNTING_RECONCILE: p('accounting.reconcile', 'accounting', 'reconcile', 'Perform account reconciliations (AR, AP, cash, inventory)'),
   ACCOUNTING_CHART_MANAGE: p('accounting.chart_manage', 'accounting', 'chart_manage', 'Manage chart of accounts (create, edit, deactivate accounts)'),
+  ACCOUNTING_MANAGE: p('accounting.manage', 'accounting', 'manage', 'Manage accounting configuration (cost centers, periods, currencies, WHT, assets, dunning)'),
 
   REPORTS_READ: p('reports.read', 'reports', 'read', 'Access reports dashboard'),
   REPORTS_CREATE: p('reports.create', 'reports', 'create', 'Create custom reports'),
@@ -161,6 +164,13 @@ export const PERMISSIONS: Record<string, Permission> = {
   EXPENSES_DELETE: p('expenses.delete', 'expenses', 'delete', 'Delete expense records'),
   EXPENSES_APPROVE: p('expenses.approve', 'expenses', 'approve', 'Approve or reject expense submissions'),
   EXPENSES_EXPORT: p('expenses.export', 'expenses', 'export', 'Export expense data to CSV'),
+
+  // Distribution / Sales Orders Module
+  DISTRIBUTION_READ: p('distribution.read', 'distribution', 'read', 'View sales orders, deliveries, and invoices'),
+  DISTRIBUTION_CREATE: p('distribution.create', 'distribution', 'create', 'Create sales orders and deliveries'),
+  DISTRIBUTION_UPDATE: p('distribution.update', 'distribution', 'update', 'Edit sales orders'),
+  DISTRIBUTION_DELETE: p('distribution.delete', 'distribution', 'delete', 'Cancel/delete sales orders'),
+  DISTRIBUTION_APPROVE: p('distribution.approve', 'distribution', 'approve', 'Approve sales orders'),
 
   // Quotations Module
   QUOTATIONS_READ: p('quotations.read', 'quotations', 'read', 'View quotations'),

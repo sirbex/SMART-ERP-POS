@@ -5,7 +5,7 @@
  *
  * PURPOSE:
  * After every inventory-affecting operation, verify that GL account 1300
- * (Inventory) stays in sync with the subledger (inventory_batches).
+ * (Inventory) stays in sync with the inventory valuation subledger (cost_layers).
  * If a discrepancy is detected, log a CRITICAL alert with root cause
  * so it can be surfaced to the tenant.
  *
@@ -56,7 +56,7 @@ export interface IntegrityReport {
  * Cross-references:
  * 1. GL entries on account 1300 (grouped by referenceType + referenceId)
  * 2. Stock movements (grouped by reference_type + reference_id)
- * 3. inventory_batches current valuation
+ * 3. cost_layers current valuation
  *
  * Returns actionable diagnostics for every discrepancy found.
  */
@@ -74,10 +74,10 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
     `);
     const glBalance = Money.toNumber(Money.parseDb(glResult.rows[0].balance));
 
-    // 2. Get batch valuation
+    // 2. Get inventory valuation from remaining cost layers
     const batchResult = await pool.query(`
-        SELECT COALESCE(SUM(remaining_quantity * cost_price), 0) AS total
-        FROM inventory_batches
+        SELECT COALESCE(SUM(remaining_quantity * unit_cost), 0) AS total
+        FROM cost_layers
         WHERE remaining_quantity > 0
     `);
     const batchValuation = Money.toNumber(Money.parseDb(batchResult.rows[0].total));

@@ -16,7 +16,8 @@ export type PermissionModule =
   | 'crm'
   | 'hr'
   | 'expenses'
-  | 'quotations';
+  | 'quotations'
+  | 'distribution';
 
 export type PermissionAction =
   | 'read'
@@ -44,7 +45,8 @@ export type PermissionAction =
   | 'banking_view'
   | 'hr_view'
   | 'period_manage'
-  | 'chart_manage';
+  | 'chart_manage'
+  | 'reprint';
 
 export interface Permission {
   key: string;

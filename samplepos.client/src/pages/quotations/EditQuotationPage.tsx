@@ -35,6 +35,7 @@ interface QuoteItem {
   uomName?: string;
   unitCost?: number;
   productType?: string;
+  stockOnHand?: number;
 }
 
 interface StockLevelItem {
@@ -65,7 +66,7 @@ export default function EditQuotationPage() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [reference, setReference] = useState('');
-  const [description, setDescription] = useState('');
+  const [, setDescription] = useState('');
   const [validFrom, setValidFrom] = useState(getBusinessDate());
   const [validUntil, setValidUntil] = useState(
     addDaysToDateString(getBusinessDate(), 30)
@@ -91,8 +92,8 @@ export default function EditQuotationPage() {
   useEffect(() => {
     if (quotation) {
       // Check if quote is editable (any OPEN status)
-      if (quotation.status === 'CONVERTED' || quotation.status === 'CANCELLED') {
-        toast.error('Cannot edit a converted or cancelled quote');
+      if (quotation.status === 'CONVERTED' || quotation.status === 'CANCELLED' || quotation.status === 'EXPIRED') {
+        toast.error('Cannot edit a converted, cancelled, or expired quote');
         navigate(`/quotations/${quoteNumber}`);
         return;
       }
@@ -223,6 +224,7 @@ export default function EditQuotationPage() {
       uomName: product.uom_name,
       unitCost: product.unit_cost ? parseFloat(product.unit_cost) : undefined,
       productType: product.product_type,
+      stockOnHand: Number(product.total_stock || 0),
     };
     setItems([...items, newItem]);
     setProductSearch('');
@@ -513,465 +515,435 @@ export default function EditQuotationPage() {
     );
   }
 
+  const [activeTab, setActiveTab] = useState<'terms' | 'notes'>('terms');
+
   return (
     <Layout>
-      <div className="p-8">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Edit Quotation</h1>
-            <p className="mt-1 text-sm text-gray-600">
-              Editing {quotation?.quoteNumber}
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/quotations')}
-            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            ← Back to List
-          </button>
-        </div>
-
-        {/* Customer Section */}
-        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Customer Information</h2>
-          <div className="space-y-4">
-            <CustomerSelector
-              selectedCustomer={selectedCustomer}
-              onSelectCustomer={setSelectedCustomer}
-              saleTotal={totals.total}
-            />
-
-            {!selectedCustomer && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Customer Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter customer name"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Phone
-                    </label>
-                    <input
-                      type="tel"
-                      value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="Phone number"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={customerEmail}
-                      onChange={(e) => setCustomerEmail(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="Email address"
-                    />
-                  </div>
-                </div>
-              </>
+      <div className="flex flex-col h-[calc(100vh-4rem)]">
+        {/* ── Page Header ── */}
+        <div className="flex items-center justify-between px-6 py-3 bg-white border-b shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate('/quotations')}
+              className="text-gray-500 hover:text-gray-800 text-sm"
+            >
+              ← Back
+            </button>
+            <h1 className="text-xl font-bold text-gray-900">Edit Quotation</h1>
+            {quotation?.quoteNumber && (
+              <span className="text-sm text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded">{quotation.quoteNumber}</span>
             )}
           </div>
-        </div>
-
-        {/* Quote Details Section */}
-        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Quote Details</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="reference-input" className="block text-sm font-medium text-gray-700 mb-2">
-                Reference
-              </label>
-              <input
-                id="reference-input"
-                type="text"
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Optional reference"
-              />
-            </div>
-            <div>
-              <label htmlFor="description-input" className="block text-sm font-medium text-gray-700 mb-2">
-                Description
-              </label>
-              <input
-                id="description-input"
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Optional description"
-              />
-            </div>
-            <div>
-              <label htmlFor="valid-from-input" className="block text-sm font-medium text-gray-700 mb-2">
-                Valid From *
-              </label>
-              <DatePicker
-                value={validFrom}
-                onChange={(date) => setValidFrom(date)}
-                placeholder="Select valid from date"
-                maxDate={validUntil ? new Date(validUntil) : undefined}
-              />
-            </div>
-            <div>
-              <label htmlFor="valid-until-input" className="block text-sm font-medium text-gray-700 mb-2">
-                Valid Until *
-              </label>
-              <DatePicker
-                value={validUntil}
-                onChange={(date) => setValidUntil(date)}
-                placeholder="Select valid until date"
-                minDate={validFrom ? new Date(validFrom) : undefined}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Items Section */}
-        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Line Items</h2>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                addItem();
-                setTimeout(() => {
-                  const lastRow = editItemRefs.current[items.length];
-                  lastRow?.[0]?.focus();
-                }, 100);
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              type="button"
+              onClick={() => navigate(`/quotations/${quoteNumber}`)}
+              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+              disabled={updateMutation.isPending}
             >
-              + Add Item
-              <kbd className="ml-2 px-1.5 py-0.5 bg-blue-500 border border-blue-400 rounded text-[10px] font-mono">Ins</kbd>
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={updateMutation.isPending}
+              className="px-6 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50"
+            >
+              {updateMutation.isPending ? 'Updating...' : 'Update Quotation'}
             </button>
           </div>
+        </div>
 
-          {/* Product Search */}
-          <div className="mb-4 relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Search Products
-              <span className="ml-2 text-xs text-gray-400 font-normal">
-                <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">/</kbd> or
-                <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono ml-1">F2</kbd> to focus
-              </span>
-            </label>
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={productSearch}
-              onChange={(e) => { setProductSearch(e.target.value); setSearchSelectedIndex(0); }}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Search by name, SKU, or barcode... (↑↓ navigate, Enter select)"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-            {productSearch && products.length > 0 && (
-              <div ref={productListRef} className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                {products.map((product: StockLevelItem, idx: number) => (
-                  <button
-                    key={product.product_id}
-                    onClick={() => addProductAsItem(product)}
-                    className={`w-full px-4 py-2 text-left border-b border-gray-100 last:border-b-0 transition-colors ${idx === searchSelectedIndex
-                      ? 'bg-blue-100 border-l-4 border-l-blue-600'
-                      : 'hover:bg-gray-50'
-                      }`}
-                  >
-                    <div className="font-medium text-gray-900">{product.product_name}</div>
-                    <div className="text-sm text-gray-500">
-                      {product.sku && `SKU: ${product.sku} • `}
-                      {product.barcode && `BC: ${product.barcode} • `}
-                      {formatCurrency(parseFloat(String(product.selling_price || '0')))}
-                      <span className="ml-2 text-gray-400">
-                        Stock: {Number(product.total_stock || 0)}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* ── Scrollable Content ── */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-7xl mx-auto px-6 py-4 space-y-4">
 
-          {/* Items Table */}
-          {items.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No items added yet. Click "Add Item" or search for products above.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tax</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {items.map((item, rowIndex) => {
-                    const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
-                    const itemDiscount = new Decimal(item.discountAmount);
-                    const taxableAmount = itemSubtotal.minus(itemDiscount);
-                    const itemTax = item.isTaxable
-                      ? taxableAmount.times(item.taxRate).dividedBy(100)
-                      : new Decimal(0);
-                    const itemTotal = taxableAmount.plus(itemTax);
+            {/* ═══════════ HEADER SECTION ═══════════ */}
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                {/* Customer */}
+                <div className="lg:col-span-4">
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Customer <span className="text-red-500">*</span></label>
+                  <CustomerSelector
+                    selectedCustomer={selectedCustomer}
+                    onSelectCustomer={setSelectedCustomer}
+                    saleTotal={totals.total}
+                  />
+                  {!selectedCustomer && (
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="w-full mt-2 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Or type customer name"
+                    />
+                  )}
+                </div>
 
-                    return (
-                      <tr key={item.id} className="focus-within:bg-blue-50/30">
-                        <td className="px-4 py-3">
-                          <input
-                            ref={(el) => {
-                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
-                              editItemRefs.current[rowIndex][0] = el;
-                            }}
-                            type="text"
-                            value={item.description}
-                            onChange={(e) => updateItem(item.id, 'description', e.target.value)}
-                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 0)}
-                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            placeholder="Description"
-                            aria-label={`Item ${rowIndex + 1} description`}
-                          />
-                          {item.sku && (
-                            <div className="text-xs text-gray-500 mt-1">SKU: {item.sku}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            ref={(el) => {
-                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
-                              editItemRefs.current[rowIndex][1] = el;
-                            }}
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
-                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 1)}
-                            className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            min="0"
-                            step="0.01"
-                            aria-label={`Item ${rowIndex + 1} quantity`}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            ref={(el) => {
-                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
-                              editItemRefs.current[rowIndex][2] = el;
-                            }}
-                            type="number"
-                            value={item.unitPrice}
-                            onChange={(e) => updateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 2)}
-                            className="w-24 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            min="0"
-                            step="0.01"
-                            aria-label={`Item ${rowIndex + 1} unit price`}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            ref={(el) => {
-                              if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
-                              editItemRefs.current[rowIndex][3] = el;
-                            }}
-                            type="number"
-                            value={item.discountAmount}
-                            onChange={(e) => updateItem(item.id, 'discountAmount', parseFloat(e.target.value) || 0)}
-                            onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 3)}
-                            className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            min="0"
-                            step="0.01"
-                            aria-label={`Item ${rowIndex + 1} discount`}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              checked={item.isTaxable}
-                              onChange={(e) => updateItem(item.id, 'isTaxable', e.target.checked)}
-                              className="rounded"
-                              aria-label="Item is taxable"
-                            />
-                            {item.isTaxable && (
-                              <input
-                                type="number"
-                                value={item.taxRate}
-                                onChange={(e) => updateItem(item.id, 'taxRate', parseFloat(e.target.value) || 0)}
-                                className="w-16 px-2 py-1 border border-gray-300 rounded"
-                                min="0"
-                                step="0.01"
-                                placeholder="%"
-                                aria-label="Tax rate percentage"
-                              />
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium">
-                          {formatCurrency(itemTotal.toNumber())}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => removeItem(item.id)}
-                            className="text-red-600 hover:text-red-800"
-                            title="Remove item (Ctrl+Delete)"
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                {/* Phone & Email */}
+                <div className="lg:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="0700000000"
+                  />
+                </div>
+                <div className="lg:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="email@example.com"
+                  />
+                </div>
 
-          {/* Keyboard Shortcuts Legend */}
-          <div className="mt-3 bg-gray-50 rounded-lg px-4 py-3 border border-gray-200">
-            <div className="text-xs text-gray-500 font-medium mb-1.5">Keyboard Shortcuts</div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">/</kbd> or <kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">F2</kbd> Focus search</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">↑</kbd><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">↓</kbd> Navigate results</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Enter</kbd> Select / Next field</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Tab</kbd> Next field</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Alt+↑↓</kbd> Navigate rows</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Ins</kbd> Add custom item</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Ctrl+Del</kbd> Remove row</span>
-              <span><kbd className="px-1 py-0.5 bg-white border border-gray-300 rounded text-[10px] font-mono">Esc</kbd> Clear search</span>
-            </div>
-          </div>
+                {/* Reference */}
+                <div className="lg:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Reference</label>
+                  <input
+                    type="text"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="PO-123"
+                  />
+                </div>
 
-          {/* Totals */}
-          {items.length > 0 && (
-            <div className="mt-4 border-t border-gray-200 pt-4">
-              <div className="flex justify-end">
-                <div className="w-64 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Subtotal:</span>
-                    <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Discount:</span>
-                    <span className="font-medium text-red-600">
-                      -{formatCurrency(totals.totalDiscount)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Tax:</span>
-                    <span className="font-medium">{formatCurrency(totals.totalTax)}</span>
-                  </div>
-                  <div className="flex justify-between text-lg font-bold border-t border-gray-200 pt-2">
-                    <span>Total:</span>
-                    <span>{formatCurrency(totals.total)}</span>
-                  </div>
+                {/* Valid Until */}
+                <div className="lg:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Valid Until</label>
+                  <DatePicker
+                    value={validUntil}
+                    onChange={(date) => setValidUntil(date)}
+                    placeholder="Select date"
+                    minDate={validFrom ? new Date(validFrom) : undefined}
+                  />
                 </div>
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Terms Section */}
-        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Terms &amp; Conditions</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Payment Terms
-              </label>
-              <input
-                type="text"
-                value={paymentTerms}
-                onChange={(e) => setPaymentTerms(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="e.g., Net 30, Payment on delivery"
-              />
+            {/* ═══════════ ITEMS TABLE ═══════════ */}
+            <div className="bg-white rounded-lg border border-gray-200">
+              {/* Product Search */}
+              <div className="p-3 border-b border-gray-200 relative">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400 text-lg">🔍</span>
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={productSearch}
+                    onChange={(e) => { setProductSearch(e.target.value); setSearchSelectedIndex(0); }}
+                    onKeyDown={handleSearchKeyDown}
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Search products by name, SKU, or barcode... (/ or F2 to focus)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addItem();
+                      setTimeout(() => {
+                        const lastRow = editItemRefs.current[items.length];
+                        lastRow?.[0]?.focus();
+                      }, 100);
+                    }}
+                    className="px-3 py-2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium whitespace-nowrap"
+                  >
+                    + Custom Line
+                  </button>
+                </div>
+
+                {/* Search Results Dropdown */}
+                {productSearch && products.length > 0 && (
+                  <div ref={productListRef} className="mt-1 border border-gray-300 rounded-lg max-h-56 overflow-y-auto bg-white shadow-lg absolute z-20 left-3 right-3">
+                    {products.slice(0, 10).map((product: StockLevelItem, idx: number) => (
+                      <button
+                        key={product.product_id}
+                        type="button"
+                        onClick={() => addProductAsItem(product)}
+                        className={`w-full px-4 py-2.5 text-left border-b last:border-b-0 transition-colors ${idx === searchSelectedIndex
+                          ? 'bg-blue-100 border-l-4 border-l-blue-600'
+                          : 'hover:bg-blue-50'
+                          }`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <span className="font-medium text-gray-900 text-sm">{product.product_name}</span>
+                            <span className="text-xs text-gray-500 ml-2">
+                              {product.sku && `SKU: ${product.sku}`}
+                              {product.barcode && ` | BC: ${product.barcode}`}
+                            </span>
+                          </div>
+                          <div className="text-right text-xs">
+                            <span className="text-green-600 font-medium">{formatCurrency(parseFloat(String(product.selling_price || 0)))}</span>
+                            <span className="text-gray-400 ml-2">Stk: {Number(product.total_stock || 0)}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Items Table */}
+              {items.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <div className="text-3xl mb-2">📦</div>
+                  <p className="text-sm">Search for products above or add a custom line</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                        <th className="text-left py-2.5 px-3 w-8">#</th>
+                        <th className="text-left py-2.5 px-3">Description</th>
+                        <th className="text-right py-2.5 px-3 w-24">Qty</th>
+                        <th className="text-right py-2.5 px-3 w-28">Unit Price</th>
+                        <th className="text-right py-2.5 px-3 w-24">Discount</th>
+                        <th className="text-center py-2.5 px-3 w-16">Tax</th>
+                        <th className="text-right py-2.5 px-3 w-28">Total</th>
+                        <th className="py-2.5 px-3 w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item, rowIndex) => {
+                        const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
+                        const itemDiscount = new Decimal(item.discountAmount);
+                        const taxableAmount = itemSubtotal.minus(itemDiscount);
+                        const itemTax = item.isTaxable
+                          ? taxableAmount.times(item.taxRate).dividedBy(100)
+                          : new Decimal(0);
+                        const itemTotal = taxableAmount.plus(itemTax);
+
+                        return (
+                          <tr key={item.id} className="border-t border-gray-100 hover:bg-blue-50/30 focus-within:bg-blue-50/50">
+                            <td className="py-2 px-3 text-gray-400 text-xs">{rowIndex + 1}</td>
+                            <td className="py-2 px-3">
+                              <input
+                                ref={(el) => {
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                                  editItemRefs.current[rowIndex][0] = el;
+                                }}
+                                type="text"
+                                value={item.description}
+                                onChange={(e) => updateItem(item.id, 'description', e.target.value)}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 0)}
+                                className="w-full px-2 py-1 text-sm border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent"
+                                placeholder="Item description"
+                              />
+                              {item.sku && <span className="text-[10px] text-gray-400 ml-2">SKU: {item.sku}</span>}
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                ref={(el) => {
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                                  editItemRefs.current[rowIndex][1] = el;
+                                }}
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 1)}
+                                className={`w-full px-2 py-1 text-sm text-right border rounded focus:ring-1 focus:ring-blue-500 ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-gray-300 focus:border-blue-500 bg-transparent'}`}
+                                min="0"
+                                step="0.01"
+                              />
+                              {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
+                                <p className="text-red-600 text-[10px] text-right">Only {item.stockOnHand} in stock</p>
+                              )}
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                ref={(el) => {
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                                  editItemRefs.current[rowIndex][2] = el;
+                                }}
+                                type="number"
+                                value={item.unitPrice}
+                                onChange={(e) => updateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 2)}
+                                className="w-full px-2 py-1 text-sm text-right border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent"
+                                min="0"
+                                step="0.01"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                ref={(el) => {
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                                  editItemRefs.current[rowIndex][3] = el;
+                                }}
+                                type="number"
+                                value={item.discountAmount}
+                                onChange={(e) => updateItem(item.id, 'discountAmount', parseFloat(e.target.value) || 0)}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 3)}
+                                className="w-full px-2 py-1 text-sm text-right border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent"
+                                min="0"
+                                step="0.01"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={item.isTaxable}
+                                onChange={(e) => updateItem(item.id, 'isTaxable', e.target.checked)}
+                                className="rounded border-gray-300"
+                                title={item.isTaxable ? `Tax: ${item.taxRate}%` : 'Not taxable'}
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right font-medium text-gray-900">
+                              {formatCurrency(itemTotal.toNumber())}
+                            </td>
+                            <td className="py-2 px-3">
+                              <button
+                                type="button"
+                                onClick={() => removeItem(item.id)}
+                                className="text-gray-400 hover:text-red-600 text-sm"
+                                title="Remove (Ctrl+Del)"
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Keyboard Shortcuts */}
+              <div className="px-3 py-2 border-t border-gray-100 bg-gray-50/50">
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-gray-400">
+                  <span><kbd className="px-1 py-0.5 bg-white border rounded font-mono">/</kbd> Search</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border rounded font-mono">↑↓</kbd> Navigate</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border rounded font-mono">Enter</kbd> Select/Next</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border rounded font-mono">Ins</kbd> Custom line</span>
+                  <span><kbd className="px-1 py-0.5 bg-white border rounded font-mono">Ctrl+Del</kbd> Remove</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Delivery Terms
-              </label>
-              <input
-                type="text"
-                value={deliveryTerms}
-                onChange={(e) => setDeliveryTerms(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Delivery timeframe and conditions"
-              />
+
+            {/* ═══════════ BOTTOM TABS (Terms / Notes) ═══════════ */}
+            <div className="bg-white rounded-lg border border-gray-200">
+              <div className="flex border-b border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('terms')}
+                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'terms'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                >
+                  Terms & Conditions
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('notes')}
+                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'notes'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                >
+                  Internal Notes
+                </button>
+              </div>
+
+              <div className="p-4">
+                {activeTab === 'terms' && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label>
+                      <input
+                        type="text"
+                        value={paymentTerms}
+                        onChange={(e) => setPaymentTerms(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., Net 30"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Terms</label>
+                      <input
+                        type="text"
+                        value={deliveryTerms}
+                        onChange={(e) => setDeliveryTerms(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 7-14 business days"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center text-sm">
+                        <input
+                          type="checkbox"
+                          checked={requiresApproval}
+                          onChange={(e) => setRequiresApproval(e.target.checked)}
+                          className="mr-2 rounded border-gray-300"
+                        />
+                        <span className="text-gray-700">Requires Approval</span>
+                      </label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Terms & Conditions</label>
+                      <textarea
+                        value={termsAndConditions}
+                        onChange={(e) => setTermsAndConditions(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        rows={2}
+                        placeholder="Add any special terms or conditions..."
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'notes' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Internal Notes (not shown to customer)</label>
+                    <textarea
+                      value={internalNotes}
+                      onChange={(e) => setInternalNotes(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      rows={3}
+                      placeholder="Notes for internal use only..."
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Terms and Conditions
-              </label>
-              <textarea
-                value={termsAndConditions}
-                onChange={(e) => setTermsAndConditions(e.target.value)}
-                rows={4}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Enter any terms and conditions..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Internal Notes
-              </label>
-              <textarea
-                value={internalNotes}
-                onChange={(e) => setInternalNotes(e.target.value)}
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Internal notes (not visible to customer)"
-              />
-            </div>
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="requiresApproval"
-                checked={requiresApproval}
-                onChange={(e) => setRequiresApproval(e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="requiresApproval" className="ml-2 text-sm text-gray-700">
-                Requires approval before sending
-              </label>
-            </div>
+
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex justify-end space-x-4">
-          <button
-            onClick={() => navigate(`/quotations/${quoteNumber}`)}
-            className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-            disabled={updateMutation.isPending}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={updateMutation.isPending}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {updateMutation.isPending ? 'Updating...' : 'Update Quotation'}
-          </button>
+        {/* ── Sticky Footer (Totals) ── */}
+        <div className="border-t bg-white px-6 py-3 shrink-0">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-6 text-sm text-gray-600">
+              <span>Items: <strong className="text-gray-900">{items.length}</strong></span>
+              {totals.totalDiscount > 0 && (
+                <span>Discount: <strong className="text-red-600">-{formatCurrency(totals.totalDiscount)}</strong></span>
+              )}
+              <span>Tax: <strong className="text-gray-900">{formatCurrency(totals.totalTax)}</strong></span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Total Amount</div>
+                <div className="text-2xl font-bold text-blue-600">{formatCurrency(totals.total)}</div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={updateMutation.isPending}
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold text-base shadow disabled:opacity-50"
+              >
+                {updateMutation.isPending ? 'Updating...' : 'Update Quotation'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </Layout>

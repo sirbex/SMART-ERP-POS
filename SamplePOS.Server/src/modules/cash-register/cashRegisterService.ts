@@ -422,6 +422,7 @@ export const cashRegisterService = {
                     lines,
                     userId,
                     idempotencyKey,
+                    source: 'PAYMENT_RECEIPT' as const,
                 },
                 dbPool
             );
@@ -655,6 +656,7 @@ export const cashRegisterService = {
                     lines,
                     userId,
                     idempotencyKey,
+                    source: 'PAYMENT_RECEIPT' as const,
                 },
                 dbPool
             );

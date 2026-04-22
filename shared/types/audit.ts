@@ -36,7 +36,9 @@ export type EntityType =
   | 'POSITION'
   | 'EMPLOYEE'
   | 'PAYROLL_PERIOD'
-  | 'PAYROLL_ENTRY';
+  | 'PAYROLL_ENTRY'
+  | 'SALES_ORDER'
+  | 'DELIVERY';
 
 export type AuditAction =
   | 'CREATE'
@@ -64,7 +66,8 @@ export type AuditAction =
   | 'PRICE_OVERRIDE'
   | 'REMOVE'
   | 'STATUS_CHANGE'
-  | 'FINALIZE';
+  | 'FINALIZE'
+  | 'REPRINT';
 
 export type Severity = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
 

@@ -135,6 +135,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
       'quotations',
       'crm',
       'orders',
+      'distribution',
     ].includes(module);
   },
   CASHIER: (key) => {
@@ -155,6 +156,9 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
       'orders.create',
       'orders.pay',
       'orders.cancel',
+      'sales.reprint',
+      'distribution.read',
+      'distribution.create',
     ].includes(key);
   },
   STAFF: (key) => {

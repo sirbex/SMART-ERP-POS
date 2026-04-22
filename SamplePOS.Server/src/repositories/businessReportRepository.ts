@@ -69,6 +69,17 @@ export interface SummaryTotalsRow {
   sale_count: number;
 }
 
+/** Customer deposit summary for the period */
+export interface CustomerDepositSummaryRow {
+  total_deposited: string;
+  total_cleared: string;
+  deposit_count: number;
+  clearing_count: number;
+  outstanding_liability: string;
+  active_deposit_count: number;
+  customers_with_deposits: number;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers — date filter fragment for ledger_entries."EntryDate"
 // ---------------------------------------------------------------------------
@@ -410,5 +421,68 @@ export async function getSummaryTotals(
     total_expenses: exp.total_expenses || '0',
     total_stock_adjustments: adj.total_stock_adjustments || '0',
     sale_count: parseInt(rev.sale_count, 10) || 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Customer Deposits Summary — deposits received and clearings in the period
+// ---------------------------------------------------------------------------
+
+export async function getCustomerDepositSummary(
+  filters: BusinessReportFilters,
+  dbPool?: Pool | PoolClient
+): Promise<CustomerDepositSummaryRow> {
+  const db = dbPool || globalPool;
+  const params = dateParams(filters);
+
+  // Deposits received in period
+  const depositQuery = `
+    SELECT
+      COUNT(cd.id)::integer AS deposit_count,
+      ROUND(COALESCE(SUM(cd.amount), 0)::numeric, 2) AS total_deposited
+    FROM pos_customer_deposits cd
+    WHERE cd.status IN ('ACTIVE', 'DEPLETED')
+      AND ($1::timestamptz IS NULL OR cd.created_at >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR cd.created_at < $2::timestamptz)
+  `;
+
+  // Clearings applied in period
+  const clearingQuery = `
+    SELECT
+      COUNT(dc.id)::integer AS clearing_count,
+      ROUND(COALESCE(SUM(dc.amount), 0)::numeric, 2) AS total_cleared
+    FROM down_payment_clearings dc
+    WHERE ($1::timestamptz IS NULL OR dc.created_at >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR dc.created_at < $2::timestamptz)
+  `;
+
+  // Outstanding liability (all-time)
+  const liabilityQuery = `
+    SELECT
+      COUNT(cd.id)::integer AS active_deposit_count,
+      COUNT(DISTINCT cd.customer_id)::integer AS customers_with_deposits,
+      ROUND(COALESCE(SUM(cd.amount_available), 0)::numeric, 2) AS outstanding_liability
+    FROM pos_customer_deposits cd
+    WHERE cd.status = 'ACTIVE' AND cd.amount_available > 0
+  `;
+
+  const [depResult, clrResult, liabResult] = await Promise.all([
+    db.query(depositQuery, params),
+    db.query(clearingQuery, params),
+    db.query(liabilityQuery),
+  ]);
+
+  const dep = depResult.rows[0] || {};
+  const clr = clrResult.rows[0] || {};
+  const liab = liabResult.rows[0] || {};
+
+  return {
+    total_deposited: dep.total_deposited || '0',
+    total_cleared: clr.total_cleared || '0',
+    deposit_count: parseInt(dep.deposit_count, 10) || 0,
+    clearing_count: parseInt(clr.clearing_count, 10) || 0,
+    outstanding_liability: liab.outstanding_liability || '0',
+    active_deposit_count: parseInt(liab.active_deposit_count, 10) || 0,
+    customers_with_deposits: parseInt(liab.customers_with_deposits, 10) || 0,
   };
 }

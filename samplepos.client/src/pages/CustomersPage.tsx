@@ -9,6 +9,7 @@ import { DatePicker } from '../components/ui/date-picker';
 import type { Customer } from '@shared/zod/customer';
 import QuickAddCustomerModal from '../components/customers/QuickAddCustomerModal';
 import CustomerDetailModal from '../components/customers/CustomerDetailModal';
+import CustomerGroupsPanel from '../components/customers/CustomerGroupsPanel';
 import { useModalAccessibility } from '../hooks/useFocusTrap';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import { getBusinessDate, formatTimestamp } from '../utils/businessDate';
@@ -582,12 +583,7 @@ export default function CustomersPage() {
 
         {/* Groups Tab */}
         {activeTab === 'groups' && (
-          <div className="bg-white rounded-lg shadow border border-gray-200 p-8">
-            <div className="text-center text-gray-500">
-              <p className="text-lg font-medium mb-2">Customer Groups</p>
-              <p className="text-sm">Coming soon - Manage customer pricing tiers and groups</p>
-            </div>
-          </div>
+          <CustomerGroupsPanel />
         )}
       </div>
 

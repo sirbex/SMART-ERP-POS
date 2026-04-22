@@ -205,8 +205,23 @@ export const reportsRepository = {
 
   /**
    * INVENTORY VALUATION REPORT
-   * Calculate current inventory value using specified valuation method
-   * Returns items (paginated), SQL-aggregated summary, and byCategory breakdown
+   * Calculate current inventory value with GL reconciliation.
+   *
+   * Accuracy rules (enforced):
+   *  - Quantities come from `product_inventory.quantity_on_hand` (authoritative subledger).
+   *  - Cost comes from aggregated `cost_layers` when available; falls back to
+   *    `product_valuation.average_cost` when a product has stock but no active layers
+   *    (prevents silent zero-value rows for drift cases).
+   *  - Deactivated products with stock are NOT hidden — they remain on the GL so must
+   *    appear on the report. A `productActive` flag is included per row.
+   *  - The report summary includes a three-way reconciliation vs GL account 1300 and
+   *    the AVCO subledger, so finance sees drift immediately.
+   *
+   * Historical snapshots (asOfDate != today):
+   *  - Not currently supported accurately — `remaining_quantity` is a live field.
+   *    Callers get a warning via the service layer, and the report is computed as a
+   *    current snapshot. A true historical reconstruction requires stock_movement
+   *    replay and will be added as a separate code path.
    */
   async getInventoryValuation(
     pool: Pool,
@@ -219,31 +234,60 @@ export const reportsRepository = {
     }
   ): Promise<{
     items: InventoryValuationRow[];
-    summary: { totalItems: number; totalQuantity: number; totalValue: number; totalPotentialRevenue: number; totalPotentialProfit: number };
+    summary: {
+      totalItems: number;
+      totalQuantity: number;
+      totalValue: number;
+      totalPotentialRevenue: number;
+      totalPotentialProfit: number;
+      glInventoryBalance: number;
+      costLayersTotal: number;
+      subledgerAvcoTotal: number;
+      variance: number;
+      variancePercent: number;
+      isReconciled: boolean;
+      movementCounts?: { FAST: number; SLOW: number; DEAD: number; NEW: number };
+      abcCounts?: { A: number; B: number; C: number };
+      driftCount?: number;
+      deadStockValue?: number;
+    };
     byCategory: Array<{ category: string; productCount: number; quantityOnHand: number; costValue: number; potentialRevenue: number; potentialProfit: number; profitMargin: number }>;
   }> {
     const asOfDate = options.asOfDate || getBusinessDate();
 
     let categoryFilter = '';
-    const params: unknown[] = [asOfDate];
+    const params: unknown[] = [];
 
     if (options.categoryId) {
-      categoryFilter = 'AND p.category = $2';
+      categoryFilter = 'AND p.category = $1';
       params.push(options.categoryId);
     }
 
     // ── CTE shared by all three queries ──
+    // Authoritative quantity: product_inventory.quantity_on_hand
+    // Cost resolution priority: cost_layers aggregate → product_valuation.average_cost → 0
+    // SAP/Odoo-grade enrichments:
+    //   - oldest_received (FIFO stock age)
+    //   - last_sale_date / days_since_last_sale (movement classification)
+    //   - qty_subledger vs qty_cost_layers (drift detection per product)
     const baseCTE = `
       WITH cl_agg AS (
         SELECT
           cl.product_id,
-          SUM(cl.remaining_quantity) AS remaining_qty,
-          SUM(cl.remaining_quantity * cl.unit_cost) AS remaining_value
+          SUM(cl.remaining_quantity) AS layer_qty,
+          SUM(cl.remaining_quantity * cl.unit_cost) AS layer_value,
+          MIN(cl.received_date) AS oldest_received
         FROM cost_layers cl
         WHERE cl.is_active = true
-          AND cl.received_date <= $1
           AND cl.remaining_quantity > 0
         GROUP BY cl.product_id
+      ),
+      last_sale AS (
+        SELECT si.product_id, MAX(s.sale_date) AS last_sale_date
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
+        GROUP BY si.product_id
       ),
       valuation AS (
         SELECT
@@ -251,30 +295,78 @@ export const reportsRepository = {
           p.name AS product_name,
           p.sku,
           p.category,
-          cl_agg.remaining_qty AS total_quantity,
-          CASE WHEN cl_agg.remaining_qty > 0
-            THEN ROUND((cl_agg.remaining_value / cl_agg.remaining_qty)::numeric, 2)
-            ELSE 0
+          p.is_active AS product_active,
+          pi.quantity_on_hand AS total_quantity,
+          COALESCE(cl_agg.layer_qty, 0) AS qty_cost_layers,
+          (pi.quantity_on_hand - COALESCE(cl_agg.layer_qty, 0)) AS qty_drift,
+          CASE
+            WHEN COALESCE(cl_agg.layer_qty, 0) > 0
+              THEN ROUND((cl_agg.layer_value / cl_agg.layer_qty)::numeric, 2)
+            ELSE ROUND(COALESCE(pv.average_cost, 0)::numeric, 2)
           END AS unit_cost,
           COALESCE(pv.selling_price, 0) AS selling_price,
-          ROUND(cl_agg.remaining_value::numeric, 2) AS total_value,
-          ROUND((cl_agg.remaining_qty * COALESCE(pv.selling_price, 0))::numeric, 2) AS potential_revenue,
-          ROUND((cl_agg.remaining_qty * COALESCE(pv.selling_price, 0) - cl_agg.remaining_value)::numeric, 2) AS potential_profit,
-          CASE WHEN COALESCE(pv.selling_price, 0) > 0
-            THEN ROUND(((COALESCE(pv.selling_price, 0) - cl_agg.remaining_value / cl_agg.remaining_qty)
-                  / COALESCE(pv.selling_price, 0) * 100)::numeric, 2)
+          ROUND((
+            CASE
+              WHEN COALESCE(cl_agg.layer_qty, 0) > 0
+                THEN pi.quantity_on_hand * (cl_agg.layer_value / cl_agg.layer_qty)
+              ELSE pi.quantity_on_hand * COALESCE(pv.average_cost, 0)
+            END
+          )::numeric, 2) AS total_value,
+          ROUND((pi.quantity_on_hand * COALESCE(pv.selling_price, 0))::numeric, 2) AS potential_revenue,
+          ROUND((
+            pi.quantity_on_hand * COALESCE(pv.selling_price, 0)
+            - (CASE
+                WHEN COALESCE(cl_agg.layer_qty, 0) > 0
+                  THEN pi.quantity_on_hand * (cl_agg.layer_value / cl_agg.layer_qty)
+                ELSE pi.quantity_on_hand * COALESCE(pv.average_cost, 0)
+              END)
+          )::numeric, 2) AS potential_profit,
+          CASE
+            WHEN COALESCE(pv.selling_price, 0) > 0
+              THEN ROUND((
+                (COALESCE(pv.selling_price, 0)
+                  - (CASE
+                      WHEN COALESCE(cl_agg.layer_qty, 0) > 0
+                        THEN cl_agg.layer_value / cl_agg.layer_qty
+                      ELSE COALESCE(pv.average_cost, 0)
+                    END)
+                ) / COALESCE(pv.selling_price, 0) * 100
+              )::numeric, 2)
             ELSE 0
           END AS profit_margin,
-          ROUND((COALESCE(pv.selling_price, 0) - CASE WHEN cl_agg.remaining_qty > 0
-            THEN cl_agg.remaining_value / cl_agg.remaining_qty ELSE 0 END)::numeric, 2) AS profit_per_unit,
+          ROUND((
+            COALESCE(pv.selling_price, 0)
+            - (CASE
+                WHEN COALESCE(cl_agg.layer_qty, 0) > 0
+                  THEN cl_agg.layer_value / cl_agg.layer_qty
+                ELSE COALESCE(pv.average_cost, 0)
+              END)
+          )::numeric, 2) AS profit_per_unit,
+          CASE
+            WHEN COALESCE(cl_agg.layer_qty, 0) > 0 THEN 'FIFO_LAYER'
+            WHEN COALESCE(pv.average_cost, 0) > 0 THEN 'AVCO_FALLBACK'
+            ELSE 'NO_COST_BASIS'
+          END AS cost_source,
+          cl_agg.oldest_received,
+          CASE WHEN cl_agg.oldest_received IS NOT NULL
+               THEN GREATEST(0, (CURRENT_DATE - cl_agg.oldest_received::date))::integer
+               ELSE NULL END AS days_in_stock,
+          last_sale.last_sale_date::text AS last_sale_date,
+          CASE WHEN last_sale.last_sale_date IS NOT NULL
+               THEN GREATEST(0, (CURRENT_DATE - last_sale.last_sale_date::date))::integer
+               ELSE NULL END AS days_since_last_sale,
           NOW() AS last_updated
-        FROM products p
-        INNER JOIN cl_agg ON cl_agg.product_id = p.id
+        FROM product_inventory pi
+        INNER JOIN products p ON p.id = pi.product_id
+        LEFT JOIN cl_agg ON cl_agg.product_id = p.id
         LEFT JOIN product_valuation pv ON pv.product_id = p.id
-        WHERE p.is_active = true
-          AND cl_agg.remaining_qty > 0
+        LEFT JOIN last_sale ON last_sale.product_id = p.id
+        WHERE pi.quantity_on_hand > 0
           ${categoryFilter}
       )`;
+    // Note: asOfDate parameter is accepted for API compatibility but not applied here
+    // (see historical snapshots note above). Service layer emits a warning when used.
+    void asOfDate;
 
     // ── 1) Summary totals (single row) ──
     const summaryQuery = `
@@ -322,20 +414,61 @@ export const reportsRepository = {
       LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
     `;
 
-    // Run all three in parallel (all read-only, no contention)
-    const [summaryResult, categoryResult, itemResult] = await Promise.all([
+    // ── 4) GL reconciliation (account 1300 = Inventory) + AVCO subledger total ──
+    // Mirrors inventoryIntegrityService canonical query — single source of truth.
+    const reconciliationQuery = `
+      SELECT
+        (SELECT COALESCE(SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0)
+           FROM ledger_entries le
+           JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+           JOIN accounts a ON le."AccountId" = a."Id"
+           WHERE a."AccountCode" = '1300'
+             AND lt."IsReversed" = FALSE) AS gl_balance,
+        (SELECT COALESCE(ROUND(SUM(cl.remaining_quantity * cl.unit_cost)::numeric, 2), 0)
+           FROM cost_layers cl
+           WHERE cl.is_active = true
+             AND cl.remaining_quantity > 0) AS cost_layers_total,
+        (SELECT COALESCE(ROUND(SUM(pi.quantity_on_hand * COALESCE(pv.average_cost, 0))::numeric, 2), 0)
+           FROM product_inventory pi
+           LEFT JOIN product_valuation pv ON pv.product_id = pi.product_id
+           WHERE pi.quantity_on_hand > 0) AS subledger_avco_total
+    `;
+
+    // Run all in parallel (all read-only, no contention)
+    const [summaryResult, categoryResult, itemResult, reconResult] = await Promise.all([
       pool.query(summaryQuery, params),
       pool.query(categoryQuery, params),
       pool.query(itemQuery, itemParams),
+      pool.query(reconciliationQuery),
     ]);
 
     const summaryRow = summaryResult.rows[0];
+    const reconRow = reconResult.rows[0];
+    const glBalance = new Decimal(reconRow.gl_balance || 0);
+    const costLayersTotal = new Decimal(reconRow.cost_layers_total || 0);
+    const subledgerAvcoTotal = new Decimal(reconRow.subledger_avco_total || 0);
+    const reportTotal = new Decimal(summaryRow.total_value || 0);
+    const variance = glBalance.minus(reportTotal);
+    // Materiality threshold: max(5000, |GL| * 0.0001) — matches inventoryIntegrityService
+    const pctThreshold = glBalance.abs().times(0.0001);
+    const threshold = pctThreshold.greaterThan(5000) ? pctThreshold : new Decimal(5000);
+    const isReconciled = variance.abs().lessThanOrEqualTo(threshold);
+    const variancePercent = glBalance.abs().greaterThan(0)
+      ? variance.dividedBy(glBalance).times(100).toDecimalPlaces(2).toNumber()
+      : 0;
+
     const summary = {
       totalItems: parseInt(summaryRow.total_items) || 0,
       totalQuantity: new Decimal(summaryRow.total_quantity || 0).toNumber(),
-      totalValue: new Decimal(summaryRow.total_value || 0).toNumber(),
+      totalValue: reportTotal.toNumber(),
       totalPotentialRevenue: new Decimal(summaryRow.total_potential_revenue || 0).toNumber(),
       totalPotentialProfit: new Decimal(summaryRow.total_potential_profit || 0).toNumber(),
+      glInventoryBalance: glBalance.toDecimalPlaces(2).toNumber(),
+      costLayersTotal: costLayersTotal.toNumber(),
+      subledgerAvcoTotal: subledgerAvcoTotal.toNumber(),
+      variance: variance.toDecimalPlaces(2).toNumber(),
+      variancePercent,
+      isReconciled,
     };
 
     const byCategory = categoryResult.rows.map((row) => ({
@@ -348,21 +481,118 @@ export const reportsRepository = {
       profitMargin: new Decimal(row.profit_margin || 0).toNumber(),
     }));
 
-    const items = itemResult.rows.map((row) => ({
-      productId: row.product_id,
-      productName: row.product_name,
-      sku: row.sku,
-      category: row.category,
-      quantityOnHand: new Decimal(row.total_quantity || 0).toNumber(),
-      unitCost: new Decimal(row.unit_cost || 0).toNumber(),
-      sellingPrice: new Decimal(row.selling_price || 0).toNumber(),
-      totalValue: new Decimal(row.total_value || 0).toNumber(),
-      potentialRevenue: new Decimal(row.potential_revenue || 0).toNumber(),
-      profitPerUnit: new Decimal(row.profit_per_unit || 0).toNumber(),
-      potentialProfit: new Decimal(row.potential_profit || 0).toNumber(),
-      profitMargin: new Decimal(row.profit_margin || 0).toNumber(),
-      lastUpdated: formatDate(row.last_updated),
-    }));
+    // ── SAP/Odoo enrichments on items (post-SQL, over page) ──
+    // ABC is computed on the full page (global ABC is approximated from total_value share).
+    // Movement classification thresholds match common ERP defaults:
+    //   NEW:  no sales yet AND received ≤ 30 days ago
+    //   FAST: last sale ≤ 30 days
+    //   SLOW: last sale 31..180 days
+    //   DEAD: last sale > 180 days OR never sold AND in stock > 180 days
+    const rawItems = itemResult.rows;
+    // Sort a copy by total_value desc for ABC cumulative cutoff
+    const sortedByValue = [...rawItems].sort(
+      (a, b) => new Decimal(b.total_value || 0).minus(a.total_value || 0).toNumber()
+    );
+    const abcById = new Map<string, 'A' | 'B' | 'C'>();
+    const totalForABC = reportTotal.toNumber();
+    let cumulative = 0;
+    for (const r of sortedByValue) {
+      const before = totalForABC > 0 ? cumulative / totalForABC : 0;
+      cumulative += new Decimal(r.total_value || 0).toNumber();
+      // Standard Pareto ABC: items whose *pre-addition* cumulative share is
+      // below the cutoff belong to that class (so the single item that crosses
+      // 80% is classified as A, not pushed down).
+      abcById.set(
+        r.product_id,
+        before < 0.8 ? 'A' : before < 0.95 ? 'B' : 'C'
+      );
+    }
+
+    const driftThresholdQty = new Decimal('0.001');
+
+    const items = rawItems.map((row) => {
+      const qtyDrift = new Decimal(row.qty_drift || 0);
+      const hasDrift = qtyDrift.abs().greaterThan(driftThresholdQty);
+      const daysSinceLastSale: number | null =
+        row.days_since_last_sale === null || row.days_since_last_sale === undefined
+          ? null
+          : parseInt(row.days_since_last_sale, 10);
+      const daysInStock: number | null =
+        row.days_in_stock === null || row.days_in_stock === undefined
+          ? null
+          : parseInt(row.days_in_stock, 10);
+
+      let movementClass: 'FAST' | 'SLOW' | 'DEAD' | 'NEW';
+      if (daysSinceLastSale === null) {
+        movementClass = daysInStock !== null && daysInStock <= 30 ? 'NEW' : 'DEAD';
+      } else if (daysSinceLastSale <= 30) {
+        movementClass = 'FAST';
+      } else if (daysSinceLastSale <= 180) {
+        movementClass = 'SLOW';
+      } else {
+        movementClass = 'DEAD';
+      }
+
+      const tv = new Decimal(row.total_value || 0).toNumber();
+      const valueContribution =
+        totalForABC > 0 ? new Decimal(tv).dividedBy(totalForABC).times(100).toDecimalPlaces(2).toNumber() : 0;
+
+      return {
+        productId: row.product_id,
+        productName: row.product_name,
+        sku: row.sku,
+        category: row.category,
+        productActive: row.product_active,
+        costSource: row.cost_source,
+        quantityOnHand: new Decimal(row.total_quantity || 0).toNumber(),
+        unitCost: new Decimal(row.unit_cost || 0).toNumber(),
+        sellingPrice: new Decimal(row.selling_price || 0).toNumber(),
+        totalValue: tv,
+        potentialRevenue: new Decimal(row.potential_revenue || 0).toNumber(),
+        profitPerUnit: new Decimal(row.profit_per_unit || 0).toNumber(),
+        potentialProfit: new Decimal(row.potential_profit || 0).toNumber(),
+        profitMargin: new Decimal(row.profit_margin || 0).toNumber(),
+        lastUpdated: formatDate(row.last_updated),
+        // enrichments
+        abcClass: abcById.get(row.product_id) || 'C',
+        valueContribution,
+        daysInStock,
+        lastSaleDate: row.last_sale_date || null,
+        daysSinceLastSale,
+        movementClass,
+        qtySubledger: new Decimal(row.total_quantity || 0).toNumber(),
+        qtyCostLayers: new Decimal(row.qty_cost_layers || 0).toNumber(),
+        qtyDrift: qtyDrift.toDecimalPlaces(4).toNumber(),
+        hasDrift,
+      };
+    });
+
+    // Movement / ABC aggregate counts for the summary strip
+    const movementCounts = items.reduce(
+      (acc, it) => {
+        acc[it.movementClass] += 1;
+        return acc;
+      },
+      { FAST: 0, SLOW: 0, DEAD: 0, NEW: 0 } as Record<'FAST' | 'SLOW' | 'DEAD' | 'NEW', number>
+    );
+    const abcCounts = items.reduce(
+      (acc, it) => {
+        acc[it.abcClass] += 1;
+        return acc;
+      },
+      { A: 0, B: 0, C: 0 } as Record<'A' | 'B' | 'C', number>
+    );
+    const driftCount = items.filter((it) => it.hasDrift).length;
+    const deadStockValue = items
+      .filter((it) => it.movementClass === 'DEAD')
+      .reduce((sum, it) => sum.plus(it.totalValue), new Decimal(0))
+      .toDecimalPlaces(2)
+      .toNumber();
+
+    (summary as Record<string, unknown>).movementCounts = movementCounts;
+    (summary as Record<string, unknown>).abcCounts = abcCounts;
+    (summary as Record<string, unknown>).driftCount = driftCount;
+    (summary as Record<string, unknown>).deadStockValue = deadStockValue;
 
     return { items, summary, byCategory };
   },
@@ -412,7 +642,7 @@ export const reportsRepository = {
         SELECT s.id, s.total_amount, s.discount_amount
         FROM sales s
         WHERE s.sale_date >= $1 AND s.sale_date < $2
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${customerFilter}
           ${sessionFilter}
       ),
@@ -487,7 +717,7 @@ export const reportsRepository = {
         INNER JOIN sales s ON s.id = si.sale_id
         LEFT JOIN products p ON p.id = si.product_id
         WHERE s.sale_date >= $1 AND s.sale_date < $2
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${customerFilter}
           ${sessionFilter}
         GROUP BY COALESCE(p.name, si.product_name, 'Custom Item')
@@ -500,7 +730,7 @@ export const reportsRepository = {
                  s.total_amount, s.discount_amount
           FROM sales s
           WHERE s.sale_date >= $1 AND s.sale_date < $2
-            AND s.status NOT IN ('VOID', 'REFUNDED')
+            AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
             ${customerFilter}
             ${sessionFilter}
         ),
@@ -771,7 +1001,7 @@ export const reportsRepository = {
       INNER JOIN sales s ON s.id = si.sale_id
       LEFT JOIN products p ON p.id = si.product_id
       WHERE s.sale_date >= $1 AND s.sale_date < $2
-        AND s.status NOT IN ('VOID', 'REFUNDED')
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         ${categoryFilter}
       GROUP BY p.id, COALESCE(p.name, si.product_name, 'Custom Item'), p.sku
       ORDER BY quantity_sold DESC
@@ -979,7 +1209,7 @@ export const reportsRepository = {
           SUM(s.total_amount) as total_amount
         FROM sales s
         WHERE s.sale_date >= $1 AND s.sale_date < $2
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${methodFilter}
         GROUP BY s.payment_method
       ),
@@ -1043,39 +1273,39 @@ export const reportsRepository = {
 
     if (options.status) {
       const paramIndex = params.length + 1;
-      filters += ` AND i."Status" = $${paramIndex}::invoice_status`;
+      filters += ` AND i.status = $${paramIndex}`;
       params.push(options.status);
     }
 
     // Use pre-aggregated subqueries to avoid multiplicative joins.
-    // Joining invoices to invoice_payments directly inflates SUM(i."TotalAmount"), etc.
+    // Joining invoices to invoice_payments directly inflates SUM(i.total_amount), etc.
     // when an invoice has multiple partial payments.
     const query = `
       WITH invoice_agg AS (
         SELECT 
-          i."CustomerId" as customer_id,
-          COUNT(i."Id") as total_invoices,
-          SUM(i."TotalAmount") as total_invoiced,
-          SUM(i."AmountPaid") as total_paid,
-          SUM(i."OutstandingBalance") as total_outstanding,
+          i.customer_id as customer_id,
+          COUNT(i.id) as total_invoices,
+          SUM(i.total_amount) as total_invoiced,
+          SUM(i.amount_paid) as total_paid,
+          SUM(i.amount_due) as total_outstanding,
           SUM(CASE 
-            WHEN i."DueDate" < CURRENT_DATE AND i."OutstandingBalance" > 0 THEN i."OutstandingBalance" 
+            WHEN i.due_date < CURRENT_DATE AND i.amount_due > 0 THEN i.amount_due 
             ELSE 0 
           END) as overdue_amount
         FROM invoices i
-        WHERE i."InvoiceDate" >= $1 AND i."InvoiceDate" < $2
+        WHERE i.issue_date >= $1 AND i.issue_date < $2
           ${filters}
-        GROUP BY i."CustomerId"
+        GROUP BY i.customer_id
       ),
       payment_days AS (
         SELECT 
-          i."CustomerId" as customer_id,
-          AVG(EXTRACT(EPOCH FROM (ip.payment_date - i."InvoiceDate")) / 86400) as average_payment_days
+          i.customer_id as customer_id,
+          AVG(EXTRACT(EPOCH FROM (ip.payment_date - i.issue_date)) / 86400) as average_payment_days
         FROM invoices i
-        INNER JOIN invoice_payments ip ON ip.invoice_id = i."Id"
-        WHERE i."InvoiceDate" >= $1 AND i."InvoiceDate" < $2
+        INNER JOIN invoice_payments ip ON ip.invoice_id = i.id
+        WHERE i.issue_date >= $1 AND i.issue_date < $2
           ${filters}
-        GROUP BY i."CustomerId"
+        GROUP BY i.customer_id
       )
       SELECT 
         c.id as customer_id,
@@ -1097,19 +1327,19 @@ export const reportsRepository = {
     const summaryQuery = `
       WITH invoice_agg AS (
         SELECT 
-          i."CustomerId" as customer_id,
-          COUNT(i."Id") as total_invoices,
-          SUM(i."TotalAmount") as total_invoiced,
-          SUM(i."AmountPaid") as total_paid,
-          SUM(i."OutstandingBalance") as total_outstanding,
+          i.customer_id as customer_id,
+          COUNT(i.id) as total_invoices,
+          SUM(i.total_amount) as total_invoiced,
+          SUM(i.amount_paid) as total_paid,
+          SUM(i.amount_due) as total_outstanding,
           SUM(CASE 
-            WHEN i."DueDate" < CURRENT_DATE AND i."OutstandingBalance" > 0 THEN i."OutstandingBalance" 
+            WHEN i.due_date < CURRENT_DATE AND i.amount_due > 0 THEN i.amount_due 
             ELSE 0 
           END) as overdue_amount
         FROM invoices i
-        WHERE i."InvoiceDate" >= $1 AND i."InvoiceDate" < $2
+        WHERE i.issue_date >= $1 AND i.issue_date < $2
           ${filters}
-        GROUP BY i."CustomerId"
+        GROUP BY i.customer_id
       ),
       deposit_agg AS (
         SELECT
@@ -1205,7 +1435,7 @@ export const reportsRepository = {
         SUM(s.profit) as gross_profit
       FROM sales s
       WHERE s.sale_date >= $1 AND s.sale_date < $2
-        AND s.status NOT IN ('VOID', 'REFUNDED')
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       GROUP BY ${dateGroup}
       ORDER BY period
     `;
@@ -1221,7 +1451,7 @@ export const reportsRepository = {
         END as gross_profit_margin
       FROM sales s
       WHERE s.sale_date >= $1 AND s.sale_date < $2
-        AND s.status NOT IN ('VOID', 'REFUNDED')
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
     `;
 
     const [result, summaryResult, expenseResult, supplierPayResult] = await Promise.all([
@@ -1687,8 +1917,8 @@ export const reportsRepository = {
         s.sale_date,
         s.total_amount,
         COALESCE(i."AmountPaid", s.amount_paid) as amount_paid,
-        COALESCE(i."OutstandingBalance", s.total_amount - s.amount_paid) as balance_due,
-        COALESCE(i."Status", s.status::text) as payment_status,
+        COALESCE(i.amount_due, s.total_amount - s.amount_paid) as balance_due,
+        COALESCE(i.status, s.status::text) as payment_status,
         array_agg(
           json_build_object(
             'product_name', COALESCE(p.name, si.product_name, 'Custom Item'),
@@ -1698,12 +1928,12 @@ export const reportsRepository = {
           )
         ) as items
       FROM sales s
-      LEFT JOIN invoices i ON i."SaleId" = s.id
+      LEFT JOIN invoices i ON i.sale_id = s.id
       LEFT JOIN sale_items si ON si.sale_id = s.id
       LEFT JOIN products p ON p.id = si.product_id
       WHERE ${whereClause}
       GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid, s.status,
-               i."AmountPaid", i."OutstandingBalance", i."Status"
+               i.amount_paid, i.amount_due, i.status
       ORDER BY s.sale_date DESC
     `;
 
@@ -1712,10 +1942,10 @@ export const reportsRepository = {
       SELECT
         COUNT(s.id) as total_transactions,
         COALESCE(SUM(s.total_amount), 0) as total_sales,
-        COALESCE(SUM(COALESCE(i."AmountPaid", s.amount_paid)), 0) as total_paid,
-        COALESCE(SUM(COALESCE(i."OutstandingBalance", s.total_amount - s.amount_paid)), 0) as total_outstanding
+        COALESCE(SUM(COALESCE(i.amount_paid, s.amount_paid)), 0) as total_paid,
+        COALESCE(SUM(COALESCE(i.amount_due, s.total_amount - s.amount_paid)), 0) as total_outstanding
       FROM sales s
-      LEFT JOIN invoices i ON i."SaleId" = s.id
+      LEFT JOIN invoices i ON i.sale_id = s.id
       WHERE ${whereClause}
     `;
 
@@ -1952,7 +2182,7 @@ export const reportsRepository = {
             AVG(COALESCE(s.total_amount, 0)) as average_sale_value
           FROM sales s
           WHERE s.sale_date >= $1 AND s.sale_date < $2
-            AND s.status NOT IN ('VOID', 'REFUNDED')
+            AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
           GROUP BY (s.sale_date AT TIME ZONE '${TZ}')::date, s.payment_method
@@ -1971,11 +2201,30 @@ export const reportsRepository = {
             0 as credit_created,
             AVG(COALESCE(ip.amount, 0)) as average_collection_value
           FROM invoice_payments ip
-          INNER JOIN invoices i ON ip.invoice_id = i."Id"
+          INNER JOIN invoices i ON ip.invoice_id = i.id
           WHERE ip.payment_date >= $1 AND ip.payment_date < $2
             AND ip.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND ip.payment_method = $3' : ''}
           GROUP BY (ip.payment_date AT TIME ZONE '${TZ}')::date, ip.payment_method
+        ),
+        daily_deposits AS (
+          -- Customer deposit receipts (prepayments / down payments)
+          SELECT 
+            (cd.created_at AT TIME ZONE '${TZ}')::date as transaction_date,
+            cd.payment_method as payment_method,
+            'DEPOSIT_RECEIPT' as revenue_type,
+            COUNT(cd.id) as transaction_count,
+            SUM(COALESCE(cd.amount, 0)) as cash_amount,
+            0 as total_sales,
+            0 as total_cost,
+            0 as gross_profit,
+            0 as credit_created,
+            AVG(COALESCE(cd.amount, 0)) as average_deposit_value
+          FROM pos_customer_deposits cd
+          WHERE cd.created_at >= $1 AND cd.created_at < $2
+            AND cd.status IN ('ACTIVE', 'DEPLETED')
+            ${options.paymentMethod ? 'AND cd.payment_method = $3' : ''}
+          GROUP BY (cd.created_at AT TIME ZONE '${TZ}')::date, cd.payment_method
         ),
         combined_cash_flow AS (
           SELECT 
@@ -2003,6 +2252,19 @@ export const reportsRepository = {
             credit_created,
             average_collection_value as average_transaction_value
           FROM daily_collections
+          UNION ALL
+          SELECT 
+            transaction_date,
+            payment_method,
+            revenue_type,
+            transaction_count,
+            cash_amount,
+            total_sales,
+            total_cost,
+            gross_profit,
+            credit_created,
+            average_deposit_value as average_transaction_value
+          FROM daily_deposits
         )
         SELECT 
           to_char(transaction_date, 'YYYY-MM-DD') as transaction_date,
@@ -2032,7 +2294,7 @@ export const reportsRepository = {
             COUNT(DISTINCT (s.sale_date AT TIME ZONE '${TZ}')::date) as sale_days
           FROM sales s
           WHERE s.sale_date >= $1 AND s.sale_date < $2
-            AND s.status NOT IN ('VOID', 'REFUNDED')
+            AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
         ),
@@ -2042,7 +2304,7 @@ export const reportsRepository = {
             SUM(COALESCE(ip.amount, 0)) as cash_amount,
             COUNT(DISTINCT (ip.payment_date AT TIME ZONE '${TZ}')::date) as coll_days
           FROM invoice_payments ip
-          INNER JOIN invoices i ON ip.invoice_id = i."Id"
+          INNER JOIN invoices i ON ip.invoice_id = i.id
           WHERE ip.payment_date >= $1 AND ip.payment_date < $2
             AND ip.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND ip.payment_method = $3' : ''}
@@ -2052,9 +2314,10 @@ export const reportsRepository = {
             COUNT(cd.id) as txn_count,
             SUM(COALESCE(cd.amount, 0)) as cash_amount,
             COUNT(DISTINCT (cd.created_at AT TIME ZONE '${TZ}')::date) as dep_days
-          FROM customer_deposits cd
+          FROM pos_customer_deposits cd
           WHERE cd.created_at >= $1 AND cd.created_at < $2
-            AND cd.status = 'ACTIVE'
+            AND cd.status IN ('ACTIVE', 'DEPLETED')
+            ${options.paymentMethod ? 'AND cd.payment_method = $3' : ''}
         )
         SELECT
           ss.txn_count as sales_txn_count,
@@ -2440,7 +2703,7 @@ export const reportsRepository = {
       FROM customers c
       INNER JOIN sales s ON s.customer_id = c.id
       WHERE ${whereClause}
-        AND s.status NOT IN ('VOID', 'REFUNDED')
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       GROUP BY c.id, c.customer_number, c.name, c.email, c.phone, c.balance
       ORDER BY ${options.sortBy === 'ORDERS' ? 'total_purchases' : options.sortBy === 'PROFIT' ? 'total_profit' : 'total_revenue'} DESC
       ${limitClause}
@@ -2500,18 +2763,18 @@ export const reportsRepository = {
           c.email,
           c.phone,
           c.credit_limit,
-          i."Id" as invoice_id,
-          i."InvoiceNumber" as invoice_number,
-          i."InvoiceDate" as invoice_date,
-          i."DueDate" as due_date,
-          i."TotalAmount" as total_amount,
-          i."AmountPaid" as amount_paid,
-          i."OutstandingBalance" as outstanding_balance,
-          EXTRACT(DAY FROM ($1::date - i."DueDate")) as days_overdue
+          i.id as invoice_id,
+          i.invoice_number as invoice_number,
+          i.issue_date as invoice_date,
+          i.due_date as due_date,
+          i.total_amount as total_amount,
+          i.amount_paid as amount_paid,
+          i.amount_due as outstanding_balance,
+          EXTRACT(DAY FROM ($1::date - i.due_date)) as days_overdue
         FROM customers c
-        INNER JOIN invoices i ON i."CustomerId" = c.id
-        WHERE i."OutstandingBalance" > 0
-          AND i."Status" != 'PAID'
+        INNER JOIN invoices i ON i.customer_id = c.id
+        WHERE i.amount_due > 0
+          AND i.status != 'PAID'
       )
       SELECT 
         customer_id,
@@ -2539,12 +2802,12 @@ export const reportsRepository = {
         WITH customer_invoices AS (
           SELECT 
             c.id as customer_id,
-            i."OutstandingBalance" as outstanding_balance,
-            EXTRACT(DAY FROM ($1::date - i."DueDate")) as days_overdue
+            i.amount_due as outstanding_balance,
+            EXTRACT(DAY FROM ($1::date - i.due_date)) as days_overdue
           FROM customers c
-          INNER JOIN invoices i ON i."CustomerId" = c.id
-          WHERE i."OutstandingBalance" > 0
-            AND i."Status" != 'PAID'
+          INNER JOIN invoices i ON i.customer_id = c.id
+          WHERE i.amount_due > 0
+            AND i.status != 'PAID'
         )
         SELECT
           COUNT(DISTINCT customer_id) as total_customers,
@@ -3217,7 +3480,7 @@ export const reportsRepository = {
       INNER JOIN sale_items si ON si.sale_id = s.id
       LEFT JOIN products p ON p.id = si.product_id
       WHERE s.sale_date >= $1 AND s.sale_date < $2
-        AND s.status NOT IN ('VOID', 'REFUNDED')
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       GROUP BY COALESCE(p.category, 'Uncategorized')
       ORDER BY total_revenue DESC
     `;
@@ -3273,7 +3536,7 @@ export const reportsRepository = {
           COALESCE(SUM(s.discount_amount), 0) as total_discounts
         FROM sales s
         WHERE s.sale_date >= $1 AND s.sale_date < $2
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         GROUP BY s.payment_method
       ),
       grand_total AS (
@@ -3328,7 +3591,7 @@ export const reportsRepository = {
         MODE() WITHIN GROUP (ORDER BY to_char(s.sale_date AT TIME ZONE '${TZ}', 'Day')) as peak_day
       FROM sales s
       WHERE s.sale_date >= $1 AND s.sale_date < $2
-        AND s.status NOT IN ('VOID', 'REFUNDED')
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       GROUP BY EXTRACT(HOUR FROM s.sale_date AT TIME ZONE '${TZ}')
       ORDER BY hour
     `;
@@ -3391,7 +3654,7 @@ export const reportsRepository = {
           COUNT(s.id) as transaction_count
         FROM sales s
         WHERE s.sale_date >= $1 AND s.sale_date < $2
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         GROUP BY ${groupByClause}
       ),
       previous_period AS (
@@ -3401,7 +3664,7 @@ export const reportsRepository = {
           COUNT(s.id) as transaction_count
         FROM sales s
         WHERE s.sale_date >= $3 AND s.sale_date < $4
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         GROUP BY ${groupByClause}
       )
       SELECT 
@@ -3474,18 +3737,18 @@ export const reportsRepository = {
         s.sale_number,
         to_char(s.sale_date, 'YYYY-MM-DD HH24:MI:SS') as sale_date,
         s.total_amount,
-        COALESCE(i."AmountPaid", s.amount_paid) as amount_paid,
-        COALESCE(i."OutstandingBalance", s.total_amount - s.amount_paid) as outstanding_balance,
+        COALESCE(i.amount_paid, s.amount_paid) as amount_paid,
+        COALESCE(i.amount_due, s.total_amount - s.amount_paid) as outstanding_balance,
         s.payment_method,
         COUNT(si.id) as item_count,
-        COALESCE(i."Status", s.status::text) as status
+        COALESCE(i.status, s.status::text) as status
       FROM sales s
-      LEFT JOIN invoices i ON i."SaleId" = s.id
+      LEFT JOIN invoices i ON i.sale_id = s.id
       LEFT JOIN sale_items si ON si.sale_id = s.id
       WHERE s.customer_id = $1
         AND s.sale_date >= $2 AND s.sale_date < $3
       GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid,
-               s.payment_method, s.status, i."AmountPaid", i."OutstandingBalance", i."Status"
+               s.payment_method, s.status, i.amount_paid, i.amount_due, i.status
       ORDER BY s.sale_date DESC
     `;
 
@@ -3538,7 +3801,7 @@ export const reportsRepository = {
           SUM(s.total_amount - s.amount_paid) as credit_extended
         FROM sales s
         WHERE s.sale_date >= $1 AND s.sale_date < $2
-          AND s.status NOT IN ('VOID', 'REFUNDED')
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       ),
       daily_collections AS (
         -- Today's debt collections
@@ -3546,9 +3809,9 @@ export const reportsRepository = {
           COUNT(ip.id) as collection_transactions,
           SUM(ip.amount) as total_collections,
           AVG(ip.amount) as avg_collection_value,
-          COUNT(DISTINCT i."CustomerId") as paying_customers
+          COUNT(DISTINCT i.customer_id) as paying_customers
         FROM invoice_payments ip
-        INNER JOIN invoices i ON ip.invoice_id = i."Id"
+        INNER JOIN invoices i ON ip.invoice_id = i.id
         WHERE ip.payment_date >= $1 AND ip.payment_date < $2
       ),
       inventory_health AS (
@@ -3572,14 +3835,31 @@ export const reportsRepository = {
           AVG(c.balance) as avg_customer_balance
         FROM customers c
       ),
+      deposit_liabilities AS (
+        -- Customer deposit liabilities (prepayments owed)
+        SELECT
+          COUNT(cd.id) as active_deposit_count,
+          COUNT(DISTINCT cd.customer_id) as customers_with_deposits,
+          COALESCE(SUM(cd.amount_available), 0) as total_deposit_liability,
+          COALESCE(SUM(cd.amount), 0) as total_deposited,
+          COALESCE(SUM(cd.amount_used), 0) as total_cleared
+        FROM pos_customer_deposits cd
+        WHERE cd.status = 'ACTIVE' AND cd.amount_available > 0
+      ),
       cash_position AS (
         -- Working capital indicators
         SELECT 
-          -- Today's cash flow
+          -- Today's cash flow (including deposits received)
           COALESCE(dsm.cash_collected, 0) + COALESCE(dc.total_collections, 0) as total_cash_in,
           COALESCE(dsm.credit_extended, 0) as new_credit_extended,
           -- Outstanding position
           COALESCE(cm.total_receivables, 0) as outstanding_receivables,
+          -- Deposit liabilities
+          COALESCE(dl.total_deposit_liability, 0) as deposit_liability,
+          COALESCE(dl.active_deposit_count, 0) as active_deposit_count,
+          COALESCE(dl.customers_with_deposits, 0) as customers_with_deposits,
+          COALESCE(dl.total_deposited, 0) as total_deposited,
+          COALESCE(dl.total_cleared, 0) as total_cleared,
           -- Efficiency ratios
           CASE 
             WHEN COALESCE(dsm.net_revenue, 0) > 0 THEN 
@@ -3594,6 +3874,7 @@ export const reportsRepository = {
         FROM daily_sales_metrics dsm
         CROSS JOIN daily_collections dc
         CROSS JOIN customer_metrics cm
+        CROSS JOIN deposit_liabilities dl
       )
       SELECT 
         -- Sales Performance
@@ -3631,6 +3912,11 @@ export const reportsRepository = {
         cp.total_cash_in,
         cp.new_credit_extended,
         cp.outstanding_receivables,
+        cp.deposit_liability,
+        cp.active_deposit_count,
+        cp.customers_with_deposits,
+        cp.total_deposited,
+        cp.total_cleared,
         cp.profit_margin_percent,
         cp.cash_collection_rate,
         
@@ -3704,6 +3990,11 @@ export const reportsRepository = {
           totalCashIn: 0,
           newCreditExtended: 0,
           outstandingReceivables: 0,
+          depositLiability: 0,
+          activeDepositCount: 0,
+          customersWithDeposits: 0,
+          totalDeposited: 0,
+          totalCleared: 0,
           profitMarginPercent: 0,
           cashCollectionRate: 0,
         },
@@ -3769,6 +4060,11 @@ export const reportsRepository = {
         outstandingReceivables: new Decimal(row.outstanding_receivables || 0)
           .toDecimalPlaces(2)
           .toNumber(),
+        depositLiability: new Decimal(row.deposit_liability || 0).toDecimalPlaces(2).toNumber(),
+        activeDepositCount: parseInt(row.active_deposit_count || 0),
+        customersWithDeposits: parseInt(row.customers_with_deposits || 0),
+        totalDeposited: new Decimal(row.total_deposited || 0).toDecimalPlaces(2).toNumber(),
+        totalCleared: new Decimal(row.total_cleared || 0).toDecimalPlaces(2).toNumber(),
         profitMarginPercent: new Decimal(row.profit_margin_percent || 0)
           .toDecimalPlaces(2)
           .toNumber(),
@@ -4438,17 +4734,17 @@ export const reportsRepository = {
         q.valid_until,
         COUNT(qi.id) as line_count,
         s.sale_number as converted_to_sale,
-        i.\"InvoiceNumber\" as converted_to_invoice,
+        i.invoice_number as converted_to_invoice,
         q.created_at
       FROM quotations q
       LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
       LEFT JOIN sales s ON s.id = q.converted_to_sale_id
-      LEFT JOIN invoices i ON i.\"Id\" = q.converted_to_invoice_id
+      LEFT JOIN invoices i ON i.id = q.converted_to_invoice_id
       WHERE q.created_at >= $1 AND q.created_at < $2
         ${filters}
       GROUP BY q.id, q.quote_number, q.customer_name, q.quote_type, q.status,
                q.subtotal, q.discount_amount, q.tax_amount, q.total_amount,
-               q.valid_from, q.valid_until, s.sale_number, i.\"InvoiceNumber\",
+               q.valid_from, q.valid_until, s.sale_number, i.invoice_number,
                q.created_at
       ORDER BY q.created_at DESC
     `;

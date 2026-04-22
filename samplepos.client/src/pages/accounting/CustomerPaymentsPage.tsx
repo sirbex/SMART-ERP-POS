@@ -43,6 +43,7 @@ import type {
 } from '../../types/comprehensive-accounting';
 import type { Customer } from '../../types/business';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 const CustomerPaymentsPage: React.FC = () => {
     const [payments, setPayments] = useState<CustomerPayment[]>([]);
@@ -265,6 +266,9 @@ const CustomerPaymentsPage: React.FC = () => {
         payment.paymentNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         payment.reference?.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    useSubmitOnEnter(isCreateModalOpen, true, handleCreatePayment);
+    useSubmitOnEnter(isAllocationModalOpen, !allocatingPayment, handleManualAllocate);
 
     if (loading) {
         return (

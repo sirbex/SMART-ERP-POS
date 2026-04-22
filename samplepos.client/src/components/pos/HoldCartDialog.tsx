@@ -5,6 +5,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Clock } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 interface HoldCartDialogProps {
     isOpen: boolean;
@@ -39,6 +40,8 @@ export function HoldCartDialog({
         setNotes('');
         onClose();
     };
+
+    useSubmitOnEnter(isOpen, true, handleConfirm);
 
     return (
         <Dialog open={isOpen} onOpenChange={handleClose}>

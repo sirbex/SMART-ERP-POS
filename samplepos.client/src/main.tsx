@@ -127,27 +127,30 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
   // ── SW ↔ Client messaging for Background Sync ────────────
   navigator.serviceWorker.addEventListener('message', (event) => {
-    // SW requesting sync data (auth token + offline queue)
+    // SW requesting sync data (auth token + offline event journal)
     if (event.data?.type === 'SW_REQUEST_SYNC_DATA') {
-      const queue = JSON.parse(localStorage.getItem('pos_offline_sales') || '[]');
-      const authToken = localStorage.getItem('auth_token');
-      const apiBase = import.meta.env.VITE_API_URL || '/api';
-      // Reply via the MessageChannel port the SW sent
-      if (event.ports[0]) {
-        event.ports[0].postMessage({ queue, authToken, apiBase });
-      }
+      import('./lib/offlineEventJournal').then(({ getAllEvents, getAllSyncState }) => {
+        const events = getAllEvents();
+        const syncState = getAllSyncState();
+        const authToken = localStorage.getItem('auth_token');
+        const apiBase = import.meta.env.VITE_API_URL || '/api';
+        // Reply via the MessageChannel port the SW sent
+        if (event.ports[0]) {
+          event.ports[0].postMessage({ events, syncState, authToken, apiBase });
+        }
+      });
     }
 
-    // SW finished Background Sync — remove synced entries from localStorage
+    // SW finished Background Sync — mark synced keys in the journal
     if (event.data?.type === 'BACKGROUND_SYNC_COMPLETE') {
       const syncedKeys: string[] = event.data.syncedKeys || [];
-      if (syncedKeys.length > 0) {
-        const queue = JSON.parse(localStorage.getItem('pos_offline_sales') || '[]');
-        const filtered = queue.filter(
-          (s: { idempotencyKey: string }) => !syncedKeys.includes(s.idempotencyKey)
-        );
-        localStorage.setItem('pos_offline_sales', JSON.stringify(filtered));
-        window.dispatchEvent(new CustomEvent('offline-queue-updated'));
+      const reviewKeys: string[] = event.data.reviewKeys || [];
+      if (syncedKeys.length > 0 || reviewKeys.length > 0) {
+        import('./lib/offlineEventJournal').then(({ markSynced, markReview }) => {
+          for (const key of syncedKeys) markSynced(key);
+          for (const key of reviewKeys) markReview(key, 'Background sync review');
+          window.dispatchEvent(new CustomEvent('offline-queue-updated'));
+        });
       }
     }
   });

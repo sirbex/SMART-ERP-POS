@@ -1324,10 +1324,37 @@ export const salesRepository = {
 
   /**
    * Mark a sale as REFUNDED (only when all items fully refunded).
+   * @deprecated Use markSaleVoidedByReturn for completed POS sales (ERP discipline).
    */
   async markSaleRefunded(pool: Pool | PoolClient, saleId: string): Promise<void> {
     await pool.query(
       `UPDATE sales SET status = 'REFUNDED' WHERE id = $1 AND status = 'COMPLETED'`,
+      [saleId]
+    );
+  },
+
+  /**
+   * Mark a sale as VOIDED_BY_RETURN after all items have been returned.
+   * ERP discipline (SAP/Odoo): completed POS sales are never voided — they are reversed
+   * through Return → Credit Note → Refund. VOIDED_BY_RETURN records this outcome while
+   * preserving the original sale document in the audit trail.
+   */
+  async markSaleVoidedByReturn(pool: Pool | PoolClient, saleId: string): Promise<void> {
+    await pool.query(
+      `UPDATE sales SET status = 'VOIDED_BY_RETURN'
+       WHERE id = $1 AND status IN ('COMPLETED', 'PARTIALLY_RETURNED')`,
+      [saleId]
+    );
+  },
+
+  /**
+   * Mark a sale as PARTIALLY_RETURNED when some (but not all) items have been returned.
+   * Only advances from COMPLETED → PARTIALLY_RETURNED; already-partial sales stay PARTIALLY_RETURNED.
+   */
+  async markSalePartiallyReturned(pool: Pool | PoolClient, saleId: string): Promise<void> {
+    await pool.query(
+      `UPDATE sales SET status = 'PARTIALLY_RETURNED'
+       WHERE id = $1 AND status = 'COMPLETED'`,
       [saleId]
     );
   },

@@ -7,6 +7,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { extractApiError } from '../../utils/extractApiError';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import Layout from '../../components/Layout';
 import {
   useCategories,
@@ -159,6 +160,8 @@ export default function CategoriesPage() {
   }, [updateMutation]);
 
   const isMutating = createMutation.isPending || updateMutation.isPending;
+
+  useSubmitOnEnter(showCreateModal || !!editingCategory, !isMutating, handleSubmit);
 
   return (
     <Layout>

@@ -14,7 +14,7 @@
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
-import { ValidationError } from '../../middleware/errorHandler.js';
+import { ValidationError, BusinessError } from '../../middleware/errorHandler.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import logger from '../../utils/logger.js';
@@ -116,7 +116,7 @@ export class StockMovementHandler {
       const newQty = previousQty.plus(changeQty);
 
       // Step 5: Validate resulting quantity
-      await this.validateResultingQuantity(client, newQty, batch.product_id);
+      await this.validateResultingQuantity(client, newQty, batch.product_id, previousQty, params.quantity);
 
       // Step 6: Update batch quantity
       await client.query(
@@ -421,13 +421,17 @@ export class StockMovementHandler {
   private async validateResultingQuantity(
     client: PoolClient,
     newQuantity: Decimal,
-    productId: string
+    productId: string,
+    previousQuantity?: Decimal,
+    requestedQty?: number
   ): Promise<void> {
     if (newQuantity.lessThan(0)) {
-      // Negative stock is not allowed — system_settings is a flat single-row table
-      // with no key/value pairs. Default to rejecting negative stock.
-      throw new ValidationError(
-        `Insufficient stock for product ${productId}. Resulting quantity would be ${newQuantity.toString()}`
+      const remaining = previousQuantity?.toNumber() ?? 0;
+      const requested = requestedQty ?? 0;
+      throw new BusinessError(
+        `Insufficient stock. Batch has ${remaining} unit(s) remaining but ${requested} unit(s) were requested.`,
+        'INSUFFICIENT_BATCH_QTY',
+        { productId, remaining, requested }
       );
     }
 
@@ -488,8 +492,8 @@ export class StockMovementHandler {
 
       await client.query(
         `UPDATE cost_layers
-         SET remaining_quantity = $1,
-             is_active = CASE WHEN $1 <= 0 THEN false ELSE is_active END,
+         SET remaining_quantity = $1::numeric,
+             is_active = CASE WHEN $1::numeric <= 0 THEN false ELSE is_active END,
              updated_at = NOW()
          WHERE id = $2`,
         [newQty.toFixed(4), layer.id]

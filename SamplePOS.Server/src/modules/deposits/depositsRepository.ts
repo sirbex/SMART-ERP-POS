@@ -68,7 +68,7 @@ export interface ApplyDepositInput {
  * Generate next deposit number (DEP-YYYY-####)
  */
 export async function generateDepositNumber(
-    pool: Pool
+    pool: DbConnection
 ): Promise<string> {
     const year = getBusinessYear();
     const seq = await pool.query("SELECT nextval('deposit_number_seq')");
@@ -80,7 +80,7 @@ export async function generateDepositNumber(
  * Create a new customer deposit
  */
 export async function createDeposit(
-    pool: Pool,
+    pool: DbConnection,
     input: CreateDepositInput
 ): Promise<DepositDbRow> {
     const depositNumber = await generateDepositNumber(pool);

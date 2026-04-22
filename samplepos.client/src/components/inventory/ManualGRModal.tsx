@@ -24,6 +24,7 @@ import {
   GOODS_RECEIPT_RULES,
   type SearchableProduct,
 } from "./shared";
+import { useSubmitOnEnter } from "../../hooks/useSubmitOnEnter";
 
 interface ManualGRItem {
   productId: string;
@@ -306,13 +307,14 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     }
   };
 
+  useSubmitOnEnter(open && !showCreateProductModal, !createGRMutation.isPending && !!supplierId && selectedItems.length > 0, handleSubmit);
+  useSubmitOnEnter(showCreateProductModal, !createProductMutation.isPending, handleCreateProduct);
+
   return (
     <>
-      <Dialog
-        open={open}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) handleCloseAttempt();
-        }}
+      <Dialog open={open} onOpenChange={(isOpen) => {
+        if (!isOpen) handleCloseAttempt();
+      }}
       >
         <DialogContent
           className="max-w-5xl"

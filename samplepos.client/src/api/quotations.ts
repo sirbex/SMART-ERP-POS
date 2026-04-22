@@ -97,6 +97,13 @@ export const quotationApi = {
   },
 
   /**
+   * Permanently delete a cancelled quotation (admin only)
+   */
+  async permanentlyDeleteQuotation(id: string): Promise<void> {
+    await apiClient.delete(`/quotations/${id}?permanent=true`);
+  },
+
+  /**
    * Update item-level decisions (accept/reject per line)
    */
   async updateItemDecisions(

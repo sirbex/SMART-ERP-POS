@@ -51,6 +51,7 @@ import type {
 } from '../../types/comprehensive-accounting';
 import type { Customer, Product } from '../../types/business';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 const INVOICE_STATUSES = [
     { value: '', label: 'All Statuses' },
@@ -378,6 +379,9 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             return sum + (quantity * unitPrice);
         }, 0);
     };
+
+    useSubmitOnEnter(isCreateModalOpen, true, handleCreateInvoice);
+    useSubmitOnEnter(isPaymentModalOpen, true, handleRecordPayment);
 
     if (loading) {
         return (

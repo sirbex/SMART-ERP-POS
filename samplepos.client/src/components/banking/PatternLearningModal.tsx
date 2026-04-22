@@ -18,6 +18,7 @@ import {
     useBankCategories,
     BankPattern,
 } from '../../hooks/useBanking';
+import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 interface PatternLearningModalProps {
     isOpen: boolean;
@@ -93,6 +94,12 @@ export const PatternLearningModal: React.FC<PatternLearningModalProps> = ({
 
     const filteredCategories = categories.filter(
         cat => cat.direction === (transactionType === 'CREDIT' ? 'IN' : 'OUT')
+    );
+
+    useSubmitOnEnter(
+        isOpen,
+        !learnMutation.isPending && !!patternText && !!selectedCategoryId,
+        handleCreatePattern
     );
 
     return (

@@ -16,31 +16,31 @@
 import type { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import type {
-    ReturnsAllowancesRow,
-    PurchaseReturnsAllowancesRow,
-    LedgerEntryRow,
-    NoteRegisterRow,
-    TaxReversalRow,
-    InvoiceAdjustmentRow,
-    SupplierStatementEntry,
-    SupplierAgingRow,
+  ReturnsAllowancesRow,
+  PurchaseReturnsAllowancesRow,
+  LedgerEntryRow,
+  NoteRegisterRow,
+  TaxReversalRow,
+  InvoiceAdjustmentRow,
+  SupplierStatementEntry,
+  SupplierAgingRow,
 } from './cnDnReportTypes.js';
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
 function toNum(v: unknown): number {
-    return new Decimal(String(v ?? 0)).toDecimalPlaces(2).toNumber();
+  return new Decimal(String(v ?? 0)).toDecimalPlaces(2).toNumber();
 }
 
 // ─── 1. Sales Returns & Allowances (P&L) ───────────────────────────
 // Groups by month. Uses GL entries for accuracy (DR 4010 = Sales Returns).
 export async function getSalesReturnsReport(
-    pool: Pool,
-    startDate: string,
-    endDate: string,
+  pool: Pool,
+  startDate: string,
+  endDate: string,
 ): Promise<ReturnsAllowancesRow[]> {
-    const result = await pool.query(
-        `WITH monthly_sales AS (
+  const result = await pool.query(
+    `WITH monthly_sales AS (
        SELECT
          to_char(lt."TransactionDate", 'YYYY-MM') AS period,
          COALESCE(SUM(le."CreditAmount"), 0) AS total_sales
@@ -78,26 +78,26 @@ export async function getSalesReturnsReport(
      FROM monthly_sales s
      FULL OUTER JOIN monthly_returns r ON r.period = s.period
      ORDER BY period`,
-        [startDate, endDate],
-    );
+    [startDate, endDate],
+  );
 
-    return result.rows.map((r) => ({
-        period: r.period,
-        totalSales: toNum(r.total_sales),
-        salesReturns: toNum(r.sales_returns),
-        netSales: toNum(r.net_sales),
-        creditNoteCount: Number(r.cn_count),
-    }));
+  return result.rows.map((r) => ({
+    period: r.period,
+    totalSales: toNum(r.total_sales),
+    salesReturns: toNum(r.sales_returns),
+    netSales: toNum(r.net_sales),
+    creditNoteCount: Number(r.cn_count),
+  }));
 }
 
 // ─── 2. Purchase Returns & Allowances (P&L) ────────────────────────
 export async function getPurchaseReturnsReport(
-    pool: Pool,
-    startDate: string,
-    endDate: string,
+  pool: Pool,
+  startDate: string,
+  endDate: string,
 ): Promise<PurchaseReturnsAllowancesRow[]> {
-    const result = await pool.query(
-        `WITH monthly_purchases AS (
+  const result = await pool.query(
+    `WITH monthly_purchases AS (
        SELECT
          to_char(lt."TransactionDate", 'YYYY-MM') AS period,
          COALESCE(SUM(le."DebitAmount"), 0) AS total_purchases
@@ -135,34 +135,34 @@ export async function getPurchaseReturnsReport(
      FROM monthly_purchases p
      FULL OUTER JOIN monthly_returns r ON r.period = p.period
      ORDER BY period`,
-        [startDate, endDate],
-    );
+    [startDate, endDate],
+  );
 
-    return result.rows.map((r) => ({
-        period: r.period,
-        totalPurchases: toNum(r.total_purchases),
-        purchaseReturns: toNum(r.purchase_returns),
-        netPurchases: toNum(r.net_purchases),
-        creditNoteCount: Number(r.scn_count),
-    }));
+  return result.rows.map((r) => ({
+    period: r.period,
+    totalPurchases: toNum(r.total_purchases),
+    purchaseReturns: toNum(r.purchase_returns),
+    netPurchases: toNum(r.net_purchases),
+    creditNoteCount: Number(r.scn_count),
+  }));
 }
 
 // ─── 3. AR Ledger (GL view from Accounts Receivable 1200) ──────────
 export async function getArLedger(
-    pool: Pool,
-    startDate: string,
-    endDate: string,
-    customerId?: string,
+  pool: Pool,
+  startDate: string,
+  endDate: string,
+  customerId?: string,
 ): Promise<Omit<LedgerEntryRow, 'balance'>[]> {
-    const params: (string | undefined)[] = [startDate, endDate];
-    let customerFilter = '';
-    if (customerId) {
-        params.push(customerId);
-        customerFilter = `AND le."EntityId" = $${params.length}`;
-    }
+  const params: (string | undefined)[] = [startDate, endDate];
+  let customerFilter = '';
+  if (customerId) {
+    params.push(customerId);
+    customerFilter = `AND le."EntityId" = $${params.length}`;
+  }
 
-    const result = await pool.query(
-        `SELECT
+  const result = await pool.query(
+    `SELECT
        lt."TransactionDate" AS date,
        lt."TransactionNumber" AS transaction_number,
        lt."ReferenceType" AS reference_type,
@@ -180,36 +180,36 @@ export async function getArLedger(
        AND lt."TransactionDate" <= $2::date
        ${customerFilter}
      ORDER BY lt."TransactionDate" ASC, lt."CreatedAt" ASC`,
-        params,
-    );
+    params,
+  );
 
-    return result.rows.map((r) => ({
-        date: r.date,
-        transactionNumber: r.transaction_number,
-        referenceType: r.reference_type || '',
-        referenceNumber: r.reference_number || '',
-        description: r.description || '',
-        debit: toNum(r.debit),
-        credit: toNum(r.credit),
-    }));
+  return result.rows.map((r) => ({
+    date: r.date,
+    transactionNumber: r.transaction_number,
+    referenceType: r.reference_type || '',
+    referenceNumber: r.reference_number || '',
+    description: r.description || '',
+    debit: toNum(r.debit),
+    credit: toNum(r.credit),
+  }));
 }
 
 // ─── 4. AP Ledger (GL view from Accounts Payable 2100) ─────────────
 export async function getApLedger(
-    pool: Pool,
-    startDate: string,
-    endDate: string,
-    supplierId?: string,
+  pool: Pool,
+  startDate: string,
+  endDate: string,
+  supplierId?: string,
 ): Promise<Omit<LedgerEntryRow, 'balance'>[]> {
-    const params: (string | undefined)[] = [startDate, endDate];
-    let supplierFilter = '';
-    if (supplierId) {
-        params.push(supplierId);
-        supplierFilter = `AND le."EntityId" = $${params.length}`;
-    }
+  const params: (string | undefined)[] = [startDate, endDate];
+  let supplierFilter = '';
+  if (supplierId) {
+    params.push(supplierId);
+    supplierFilter = `AND le."EntityId" = $${params.length}`;
+  }
 
-    const result = await pool.query(
-        `SELECT
+  const result = await pool.query(
+    `SELECT
        lt."TransactionDate" AS date,
        lt."TransactionNumber" AS transaction_number,
        lt."ReferenceType" AS reference_type,
@@ -227,110 +227,110 @@ export async function getApLedger(
        AND lt."TransactionDate" <= $2::date
        ${supplierFilter}
      ORDER BY lt."TransactionDate" ASC, lt."CreatedAt" ASC`,
-        params,
-    );
+    params,
+  );
 
-    return result.rows.map((r) => ({
-        date: r.date,
-        transactionNumber: r.transaction_number,
-        referenceType: r.reference_type || '',
-        referenceNumber: r.reference_number || '',
-        description: r.description || '',
-        debit: toNum(r.debit),
-        credit: toNum(r.credit),
-    }));
+  return result.rows.map((r) => ({
+    date: r.date,
+    transactionNumber: r.transaction_number,
+    referenceType: r.reference_type || '',
+    referenceNumber: r.reference_number || '',
+    description: r.description || '',
+    debit: toNum(r.debit),
+    credit: toNum(r.credit),
+  }));
 }
 
 // ─── 5. Credit/Debit Note Register ─────────────────────────────────
 export async function getNoteRegister(
-    pool: Pool,
-    options: {
-        startDate: string;
-        endDate: string;
-        side?: 'CUSTOMER' | 'SUPPLIER';
-        documentType?: string;
-        status?: string;
-    },
+  pool: Pool,
+  options: {
+    startDate: string;
+    endDate: string;
+    side?: 'CUSTOMER' | 'SUPPLIER';
+    documentType?: string;
+    status?: string;
+  },
 ): Promise<NoteRegisterRow[]> {
-    const rows: NoteRegisterRow[] = [];
+  const rows: NoteRegisterRow[] = [];
 
-    // Customer-side notes
-    if (!options.side || options.side === 'CUSTOMER') {
-        const params: string[] = [options.startDate, options.endDate];
-        let typeFilter = '';
-        let statusFilter = '';
-        if (options.documentType && ['CREDIT_NOTE', 'DEBIT_NOTE'].includes(options.documentType)) {
-            params.push(options.documentType);
-            typeFilter = `AND i.document_type = $${params.length}`;
-        }
-        if (options.status) {
-            params.push(options.status);
-            statusFilter = `AND i."Status" = $${params.length}`;
-        }
-
-        const custResult = await pool.query(
-            `SELECT
-         i."Id" AS note_id,
-         i."InvoiceNumber" AS note_number,
-         i.document_type,
-         i."CustomerName" AS party_name,
-         ref."InvoiceNumber" AS ref_invoice_number,
-         i.reason,
-         i."Subtotal" AS subtotal,
-         i."TaxAmount" AS tax_amount,
-         i."TotalAmount" AS total_amount,
-         i."Status" AS status,
-         i."InvoiceDate" AS issue_date,
-         i."CreatedAt" AS created_at
-       FROM invoices i
-       LEFT JOIN invoices ref ON ref."Id" = i.reference_invoice_id
-       WHERE i.document_type IN ('CREDIT_NOTE', 'DEBIT_NOTE')
-         AND i."InvoiceDate" >= $1::date
-         AND i."InvoiceDate" <= $2::date
-         ${typeFilter}
-         ${statusFilter}
-       ORDER BY i."InvoiceDate" DESC, i."CreatedAt" DESC`,
-            params,
-        );
-
-        for (const r of custResult.rows) {
-            rows.push({
-                noteId: r.note_id,
-                noteNumber: r.note_number,
-                documentType: r.document_type,
-                side: 'CUSTOMER',
-                partyName: r.party_name || '',
-                referenceInvoiceNumber: r.ref_invoice_number || '',
-                reason: r.reason,
-                subtotal: toNum(r.subtotal),
-                taxAmount: toNum(r.tax_amount),
-                totalAmount: toNum(r.total_amount),
-                status: r.status,
-                issueDate: r.issue_date,
-                createdAt: r.created_at,
-            });
-        }
+  // Customer-side notes
+  if (!options.side || options.side === 'CUSTOMER') {
+    const params: string[] = [options.startDate, options.endDate];
+    let typeFilter = '';
+    let statusFilter = '';
+    if (options.documentType && ['CREDIT_NOTE', 'DEBIT_NOTE'].includes(options.documentType)) {
+      params.push(options.documentType);
+      typeFilter = `AND i.document_type = $${params.length}`;
+    }
+    if (options.status) {
+      params.push(options.status);
+      statusFilter = `AND i.status = $${params.length}`;
     }
 
-    // Supplier-side notes
-    if (!options.side || options.side === 'SUPPLIER') {
-        const params: string[] = [options.startDate, options.endDate];
-        let typeFilter = '';
-        let statusFilter = '';
-        if (
-            options.documentType &&
-            ['SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE'].includes(options.documentType)
-        ) {
-            params.push(options.documentType);
-            typeFilter = `AND si.document_type = $${params.length}`;
-        }
-        if (options.status) {
-            params.push(options.status);
-            statusFilter = `AND si."Status" = $${params.length}`;
-        }
+    const custResult = await pool.query(
+      `SELECT
+         i.id AS note_id,
+         i.invoice_number AS note_number,
+         i.document_type,
+         i.customer_name AS party_name,
+         ref.invoice_number AS ref_invoice_number,
+         i.reason,
+         i.subtotal AS subtotal,
+         i.tax_amount AS tax_amount,
+         i.total_amount AS total_amount,
+         i.status AS status,
+         i.issue_date AS issue_date,
+         i.created_at AS created_at
+       FROM invoices i
+       LEFT JOIN invoices ref ON ref.id = i.reference_invoice_id
+       WHERE i.document_type IN ('CREDIT_NOTE', 'DEBIT_NOTE')
+         AND i.issue_date >= $1::date
+         AND i.issue_date <= $2::date
+         ${typeFilter}
+         ${statusFilter}
+       ORDER BY i.issue_date DESC, i.created_at DESC`,
+      params,
+    );
 
-        const suppResult = await pool.query(
-            `SELECT
+    for (const r of custResult.rows) {
+      rows.push({
+        noteId: r.note_id,
+        noteNumber: r.note_number,
+        documentType: r.document_type,
+        side: 'CUSTOMER',
+        partyName: r.party_name || '',
+        referenceInvoiceNumber: r.ref_invoice_number || '',
+        reason: r.reason,
+        subtotal: toNum(r.subtotal),
+        taxAmount: toNum(r.tax_amount),
+        totalAmount: toNum(r.total_amount),
+        status: r.status,
+        issueDate: r.issue_date,
+        createdAt: r.created_at,
+      });
+    }
+  }
+
+  // Supplier-side notes
+  if (!options.side || options.side === 'SUPPLIER') {
+    const params: string[] = [options.startDate, options.endDate];
+    let typeFilter = '';
+    let statusFilter = '';
+    if (
+      options.documentType &&
+      ['SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE'].includes(options.documentType)
+    ) {
+      params.push(options.documentType);
+      typeFilter = `AND si.document_type = $${params.length}`;
+    }
+    if (options.status) {
+      params.push(options.status);
+      statusFilter = `AND si."Status" = $${params.length}`;
+    }
+
+    const suppResult = await pool.query(
+      `SELECT
          si."Id" AS note_id,
          si."SupplierInvoiceNumber" AS note_number,
          si.document_type,
@@ -353,42 +353,42 @@ export async function getNoteRegister(
          ${typeFilter}
          ${statusFilter}
        ORDER BY si."InvoiceDate" DESC, si."CreatedAt" DESC`,
-            params,
-        );
+      params,
+    );
 
-        for (const r of suppResult.rows) {
-            rows.push({
-                noteId: r.note_id,
-                noteNumber: r.note_number,
-                documentType: r.document_type,
-                side: 'SUPPLIER',
-                partyName: r.party_name || '',
-                referenceInvoiceNumber: r.ref_invoice_number || '',
-                reason: r.reason,
-                subtotal: toNum(r.subtotal),
-                taxAmount: toNum(r.tax_amount),
-                totalAmount: toNum(r.total_amount),
-                status: r.status,
-                issueDate: r.issue_date,
-                createdAt: r.created_at,
-            });
-        }
+    for (const r of suppResult.rows) {
+      rows.push({
+        noteId: r.note_id,
+        noteNumber: r.note_number,
+        documentType: r.document_type,
+        side: 'SUPPLIER',
+        partyName: r.party_name || '',
+        referenceInvoiceNumber: r.ref_invoice_number || '',
+        reason: r.reason,
+        subtotal: toNum(r.subtotal),
+        taxAmount: toNum(r.tax_amount),
+        totalAmount: toNum(r.total_amount),
+        status: r.status,
+        issueDate: r.issue_date,
+        createdAt: r.created_at,
+      });
     }
+  }
 
-    return rows;
+  return rows;
 }
 
 // ─── 6. Tax Reversal Report ────────────────────────────────────────
 export async function getTaxReversalReport(
-    pool: Pool,
-    startDate: string,
-    endDate: string,
+  pool: Pool,
+  startDate: string,
+  endDate: string,
 ): Promise<TaxReversalRow[]> {
-    // Output VAT from customer invoices/notes, Input VAT from supplier invoices/notes
-    // Grouped by tax rate from line items
+  // Output VAT from customer invoices/notes, Input VAT from supplier invoices/notes
+  // Grouped by tax rate from line items
 
-    const result = await pool.query(
-        `WITH customer_tax AS (
+  const result = await pool.query(
+    `WITH customer_tax AS (
        SELECT
          COALESCE(ili."TaxRate", 0) AS tax_rate,
          SUM(CASE
@@ -400,10 +400,10 @@ export async function getTaxReversalReport(
            THEN ili."TaxAmount" ELSE 0
          END) AS tax_reversed_cn
        FROM invoice_line_items ili
-       JOIN invoices i ON i."Id" = ili."InvoiceId"
-       WHERE i."Status" NOT IN ('Cancelled', 'CANCELLED', 'Draft', 'DRAFT')
-         AND i."InvoiceDate" >= $1::date
-         AND i."InvoiceDate" <= $2::date
+       JOIN invoices i ON i.id = ili."InvoiceId"
+       WHERE i.status NOT IN ('CANCELLED', 'DRAFT')
+         AND i.issue_date >= $1::date
+         AND i.issue_date <= $2::date
        GROUP BY COALESCE(ili."TaxRate", 0)
      ),
      supplier_tax AS (
@@ -436,59 +436,59 @@ export async function getTaxReversalReport(
      FROM customer_tax ct
      FULL OUTER JOIN supplier_tax st ON st.tax_rate = ct.tax_rate
      ORDER BY tax_rate`,
-        [startDate, endDate],
-    );
+    [startDate, endDate],
+  );
 
-    return result.rows.map((r) => ({
-        taxRate: toNum(r.tax_rate),
-        salesTax: toNum(r.sales_tax),
-        taxReversedByCN: toNum(r.tax_reversed_cn),
-        netSalesTax: toNum(r.net_sales_tax),
-        purchaseTax: toNum(r.purchase_tax),
-        taxReversedBySCN: toNum(r.tax_reversed_scn),
-        netPurchaseTax: toNum(r.net_purchase_tax),
-    }));
+  return result.rows.map((r) => ({
+    taxRate: toNum(r.tax_rate),
+    salesTax: toNum(r.sales_tax),
+    taxReversedByCN: toNum(r.tax_reversed_cn),
+    netSalesTax: toNum(r.net_sales_tax),
+    purchaseTax: toNum(r.purchase_tax),
+    taxReversedBySCN: toNum(r.tax_reversed_scn),
+    netPurchaseTax: toNum(r.net_purchase_tax),
+  }));
 }
 
 // ─── 7. Invoice Adjustment History (for a single invoice) ──────────
 export async function getInvoiceAdjustments(
-    pool: Pool,
-    invoiceId: string,
-    side: 'CUSTOMER' | 'SUPPLIER' = 'CUSTOMER',
+  pool: Pool,
+  invoiceId: string,
+  side: 'CUSTOMER' | 'SUPPLIER' = 'CUSTOMER',
 ): Promise<InvoiceAdjustmentRow[]> {
-    if (side === 'CUSTOMER') {
-        const result = await pool.query(
-            `SELECT
-         i."Id" AS note_id,
-         i."InvoiceNumber" AS note_number,
+  if (side === 'CUSTOMER') {
+    const result = await pool.query(
+      `SELECT
+         i.id AS note_id,
+         i.invoice_number AS note_number,
          i.document_type,
          i.reason,
-         i."TotalAmount" AS total_amount,
-         i."TaxAmount" AS tax_amount,
-         i."Status" AS status,
-         i."InvoiceDate" AS issue_date
+         i.total_amount AS total_amount,
+         i.tax_amount AS tax_amount,
+         i.status AS status,
+         i.issue_date AS issue_date
        FROM invoices i
        WHERE i.reference_invoice_id = $1
          AND i.document_type IN ('CREDIT_NOTE', 'DEBIT_NOTE')
-       ORDER BY i."InvoiceDate" ASC, i."CreatedAt" ASC`,
-            [invoiceId],
-        );
+       ORDER BY i.issue_date ASC, i.created_at ASC`,
+      [invoiceId],
+    );
 
-        return result.rows.map((r) => ({
-            noteId: r.note_id,
-            noteNumber: r.note_number,
-            documentType: r.document_type,
-            reason: r.reason,
-            totalAmount: toNum(r.total_amount),
-            taxAmount: toNum(r.tax_amount),
-            status: r.status,
-            issueDate: r.issue_date,
-        }));
-    }
+    return result.rows.map((r) => ({
+      noteId: r.note_id,
+      noteNumber: r.note_number,
+      documentType: r.document_type,
+      reason: r.reason,
+      totalAmount: toNum(r.total_amount),
+      taxAmount: toNum(r.tax_amount),
+      status: r.status,
+      issueDate: r.issue_date,
+    }));
+  }
 
-    // Supplier side
-    const result = await pool.query(
-        `SELECT
+  // Supplier side
+  const result = await pool.query(
+    `SELECT
        si."Id" AS note_id,
        si."SupplierInvoiceNumber" AS note_number,
        si.document_type,
@@ -502,19 +502,19 @@ export async function getInvoiceAdjustments(
        AND si.document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
        AND si.deleted_at IS NULL
      ORDER BY si."InvoiceDate" ASC, si."CreatedAt" ASC`,
-        [invoiceId],
-    );
+    [invoiceId],
+  );
 
-    return result.rows.map((r) => ({
-        noteId: r.note_id,
-        noteNumber: r.note_number,
-        documentType: r.document_type,
-        reason: r.reason,
-        totalAmount: toNum(r.total_amount),
-        taxAmount: toNum(r.tax_amount),
-        status: r.status,
-        issueDate: r.issue_date,
-    }));
+  return result.rows.map((r) => ({
+    noteId: r.note_id,
+    noteNumber: r.note_number,
+    documentType: r.document_type,
+    reason: r.reason,
+    totalAmount: toNum(r.total_amount),
+    taxAmount: toNum(r.tax_amount),
+    status: r.status,
+    issueDate: r.issue_date,
+  }));
 }
 
 // ─── 8. Supplier Statement ─────────────────────────────────────────
@@ -525,12 +525,12 @@ export async function getInvoiceAdjustments(
  * (Credit to AP = we owe more, Debit to AP = we paid / reduced)
  */
 export async function getSupplierStatementOpeningBalance(
-    pool: Pool,
-    supplierId: string,
-    beforeDate: string,
+  pool: Pool,
+  supplierId: string,
+  beforeDate: string,
 ): Promise<number> {
-    const result = await pool.query(
-        `SELECT COALESCE(
+  const result = await pool.query(
+    `SELECT COALESCE(
            SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0
          ) AS opening
          FROM ledger_entries le
@@ -541,10 +541,10 @@ export async function getSupplierStatementOpeningBalance(
            AND le."EntityType" = 'supplier'
            AND lt."Status" = 'POSTED'
            AND le."EntryDate"::date < $2::date`,
-        [supplierId, beforeDate],
-    );
+    [supplierId, beforeDate],
+  );
 
-    return toNum(result.rows[0]?.opening);
+  return toNum(result.rows[0]?.opening);
 }
 
 /**
@@ -554,13 +554,13 @@ export async function getSupplierStatementOpeningBalance(
  * - Debit to AP  → "credit" column (liability reduced: payment, credit note)
  */
 export async function getSupplierStatementEntries(
-    pool: Pool,
-    supplierId: string,
-    startDate: string,
-    endDate: string,
+  pool: Pool,
+  supplierId: string,
+  startDate: string,
+  endDate: string,
 ): Promise<SupplierStatementEntry[]> {
-    const result = await pool.query(
-        `SELECT
+  const result = await pool.query(
+    `SELECT
            le."EntryDate"::date AS date,
            lt."ReferenceType" AS type,
            COALESCE(lt."ReferenceNumber", '') AS reference,
@@ -577,17 +577,17 @@ export async function getSupplierStatementEntries(
            AND le."EntryDate"::date >= $2::date
            AND le."EntryDate"::date <= $3::date
          ORDER BY le."EntryDate" ASC, le."CreatedAt" ASC`,
-        [supplierId, startDate, endDate],
-    );
+    [supplierId, startDate, endDate],
+  );
 
-    return result.rows.map((r) => ({
-        date: r.date,
-        type: r.type,
-        reference: r.reference || '',
-        description: r.description || '',
-        debit: toNum(r.debit),
-        credit: toNum(r.credit),
-    }));
+  return result.rows.map((r) => ({
+    date: r.date,
+    type: r.type,
+    reference: r.reference || '',
+    description: r.description || '',
+    debit: toNum(r.debit),
+    credit: toNum(r.credit),
+  }));
 }
 
 // ─── 9. Supplier Aging (Aged Payables) — GL-driven ─────────────────
@@ -596,11 +596,11 @@ export async function getSupplierStatementEntries(
 // Ages outstanding transactions by their entry date against asOfDate.
 // Only includes transactions with net positive balance (still owed).
 export async function getSupplierAging(
-    pool: Pool,
-    asOfDate: string,
+  pool: Pool,
+  asOfDate: string,
 ): Promise<SupplierAgingRow[]> {
-    const result = await pool.query(
-        `WITH ap_transactions AS (
+  const result = await pool.query(
+    `WITH ap_transactions AS (
        SELECT
          le."EntityId" AS supplier_id,
          lt."Id" AS txn_id,
@@ -641,19 +641,19 @@ export async function getSupplierAging(
      FROM with_supplier
      GROUP BY supplier_id, supplier_name
      ORDER BY total_outstanding DESC`,
-        [asOfDate],
-    );
+    [asOfDate],
+  );
 
-    return result.rows.map((r) => ({
-        supplierId: r.supplier_id,
-        supplierName: r.supplier_name,
-        totalInvoices: Number(r.total_invoices),
-        totalOutstanding: toNum(r.total_outstanding),
-        current: toNum(r.current_amount),
-        days30: toNum(r.days_1_30),
-        days60: toNum(r.days_31_60),
-        days90: toNum(r.days_61_90),
-        over90: toNum(r.days_over_90),
-        maxDaysOverdue: Number(r.max_days_overdue || 0),
-    }));
+  return result.rows.map((r) => ({
+    supplierId: r.supplier_id,
+    supplierName: r.supplier_name,
+    totalInvoices: Number(r.total_invoices),
+    totalOutstanding: toNum(r.total_outstanding),
+    current: toNum(r.current_amount),
+    days30: toNum(r.days_1_30),
+    days60: toNum(r.days_31_60),
+    days90: toNum(r.days_61_90),
+    over90: toNum(r.days_over_90),
+    maxDaysOverdue: Number(r.max_days_overdue || 0),
+  }));
 }

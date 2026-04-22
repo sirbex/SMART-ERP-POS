@@ -121,6 +121,80 @@ describe('accountingCore', () => {
                 })
             ).rejects.toThrow();
         });
+
+        it('should take an advisory lock before generating the next transaction number', async () => {
+            const queryLog: string[] = [];
+
+            mockQuery.mockImplementation(async (...args: unknown[]) => {
+                const sql = String(args[0]);
+                const params = Array.isArray(args[1]) ? (args[1] as unknown[]) : [];
+                queryLog.push(sql);
+
+                if (sql.includes('WHERE "IdempotencyKey" = $1')) {
+                    return { rows: [], rowCount: 0 };
+                }
+
+                if (sql.includes('FROM financial_periods') && sql.includes('start_date AND end_date')) {
+                    return { rows: [{ status: 'OPEN' }], rowCount: 1 };
+                }
+
+                if (sql.includes('pg_advisory_xact_lock')) {
+                    return { rows: [{ pg_advisory_xact_lock: '' }], rowCount: 1 };
+                }
+
+                if (sql.includes('SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER))')) {
+                    return { rows: [{ next_num: '42' }], rowCount: 1 };
+                }
+
+                if (sql.includes('INSERT INTO ledger_transactions')) {
+                    return { rows: [], rowCount: 1 };
+                }
+
+                if (sql.includes('FROM accounts') && sql.includes('WHERE "AccountCode" = $1')) {
+                    const accountCode = String(params[0]);
+                    const accountMap: Record<string, { Id: string; AccountName: string; NormalBalance: 'DEBIT' | 'CREDIT' }> = {
+                        '1010': { Id: 'acct-cash', AccountName: 'Cash', NormalBalance: 'DEBIT' },
+                        '4000': { Id: 'acct-revenue', AccountName: 'Sales Revenue', NormalBalance: 'CREDIT' },
+                    };
+                    return { rows: [accountMap[accountCode]], rowCount: accountMap[accountCode] ? 1 : 0 };
+                }
+
+                if (
+                    sql.includes('INSERT INTO ledger_entries') ||
+                    sql.includes('UPDATE accounts') ||
+                    sql.includes('INSERT INTO gl_period_balances') ||
+                    sql.includes('INSERT INTO audit_log')
+                ) {
+                    return { rows: [], rowCount: 1 };
+                }
+
+                return { rows: [], rowCount: 0 };
+            });
+
+            const result = await accountingCore.createJournalEntry({
+                description: 'Successful entry',
+                entryDate: '2025-01-01',
+                referenceType: 'TEST',
+                referenceId: 'test-4',
+                referenceNumber: 'TEST-004',
+                lines: [
+                    { accountCode: '1010', debitAmount: 100, creditAmount: 0, description: 'Cash' },
+                    { accountCode: '4000', debitAmount: 0, creditAmount: 100, description: 'Revenue' },
+                ],
+                userId: 'user1',
+                idempotencyKey: 'idem-4',
+            });
+
+            const advisoryLockQueryIndex = queryLog.findIndex((sql) => sql.includes('pg_advisory_xact_lock'));
+            const transactionNumberQueryIndex = queryLog.findIndex((sql) =>
+                sql.includes('SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER))')
+            );
+
+            expect(result.transactionNumber).toBe('TXN-000042');
+            expect(advisoryLockQueryIndex).toBeGreaterThanOrEqual(0);
+            expect(transactionNumberQueryIndex).toBeGreaterThanOrEqual(0);
+            expect(advisoryLockQueryIndex).toBeLessThan(transactionNumberQueryIndex);
+        });
     });
 
     describe('getAccountBalance', () => {

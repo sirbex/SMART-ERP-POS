@@ -106,7 +106,7 @@ export class AgedBalanceService {
        FROM sales s
        LEFT JOIN customers c ON c.id = s.customer_id
        WHERE s.payment_method = 'CREDIT'
-         AND s.status NOT IN ('VOID', 'REFUNDED')
+         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
          AND (s.total_amount - COALESCE(s.amount_paid, 0)) > 0.01
          AND s.sale_date <= $1
        ORDER BY c.name, s.sale_date`,
@@ -118,18 +118,18 @@ export class AgedBalanceService {
       `SELECT
          c.id as entity_id,
          c.name as entity_name,
-         i."InvoiceNumber" as invoice_number,
-         i."InvoiceDate" as invoice_date,
-         i."DueDate" as due_date,
-         i."TotalAmount" as original_amount,
-         (i."TotalAmount" - COALESCE(i."AmountPaid", 0)) as outstanding_amount,
-         ($1::date - COALESCE(i."DueDate", i."InvoiceDate")::date) as days_overdue
+         i.invoice_number as invoice_number,
+         i.issue_date as invoice_date,
+         i.due_date as due_date,
+         i.total_amount as original_amount,
+         (i.total_amount - COALESCE(i.amount_paid, 0)) as outstanding_amount,
+         ($1::date - COALESCE(i.due_date, i.issue_date)::date) as days_overdue
        FROM invoices i
-       LEFT JOIN customers c ON c.id = i."CustomerId"
-       WHERE i."Status" NOT IN ('CANCELLED', 'PAID')
-         AND (i."TotalAmount" - COALESCE(i."AmountPaid", 0)) > 0.01
-         AND i."InvoiceDate" <= $1
-       ORDER BY c.name, i."InvoiceDate"`,
+       LEFT JOIN customers c ON c.id = i.customer_id
+       WHERE i.status NOT IN ('CANCELLED', 'PAID')
+         AND (i.total_amount - COALESCE(i.amount_paid, 0)) > 0.01
+         AND i.issue_date <= $1
+       ORDER BY c.name, i.issue_date`,
       [asOfDate]
     );
 

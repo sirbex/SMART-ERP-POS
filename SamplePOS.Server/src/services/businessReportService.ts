@@ -66,6 +66,20 @@ export interface SupplierPaymentByAccountEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Customer Deposits (Liability section)
+// ---------------------------------------------------------------------------
+
+export interface CustomerDepositSummary {
+  totalDeposited: number;
+  totalCleared: number;
+  depositCount: number;
+  clearingCount: number;
+  outstandingLiability: number;
+  activeDepositCount: number;
+  customersWithDeposits: number;
+}
+
+// ---------------------------------------------------------------------------
 // Section 5 — Summary
 // ---------------------------------------------------------------------------
 
@@ -93,6 +107,7 @@ export interface BusinessPerformanceReport {
   costAndStock: CostAndStockEntry[];
   expensesByAccount: ExpenseByAccountEntry[];
   supplierPaymentsByAccount: SupplierPaymentByAccountEntry[];
+  customerDeposits: CustomerDepositSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +122,7 @@ export async function getBusinessPerformanceReport(
 
   try {
     // Run all 5 sections in parallel
-    const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals] = await Promise.all([
+    const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals, depositSummary] = await Promise.all([
       repo.getMoneyIn(filters, pool),
       repo.getRevenueByCategory(filters, pool),
       repo.getCostAndStock(filters, pool),
@@ -116,6 +131,7 @@ export async function getBusinessPerformanceReport(
         : Promise.resolve([]),
       repo.getSupplierPaymentsByAccount(filters, pool),
       repo.getSummaryTotals(filters, pool),
+      repo.getCustomerDepositSummary(filters, pool),
     ]);
 
     // --- Normalize Section 1 ---
@@ -163,6 +179,17 @@ export async function getBusinessPerformanceReport(
       totalPaid: Money.toNumber(Money.parseDb(r.total_paid)),
     }));
 
+    // --- Normalize Customer Deposits ---
+    const customerDeposits: CustomerDepositSummary = {
+      totalDeposited: Money.toNumber(Money.parseDb(depositSummary.total_deposited)),
+      totalCleared: Money.toNumber(Money.parseDb(depositSummary.total_cleared)),
+      depositCount: depositSummary.deposit_count,
+      clearingCount: depositSummary.clearing_count,
+      outstandingLiability: Money.toNumber(Money.parseDb(depositSummary.outstanding_liability)),
+      activeDepositCount: depositSummary.active_deposit_count,
+      customersWithDeposits: depositSummary.customers_with_deposits,
+    };
+
     // --- Section 5: Summary ---
     const totalRevenue = Money.toNumber(Money.parseDb(totals.total_revenue));
     const totalCogs = Money.toNumber(Money.parseDb(totals.total_cogs));
@@ -198,6 +225,7 @@ export async function getBusinessPerformanceReport(
       costAndStock,
       expensesByAccount,
       supplierPaymentsByAccount,
+      customerDeposits,
     };
   } catch (error) {
     logger.error('Error generating business performance report', { error, filters });

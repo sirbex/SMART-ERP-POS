@@ -54,6 +54,10 @@ const ReportsPage = lazyWithRetry(() => import('./pages/ReportsPage'));
 const ExpenseReportsPage = lazyWithRetry(() => import('./pages/reports/ExpenseReportsPage'));
 const ReorderDashboardPage = lazyWithRetry(() => import('./pages/reports/ReorderDashboardPage'));
 const BusinessPerformancePage = lazyWithRetry(() => import('./pages/reports/BusinessPerformancePage'));
+const InventoryValuationReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryValuationReportPage'));
+const InventoryReconciliationReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryReconciliationReportPage'));
+const InventoryAnalyticsReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryAnalyticsReportPage'));
+const InventoryMarginsReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryMarginsReportPage'));
 const AdminDataManagementPage = lazyWithRetry(() => import('./pages/AdminDataManagementPage'));
 const StockLevelsPage = lazyWithRetry(() => import('./pages/inventory/StockLevelsPage'));
 const ProductsPage = lazyWithRetry(() => import('./pages/inventory/ProductsPage'));
@@ -103,6 +107,12 @@ const GLIntegrityPage = lazyWithRetry(() => import('./pages/accounting/GLIntegri
 const AgedBalancePage = lazyWithRetry(() => import('./pages/accounting/AgedBalancePage'));
 const DeliveryPage = lazyWithRetry(() => import('./pages/delivery/DeliveryPage'));
 const DeliveryNotesPage = lazyWithRetry(() => import('./pages/delivery-notes/DeliveryNotesPage'));
+const DistSalesOrderListPage = lazyWithRetry(() => import('./pages/distribution/DistSalesOrderListPage'));
+const DistSalesOrderCreatePage = lazyWithRetry(() => import('./pages/distribution/DistSalesOrderCreatePage'));
+const DistSalesOrderDetailPage = lazyWithRetry(() => import('./pages/distribution/DistSalesOrderDetailPage'));
+const DistSalesOrderEditPage = lazyWithRetry(() => import('./pages/distribution/DistSalesOrderEditPage'));
+const DistInvoiceListPage = lazyWithRetry(() => import('./pages/distribution/DistInvoiceListPage'));
+const DistClearingPage = lazyWithRetry(() => import('./pages/distribution/DistClearingPage'));
 const ImportPage = lazyWithRetry(() => import('./pages/ImportPage'));
 const BarcodeLookupPage = lazyWithRetry(() => import('./pages/inventory/BarcodeLookupPage'));
 const CRMPage = lazyWithRetry(() => import('./pages/crm/CRMPage'));
@@ -112,6 +122,7 @@ const CategoriesPage = lazyWithRetry(() => import('./pages/pricing/CategoriesPag
 const PricePreviewPage = lazyWithRetry(() => import('./pages/pricing/PricePreviewPage'));
 const QuickLoginScreen = lazyWithRetry(() => import('./pages/pos/QuickLoginScreen'));
 const MyQuickLoginPage = lazyWithRetry(() => import('./pages/settings/MyQuickLoginPage'));
+const DownPaymentClearingPage = lazyWithRetry(() => import('./pages/accounting/DownPaymentClearingPage'));
 
 // Platform (Super Admin) imports
 import { PlatformAuthProvider, usePlatformAuth } from './contexts/PlatformAuthContext';
@@ -749,6 +760,18 @@ function App() {
                       </ProtectedRoute>
                     }
                   />
+                  <Route
+                    path="/accounting/down-payment-clearing"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.post', 'accounting.read']} requiredFeature="accounting">
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <DownPaymentClearingPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
 
                   {/* Quick Login Setup - ALL authenticated users */}
                   <Route
@@ -818,6 +841,40 @@ function App() {
                     }
                   />
 
+                  {/* SAP/Odoo-style Inventory Reports (4 independent screens) */}
+                  <Route
+                    path="/reports/inventory/valuation"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read']} requiredFeature="reports">
+                        <InventoryValuationReportPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/reports/inventory/reconciliation"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read']} requiredFeature="reports">
+                        <InventoryReconciliationReportPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/reports/inventory/analytics"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read']} requiredFeature="reports">
+                        <InventoryAnalyticsReportPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/reports/inventory/margins"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read']} requiredFeature="reports">
+                        <InventoryMarginsReportPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
                   {/* Admin Routes - ADMIN only */}
                   <Route
                     path="/admin/data-management"
@@ -860,6 +917,56 @@ function App() {
                     element={
                       <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['delivery.read']} requiredFeature="invoices">
                         <DeliveryNotesPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Distribution Module (SAP-style document flow) */}
+                  <Route
+                    path="/distribution/sales-orders"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['orders.read']} requiredFeature="invoices">
+                        <DistSalesOrderListPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/distribution/sales-orders/new"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['orders.create']} requiredFeature="invoices">
+                        <DistSalesOrderCreatePage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/distribution/sales-orders/:id/edit"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['orders.create']} requiredFeature="invoices">
+                        <DistSalesOrderEditPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/distribution/sales-orders/:id"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['orders.read']} requiredFeature="invoices">
+                        <DistSalesOrderDetailPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/distribution/invoices"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['invoices.read']} requiredFeature="invoices">
+                        <DistInvoiceListPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/distribution/clearing"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.post']} requiredFeature="invoices">
+                        <DistClearingPage />
                       </ProtectedRoute>
                     }
                   />

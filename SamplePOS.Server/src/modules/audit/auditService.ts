@@ -160,7 +160,7 @@ export async function logSaleVoided(
       action: 'VOID',
       actionDetails: `Sale ${saleNumber} voided. Reason: ${reason}`,
       oldValues: originalSaleData,
-      newValues: { ...originalSaleData, status: 'VOIDED', voidReason: reason },
+      newValues: { ...originalSaleData, status: 'VOID', voidReason: reason },
       severity: 'WARNING',
       category: 'FINANCIAL',
       tags: ['sale', 'void', 'correction'],
@@ -665,6 +665,37 @@ export async function logPriceChange(
       severity: 'INFO',
       category: 'INVENTORY',
       tags: ['product', 'price', 'change'],
+    },
+    context
+  );
+}
+
+// =====================================================
+// RECEIPT REPRINT AUDIT FUNCTIONS
+// =====================================================
+
+/**
+ * Log receipt reprint action
+ */
+export async function logReceiptReprint(
+  pool: Pool,
+  saleId: string,
+  saleNumber: string,
+  printCount: number,
+  context: AuditContext
+): Promise<AuditLog | null> {
+  return await logAction(
+    pool,
+    {
+      entityType: 'SALE',
+      entityId: saleId,
+      entityNumber: saleNumber,
+      action: 'REPRINT',
+      actionDetails: `Receipt reprinted for ${saleNumber} (print #${printCount})`,
+      newValues: { printCount },
+      severity: printCount > 3 ? 'WARNING' : 'INFO',
+      category: 'FINANCIAL',
+      tags: ['sale', 'receipt', 'reprint'],
     },
     context
   );

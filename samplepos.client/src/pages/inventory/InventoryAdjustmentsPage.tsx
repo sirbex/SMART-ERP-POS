@@ -14,10 +14,10 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { ResponsiveGrid } from '../../components/ui/ResponsiveGrid';
-import { useStockLevels, useAdjustInventory } from '../../hooks/useInventory';
+import { useStockLevels, useAdjustInventory, useAdjustBatch } from '../../hooks/useInventory';
 import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
-import { InventoryAdjustmentSchema } from '@shared/zod/inventory';
+import { BatchAdjustmentSchema } from '@shared/zod/inventory';
 import apiClient from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
@@ -88,7 +88,9 @@ export default function InventoryAdjustmentsPage() {
   const queryClient = useQueryClient();
   const { data: stockLevelsData, isLoading, error } = useStockLevels();
   const adjustInventoryMutation = useAdjustInventory();
-  const { data: productsData } = useProducts();
+  const adjustBatchMutation = useAdjustBatch();
+  // Load products for category map (static, for batch search)
+  const { data: productsData } = useProducts({ limit: 500 });
 
   // Get recent adjustment movements for quick reference (today only)
   const todayStr = getBusinessDate();
@@ -122,6 +124,11 @@ export default function InventoryAdjustmentsPage() {
   const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
   const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
 
+  // Physical count: server-side search so all products are reachable (DB has >500 products)
+  // When search term ≥2 chars, API filters server-side; otherwise loads first 500.
+  const pcSearchParam = physicalCountSearchTerm.trim().length >= 2 ? physicalCountSearchTerm.trim() : undefined;
+  const { data: pcProductsData } = useProducts({ search: pcSearchParam, limit: 500 });
+
   // Refs for keyboard navigation
   const quantityInputRef = useRef<HTMLInputElement>(null);
   const reasonInputRef = useRef<HTMLTextAreaElement>(null);
@@ -148,7 +155,7 @@ export default function InventoryAdjustmentsPage() {
       // Enter to submit (if not in textarea)
       if (e.key === 'Enter' && !e.shiftKey && e.target !== reasonInputRef.current) {
         e.preventDefault();
-        if (adjustmentQuantity && adjustmentReason && !adjustInventoryMutation.isPending) {
+        if (adjustmentQuantity && adjustmentReason && !adjustBatchMutation.isPending) {
           handleSubmitAdjustment();
         }
       }
@@ -157,7 +164,31 @@ export default function InventoryAdjustmentsPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAdjustModal, adjustmentQuantity, adjustmentReason, adjustInventoryMutation.isPending]);
+  }, [showAdjustModal, adjustmentQuantity, adjustmentReason, adjustBatchMutation.isPending]);
+
+  // Keyboard shortcuts for physical count modal
+  useEffect(() => {
+    if (!showPhysicalCountModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (!isProcessingCount) setShowPhysicalCountModal(false);
+      }
+      // Enter submits Process Count (only when not in an input/textarea to avoid conflicts)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        e.preventDefault();
+        const hasCounted = Object.values(countedQuantities).some(v => v !== '');
+        const canSubmit = !isProcessingCount && hasCounted && physicalCountReason.trim();
+        if (canSubmit) handleSubmitPhysicalCount();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPhysicalCountModal, isProcessingCount, countedQuantities, physicalCountReason]);
 
   // Auto-focus quantity input when modal opens
   useEffect(() => {
@@ -243,14 +274,14 @@ export default function InventoryAdjustmentsPage() {
   // Reset batch page on search change
   useEffect(() => { setCurrentPage(1); }, [searchTerm]);
 
-  // Products for physical count (includes ALL active products, even with zero stock)
+  // Products for physical count (uses pcProductsData — server-side search-aware)
   const products = useMemo(() => {
-    if (!productsData) return [];
-    if (productsData.data && Array.isArray(productsData.data)) {
-      return productsData.data;
+    if (!pcProductsData) return [];
+    if (pcProductsData.data && Array.isArray(pcProductsData.data)) {
+      return pcProductsData.data;
     }
-    return Array.isArray(productsData) ? productsData : [];
-  }, [productsData]);
+    return Array.isArray(pcProductsData) ? pcProductsData : [];
+  }, [pcProductsData]);
 
   // Stock level lookup by product_id
   const stockLevelMap = useMemo(() => {
@@ -296,15 +327,10 @@ export default function InventoryAdjustmentsPage() {
   }, [physicalCountItems, countedQuantities]);
 
   // Filter physical count items
+  // Text filtering is handled server-side (see pcProductsData / pcSearchParam).
+  // Client-side filters only apply to discrepancy/uncounted toggles.
   const physicalCountFilteredItems = useMemo(() => {
     let filtered = [...physicalCountItems];
-    if (physicalCountSearchTerm.trim()) {
-      const searchLower = physicalCountSearchTerm.toLowerCase();
-      filtered = filtered.filter(item =>
-        String(item.product_name || '').toLowerCase().includes(searchLower) ||
-        String(item.sku || '').toLowerCase().includes(searchLower)
-      );
-    }
     if (showOnlyDiscrepancies) {
       filtered = filtered.filter(item => {
         const countedValue = countedQuantities[item.id];
@@ -317,7 +343,7 @@ export default function InventoryAdjustmentsPage() {
       );
     }
     return filtered;
-  }, [physicalCountItems, physicalCountSearchTerm, showOnlyDiscrepancies, showOnlyUncounted, countedQuantities]);
+  }, [physicalCountItems, showOnlyDiscrepancies, showOnlyUncounted, countedQuantities]);
 
   // Pagination for physical count items
   const physicalCountTotalPages = Math.max(1, Math.ceil(physicalCountFilteredItems.length / ITEMS_PER_PAGE));
@@ -340,6 +366,7 @@ export default function InventoryAdjustmentsPage() {
     setIsProcessingCount(true);
 
     try {
+      // Build enterprise adjustment records — explicit direction, reason = PHYSICAL_COUNT
       const adjustments = physicalCountItems
         .filter(item => {
           const counted = countedQuantities[item.id];
@@ -348,11 +375,12 @@ export default function InventoryAdjustmentsPage() {
         .map(item => {
           const counted = parseFloat(countedQuantities[item.id]);
           const current = item.expected_quantity;
+          const diff = counted - current;
           return {
             productId: item.product_id,
-            adjustment: counted - current,
-            reason: `${physicalCountReason} | SKU: ${item.sku} | Expected: ${current.toFixed(2)}, Counted: ${counted.toFixed(2)}`,
-            userId: currentUser.id,
+            quantity: Math.abs(diff),
+            direction: diff > 0 ? 'IN' as const : 'OUT' as const,
+            notes: `${physicalCountReason} | SKU: ${item.sku} | Expected: ${current.toFixed(2)}, Counted: ${counted.toFixed(2)}`,
             productName: item.product_name,
           };
         });
@@ -363,7 +391,7 @@ export default function InventoryAdjustmentsPage() {
         return;
       }
 
-      const confirmMsg = `Process physical count?\n\n${adjustments.length} adjustment(s) will be created:\n${adjustments.slice(0, 5).map(a => `• ${a.productName}: ${a.adjustment > 0 ? '+' : ''}${a.adjustment.toFixed(2)}`).join('\n')}${adjustments.length > 5 ? `\n... and ${adjustments.length - 5} more` : ''}`;
+      const confirmMsg = `Process physical count?\n\n${adjustments.length} adjustment(s) will be created:\n${adjustments.slice(0, 5).map(a => `• ${a.productName}: ${a.direction === 'IN' ? '+' : '-'}${a.quantity.toFixed(2)}`).join('\n')}${adjustments.length > 5 ? `\n... and ${adjustments.length - 5} more` : ''}`;
       if (!window.confirm(confirmMsg)) {
         setIsProcessingCount(false);
         return;
@@ -375,22 +403,29 @@ export default function InventoryAdjustmentsPage() {
 
       for (const adj of adjustments) {
         try {
-          const validatedData = InventoryAdjustmentSchema.parse({
+          const validatedData = BatchAdjustmentSchema.parse({
             productId: adj.productId,
-            adjustment: adj.adjustment,
-            reason: adj.reason,
-            userId: adj.userId,
+            quantity: adj.quantity,
+            direction: adj.direction,
+            reason: 'PHYSICAL_COUNT',
+            notes: adj.notes,
+            userId: currentUser.id,
           });
-          await adjustInventoryMutation.mutateAsync(validatedData);
+          await adjustBatchMutation.mutateAsync(validatedData);
           successCount++;
         } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          errors.push(`${adj.productName}: ${errorMsg}`);
+          const apiErr = err as { response?: { data?: { error_code?: string; details?: { remaining?: number; requested?: number } } }; message?: string };
+          const errCode = apiErr?.response?.data?.error_code;
+          const details = apiErr?.response?.data?.details;
+          const msg = errCode === 'INSUFFICIENT_BATCH_QTY'
+            ? `Has ${details?.remaining ?? 0} remaining, requested ${details?.requested ?? adj.quantity}`
+            : (err instanceof Error ? err.message : String(err));
+          errors.push(`${adj.productName}: ${msg}`);
           errorCount++;
         }
       }
 
-      let resultMessage = `Physical count complete!\n✅ ${successCount} adjustment(s) created`;
+      let resultMessage = `Physical count complete!\n✅ ${successCount} PHYSICAL_COUNT adjustment(s) created`;
       if (errorCount > 0) {
         resultMessage += `\n\n❌ ${errorCount} failed:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? `\n... and ${errors.length - 3} more` : ''}`;
       }
@@ -432,85 +467,82 @@ export default function InventoryAdjustmentsPage() {
 
   // Handle adjustment submission
   const handleSubmitAdjustment = useCallback(async () => {
-    console.log('🚀 handleSubmitAdjustment called!');
-    console.log('📦 selectedBatch:', selectedBatch);
-    console.log('👤 currentUser:', currentUser);
-
     if (!selectedBatch || !currentUser) {
-      console.error('❌ Missing required data:', { selectedBatch, currentUser });
       alert('Missing required data. Please try again.');
       return;
     }
 
-    console.log('✅ Starting adjustment submission...', {
-      product_id: selectedBatch.product_id,
-      product_name: selectedBatch.product_name,
-      adjustmentType,
-      adjustmentQuantity,
-      adjustmentReason,
-      userId: currentUser.id,
-    });
+    const qty = new Decimal(adjustmentQuantity || 0).toNumber();
+    if (qty <= 0) {
+      alert('Quantity must be a positive number.');
+      return;
+    }
+
+    // Map UI category + direction to enterprise reason + direction
+    type AdjReason = 'ADJUSTMENT' | 'DAMAGE' | 'EXPIRY' | 'PHYSICAL_COUNT' | 'WRITE_OFF';
+    type AdjDir = 'IN' | 'OUT';
+
+    const reason: AdjReason =
+      movementCategory === 'DAMAGE'
+        ? 'DAMAGE'
+        : movementCategory === 'EXPIRY'
+          ? 'EXPIRY'
+          : 'ADJUSTMENT';
+
+    const direction: AdjDir =
+      movementCategory === 'DAMAGE' || movementCategory === 'EXPIRY'
+        ? 'OUT'
+        : adjustmentType === 'increase'
+          ? 'IN'
+          : 'OUT';
 
     try {
-      if (movementCategory === 'DAMAGE' || movementCategory === 'EXPIRY') {
-        // Use stock-movements API for DAMAGE/EXPIRY
-        const qty = new Decimal(adjustmentQuantity || 0).toNumber();
-        // Send with movementType as backend RecordMovementSchema expects
-        await apiClient.post('stock-movements', {
-          productId: selectedBatch.product_id,
-          movementType: movementCategory,
-          quantity: qty,
-          notes: adjustmentReason,
-          createdBy: currentUser.id,
-        });
-        // Invalidate queries for fresh data
-        queryClient.invalidateQueries({ queryKey: ['stockLevels'] });
-        queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
-        queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
-      } else {
-        // ADJUSTMENT_IN / ADJUSTMENT_OUT via existing adjust endpoint
-        const qtyDecimal = new Decimal(adjustmentQuantity || 0);
-        const adjustment =
-          adjustmentType === 'increase' ? qtyDecimal.toNumber() : qtyDecimal.times(-1).toNumber();
+      const validatedData = BatchAdjustmentSchema.parse({
+        batchId: selectedBatch.id,
+        productId: selectedBatch.product_id,
+        quantity: qty,
+        direction,
+        reason,
+        notes: adjustmentReason,
+        userId: currentUser.id,
+      });
 
-        const validatedData = InventoryAdjustmentSchema.parse({
-          productId: selectedBatch.product_id,
-          adjustment,
-          reason: adjustmentReason,
-          userId: currentUser.id,
-        });
+      await adjustBatchMutation.mutateAsync(validatedData);
 
-        await adjustInventoryMutation.mutateAsync(validatedData);
-      }
-
-      // Success
       const typeLabel =
-        movementCategory === 'DAMAGE'
+        reason === 'DAMAGE'
           ? 'Damage recorded'
-          : movementCategory === 'EXPIRY'
+          : reason === 'EXPIRY'
             ? 'Expiry write-off recorded'
-            : 'Inventory adjusted';
+            : direction === 'IN'
+              ? 'Stock increased'
+              : 'Stock decreased';
+
       alert(`${typeLabel} successfully!`);
       setShowAdjustModal(false);
       setSelectedBatch(null);
       setAdjustmentQuantity('');
       setAdjustmentReason('');
       setMovementCategory('ADJUSTMENT');
+      setAdjustmentType('increase');
     } catch (error) {
-      console.error('❌ Adjustment failed:', error);
       if (error instanceof z.ZodError) {
-        const errors: Record<string, string> = {};
-        error.issues.forEach((issue) => {
-          if (issue.path[0]) {
-            errors[issue.path[0].toString()] = issue.message;
-          }
-        });
-        // Validation errors removed
-        console.error('❌ Validation errors:', errors);
-      } else {
-        console.error('❌ Error details:', error);
-        handleApiError(error, { fallback: 'Failed to adjust inventory' });
+        const first = error.issues[0];
+        alert(`Validation: ${first?.message ?? 'Invalid input'}`);
+        return;
       }
+      // Parse domain errors from the backend
+      const apiErr = error as { response?: { data?: { error_code?: string; details?: { remaining?: number; requested?: number } } } };
+      const errorCode = apiErr?.response?.data?.error_code;
+      const details = apiErr?.response?.data?.details;
+      if (errorCode === 'INSUFFICIENT_BATCH_QTY') {
+        alert(
+          `Cannot reduce stock.\nBatch has ${details?.remaining ?? 0} unit(s) remaining, but ${details?.requested ?? qty} unit(s) were requested.`
+        );
+        return;
+      }
+      console.error('Adjustment failed:', error);
+      handleApiError(error, { fallback: 'Failed to adjust inventory' });
     }
   }, [
     selectedBatch,
@@ -519,7 +551,7 @@ export default function InventoryAdjustmentsPage() {
     adjustmentType,
     adjustmentReason,
     movementCategory,
-    adjustInventoryMutation,
+    adjustBatchMutation,
     queryClient,
   ]);
 
@@ -1071,7 +1103,7 @@ export default function InventoryAdjustmentsPage() {
                   setShowAdjustModal(false);
                 }}
                 className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium"
-                disabled={adjustInventoryMutation.isPending}
+                disabled={adjustBatchMutation.isPending}
               >
                 Cancel (Esc)
               </button>
@@ -1083,10 +1115,10 @@ export default function InventoryAdjustmentsPage() {
                   e.stopPropagation();
                   handleSubmitAdjustment();
                 }}
-                disabled={adjustInventoryMutation.isPending || !formValidation.isValid}
+                disabled={adjustBatchMutation.isPending || !formValidation.isValid}
                 className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
-                {adjustInventoryMutation.isPending
+                {adjustBatchMutation.isPending
                   ? 'Saving...'
                   : movementCategory === 'DAMAGE'
                     ? 'Record Damage'

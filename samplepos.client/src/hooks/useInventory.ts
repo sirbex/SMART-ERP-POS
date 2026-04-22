@@ -137,6 +137,38 @@ export function useAdjustInventory() {
 }
 
 /**
+ * Enterprise batch adjustment — explicit direction + reason, always positive quantity.
+ * Use this for all new adjustment flows (manual, damage, expiry, physical count).
+ */
+export function useAdjustBatch() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      batchId?: string;        // Optional: backend auto-selects via FEFO when omitted
+      productId: string;
+      quantity: number;
+      direction: 'IN' | 'OUT';
+      reason: 'ADJUSTMENT' | 'DAMAGE' | 'EXPIRY' | 'PHYSICAL_COUNT' | 'WRITE_OFF';
+      notes: string;
+      userId: string;
+      documentId?: string;
+    }) => {
+      const response = await api.inventory.adjustBatch(data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: inventoryKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
+      queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
+    },
+    onError: (error) => {
+      console.error('Failed to adjust batch:', getErrorMessage(error));
+    },
+  });
+}
+
+/**
  * Get inventory value
  */
 export function useInventoryValue(productId?: string) {

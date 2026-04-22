@@ -625,8 +625,7 @@ export class GLIntegrityChecker {
       FROM ledger_entries le
       JOIN accounts a ON a."Id" = le."AccountId"
       JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-      WHERE lt."Status" = 'POSTED'
-        AND a."AccountType" = 'ASSET'
+      WHERE a."AccountType" = 'ASSET'
         AND a."AccountCode" NOT IN ('1550')  -- Accum Depreciation is contra
       GROUP BY a."AccountCode", a."AccountName", a."AccountType"
       HAVING SUM(le."DebitAmount") - SUM(le."CreditAmount") < -0.01
@@ -678,7 +677,6 @@ export class GLIntegrityChecker {
           COALESCE(SUM(le."CreditAmount"), 0)                   AS le_credits
         FROM ledger_entries le
         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-        WHERE lt."Status" = 'POSTED'
         GROUP BY le."AccountId",
                  EXTRACT(YEAR  FROM lt."TransactionDate")::INT,
                  EXTRACT(MONTH FROM lt."TransactionDate")::INT

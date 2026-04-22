@@ -192,8 +192,19 @@ export const quotationController = {
   deleteQuotation: asyncHandler(async (req: Request, res: Response) => {
     const pool: Pool = req.pool!;
     const { id } = UuidParamSchema.parse(req.params);
-    await quotationService.deleteQuotation(pool, id);
-    res.json({ success: true, message: 'Quotation deleted successfully' });
+    const permanent = req.query.permanent === 'true';
+
+    if (permanent) {
+      // Only ADMIN can permanently delete
+      const user = (req as unknown as { user?: { role?: string } }).user;
+      if (!user || user.role !== 'ADMIN') {
+        res.status(403).json({ success: false, error: 'Only admins can permanently delete quotations' });
+        return;
+      }
+    }
+
+    await quotationService.deleteQuotation(pool, id, permanent);
+    res.json({ success: true, message: permanent ? 'Quotation permanently deleted' : 'Quotation deleted successfully' });
   }),
 
   /**

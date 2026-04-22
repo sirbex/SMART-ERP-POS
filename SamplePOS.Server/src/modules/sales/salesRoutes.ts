@@ -36,7 +36,7 @@ const ListSalesQuerySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val ? parseInt(val) : 50)),
-  status: z.enum(['COMPLETED', 'CANCELLED', 'REFUNDED']).optional(),
+  status: z.enum(['COMPLETED', 'CANCELLED', 'REFUNDED', 'VOID', 'PARTIALLY_RETURNED', 'VOIDED_BY_RETURN']).optional(),
   customerId: z.string().uuid().optional(),
   cashierId: z.string().uuid().optional(),
   paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']).optional(),
@@ -456,7 +456,7 @@ export const salesController = {
       amountThreshold || 1000000 // Default threshold: 1M UGX
     );
 
-    // Log audit trail
+    // Log audit trail (failure here should not fail the void)
     try {
       const auditContext = req.auditContext || {
         userId: voidedById,
@@ -480,50 +480,15 @@ export const salesController = {
         },
         auditContext
       );
-
-      res.json({
-        success: true,
-        data: normalizeResponse(result),
-        message: `Sale ${result.sale.saleNumber} voided successfully`,
-      });
-    } catch (error: unknown) {
-      console.error('Error voiding sale:', error);
-
-      // Return appropriate status codes
-      if ((error instanceof Error ? error.message : String(error)).includes('not found')) {
-        res.status(404).json({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return;
-      }
-
-      if (
-        (error instanceof Error ? error.message : String(error)).includes(
-          'Manager approval required'
-        ) ||
-        (error instanceof Error ? error.message : String(error)).includes('must have MANAGER')
-      ) {
-        res.status(403).json({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return;
-      }
-
-      if ((error instanceof Error ? error.message : String(error)).includes('Cannot void')) {
-        res.status(400).json({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to void sale',
-      });
+    } catch (auditError: unknown) {
+      console.error('Audit logging failed for void:', auditError);
     }
+
+    res.json({
+      success: true,
+      data: normalizeResponse(result),
+      message: `Sale ${result.sale.saleNumber} voided successfully`,
+    });
   },
 
   /**
@@ -647,13 +612,13 @@ salesRoutes.get('/summary', authenticate, asyncHandler(salesController.getSalesS
 salesRoutes.get(
   '/summary/reconcile',
   authenticate,
-  requirePermission('reports.view'),
+  requirePermission('reports.read'),
   asyncHandler(salesController.reconcileSummary)
 );
 salesRoutes.post(
   '/summary/rebuild',
   authenticate,
-  requirePermission('settings.manage'),
+  requirePermission('settings.update'),
   asyncHandler(salesController.rebuildSummary)
 );
 
@@ -702,4 +667,56 @@ salesRoutes.get(
   '/:id/refunds',
   authenticate,
   asyncHandler(salesController.getRefundsBySaleId)
+);
+
+// Reprint receipt - requires sales.reprint permission (with audit trail)
+salesRoutes.post(
+  '/:id/reprint',
+  authenticate,
+  requirePermission('sales.reprint'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+
+    // Get the sale to verify it exists and get its sale number
+    const { salesRepository } = await import('./salesRepository.js');
+    const saleData = await salesRepository.getSaleById(pool, id);
+    if (!saleData) {
+      res.status(404).json({ success: false, error: 'Sale not found' });
+      return;
+    }
+
+    const saleNumber = saleData.sale.saleNumber || (saleData.sale as unknown as Record<string, unknown>).sale_number as string;
+
+    // Increment print_count
+    const result = await pool.query(
+      'UPDATE sales SET print_count = COALESCE(print_count, 0) + 1 WHERE id = $1 RETURNING print_count',
+      [id]
+    );
+    const printCount = result.rows[0].print_count;
+
+    // Log to audit trail
+    try {
+      const auditContext = req.auditContext || {
+        userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+        userName: req.user?.fullName,
+        userRole: req.user?.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      const { logReceiptReprint } = await import('../audit/auditService.js');
+      await logReceiptReprint(pool, id, saleNumber, printCount, auditContext);
+    } catch (auditError: unknown) {
+      console.error('Audit logging failed for receipt reprint:', auditError);
+    }
+
+    res.json({
+      success: true,
+      data: { printCount, isReprint: printCount > 1 },
+      message: printCount > 1
+        ? `Receipt reprinted (print #${printCount})`
+        : 'Receipt printed',
+    });
+  })
 );

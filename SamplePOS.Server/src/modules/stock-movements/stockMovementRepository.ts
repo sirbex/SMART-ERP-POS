@@ -183,15 +183,52 @@ export async function getAllMovements(
     values.push(filters.endDate);
   }
 
+  if (filters?.search) {
+    const like = `%${filters.search}%`;
+    whereClauses.push(
+      `(p.name ILIKE $${paramIndex}
+       OR COALESCE(p.sku::text, '') ILIKE $${paramIndex}
+       OR COALESCE(b.batch_number, '') ILIKE $${paramIndex}
+       OR COALESCE(s.sale_number, '') ILIKE $${paramIndex}
+       OR COALESCE(gr.receipt_number, '') ILIKE $${paramIndex}
+       OR COALESCE(sm.notes, '') ILIKE $${paramIndex}
+       OR COALESCE(sm.reference_id::text, '') ILIKE $${paramIndex})`
+    );
+    values.push(like);
+    paramIndex++;
+  }
+
   const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
+  // Count query (includes same JOINs so search filter works)
   const countResult = await pool.query(
-    `SELECT COUNT(*) FROM stock_movements sm ${whereClause}`,
+    `SELECT COUNT(*)
+     FROM stock_movements sm
+     JOIN products p ON sm.product_id = p.id
+     LEFT JOIN inventory_batches b ON sm.batch_id = b.id
+     LEFT JOIN sales s ON sm.reference_type = 'SALE' AND sm.reference_id = s.id
+     LEFT JOIN goods_receipts gr ON sm.reference_type = 'GOODS_RECEIPT' AND sm.reference_id = gr.id
+     ${whereClause}`,
     values
   );
 
+  // Data query: CTE computes running balance per product over ALL movements,
+  // then the outer query applies date/type/search filters and paginates.
   const result = await pool.query(
-    `SELECT 
+    `WITH balance_cte AS (
+       SELECT
+         sm.id,
+         SUM(
+           CASE WHEN sm.movement_type IN (
+             'GOODS_RECEIPT','ADJUSTMENT_IN','TRANSFER_IN','RETURN','OPENING_BALANCE'
+           ) THEN sm.quantity ELSE -sm.quantity END
+         ) OVER (
+           PARTITION BY sm.product_id
+           ORDER BY sm.created_at ASC, sm.id ASC
+         ) AS balance_after
+       FROM stock_movements sm
+     )
+     SELECT
        sm.id,
        sm.movement_number AS "movementNumber",
        sm.product_id AS "productId",
@@ -207,14 +244,16 @@ export async function getAllMovements(
        p.name AS "productName",
        b.batch_number AS "batchNumber",
        s.sale_number AS "saleNumber",
-       gr.receipt_number AS "grNumber"
+       gr.receipt_number AS "grNumber",
+       bc.balance_after AS "balanceAfter"
      FROM stock_movements sm
      JOIN products p ON sm.product_id = p.id
      LEFT JOIN inventory_batches b ON sm.batch_id = b.id
      LEFT JOIN sales s ON sm.reference_type = 'SALE' AND sm.reference_id = s.id
      LEFT JOIN goods_receipts gr ON sm.reference_type = 'GOODS_RECEIPT' AND sm.reference_id = gr.id
+     JOIN balance_cte bc ON bc.id = sm.id
      ${whereClause}
-     ORDER BY sm.created_at DESC
+     ORDER BY sm.created_at DESC, sm.id DESC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
     [...values, limit, offset]
   );

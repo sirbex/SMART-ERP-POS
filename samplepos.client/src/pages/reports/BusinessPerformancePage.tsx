@@ -9,6 +9,7 @@ import {
   Wallet,
   Package,
   CreditCard,
+  Landmark,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
@@ -60,6 +61,16 @@ interface SupplierPaymentByAccountEntry {
   totalPaid: number;
 }
 
+interface CustomerDepositSummary {
+  totalDeposited: number;
+  totalCleared: number;
+  depositCount: number;
+  clearingCount: number;
+  outstandingLiability: number;
+  activeDepositCount: number;
+  customersWithDeposits: number;
+}
+
 interface BusinessSummary {
   totalRevenue: number;
   totalCogs: number;
@@ -80,6 +91,7 @@ interface BusinessPerformanceData {
   costAndStock: CostAndStockEntry[];
   expensesByAccount: ExpenseByAccountEntry[];
   supplierPaymentsByAccount?: SupplierPaymentByAccountEntry[];
+  customerDeposits?: CustomerDepositSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,10 +443,10 @@ const BusinessPerformancePage: React.FC = () => {
                               <td className="px-4 py-3 text-sm text-right">
                                 <span
                                   className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row.grossMarginPct >= 30
-                                      ? 'bg-green-100 text-green-800'
-                                      : row.grossMarginPct >= 15
-                                        ? 'bg-yellow-100 text-yellow-800'
-                                        : 'bg-red-100 text-red-800'
+                                    ? 'bg-green-100 text-green-800'
+                                    : row.grossMarginPct >= 15
+                                      ? 'bg-yellow-100 text-yellow-800'
+                                      : 'bg-red-100 text-red-800'
                                     }`}
                                 >
                                   {row.grossMarginPct.toFixed(1)}%
@@ -723,6 +735,47 @@ const BusinessPerformancePage: React.FC = () => {
               </div>
             )}
 
+            {/* ── Section 4c: Customer Deposits (Liability) ── */}
+            {report.customerDeposits && (report.customerDeposits.depositCount > 0 || report.customerDeposits.outstandingLiability > 0) && (
+              <div className="bg-white rounded-lg border shadow-sm">
+                <div className="px-6 py-4 border-b">
+                  <div className="flex items-center gap-2">
+                    <Landmark className="h-5 w-5 text-purple-600" />
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      Section 4c — Customer Deposits
+                    </h2>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Customer prepayments received, clearings applied, and outstanding liability (GL 2200)
+                  </p>
+                </div>
+                <div className="p-4 sm:p-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                    <div className="bg-purple-50 p-4 rounded-lg text-center">
+                      <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">Deposits Received</p>
+                      <p className="text-lg font-bold text-purple-700">{formatCurrency(report.customerDeposits.totalDeposited)}</p>
+                      <p className="text-xs text-gray-500 mt-1">{report.customerDeposits.depositCount} deposit(s)</p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                      <p className="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">Clearings Applied</p>
+                      <p className="text-lg font-bold text-green-700">{formatCurrency(report.customerDeposits.totalCleared)}</p>
+                      <p className="text-xs text-gray-500 mt-1">{report.customerDeposits.clearingCount} clearing(s)</p>
+                    </div>
+                    <div className="bg-orange-50 p-4 rounded-lg text-center">
+                      <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">Outstanding Liability</p>
+                      <p className="text-lg font-bold text-orange-700">{formatCurrency(report.customerDeposits.outstandingLiability)}</p>
+                      <p className="text-xs text-gray-500 mt-1">{report.customerDeposits.activeDepositCount} active</p>
+                    </div>
+                    <div className="bg-blue-50 p-4 rounded-lg text-center">
+                      <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-1">Customers</p>
+                      <p className="text-lg font-bold text-blue-700">{report.customerDeposits.customersWithDeposits}</p>
+                      <p className="text-xs text-gray-500 mt-1">with deposits</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── Section 5: Net Business Position (Income Statement) ── */}
             {showSection('NET_POSITION') && (
               <div className="bg-white rounded-lg border shadow-sm">
@@ -809,8 +862,8 @@ const BusinessPerformancePage: React.FC = () => {
                           </td>
                           <td
                             className={`px-4 py-4 text-base text-right font-bold ${report.summary.netProfit >= 0
-                                ? 'text-emerald-700'
-                                : 'text-red-700'
+                              ? 'text-emerald-700'
+                              : 'text-red-700'
                               }`}
                           >
                             {formatCurrency(report.summary.netProfit)}
