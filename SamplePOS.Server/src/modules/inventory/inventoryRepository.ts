@@ -142,7 +142,7 @@ export const inventoryRepository = {
          pi.reorder_level,
          CASE WHEN COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) <= pi.reorder_level THEN true ELSE false END as needs_reorder,
          COALESCE(po_agg.qty_on_order, 0) as qty_on_order,
-         COALESCE(so_agg.qty_reserved, 0) as qty_reserved,
+         0 as qty_reserved,
          (
            SELECT json_agg(
              json_build_object(
@@ -172,17 +172,8 @@ export const inventoryRepository = {
            AND poi.ordered_quantity > poi.received_quantity
          GROUP BY poi.product_id
        ) po_agg ON po_agg.product_id = p.id
-       LEFT JOIN (
-         SELECT sol.product_id,
-                SUM(sol.confirmed_qty - sol.delivered_qty) as qty_reserved
-         FROM dist_sales_order_lines sol
-         JOIN dist_sales_orders so ON so.id = sol.sales_order_id
-         WHERE so.status IN ('OPEN', 'PARTIALLY_DELIVERED')
-           AND sol.confirmed_qty > sol.delivered_qty
-         GROUP BY sol.product_id
-       ) so_agg ON so_agg.product_id = p.id
        WHERE p.is_active = true
-       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand, po_agg.qty_on_order, so_agg.qty_reserved
+       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand, po_agg.qty_on_order
        ORDER BY needs_reorder DESC, p.name ASC`
     );
     return result.rows;
