@@ -9,7 +9,7 @@ import CustomerDeposits from './CustomerDeposits';
 import { AxiosError } from 'axios';
 import { getBusinessDate, formatTimestampDate } from '../../utils/businessDate';
 import { pricingApi } from '../../api/pricing';
-import type { PriceGroup } from '../../api/pricing';
+import type { PriceGroup } from '../../types/pricing';
 
 interface CustomerData {
     id: string;
