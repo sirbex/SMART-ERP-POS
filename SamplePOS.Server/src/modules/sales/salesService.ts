@@ -930,6 +930,9 @@ export const salesService = {
 
       // GL POSTING: Application-layer double-entry (replaces database trigger)
       // Post AFTER items exist so revenue/COGS split is accurate.
+      // CRITICAL: pass `client` (the active transaction) so GL journals are
+      // atomic with the sale. Without txClient each journal opens its own
+      // inner transaction, causing phantom GL entries when the outer TX rolls back.
       try {
         await glEntryService.recordSaleToGL(
           {
@@ -951,7 +954,8 @@ export const salesService = {
               quantity: item.quantity,
             })),
           },
-          pool
+          pool,
+          client
         );
       } catch (glError: unknown) {
         logger.error('GL posting failed for sale — transaction will rollback', {

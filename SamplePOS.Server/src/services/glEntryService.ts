@@ -163,7 +163,7 @@ export interface SaleItemData {
  *   DR Cost of Goods Sold (5000)  inventoryCost
  *   CR Inventory (1300)           inventoryCost
  */
-export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<void> {
+export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     // Calculate amounts for proper GL posting using Money utility (decimal-safe)
     // For credit sales with partial payment, only AR should reflect unpaid portion
@@ -426,7 +426,11 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
     //   so the two entries never collide.
     const shouldPostCogs = invCostNum > 0;
 
-    // Use AccountingCore for audit-safe, idempotent journal entry creation
+    // Use AccountingCore for audit-safe, idempotent journal entry creation.
+    // txClient is forwarded when available so both GL journals commit atomically
+    // inside the caller's transaction (SAP LUW pattern). Without txClient the
+    // journals open their own UnitOfWork transaction, which can lead to phantom
+    // GL entries if the outer sale transaction rolls back.
     await AccountingCore.createJournalEntry({
       entryDate: sale.saleDate,
       description: `Sale: ${sale.saleNumber}`,
@@ -437,7 +441,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SALE-${sale.saleId}`,  // Deterministic key prevents duplicates
       source: 'SALES_INVOICE' as const,
-    }, pool);
+    }, pool, txClient);
 
     // Post the separate INVENTORY_MOVE journal for the goods-issue leg.
     // NOTE: referenceType is 'SALE_COGS' (not 'SALE') to allow both journals
@@ -467,7 +471,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool): Promise<vo
         userId: SYSTEM_USER_ID,
         idempotencyKey: `SALE-COGS-${sale.saleId}`,
         source: 'INVENTORY_MOVE' as const,
-      }, pool);
+      }, pool, txClient);
 
       logger.info('COGS entry created under INVENTORY_MOVE (service items excluded)', {
         saleNumber: sale.saleNumber,
