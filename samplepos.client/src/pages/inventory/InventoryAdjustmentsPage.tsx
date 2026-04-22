@@ -222,7 +222,7 @@ export default function InventoryAdjustmentsPage() {
         // Mock: Assume single batch per product for simplicity
         return [
           {
-            id: `batch-${level.product_id}`, // Mock batch ID
+            id: level.product_id, // Placeholder — stock level rows have no real batch ID; real batches fetched on demand
             product_id: level.product_id,
             product_name: level.product_name,
             batch_number: level.sku || 'MAIN',
@@ -498,7 +498,8 @@ export default function InventoryAdjustmentsPage() {
 
     try {
       const validatedData = BatchAdjustmentSchema.parse({
-        batchId: selectedBatch.id,
+        // batchId intentionally omitted — batches here are built from stock levels (no real batch ID).
+        // Backend auto-selects the correct batch via FEFO when batchId is absent.
         productId: selectedBatch.product_id,
         quantity: qty,
         direction,
