@@ -267,10 +267,16 @@ export async function checkAPReconciliation(dbPool?: pg.Pool): Promise<Reconcili
   const result = await pool.query(`
     SELECT 
       COALESCE(
-        (SELECT SUM("CreditAmount") - SUM("DebitAmount")
+        -- Only compare supplier-facing AP entries (GR, returns, payments).
+        -- EXPENSE / EXPENSE_PAYMENT entries also post to 2100 but are NOT
+        -- tracked in suppliers.OutstandingBalance — excluding them prevents
+        -- a false drift equal to net-unpaid-expense obligations.
+        (SELECT SUM(le."CreditAmount") - SUM(le."DebitAmount")
          FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
          JOIN accounts a ON a."Id" = le."AccountId"
-         WHERE a."AccountCode" = '2100'), 0
+         WHERE a."AccountCode" = '2100'
+           AND lt."ReferenceType" IN ('GOODS_RECEIPT', 'RETURN_GRN', 'SUPPLIER_PAYMENT')), 0
       ) as gl_balance,
       COALESCE(
         (SELECT SUM("OutstandingBalance") FROM suppliers), 0
