@@ -556,6 +556,24 @@ export const salesService = {
             remainingForCost = remainingForCost.minus(take);
           }
 
+          // ── DRIFT GUARD (preview) ────────────────────────────────────────────
+          // If FEFO batches can't cover the full quantity the GL COGS will fall
+          // back to average_cost instead of exact batch.cost_price — this causes
+          // inventory GL 1300 to drift from inventory_batches valuation.
+          // The sale will also throw ERR_STOCK_001 shortly, but logging here
+          // makes the accounting impact explicit before the rollback.
+          if (remainingForCost.greaterThan(0.001)) {
+            logger.warn('[COGS DRIFT RISK] FEFO batches insufficient for GL cost preview — GL COGS will use estimated average_cost, not exact batch cost_price', {
+              productId: item.productId,
+              productName: item.productName,
+              requestedBaseQty: baseQty.toFixed(4),
+              coveredByBatches: baseQty.minus(remainingForCost).toFixed(4),
+              shortfall: remainingForCost.toFixed(4),
+              action: 'Ensure stock is received before selling. Inventory integrity check recommended.',
+            });
+          }
+          // ────────────────────────────────────────────────────────────────────
+
           // Per-base-unit cost used only for profit margin validation
           unitCost = baseQty.greaterThan(0)
             ? Money.toNumber(Money.round(itemCostDecimal.dividedBy(baseQty), 2))
@@ -983,6 +1001,10 @@ export const salesService = {
         throw glError;
       }
 
+      // Map to accumulate actual FEFO batch deduction costs per productId.
+      // Used after all deductions to verify GL COGS matches actual batch costs (drift guard).
+      const actualBatchCostMap = new Map<string, Decimal>();
+
       // Deduct from cost layers AND inventory batches for each item
       for (const item of input.items) {
         // Skip custom items - they don't have inventory or cost layers
@@ -1164,6 +1186,13 @@ export const salesService = {
 
           remainingQty = remainingQty.minus(qtyToDeduct);
 
+          // Drift guard: accumulate actual batch cost so we can compare against GL after deductions
+          const _prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
+          actualBatchCostMap.set(
+            item.productId,
+            _prevActual.plus(qtyToDeduct.times(new Decimal(batch.cost_price ?? 0)))
+          );
+
           logger.info(`Inventory batch deducted for product ${item.productId}`, {
             batchId: batch.id,
             quantity: qtyToDeduct.toFixed(4),
@@ -1208,6 +1237,48 @@ export const salesService = {
 
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
         await syncProductQuantity(client, item.productId);
+      }
+
+      // ============================================================
+      // PERMANENT DRIFT GUARD: GL COGS vs actual FEFO batch deductions
+      // ============================================================
+      // The FEFO preview (no lock) and the actual deduction (FOR UPDATE) run
+      // in separate query rounds within the same transaction. Under PostgreSQL
+      // READ COMMITTED, a concurrent sale that commits between the preview and
+      // the deduction can change which batches are available — causing the GL
+      // to post a cost different from what was physically deducted.
+      //
+      // This check detects any such divergence immediately after the sale so
+      // the cashier / admin is alerted on the same response, rather than
+      // discovering it later via an integrity report.
+      for (const saleItem of itemsWithCosts) {
+        if (saleItem.productId?.startsWith('custom_')) continue;
+        const actualCost = actualBatchCostMap.get(saleItem.productId);
+        if (actualCost === undefined) continue; // service/custom item — no batch deduction
+
+        // GL cost for this item = costPrice (per selling unit) × quantity
+        const glCost = new Decimal(saleItem.costPrice || 0).times(new Decimal(saleItem.quantity));
+        const drift = actualCost.minus(glCost);
+
+        if (drift.abs().greaterThan(0.01)) {
+          const driftStr = drift.toFixed(2);
+          logger.warn('[COGS DRIFT DETECTED] GL COGS does not match actual FEFO batch deduction', {
+            saleId: sale.id,
+            saleNumber: sale.saleNumber,
+            productId: saleItem.productId,
+            productName: saleItem.productName,
+            glCostPosted: glCost.toFixed(2),
+            actualBatchCost: actualCost.toFixed(2),
+            drift: driftStr,
+            likelyCause: 'Concurrent sale modified FEFO batches between cost preview and deduction.',
+            action: 'Run /api/accounting/integrity to quantify impact.',
+          });
+          warnings.push(
+            `ACCOUNTING ALERT: Inventory cost mismatch for "${saleItem.productName}" — ` +
+            `GL posted ${glCost.toFixed(2)} but actual batch deduction was ${actualCost.toFixed(2)} ` +
+            `(drift: ${driftStr}). Run an inventory integrity check.`
+          );
+        }
       }
 
       // BR-SAL-002: Update customer balance for CREDIT sales (split payment support)
