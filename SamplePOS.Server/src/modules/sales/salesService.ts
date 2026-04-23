@@ -2400,53 +2400,31 @@ export const salesService = {
             productId,
           });
         } else {
-          // No specific batch - restore to newest active batch
-          const batchResult = await client.query(
-            `SELECT id FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-             ORDER BY received_date DESC, created_at DESC
-             LIMIT 1`,
-            [productId]
+          // No batch tracked on the original sale item.
+          // MUST create a new batch at the original unit_cost — NOT add to an existing
+          // batch that may have a different cost_price. The GL reversal uses the original
+          // sale COGS exactly; the Sub must match or GL 1300 > subledger drift results.
+          await client.query(
+            `INSERT INTO inventory_batches (
+              product_id, batch_number, quantity, remaining_quantity,
+              cost_price, received_date, status, notes
+            ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)`,
+            [
+              productId,
+              `VOID-RESTORE-${sale.sale_number}`,
+              quantity,
+              quantity,
+              Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
+              `Restored from voided sale ${sale.sale_number}`,
+            ]
           );
 
-          if (batchResult.rows.length > 0) {
-            const restoreBatchId = batchResult.rows[0].id;
-            await client.query(
-              `UPDATE inventory_batches
-               SET remaining_quantity = remaining_quantity + $1,
-                   updated_at = NOW()
-               WHERE id = $2`,
-              [quantity, restoreBatchId]
-            );
-
-            logger.info('Inventory restored to newest batch', {
-              batchId: restoreBatchId,
-              quantity,
-              productId,
-            });
-          } else {
-            // No active batch - create new one
-            await client.query(
-              `INSERT INTO inventory_batches (
-                product_id, batch_number, quantity, remaining_quantity,
-                cost_price, received_date, status, notes
-              ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)`,
-              [
-                productId,
-                `VOID-RESTORE-${sale.sale_number}`,
-                quantity,
-                quantity,
-                Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
-                `Restored from voided sale ${sale.sale_number}`,
-              ]
-            );
-
-            logger.info('New inventory batch created for void restoration', {
-              productId,
-              quantity,
-              saleNumber: sale.sale_number,
-            });
-          }
+          logger.info('New inventory batch created for void restoration (no original batch tracked)', {
+            productId,
+            quantity,
+            unitCost: Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
+            saleNumber: sale.sale_number,
+          });
         }
 
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
