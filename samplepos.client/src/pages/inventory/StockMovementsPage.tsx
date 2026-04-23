@@ -43,6 +43,8 @@ interface StockMovementRow {
   id: string;
   productId: string;
   productName?: string;
+  productCategory?: string | null;
+  productUom?: string | null;
   movementType: string;
   quantity: number | string;
   unitCost: number | string;
@@ -54,6 +56,7 @@ interface StockMovementRow {
   createdAt: string;
   saleNumber?: string;
   grNumber?: string;
+  supplierName?: string | null;
   userName?: string;
 }
 
@@ -662,12 +665,16 @@ export default function StockMovementsPage() {
 
                       {/* Category */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-400'
-                          }`}>
-                          {product?.category || '\u2014'}
-                        </span>
+                        {(() => {
+                          const cat = movement.productCategory || product?.category;
+                          return (
+                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                              cat ? 'bg-blue-50 text-blue-700' : 'text-gray-400'
+                            }`}>
+                              {cat || '\u2014'}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Type */}
@@ -684,7 +691,7 @@ export default function StockMovementsPage() {
                           {movementConfig.sign}{quantity.toFixed(2)}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {product?.unitOfMeasure || 'PCS'}
+                          {movement.productUom || product?.unitOfMeasure || 'PCS'}
                         </div>
                       </td>
 
@@ -726,6 +733,11 @@ export default function StockMovementsPage() {
                           </div>
                         ) : (
                           <div className="text-sm text-gray-400">-</div>
+                        )}
+                        {movement.referenceType === 'GOODS_RECEIPT' && movement.supplierName && (
+                          <div className="text-xs text-indigo-600 font-medium">
+                            {movement.supplierName}
+                          </div>
                         )}
                         {movement.userName && (
                           <div className="text-xs text-gray-500">

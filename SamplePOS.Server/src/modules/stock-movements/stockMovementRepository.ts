@@ -242,15 +242,22 @@ export async function getAllMovements(
        sm.created_by_id AS "createdById",
        sm.created_at AS "createdAt",
        p.name AS "productName",
+       p.category AS "productCategory",
+       COALESCE(def_u.symbol, 'PCS') AS "productUom",
        b.batch_number AS "batchNumber",
        s.sale_number AS "saleNumber",
        gr.receipt_number AS "grNumber",
+       sup."CompanyName" AS "supplierName",
        bc.balance_after AS "balanceAfter"
      FROM stock_movements sm
      JOIN products p ON sm.product_id = p.id
      LEFT JOIN inventory_batches b ON sm.batch_id = b.id
      LEFT JOIN sales s ON sm.reference_type = 'SALE' AND sm.reference_id = s.id
      LEFT JOIN goods_receipts gr ON sm.reference_type = 'GOODS_RECEIPT' AND sm.reference_id = gr.id
+     LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+     LEFT JOIN suppliers sup ON po.supplier_id = sup."Id"
+     LEFT JOIN product_uoms def_uom ON def_uom.product_id = p.id AND def_uom.is_default = true
+     LEFT JOIN uoms def_u ON def_uom.uom_id = def_u.id
      JOIN balance_cte bc ON bc.id = sm.id
      ${whereClause}
      ORDER BY sm.created_at DESC, sm.id DESC

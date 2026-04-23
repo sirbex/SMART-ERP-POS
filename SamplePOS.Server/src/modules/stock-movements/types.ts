@@ -76,9 +76,12 @@ export interface StockMovement {
  */
 export interface StockMovementWithDetails extends StockMovement {
   productName: string;
+  productCategory?: string | null;
+  productUom?: string | null;
   batchNumber: string | null;
   saleNumber?: string | null;
   grNumber?: string | null;
+  supplierName?: string | null;
   balanceAfter?: number | null;
 }
 
