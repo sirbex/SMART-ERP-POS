@@ -586,7 +586,7 @@ export const invoiceService = {
         // Apply deposit using FIFO - uses the sale_id from the invoice if available
         // If no sale_id, we create a reference using the invoice id
         const saleIdForDeposit = inv.sale_id || invoiceId;
-        await depositsService.applyDepositsToSaleInTransaction(
+        const depositApplicationResult = await depositsService.applyDepositsToSaleInTransaction(
           client,
           inv.customer_id,
           saleIdForDeposit,
@@ -603,7 +603,34 @@ export const invoiceService = {
           depositBalanceAfter: Money.toNumber(
             new Decimal(depositBalance.availableBalance).minus(input.amount)
           ),
+          applicationsCount: depositApplicationResult.applications.length,
         });
+
+        // GL POSTING for DEPOSIT applications: DR Customer Deposits, CR AR
+        // Must be inside the transaction so it rolls back if anything fails
+        const paymentDateStrDeposit =
+          input.paymentDate instanceof Date
+            ? formatDateBusiness(input.paymentDate)
+            : (typeof input.paymentDate === 'string' ? input.paymentDate : getBusinessDate());
+        const customerRow = await client.query('SELECT name FROM customers WHERE id = $1', [inv.customer_id]);
+        const customerNameForDeposit = customerRow.rows[0]?.name || 'Unknown';
+        for (const app of depositApplicationResult.applications) {
+          await glEntryService.recordDepositApplicationToGL(
+            {
+              applicationId: app.id,
+              depositId: app.depositId,
+              depositNumber: app.depositNumber || '',
+              saleId: saleIdForDeposit,
+              saleNumber: inv.invoice_number,
+              applicationDate: paymentDateStrDeposit,
+              amount: app.amountApplied,
+              customerId: inv.customer_id,
+              customerName: customerNameForDeposit,
+            },
+            pool,
+            client
+          );
+        }
       }
 
       // Record the payment
@@ -675,39 +702,33 @@ export const invoiceService = {
         await syncCustomerBalanceFromInvoices(client, inv.customer_id, 'INVOICE_PAYMENT');
       }
 
-      await client.query('COMMIT');
-
       // ============================================================
       // GL POSTING: Record invoice payment via glEntryService
       // DR Cash/Card/Bank | CR Accounts Receivable
-      // (DEPOSIT payments are skipped inside recordInvoicePaymentToGL)
+      // MUST be inside the transaction (txClient=client) so GL and payment
+      // commit or rollback atomically — prevents ghost payments without GL.
+      // DEPOSIT payments: GL was already posted above via recordDepositApplicationToGL.
       // ============================================================
-      try {
-        const paymentDateStr =
-          input.paymentDate instanceof Date
-            ? formatDateBusiness(input.paymentDate)
-            : (typeof input.paymentDate === 'string' ? input.paymentDate : getBusinessDate());
+      const paymentDateStr =
+        input.paymentDate instanceof Date
+          ? formatDateBusiness(input.paymentDate)
+          : (typeof input.paymentDate === 'string' ? input.paymentDate : getBusinessDate());
 
-        await glEntryService.recordInvoicePaymentToGL(
-          {
-            paymentId: payment.id,
-            receiptNumber: payment.receipt_number,
-            paymentDate: paymentDateStr,
-            amount: input.amount,
-            paymentMethod: input.paymentMethod,
-            invoiceId: invoiceId,
-            invoiceNumber: inv.invoice_number,
-          },
-          pool
-        );
-      } catch (glError) {
-        logger.error('GL posting failed for invoice payment — will propagate error', {
+      await glEntryService.recordInvoicePaymentToGL(
+        {
           paymentId: payment.id,
           receiptNumber: payment.receipt_number,
-          error: glError instanceof Error ? glError.message : String(glError),
-        });
-        throw glError;
-      }
+          paymentDate: paymentDateStr,
+          amount: input.amount,
+          paymentMethod: input.paymentMethod,
+          invoiceId: invoiceId,
+          invoiceNumber: inv.invoice_number,
+        },
+        pool,
+        client
+      );
+
+      await client.query('COMMIT');
 
       logger.info('Invoice payment committed with GL verification', {
         invoiceId,
