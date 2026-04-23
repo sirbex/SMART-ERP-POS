@@ -528,48 +528,64 @@ export const salesService = {
           baseQty.toNumber()
         );
 
-        // Calculate actual cost using cost layer service (bank-grade precision)
-        let unitCost: number;
+        // Calculate actual cost from FEFO inventory batches (same source as stock movements).
+        // Using batch.cost_price directly ensures sale_items.unit_cost = SM unit_cost,
+        // keeping GL COGS in sync with the batch subledger and preventing reconciliation drift.
+        // Previously used costLayerService.calculateActualCost() which could diverge from
+        // batch.cost_price due to FIFO layer averaging and UoM conversion rounding.
+        let itemCostDecimal = new Decimal(0);
+        let unitCost: number = 0; // per base unit — used for profit margin validation only
         try {
-          const costResult = await costLayerService.calculateActualCost(
-            item.productId,
-            baseQty.toNumber(),
-            costingMethod,
-            undefined, // dbPool
-            client // txClient: reuse sale transaction to prevent deadlock
+          // Read FEFO batches in the same order as the physical deduction loop below.
+          // No FOR UPDATE here — the deduction loop acquires row locks when it runs.
+          const fefoPreview = await client.query(
+            `SELECT remaining_quantity, cost_price
+             FROM inventory_batches
+             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
+             ORDER BY expiry_date ASC NULLS LAST, received_date ASC`,
+            [item.productId]
           );
-          unitCost = Money.toNumber(Money.round(costResult.averageCost, 2));
 
-          logger.info(`Cost calculated for product ${item.productId}`, {
+          let remainingForCost = new Decimal(baseQty);
+          for (const b of fefoPreview.rows) {
+            if (remainingForCost.lessThanOrEqualTo(0)) break;
+            const batchAvail = new Decimal(b.remaining_quantity);
+            const take = Decimal.min(remainingForCost, batchAvail);
+            itemCostDecimal = itemCostDecimal.plus(take.times(new Decimal(b.cost_price)));
+            remainingForCost = remainingForCost.minus(take);
+          }
+
+          // Per-base-unit cost used only for profit margin validation
+          unitCost = baseQty.greaterThan(0)
+            ? Money.toNumber(Money.round(itemCostDecimal.dividedBy(baseQty), 2))
+            : 0;
+
+          logger.info(`Batch-derived FEFO cost for product ${item.productId}`, {
             method: costingMethod,
-            quantity: item.quantity,
-            unitCost,
-            totalCost: costResult.totalCost.toNumber(),
+            baseQty: baseQty.toNumber(),
+            totalBatchCost: itemCostDecimal.toFixed(2),
+            unitCostPerBase: unitCost,
           });
         } catch (error: unknown) {
-          // Fallback: use pre-fetched average_cost, then cost_price (imported products
-          // have cost_price set but average_cost may still be 0)
+          // Fallback: use pre-fetched average_cost, then cost_price
           const avgCost = Money.parseDb(productData.average_cost);
           const costPriceDec = Money.parseDb(productData.cost_price);
           unitCost = Money.toNumber(avgCost.greaterThan(0) ? avgCost : costPriceDec);
+          itemCostDecimal = new Decimal(unitCost).times(baseQty);
 
-          logger.debug(`Using average cost fallback for product ${item.productId}`, {
+          logger.debug(`Using product cost_price fallback for ${item.productId}`, {
             productId: item.productId,
-            averageCost: unitCost,
-            reason: (error instanceof Error ? error.message : String(error))?.includes(
-              'Insufficient cost layers'
-            )
-              ? 'No cost layers (not received via GR)'
-              : error instanceof Error
-                ? error.message
-                : String(error),
+            unitCost,
+            error: error instanceof Error ? error.message : String(error),
           });
         }
 
         // BR-SAL-007: Validate profit margin (warning only)
         SalesBusinessRules.validateProfitMargin(unitCost, effectiveUnitPrice, false);
 
-        const itemCost = new Decimal(unitCost).times(baseQty);
+        // Exact batch-derived cost — no per-base-unit rounding applied
+        const itemCost = itemCostDecimal;
         totalCost = totalCost.plus(itemCost);
         const profit = lineTotalAfterDiscount.minus(itemCost);
 
@@ -577,6 +593,7 @@ export const salesService = {
         // When selling 1 Box (12 pieces) at base cost 6,000/piece, costPrice = 72,000/box.
         // The DB trigger fn_post_sale_to_ledger computes COGS as SUM(unit_cost * quantity),
         // so storing base-unit cost with selling-UoM quantity understates COGS.
+        // Using exact batch cost ensures GL COGS = batch subledger (no reconciliation drift).
         const costPerSellingUnit = Money.toNumber(
           Money.round(itemCost.dividedBy(new Decimal(item.quantity)), 2)
         );

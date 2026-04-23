@@ -173,6 +173,12 @@ export const returnGrnService = {
             if (lines.length === 0) throw new Error('Return GRN has no line items');
 
             // 3. Process each line
+            // Also accumulate the GL amount from actual batch.cost_price (not line.unitCost).
+            // line.unitCost is user-entered on the return document and can be wrong;
+            // batch.cost_price is the authoritative inventory cost used in the batch subledger.
+            // Using batch cost for GL ensures CR Inventory = batch subledger reduction.
+            let returnTotalFromBatch = new Decimal(0);
+
             for (const line of lines) {
                 // 3a. Resolve batch — prefer explicit batchId, otherwise look up via GR linkage
                 let effectiveBatchId = line.batchId;
@@ -215,14 +221,15 @@ export const returnGrnService = {
                     );
                 }
 
-                // 3c. Reduce batch remaining_quantity
+                // 3c. Reduce batch remaining_quantity and capture batch.cost_price for GL
+                let batchCostPrice = new Decimal(line.unitCost || 0); // fallback to line.unitCost
                 if (effectiveBatchId) {
                     const batchUpdate = await client.query(
                         `UPDATE inventory_batches
              SET remaining_quantity = remaining_quantity - $1,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = $2 AND remaining_quantity >= $1
-             RETURNING remaining_quantity`,
+             RETURNING remaining_quantity, cost_price`,
                         [line.baseQuantity, effectiveBatchId]
                     );
                     if (batchUpdate.rows.length === 0) {
@@ -230,6 +237,8 @@ export const returnGrnService = {
                             `Insufficient batch quantity for ${line.productName} (batch ${line.batchNumber || 'auto'})`
                         );
                     }
+                    // Use actual batch cost_price for GL — this is the authoritative cost
+                    batchCostPrice = new Decimal(batchUpdate.rows[0].cost_price || 0);
                 } else {
                     logger.warn('No batch found for return line — stock movement will be recorded but batch not deducted', {
                         productId: line.productId,
@@ -237,13 +246,18 @@ export const returnGrnService = {
                     });
                 }
 
-                // 3d. Create SUPPLIER_RETURN stock movement
+                // Accumulate GL amount at batch cost (not user-entered line.unitCost)
+                returnTotalFromBatch = returnTotalFromBatch.plus(
+                    new Decimal(String(line.baseQuantity)).times(batchCostPrice)
+                );
+
+                // 3d. Create SUPPLIER_RETURN stock movement (use batch cost for SM consistency)
                 await stockMovementRepository.recordMovement(client, {
                     productId: line.productId,
                     batchId: effectiveBatchId,
                     movementType: 'SUPPLIER_RETURN',
                     quantity: -line.baseQuantity, // Negative = stock decrease
-                    unitCost: line.unitCost,
+                    unitCost: Money.toNumber(batchCostPrice), // batch.cost_price, not line.unitCost
                     referenceType: 'RETURN_GRN',
                     referenceId: rgrnId,
                     notes: `Return to supplier: ${rgrn.reason}`,
@@ -260,10 +274,8 @@ export const returnGrnService = {
 
             // 5. GL posting — INSIDE transaction (SAP LUW: atomic with inventory)
             //    DR Accounts Payable (2100) / CR Inventory (1300)
-            const returnTotal = lines.reduce((sum, line) => {
-                return sum.plus(new Decimal(String(line.baseQuantity)).times(new Decimal(String(line.unitCost || 0))));
-            }, new Decimal(0));
-            const returnTotalNum = Money.toNumber(returnTotal);
+            //    Use batch-derived total (returnTotalFromBatch) not line.unitCost total.
+            const returnTotalNum = Money.toNumber(returnTotalFromBatch);
 
             // Look up supplier name for GL description (hoisted for use in both step 5 and step 6)
             const grResult = await client.query(
