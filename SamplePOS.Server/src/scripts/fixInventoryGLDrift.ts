@@ -2,7 +2,8 @@
  * fixInventoryGLDrift
  * =============================================================================
  * One-shot operator script that reconciles GL account 1300 (Inventory)
- * against the cost-layer subledger under source = 'SYSTEM_CORRECTION'.
+ * against the inventory_batches (FEFO batch ledger) subledger under
+ * source = 'SYSTEM_CORRECTION'.
  *
  * WHEN TO RUN:
  *   Invoked manually by an authorised operator AFTER reviewing the output of

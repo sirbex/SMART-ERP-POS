@@ -8,7 +8,11 @@
  *
  *     GL account 1300 (Inventory) balance
  *       ==
- *     SUM(cost_layers.remaining_quantity * cost_layers.unit_cost)
+ *     SUM(inventory_batches.remaining_quantity × cost_price)
+ *
+ *   inventory_batches is the authoritative subledger because GL COGS is posted
+ *   using FEFO batch.cost_price. Using cost_layers (FIFO) would produce false
+ *   positives whenever FIFO and FEFO costs diverge.
  *
  *   When drift is detected, the service:
  *     • Logs a single structured WARN/ERROR event (no spam).
@@ -73,12 +77,15 @@ export async function runInventoryGLIntegrityCheck(
     `);
     const glBalance = Money.toNumber(Money.parseDb(glResult.rows[0].balance));
 
-    // Sub-ledger valuation — live cost layers.
+    // Sub-ledger valuation — inventory_batches (FEFO batch ledger).
+    // NOTE: cost_layers is not the correct subledger because GL COGS is posted
+    // using FEFO batch.cost_price, not FIFO cost-layer averaging. Using cost_layers
+    // produces false positives whenever FIFO and FEFO costs diverge.
+    // This matches the subledger used by glValidationService and financialIntegrityService.
     const subResult = await pool.query<{ total: string }>(`
-        SELECT COALESCE(SUM(remaining_quantity * unit_cost), 0) AS total
-        FROM cost_layers
-        WHERE is_active = TRUE
-          AND remaining_quantity > 0
+        SELECT COALESCE(SUM(remaining_quantity * cost_price), 0) AS total
+        FROM inventory_batches
+        WHERE remaining_quantity > 0
     `);
     const subledgerBalance = Money.toNumber(Money.parseDb(subResult.rows[0].total));
 
