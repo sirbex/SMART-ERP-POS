@@ -194,17 +194,13 @@ export class StockMovementHandler {
       // Step 11: Update product quantity_on_hand (aggregate from batches)
       await this.updateProductQuantity(client, params.productId);
 
-      if (ownConnection) {
-        await client.query('COMMIT');
-      }
-
       // Step 12: Post GL journal entry for adjustment/damage/expiry movements
-      // Done AFTER commit so inventory state is persisted first (same pattern as GRN).
-      // GL failure is fatal — consistency with sales/GR error handling.
+      // INSIDE transaction (SAP LUW pattern — same as GRN).
+      // Inventory batch update + GL entry commit atomically.
+      // If GL fails → full rollback → no phantom inventory without GL backing.
       if (GL_MOVEMENT_TYPES.has(params.movementType)) {
         if (movementValue > 0) {
-          // Get product name for GL description
-          const prodRes = await this.pool.query('SELECT name FROM products WHERE id = $1', [params.productId]);
+          const prodRes = await client.query('SELECT name FROM products WHERE id = $1', [params.productId]);
           const productName = prodRes.rows[0]?.name || 'Unknown';
 
           await glEntryService.recordStockMovementToGL({
@@ -214,8 +210,12 @@ export class StockMovementHandler {
             movementType: params.movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
             movementValue,
             productName,
-          }, this.pool);
+          }, undefined, client);  // pass client → atomic with inventory
         }
+      }
+
+      if (ownConnection) {
+        await client.query('COMMIT');
       }
 
       logger.info('Stock movement processed successfully', {

@@ -1924,7 +1924,7 @@ export interface StockMovementData {
  *   DR Inventory (1300)                           value
  *   CR Stock Overage Income (4110)                value
  */
-export async function recordStockMovementToGL(movement: StockMovementData, pool?: pg.Pool): Promise<void> {
+export async function recordStockMovementToGL(movement: StockMovementData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     if (movement.movementValue <= 0) {
       logger.debug('Skipping stock movement GL posting (zero value)', {
@@ -1991,7 +1991,7 @@ export async function recordStockMovementToGL(movement: StockMovementData, pool?
       userId: SYSTEM_USER_ID,
       idempotencyKey: `STOCK_MOVEMENT-${movement.movementId}`,
       source: 'INVENTORY_MOVE' as const,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded stock movement to GL', {
       movementId: movement.movementId,
