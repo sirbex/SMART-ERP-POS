@@ -212,17 +212,18 @@ export class ReconciliationService {
             const batchValue = items.find((i) => i.source === 'BATCH_VALUATION')?.amount || 0;
             const productValue = items.find((i) => i.source === 'PRODUCT_VALUATION')?.amount || 0;
 
-            // SAP/Odoo pattern: product valuation (qty × standard cost) is the
-            // canonical inventory subledger because it uses the same cost source
-            // as the service layer's GL COGS postings.
-            // Batch valuation is informational (FEFO layer view) and may drift
-            // from product costs when prices are updated without retroactive
-            // batch cost corrections.
-            const subledgerBalance = productValue > 0 ? productValue : batchValue;
+            // inventory_batches (FEFO) is the canonical subledger because:
+            // - GL COGS is posted using FEFO batch.cost_price (not products.cost_price)
+            // - Product cost_price is updated on new GRs but does NOT retroactively
+            //   update existing batch costs, so product valuation diverges over time.
+            // - All three integrity services (glValidationService, financialIntegrityService,
+            //   inventoryGLIntegrityCheckService) use inventory_batches as the source of truth.
+            // Product valuation is informational only.
+            const subledgerBalance = batchValue > 0 ? batchValue : productValue;
             const difference = new Decimal(glBalance).minus(subledgerBalance).toNumber();
-            // Materiality threshold: 1 UGX — sub-unit residuals from NUMERIC(18,6)
-            // GL entries that cannot be expressed in UGX integer terms are noise.
-            const materialityThreshold = 1;
+            // Materiality threshold: GREATEST(5000, 0.01% of GL) — consistent with
+            // inventoryGLIntegrityCheckService and the BATCH_VALUATION row in fn_reconcile_inventory.
+            const materialityThreshold = Math.max(5000, Math.abs(glBalance) * 0.0001);
             const hasDiscrepancy = Math.abs(difference) > materialityThreshold;
 
             // Run integrity diagnostics (SAP Material Ledger Document Check)
