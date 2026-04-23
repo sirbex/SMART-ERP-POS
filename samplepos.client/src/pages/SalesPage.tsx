@@ -1139,16 +1139,10 @@ function SalesTable({
                 Sale #
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Date
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Time
+                Date & Time
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Customer
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Cashier
               </th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                 Amount
@@ -1159,7 +1153,7 @@ function SalesTable({
                 </th>
               )}
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Profit
+                Profit (Margin)
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Payment
@@ -1183,16 +1177,11 @@ function SalesTable({
                   {sale.saleNumber || sale.id.slice(0, 8)}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-900">
-                  {formatDisplayDate(sale.saleDate)}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-600">
-                  {formatDisplayTime(sale.createdAt)}
+                  <div>{formatDisplayDate(sale.saleDate)}</div>
+                  <div className="text-xs text-gray-500">{formatDisplayTime(sale.createdAt)}</div>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-900">
                   {sale.customerName || 'Walk-in'}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-600">
-                  {sale.soldByName || sale.cashierName || 'N/A'}
                 </td>
                 <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
                   {formatCurrency(sale.totalAmount)}
@@ -1203,7 +1192,8 @@ function SalesTable({
                   </td>
                 )}
                 <td className="px-4 py-3 text-sm text-right font-medium text-green-600">
-                  {formatCurrency(sale.profit || 0)}
+                  <div>{formatCurrency(sale.profit || 0)}</div>
+                  {sale.profitMargin > 0 && <div className="text-xs text-gray-500">({sale.profitMargin.toFixed(1)}%)</div>}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <span
@@ -1328,8 +1318,7 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
                 <thead className="text-xs text-gray-500 uppercase">
                   <tr>
                     <th className="text-left pb-2">Sale #</th>
-                    <th className="text-left pb-2">Date</th>
-                    <th className="text-left pb-2">Time</th>
+                    <th className="text-left pb-2">Date & Time</th>
                     <th className="text-right pb-2">Amount</th>
                     <th className="text-left pb-2">Payment</th>
                     <th className="text-right pb-2">Actions</th>
@@ -1339,8 +1328,10 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
                   {customer.sales.map((sale: SaleRow) => (
                     <tr key={sale.id} className="border-t border-gray-100">
                       <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
-                      <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
-                      <td className="py-2 text-gray-600">{formatDisplayTime(sale.createdAt)}</td>
+                      <td className="py-2">
+                        <div>{formatDisplayDate(sale.saleDate)}</div>
+                        <div className="text-xs text-gray-500">{formatDisplayTime(sale.createdAt)}</div>
+                      </td>
                       <td className="py-2 text-right font-medium">
                         {formatCurrency(sale.totalAmount)}
                       </td>

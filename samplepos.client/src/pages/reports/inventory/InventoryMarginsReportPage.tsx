@@ -158,8 +158,6 @@ export default function InventoryMarginsReportPage() {
                     <th className="px-3 py-2 text-right">Selling Price</th>
                     <th className="px-3 py-2 text-right">Profit / Unit</th>
                     <th className="px-3 py-2 text-right">Margin %</th>
-                    <th className="px-3 py-2 text-right">Markup %</th>
-                    <th className="px-3 py-2 text-right">Potential Profit</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -186,17 +184,11 @@ export default function InventoryMarginsReportPage() {
                       >
                         {r.sellingPrice > 0 ? `${r.marginPercent.toFixed(2)}%` : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right">
-                        {r.unitCost > 0 ? `${r.markupPercent.toFixed(2)}%` : '—'}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium">
-                        {formatCurrency(r.potentialProfit)}
-                      </td>
                     </tr>
                   ))}
                   {data.rows.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-3 py-6 text-center text-gray-500">
+                      <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
                         No stock on hand.
                       </td>
                     </tr>

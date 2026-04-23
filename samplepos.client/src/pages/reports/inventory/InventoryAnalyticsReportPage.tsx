@@ -178,8 +178,6 @@ export default function InventoryAnalyticsReportPage() {
                     <th className="px-3 py-2 text-left">Product</th>
                     <th className="px-3 py-2 text-left">SKU</th>
                     <th className="px-3 py-2 text-right">Qty on Hand</th>
-                    <th className="px-3 py-2 text-right">Units 30d</th>
-                    <th className="px-3 py-2 text-right">Units 90d</th>
                     <th className="px-3 py-2 text-right">Velocity (u/day)</th>
                     <th className="px-3 py-2 text-left">Last Sale</th>
                     <th className="px-3 py-2 text-center">Class</th>
@@ -192,8 +190,6 @@ export default function InventoryAnalyticsReportPage() {
                       <td className="px-3 py-2">{r.productName}</td>
                       <td className="px-3 py-2 text-gray-600">{r.sku ?? '—'}</td>
                       <td className="px-3 py-2 text-right">{r.qtyOnHand.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">{r.unitsSold30d.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">{r.unitsSold90d.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right">{r.movementVelocity.toFixed(3)}</td>
                       <td className="px-3 py-2 text-gray-600">{r.lastSaleDate ?? '—'}</td>
                       <td className="px-3 py-2 text-center">
@@ -204,7 +200,7 @@ export default function InventoryAnalyticsReportPage() {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-3 py-6 text-center text-gray-500">
+                      <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
                         No products match the filter.
                       </td>
                     </tr>

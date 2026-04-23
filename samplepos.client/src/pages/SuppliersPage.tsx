@@ -626,12 +626,6 @@ export default function SuppliersPage() {
                       Contact Person
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Phone
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Payment Terms
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -645,7 +639,7 @@ export default function SuppliersPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {suppliers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
                         {searchQuery
                           ? 'No suppliers match your search'
                           : 'No suppliers yet. Add your first supplier to get started!'}
@@ -667,16 +661,6 @@ export default function SuppliersPage() {
                           <div className="text-sm text-gray-900">
                             {supplier.contactPerson || '-'}
                           </div>
-                        </td>
-
-                        {/* Email */}
-                        <td className="px-4 py-4">
-                          <div className="text-sm text-gray-900">{supplier.email || '-'}</div>
-                        </td>
-
-                        {/* Phone */}
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{supplier.phone || '-'}</div>
                         </td>
 
                         {/* Payment Terms */}

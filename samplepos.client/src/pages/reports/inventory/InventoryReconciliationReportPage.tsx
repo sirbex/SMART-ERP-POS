@@ -164,7 +164,7 @@ export default function InventoryReconciliationReportPage() {
                         <th className="px-3 py-2 text-left">Product</th>
                         <th className="px-3 py-2 text-left">SKU</th>
                         <th className="px-3 py-2 text-right">Inventory Qty</th>
-                        <th className="px-3 py-2 text-right">Cost Layers Qty</th>
+                        <th className="px-3 py-2 text-right">FIFO Layers Qty</th>
                         <th className="px-3 py-2 text-right">Qty Difference</th>
                       </tr>
                     </thead>

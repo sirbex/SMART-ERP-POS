@@ -1580,6 +1580,8 @@ export default function PurchaseOrdersPage() {
     );
   }
 
+  const hasDeliveryDates = purchaseOrders.some((po: PORow) => po.expectedDelivery);
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -1770,9 +1772,11 @@ export default function PurchaseOrdersPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Order Date
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Expected Delivery
-                  </th>
+                  {hasDeliveryDates && (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Expected Delivery
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
@@ -1787,7 +1791,7 @@ export default function PurchaseOrdersPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {purchaseOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={hasDeliveryDates ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
                       {selectedStatus !== 'ALL' || selectedSupplier
                         ? 'No purchase orders match your filters'
                         : 'No purchase orders yet. Create your first PO to get started!'}
@@ -1819,11 +1823,13 @@ export default function PurchaseOrdersPage() {
                         </td>
 
                         {/* Expected Delivery */}
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {formatDate(po.expectedDelivery)}
-                          </div>
-                        </td>
+                        {hasDeliveryDates && (
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {formatDate(po.expectedDelivery)}
+                            </div>
+                          </td>
+                        )}
 
                         {/* Status */}
                         <td className="px-4 py-4 whitespace-nowrap">
