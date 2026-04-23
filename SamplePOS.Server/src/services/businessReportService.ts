@@ -192,7 +192,12 @@ export async function getBusinessPerformanceReport(
 
     // --- Section 5: Summary ---
     const totalRevenue = Money.toNumber(Money.parseDb(totals.total_revenue));
-    const totalCogs = Money.toNumber(Money.parseDb(totals.total_cogs));
+    // Derive COGS from product_daily_summary (same source as revenueByCategory rows),
+    // so the TOTAL row exactly matches the sum of visible per-category COGS values.
+    const totalCogs = revenueByCategory.reduce(
+      (sum, r) => Money.toNumber(Money.add(sum, r.totalCogs)),
+      0
+    );
     const totalExpenses = Money.toNumber(Money.parseDb(totals.total_expenses));
     const totalStockAdjustments = Money.toNumber(Money.parseDb(totals.total_stock_adjustments));
     const totalSupplierPayments = supplierPaymentsByAccount.reduce((sum, r) => Money.toNumber(Money.add(sum, r.totalPaid)), 0);
