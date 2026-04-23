@@ -27,7 +27,13 @@ BEGIN
   END IF;
 END $$;
 
--- 3) Add session_enforced flag for session-aware refunds
-ALTER TABLE refunds
-  ADD COLUMN IF NOT EXISTS cash_register_session_id UUID
-    REFERENCES cash_register_sessions(id);
+-- 3) Add session_enforced flag for session-aware refunds (only if table exists)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'refunds'
+  ) THEN
+    EXECUTE 'ALTER TABLE refunds ADD COLUMN IF NOT EXISTS cash_register_session_id UUID REFERENCES cash_register_sessions(id)';
+  END IF;
+END $$;
