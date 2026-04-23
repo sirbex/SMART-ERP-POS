@@ -148,7 +148,7 @@ export default function CustomerDetailModal({
     const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
     useEffect(() => {
         if (tab === 'edit') {
-            pricingApi.listPriceGroups(true).then(setPriceGroups).catch(() => {});
+            pricingApi.listPriceGroups(true).then(setPriceGroups).catch(() => { });
         }
     }, [tab]);
 
