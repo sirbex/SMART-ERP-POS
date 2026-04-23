@@ -135,14 +135,21 @@ async function checkAR(pool: pg.Pool): Promise<IntegrityCheck> {
 }
 
 async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
+  // Only compare supplier-facing AP entries (GR, returns, supplier payments).
+  // EXPENSE / EXPENSE_PAYMENT entries also post to 2100 but are NOT tracked in
+  // suppliers.OutstandingBalance — excluding them prevents a false drift equal
+  // to net-unpaid-expense obligations.
+  // Include ALL suppliers (active and inactive) to match GL which has no IsActive filter.
   const r = await pool.query(`
     SELECT
       COALESCE((SELECT SUM(le."CreditAmount") - SUM(le."DebitAmount")
                 FROM ledger_entries le
                 JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
                 JOIN accounts a ON le."AccountId" = a."Id"
-                WHERE a."AccountCode" = '2100' AND ${NET_ACTIVE_TXNS}), 0) AS gl,
-      COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers WHERE "IsActive" = true), 0) AS sub
+                WHERE a."AccountCode" = '2100'
+                  AND lt."ReferenceType" IN ('GOODS_RECEIPT', 'RETURN_GRN', 'SUPPLIER_PAYMENT')
+                  AND ${NET_ACTIVE_TXNS}), 0) AS gl,
+      COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers), 0) AS sub
   `);
   const gl = new Decimal(r.rows[0].gl || 0);
   const sub = new Decimal(r.rows[0].sub || 0);
@@ -169,6 +176,9 @@ async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
 }
 
 async function checkInventory(pool: pg.Pool): Promise<IntegrityCheck> {
+  // Subledger is inventory_batches (FEFO batch ledger), not product_inventory/product_valuation.
+  // GL COGS is derived from FEFO batch costs; using cost_layers or product_valuation
+  // would produce false positives whenever FIFO and FEFO costs diverge.
   const r = await pool.query(`
     SELECT
       COALESCE((SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
@@ -176,10 +186,9 @@ async function checkInventory(pool: pg.Pool): Promise<IntegrityCheck> {
                 JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
                 JOIN accounts a ON le."AccountId" = a."Id"
                 WHERE a."AccountCode" = '1300' AND ${NET_ACTIVE_TXNS}), 0) AS gl,
-      COALESCE((SELECT SUM(pi.quantity_on_hand * COALESCE(pv.average_cost, 0))
-                FROM product_inventory pi
-                LEFT JOIN product_valuation pv ON pv.product_id = pi.product_id
-                WHERE pi.quantity_on_hand > 0), 0) AS sub
+      COALESCE((SELECT SUM(remaining_quantity * cost_price)
+                FROM inventory_batches
+                WHERE remaining_quantity > 0), 0) AS sub
   `);
   const gl = new Decimal(r.rows[0].gl || 0);
   const sub = new Decimal(r.rows[0].sub || 0);
