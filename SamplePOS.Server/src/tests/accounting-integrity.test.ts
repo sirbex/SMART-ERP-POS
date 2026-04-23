@@ -238,9 +238,9 @@ async function runTests() {
 
   const invSubledger = await pool.query(`
     SELECT COALESCE(SUM(
-      COALESCE(remaining_quantity, 0) * COALESCE(unit_cost, 0)
+      COALESCE(remaining_quantity, 0) * COALESCE(cost_price, 0)
     ), 0) as inventory_value 
-    FROM cost_layers 
+    FROM inventory_batches 
     WHERE remaining_quantity > 0
   `);
 

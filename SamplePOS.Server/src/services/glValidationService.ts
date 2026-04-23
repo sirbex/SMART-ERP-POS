@@ -291,15 +291,24 @@ export async function checkAPReconciliation(dbPool?: pg.Pool): Promise<Reconcili
 }
 
 /**
- * Check Inventory reconciliation (GL vs Cost Layers Subledger)
+ * Check Inventory reconciliation (GL vs Batch Subledger)
  *
- * CRITICAL: This check ensures the GL Inventory account (1300) matches
- * the sum of remaining inventory value in cost_layers.
+ * Compares GL Inventory account (1300) against the batch subledger:
+ *   SUM(inventory_batches.remaining_quantity × cost_price)
+ *
+ * This is the authoritative subledger because:
+ * - GL COGS is posted using FEFO batch.cost_price (from salesService FEFO preview)
+ * - inventory_batches is the physical stock ledger used for all deductions
+ * - fn_reconcile_inventory() also uses this source
+ *
+ * NOTE: cost_layers is no longer the correct subledger because GL COGS is now
+ * derived from FEFO batch costs, not FIFO cost-layer averaging. Using cost_layers
+ * would produce false positives whenever FIFO and FEFO costs diverge.
  *
  * Discrepancies can occur when:
- * - Cost layers are created without GL posting (e.g., direct API calls)
- * - Goods receipts fail to trigger GL posting
- * - Manual adjustments to cost_layers without corresponding GL entries
+ * - Goods receipts fail to post to GL (missing DR Inventory 1300)
+ * - Stock adjustments bypass GL
+ * - Return GRNs use wrong cost (now fixed — batch.cost_price used for GL)
  */
 export async function checkInventoryReconciliation(
   dbPool?: pg.Pool
@@ -314,8 +323,8 @@ export async function checkInventoryReconciliation(
          WHERE a."AccountCode" = '1300'), 0
       ) as gl_balance,
       COALESCE(
-        (SELECT SUM(remaining_quantity * unit_cost) 
-         FROM cost_layers 
+        (SELECT SUM(remaining_quantity * cost_price)
+         FROM inventory_batches
          WHERE remaining_quantity > 0), 0
       ) as subledger_balance
   `);
