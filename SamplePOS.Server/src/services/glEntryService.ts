@@ -43,6 +43,7 @@ export const AccountCodes = {
   CREDIT_CARD_RECEIPTS: '1020',
   CHECKING_ACCOUNT: '1030',
   MOBILE_MONEY: '1040',
+  UNDEPOSITED_FUNDS: '1015',
   ACCOUNTS_RECEIVABLE: '1200',
   INVENTORY: '1300',
 
@@ -1829,37 +1830,25 @@ export interface InvoicePaymentData {
 /**
  * Record an invoice payment in the general ledger
  *
- * Journal entry:
- *   DR Cash / Bank (1010/1030)    amount
- *   CR Accounts Receivable (1200) amount
+ * Journal entry (two-step clearing flow):
+ *   Step 1 — PAYMENT_RECEIPT (this function):
+ *     DR Undeposited Funds (1015)    amount
+ *     CR Accounts Receivable (1200)  amount
+ *
+ *   Step 2 — PAYMENT_DEPOSIT (separate process):
+ *     DR Cash / Bank (payment-method-specific)  amount
+ *     CR Undeposited Funds (1015)               amount
  *
  * DEPOSIT payments are skipped (already posted via deposit lifecycle).
  */
 export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
-    // Deposit payments: money already received via deposit, no Cash DR needed
+    // Deposit payments: money already received via deposit, no clearing needed
     if (payment.paymentMethod === 'DEPOSIT') {
       logger.info('Invoice payment via DEPOSIT — skipping GL (deposit already posted)', {
         receiptNumber: payment.receiptNumber,
       });
       return;
-    }
-
-    let debitAccountCode: string;
-    switch (payment.paymentMethod) {
-      case 'BANK_TRANSFER':
-        debitAccountCode = AccountCodes.CHECKING_ACCOUNT;
-        break;
-      case 'CARD':
-        debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
-        break;
-      case 'MOBILE_MONEY':
-        debitAccountCode = AccountCodes.MOBILE_MONEY;
-        break;
-      case 'CREDIT':
-      case 'CASH':
-      default:
-        debitAccountCode = AccountCodes.CASH;
     }
 
     await AccountingCore.createJournalEntry({
@@ -1870,8 +1859,8 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool
       referenceNumber: payment.receiptNumber,
       lines: [
         {
-          accountCode: debitAccountCode,
-          description: `Cash received — ${payment.receiptNumber}`,
+          accountCode: AccountCodes.UNDEPOSITED_FUNDS,
+          description: `Payment received — ${payment.receiptNumber}`,
           debitAmount: payment.amount,
           creditAmount: 0,
         },
