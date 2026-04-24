@@ -2493,10 +2493,10 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
               {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
                 (saleDetails?.status || sale.status) as string
               ) && (
-                <span className="text-xs text-gray-500 italic self-center hidden sm:inline" title="ERP rule: a posted sale cannot be deleted. Use Return to reverse it — the original sale stays in the audit trail.">
-                  Void not allowed — sale is posted
-                </span>
-              )}
+                  <span className="text-xs text-gray-500 italic self-center hidden sm:inline" title="ERP rule: a posted sale cannot be deleted. Use Return to reverse it — the original sale stays in the audit trail.">
+                    Void not allowed — sale is posted
+                  </span>
+                )}
             </div>
             {/* Right side: Document flow, Close, Print */}
             <div className="flex flex-col sm:flex-row gap-2">
@@ -2508,74 +2508,74 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                 Close
               </button>
               {canReprintReceipt && (
-              <button
-                onClick={async () => {
-                  const s = saleDetails ?? sale;
+                <button
+                  onClick={async () => {
+                    const s = saleDetails ?? sale;
 
-                  // Log reprint to audit trail and increment print count
-                  try {
-                    await api.post(`/sales/${sale.id}/reprint`);
-                  } catch (err) {
-                    console.error('Failed to log receipt reprint:', err);
-                  }
+                    // Log reprint to audit trail and increment print count
+                    try {
+                      await api.post(`/sales/${sale.id}/reprint`);
+                    } catch (err) {
+                      console.error('Failed to log receipt reprint:', err);
+                    }
 
-                  // Compute effective discount from sale-level or item-level
-                  const saleDisc = Number(s.discountAmount || 0);
-                  const itemDiscTotal =
-                    saleDisc > 0
-                      ? 0
-                      : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
-                        return (
-                          sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
-                        );
-                      }, 0);
-                  const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
+                    // Compute effective discount from sale-level or item-level
+                    const saleDisc = Number(s.discountAmount || 0);
+                    const itemDiscTotal =
+                      saleDisc > 0
+                        ? 0
+                        : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
+                          return (
+                            sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
+                          );
+                        }, 0);
+                    const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
 
-                  const receiptData: ReceiptData = {
-                    saleNumber: s.saleNumber,
-                    saleDate: s.saleDate || s.createdAt,
-                    totalAmount: s.totalAmount,
-                    subtotal:
-                      effectiveDisc > 0
-                        ? new Decimal(s.totalAmount || 0).plus(effectiveDisc).toNumber()
-                        : s.subtotal,
-                    discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
-                    taxAmount: s.taxAmount,
-                    cashierName: s.cashierName || s.soldByName,
-                    customerName: s.customerName || 'Walk-in Customer',
-                    paymentMethod: s.paymentMethod,
-                    amountPaid: s.amountPaid || s.paymentReceived,
-                    changeAmount: s.changeAmount,
-                    items: s.items?.map((item) => ({
-                      name: item.productName || item.product_name || 'Unknown',
-                      quantity: Number(item.quantity || item.qty || 0),
-                      unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
-                      subtotal: Number(
-                        item.totalPrice || item.total_price || item.subtotal || item.totalAmount || 0
-                      ),
-                      discountAmount:
-                        parseFloat(String(item.discountAmount || item.discount_amount || 0)) ||
-                        undefined,
-                    })),
-                    payments: s.paymentLines?.map((pl) => ({
-                      method: pl.paymentMethod || pl.payment_method || 'CASH',
-                      amount: Number(pl.amount),
-                      reference: pl.reference,
-                    })),
-                  };
-                  printReceipt(receiptData).catch((err) => console.error('Print failed:', err));
-                }}
-                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fillRule="evenodd"
-                    d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                Reprint Receipt
-              </button>
+                    const receiptData: ReceiptData = {
+                      saleNumber: s.saleNumber,
+                      saleDate: s.saleDate || s.createdAt,
+                      totalAmount: s.totalAmount,
+                      subtotal:
+                        effectiveDisc > 0
+                          ? new Decimal(s.totalAmount || 0).plus(effectiveDisc).toNumber()
+                          : s.subtotal,
+                      discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
+                      taxAmount: s.taxAmount,
+                      cashierName: s.cashierName || s.soldByName,
+                      customerName: s.customerName || 'Walk-in Customer',
+                      paymentMethod: s.paymentMethod,
+                      amountPaid: s.amountPaid || s.paymentReceived,
+                      changeAmount: s.changeAmount,
+                      items: s.items?.map((item) => ({
+                        name: item.productName || item.product_name || 'Unknown',
+                        quantity: Number(item.quantity || item.qty || 0),
+                        unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
+                        subtotal: Number(
+                          item.totalPrice || item.total_price || item.subtotal || item.totalAmount || 0
+                        ),
+                        discountAmount:
+                          parseFloat(String(item.discountAmount || item.discount_amount || 0)) ||
+                          undefined,
+                      })),
+                      payments: s.paymentLines?.map((pl) => ({
+                        method: pl.paymentMethod || pl.payment_method || 'CASH',
+                        amount: Number(pl.amount),
+                        reference: pl.reference,
+                      })),
+                    };
+                    printReceipt(receiptData).catch((err) => console.error('Print failed:', err));
+                  }}
+                  className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path
+                      fillRule="evenodd"
+                      d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Reprint Receipt
+                </button>
               )}
             </div>
           </div>

@@ -114,11 +114,10 @@ export default function InventoryReconciliationReportPage() {
         {data && (
           <>
             <div
-              className={`rounded-lg border p-4 flex items-start gap-3 ${
-                data.reconciled
+              className={`rounded-lg border p-4 flex items-start gap-3 ${data.reconciled
                   ? 'border-green-200 bg-green-50'
                   : 'border-red-200 bg-red-50'
-              }`}
+                }`}
             >
               {data.reconciled ? (
                 <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0" />
@@ -180,9 +179,8 @@ export default function InventoryReconciliationReportPage() {
                             {d.costLayersQty.toLocaleString()}
                           </td>
                           <td
-                            className={`px-3 py-2 text-right font-medium ${
-                              d.qtyDifference > 0 ? 'text-orange-600' : 'text-red-600'
-                            }`}
+                            className={`px-3 py-2 text-right font-medium ${d.qtyDifference > 0 ? 'text-orange-600' : 'text-red-600'
+                              }`}
                           >
                             {d.qtyDifference > 0 ? '+' : ''}
                             {d.qtyDifference.toLocaleString()}
@@ -212,9 +210,8 @@ function SummaryCard({
 }) {
   return (
     <div
-      className={`rounded-lg border p-4 ${
-        highlight ? 'border-red-200 bg-red-50' : 'bg-white'
-      }`}
+      className={`rounded-lg border p-4 ${highlight ? 'border-red-200 bg-red-50' : 'bg-white'
+        }`}
     >
       <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
       <p className="mt-1 text-xl font-semibold">{value}</p>

@@ -668,9 +668,8 @@ export default function StockMovementsPage() {
                         {(() => {
                           const cat = movement.productCategory || product?.category;
                           return (
-                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                              cat ? 'bg-blue-50 text-blue-700' : 'text-gray-400'
-                            }`}>
+                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${cat ? 'bg-blue-50 text-blue-700' : 'text-gray-400'
+                              }`}>
                               {cat || '\u2014'}
                             </span>
                           );

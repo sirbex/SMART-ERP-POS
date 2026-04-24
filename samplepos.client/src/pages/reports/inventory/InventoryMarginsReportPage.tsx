@@ -171,16 +171,14 @@ export default function InventoryMarginsReportPage() {
                         {r.sellingPrice > 0 ? formatCurrency(r.sellingPrice) : '—'}
                       </td>
                       <td
-                        className={`px-3 py-2 text-right ${
-                          r.profitPerUnit < 0 ? 'text-red-600' : ''
-                        }`}
+                        className={`px-3 py-2 text-right ${r.profitPerUnit < 0 ? 'text-red-600' : ''
+                          }`}
                       >
                         {formatCurrency(r.profitPerUnit)}
                       </td>
                       <td
-                        className={`px-3 py-2 text-right ${
-                          r.marginPercent < 0 ? 'text-red-600' : ''
-                        }`}
+                        className={`px-3 py-2 text-right ${r.marginPercent < 0 ? 'text-red-600' : ''
+                          }`}
                       >
                         {r.sellingPrice > 0 ? `${r.marginPercent.toFixed(2)}%` : '—'}
                       </td>

@@ -178,9 +178,11 @@ async function runTests() {
   const orphanedAr = parseFloat(orphanedArResult.rows[0]?.orphaned_ar || '0');
   const depositSalesCount = depositSalesNoCustomer.rows.length;
 
-  const orphanDepositSales = { rows: depositSalesCount > 0 && orphanedAr > 0.01
-    ? depositSalesNoCustomer.rows.map((r: Record<string, unknown>) => ({ ...r, outstanding_ar: orphanedAr }))
-    : [] };
+  const orphanDepositSales = {
+    rows: depositSalesCount > 0 && orphanedAr > 0.01
+      ? depositSalesNoCustomer.rows.map((r: Record<string, unknown>) => ({ ...r, outstanding_ar: orphanedAr }))
+      : []
+  };
 
   test(
     'DEPOSIT Sales Require Customer',

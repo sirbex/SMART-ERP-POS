@@ -14,24 +14,24 @@ import Decimal from 'decimal.js';
 
 /** Minimal slice of CreateSaleItemData that the guard needs. */
 export interface CogsDriftItem {
-  productId: string;
-  productName: string;
-  /** Cost per selling-UoM unit as posted to the GL (from FEFO preview). */
-  costPrice: number;
-  /** Quantity in selling-UoM units. */
-  quantity: number;
+    productId: string;
+    productName: string;
+    /** Cost per selling-UoM unit as posted to the GL (from FEFO preview). */
+    costPrice: number;
+    /** Quantity in selling-UoM units. */
+    quantity: number;
 }
 
 export interface CogsDriftResult {
-  productId: string;
-  productName: string;
-  /** GL COGS posted = costPrice × quantity (from FEFO preview). */
-  glCost: string;
-  /** Actual cost accumulated from physical FEFO batch deductions. */
-  actualBatchCost: string;
-  /** actualBatchCost − glCost (positive = GL understated, negative = GL overstated). */
-  drift: string;
-  message: string;
+    productId: string;
+    productName: string;
+    /** GL COGS posted = costPrice × quantity (from FEFO preview). */
+    glCost: string;
+    /** Actual cost accumulated from physical FEFO batch deductions. */
+    actualBatchCost: string;
+    /** actualBatchCost − glCost (positive = GL understated, negative = GL overstated). */
+    drift: string;
+    message: string;
 }
 
 /**
@@ -43,37 +43,37 @@ export interface CogsDriftResult {
  *          Returns an empty array when everything is in sync.
  */
 export function detectCogsDrift(
-  itemsWithCosts: CogsDriftItem[],
-  actualBatchCostMap: Map<string, Decimal>
+    itemsWithCosts: CogsDriftItem[],
+    actualBatchCostMap: Map<string, Decimal>
 ): CogsDriftResult[] {
-  const drifts: CogsDriftResult[] = [];
+    const drifts: CogsDriftResult[] = [];
 
-  for (const item of itemsWithCosts) {
-    // Custom / service items never touch inventory_batches — skip
-    if (item.productId?.startsWith('custom_')) continue;
+    for (const item of itemsWithCosts) {
+        // Custom / service items never touch inventory_batches — skip
+        if (item.productId?.startsWith('custom_')) continue;
 
-    const actualCost = actualBatchCostMap.get(item.productId);
-    // No entry = item was skipped during deduction (service, custom) — skip
-    if (actualCost === undefined) continue;
+        const actualCost = actualBatchCostMap.get(item.productId);
+        // No entry = item was skipped during deduction (service, custom) — skip
+        if (actualCost === undefined) continue;
 
-    // GL cost = what was posted to ledger_entries as the inventory credit
-    const glCost = new Decimal(item.costPrice || 0).times(new Decimal(item.quantity));
-    const drift = actualCost.minus(glCost);
+        // GL cost = what was posted to ledger_entries as the inventory credit
+        const glCost = new Decimal(item.costPrice || 0).times(new Decimal(item.quantity));
+        const drift = actualCost.minus(glCost);
 
-    if (drift.abs().greaterThan(0.01)) {
-      drifts.push({
-        productId: item.productId,
-        productName: item.productName,
-        glCost: glCost.toFixed(2),
-        actualBatchCost: actualCost.toFixed(2),
-        drift: drift.toFixed(2),
-        message:
-          `ACCOUNTING ALERT: Inventory cost mismatch for "${item.productName}" — ` +
-          `GL posted ${glCost.toFixed(2)} but actual batch deduction was ${actualCost.toFixed(2)} ` +
-          `(drift: ${drift.toFixed(2)}). Run an inventory integrity check.`,
-      });
+        if (drift.abs().greaterThan(0.01)) {
+            drifts.push({
+                productId: item.productId,
+                productName: item.productName,
+                glCost: glCost.toFixed(2),
+                actualBatchCost: actualCost.toFixed(2),
+                drift: drift.toFixed(2),
+                message:
+                    `ACCOUNTING ALERT: Inventory cost mismatch for "${item.productName}" — ` +
+                    `GL posted ${glCost.toFixed(2)} but actual batch deduction was ${actualCost.toFixed(2)} ` +
+                    `(drift: ${drift.toFixed(2)}). Run an inventory integrity check.`,
+            });
+        }
     }
-  }
 
-  return drifts;
+    return drifts;
 }

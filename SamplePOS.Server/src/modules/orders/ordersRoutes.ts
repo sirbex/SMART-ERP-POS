@@ -204,13 +204,12 @@ router.post(
       soldBy: userId,
       paymentLines: paymentData.paymentLines,
       cashRegisterSessionId: paymentData.cashRegisterSessionId,
+      // Atomically mark the order COMPLETED within the same sale transaction
+      fromOrderId: orderId,
     };
 
-    // 3. Create the sale (full sales workflow: FIFO costing, GL posting, inventory deduction, etc.)
+    // 3. Create the sale AND atomically mark order completed (single transaction)
     const result = await salesService.createSale(pool, saleInput);
-
-    // 4. Mark order as completed and link to sale
-    await ordersService.completeOrderInTransaction(pool, orderId, result.sale.id);
 
     res.json({
       success: true,
