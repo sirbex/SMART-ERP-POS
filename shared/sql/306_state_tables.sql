@@ -132,48 +132,108 @@ ON CONFLICT (business_date, product_id) DO UPDATE SET
 
 -- ============================================================
 -- BACKFILL: customer_balances from invoices + credit_transactions
+-- Handles dual schema: legacy PascalCase (henber) and snake_case (newer tenants)
 -- ============================================================
-INSERT INTO customer_balances (
-    customer_id, total_invoiced, total_paid, balance,
-    last_invoice_date, last_payment_date, transaction_count, updated_at
-)
-SELECT
-    c.id AS customer_id,
-    COALESCE(inv.total_invoiced, 0)     AS total_invoiced,
-    COALESCE(pay.total_paid, 0)         AS total_paid,
-    c.balance                           AS balance,
-    inv.last_invoice_date,
-    pay.last_payment_date,
-    COALESCE(inv.inv_count, 0) + COALESCE(pay.pay_count, 0) AS transaction_count,
-    NOW()
-FROM customers c
-LEFT JOIN LATERAL (
-    SELECT
-        SUM("TotalAmount") AS total_invoiced,
-        MAX(issue_date)    AS last_invoice_date,
-        COUNT(*)::INTEGER  AS inv_count
-    FROM invoices
-    WHERE "CustomerId" = c.id
-      AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
-) inv ON true
-LEFT JOIN LATERAL (
-    SELECT
-        SUM(ABS(amount)) AS total_paid,
-        MAX(created_at::date) AS last_payment_date,
-        COUNT(*)::INTEGER AS pay_count
-    FROM credit_transactions
-    WHERE customer_id = c.id
-      AND transaction_type = 'PAYMENT'
-) pay ON true
-WHERE c.is_active = true
-ON CONFLICT (customer_id) DO UPDATE SET
-    total_invoiced    = EXCLUDED.total_invoiced,
-    total_paid        = EXCLUDED.total_paid,
-    balance           = EXCLUDED.balance,
-    last_invoice_date = EXCLUDED.last_invoice_date,
-    last_payment_date = EXCLUDED.last_payment_date,
-    transaction_count = EXCLUDED.transaction_count,
-    updated_at        = NOW();
+DO $$
+DECLARE
+    pascal_invoices boolean;
+BEGIN
+    -- Detect invoice column naming convention
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'invoices'
+          AND column_name  = 'TotalAmount'
+    ) INTO pascal_invoices;
+
+    IF pascal_invoices THEN
+        -- Legacy PascalCase schema (e.g. henber)
+        INSERT INTO customer_balances (
+            customer_id, total_invoiced, total_paid, balance,
+            last_invoice_date, last_payment_date, transaction_count, updated_at
+        )
+        SELECT
+            c.id AS customer_id,
+            COALESCE(inv.total_invoiced, 0)     AS total_invoiced,
+            COALESCE(pay.total_paid, 0)         AS total_paid,
+            c.balance                           AS balance,
+            inv.last_invoice_date,
+            pay.last_payment_date,
+            COALESCE(inv.inv_count, 0) + COALESCE(pay.pay_count, 0) AS transaction_count,
+            NOW()
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM("TotalAmount") AS total_invoiced,
+                MAX(issue_date)    AS last_invoice_date,
+                COUNT(*)::INTEGER  AS inv_count
+            FROM invoices
+            WHERE "CustomerId" = c.id
+              AND "Status" NOT IN ('Cancelled', 'Voided', 'Draft')
+        ) inv ON true
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(ABS(amount)) AS total_paid,
+                MAX(created_at::date) AS last_payment_date,
+                COUNT(*)::INTEGER AS pay_count
+            FROM credit_transactions
+            WHERE customer_id = c.id
+              AND transaction_type = 'PAYMENT'
+        ) pay ON true
+        WHERE c.is_active = true
+        ON CONFLICT (customer_id) DO UPDATE SET
+            total_invoiced    = EXCLUDED.total_invoiced,
+            total_paid        = EXCLUDED.total_paid,
+            balance           = EXCLUDED.balance,
+            last_invoice_date = EXCLUDED.last_invoice_date,
+            last_payment_date = EXCLUDED.last_payment_date,
+            transaction_count = EXCLUDED.transaction_count,
+            updated_at        = NOW();
+    ELSE
+        -- snake_case schema (newer tenants)
+        INSERT INTO customer_balances (
+            customer_id, total_invoiced, total_paid, balance,
+            last_invoice_date, last_payment_date, transaction_count, updated_at
+        )
+        SELECT
+            c.id AS customer_id,
+            COALESCE(inv.total_invoiced, 0)     AS total_invoiced,
+            COALESCE(pay.total_paid, 0)         AS total_paid,
+            c.balance                           AS balance,
+            inv.last_invoice_date,
+            pay.last_payment_date,
+            COALESCE(inv.inv_count, 0) + COALESCE(pay.pay_count, 0) AS transaction_count,
+            NOW()
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(total_amount)       AS total_invoiced,
+                MAX(issue_date::date)   AS last_invoice_date,
+                COUNT(*)::INTEGER       AS inv_count
+            FROM invoices
+            WHERE customer_id = c.id
+              AND status NOT IN ('Cancelled', 'Voided', 'Draft', 'CANCELLED', 'VOIDED', 'DRAFT')
+        ) inv ON true
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(ABS(amount)) AS total_paid,
+                MAX(created_at::date) AS last_payment_date,
+                COUNT(*)::INTEGER AS pay_count
+            FROM credit_transactions
+            WHERE customer_id = c.id
+              AND transaction_type = 'PAYMENT'
+        ) pay ON true
+        WHERE c.is_active = true
+        ON CONFLICT (customer_id) DO UPDATE SET
+            total_invoiced    = EXCLUDED.total_invoiced,
+            total_paid        = EXCLUDED.total_paid,
+            balance           = EXCLUDED.balance,
+            last_invoice_date = EXCLUDED.last_invoice_date,
+            last_payment_date = EXCLUDED.last_payment_date,
+            transaction_count = EXCLUDED.transaction_count,
+            updated_at        = NOW();
+    END IF;
+END $$;
 
 -- ============================================================
 -- BACKFILL: supplier_balances from GR + supplier payments
@@ -245,7 +305,7 @@ LEFT JOIN LATERAL (
         MAX(sm.created_at::date) AS last_recv
     FROM stock_movements sm
     WHERE sm.product_id = p.id
-      AND sm.movement_type IN ('GOODS_RECEIPT', 'RETURN_IN', 'ADJUSTMENT_IN')
+      AND sm.movement_type::text IN ('GOODS_RECEIPT', 'RETURN_IN', 'ADJUSTMENT_IN')
 ) recv ON true
 LEFT JOIN LATERAL (
     SELECT
@@ -253,19 +313,19 @@ LEFT JOIN LATERAL (
         MAX(sm.created_at::date) AS last_sold
     FROM stock_movements sm
     WHERE sm.product_id = p.id
-      AND sm.movement_type IN ('SALE', 'RETURN_OUT')
+      AND sm.movement_type::text IN ('SALE', 'RETURN_OUT')
 ) sold ON true
 LEFT JOIN LATERAL (
     SELECT
         SUM(CASE
-            WHEN sm.movement_type IN ('ADJUSTMENT_IN', 'COUNT_GAIN') THEN sm.quantity
-            WHEN sm.movement_type IN ('ADJUSTMENT_OUT', 'COUNT_LOSS', 'DAMAGE', 'EXPIRED') THEN -sm.quantity
+            WHEN sm.movement_type::text IN ('ADJUSTMENT_IN', 'COUNT_GAIN') THEN sm.quantity
+            WHEN sm.movement_type::text IN ('ADJUSTMENT_OUT', 'COUNT_LOSS', 'DAMAGE', 'EXPIRED') THEN -sm.quantity
             ELSE 0
         END) AS total_adjusted,
         MAX(sm.created_at::date) AS last_adj
     FROM stock_movements sm
     WHERE sm.product_id = p.id
-      AND sm.movement_type IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'COUNT_GAIN', 'COUNT_LOSS', 'DAMAGE', 'EXPIRED')
+      AND sm.movement_type::text IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'COUNT_GAIN', 'COUNT_LOSS', 'DAMAGE', 'EXPIRED')
 ) adj ON true
 ON CONFLICT (product_id) DO UPDATE SET
     quantity_on_hand   = EXCLUDED.quantity_on_hand,
