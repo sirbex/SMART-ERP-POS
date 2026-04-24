@@ -24,21 +24,35 @@ docker compose -f docker-compose.deploy.yml build backend frontend
 echo ">>> Restarting backend + frontend..."
 docker compose -f docker-compose.deploy.yml up -d --no-deps backend frontend
 
+# Reload nginx so it picks up the new container IP (containers get new IPs on recreate)
+echo ">>> Reloading nginx to pick up new container IP..."
+docker exec smarterp-nginx nginx -s reload
+
 # Verify
 echo ""
 echo ">>> Container status:"
 docker ps --format 'table {{.Names}}\t{{.Status}}'
 
 echo ""
-echo ">>> Waiting 10s for backend to start..."
-sleep 10
+echo ">>> Waiting 15s for backend to start..."
+sleep 15
 
-# Health check
-if curl -sf http://localhost:3001/health > /dev/null 2>&1; then
-  echo ">>> Backend health: OK"
+# Internal health check (avoids nginx cold-start race)
+echo ">>> Internal backend health check:"
+if docker exec smarterp-backend wget -qO- http://localhost:3001/api/health > /dev/null 2>&1; then
+  echo ">>> Backend health: OK (internal)"
 else
-  echo ">>> Backend health: CHECKING LOGS..."
-  docker logs smarterp-backend --tail 20
+  echo ">>> Backend health: FAILED — checking logs..."
+  docker logs smarterp-backend --tail 30
+  exit 1
+fi
+
+# Public HTTPS health check
+echo ">>> Public HTTPS health check:"
+if curl -sf https://wizarddigital-inv.com/api/health > /dev/null 2>&1; then
+  echo ">>> HTTPS health: OK"
+else
+  echo ">>> HTTPS health: FAILED — nginx may need a moment, try: curl https://wizarddigital-inv.com/api/health"
 fi
 
 echo ""

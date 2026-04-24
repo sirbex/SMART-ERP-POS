@@ -28,18 +28,26 @@ This system is already running in production with live tenants and real data.
 ## Correct Deployment Procedure
 
 ```bash
-# Use the deploy script:
-scripts/deploy-update.sh
+# Use the deploy script (preferred — includes nginx reload):
+cd /opt/smarterp && bash scripts/deploy-update.sh
 
 # Or manually:
 cd /opt/smarterp
 git pull
 docker compose -f docker-compose.deploy.yml build backend frontend
 docker compose -f docker-compose.deploy.yml up -d --no-deps backend frontend
+
+# ⚠️ MANDATORY: reload nginx after EVERY container restart
+# (containers get new IPs on recreate; nginx caches the old IP → 502 until reloaded)
+docker exec smarterp-nginx nginx -s reload
+
+# Health check path is /api/health (NOT /health)
+curl https://wizarddigital-inv.com/api/health
 ```
 
 **What this does**: Rebuilds and restarts ONLY the application containers (backend + frontend).
-**What this does NOT touch**: PostgreSQL, Redis, Nginx, volumes, networks.
+**What this does NOT touch**: PostgreSQL, Redis, volumes, networks.
+**nginx reload is safe** — it only refreshes upstream IPs, zero downtime.
 
 ---
 
