@@ -596,10 +596,15 @@ export default function SuppliersPage() {
                     {supplier.contactPerson && <div className="text-sm text-gray-600 mb-1">👤 {supplier.contactPerson}</div>}
                     {supplier.phone && <div className="text-sm text-gray-600 mb-1">📞 {supplier.phone}</div>}
                     {supplier.email && <div className="text-sm text-gray-600 mb-1 truncate">📧 {supplier.email}</div>}
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center justify-between mb-3">
                       <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
                         {supplier.paymentTerms || 'NET30'}
                       </span>
+                      {Number(supplier.outstandingBalance) > 0 && (
+                        <span className="text-xs font-semibold text-red-600">
+                          {formatCurrency(Number(supplier.outstandingBalance))} due
+                        </span>
+                      )}
                     </div>
                     <div className="flex gap-2 border-t border-gray-100 pt-2">
                       <button onClick={() => setViewingSupplier(supplier)} className="flex-1 text-xs text-gray-600 hover:text-gray-900 font-medium py-1">👁️ View</button>
@@ -632,6 +637,9 @@ export default function SuppliersPage() {
                       Status
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Outstanding Balance
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
@@ -639,7 +647,7 @@ export default function SuppliersPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {suppliers.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                         {searchQuery
                           ? 'No suppliers match your search'
                           : 'No suppliers yet. Add your first supplier to get started!'}
@@ -680,6 +688,17 @@ export default function SuppliersPage() {
                           >
                             {supplier.isActive ? '✓ Active' : '○ Inactive'}
                           </span>
+                        </td>
+
+                        {/* Outstanding Balance */}
+                        <td className="px-4 py-4 whitespace-nowrap text-right">
+                          {Number(supplier.outstandingBalance) > 0 ? (
+                            <span className="text-sm font-semibold text-red-600">
+                              {formatCurrency(Number(supplier.outstandingBalance))}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-gray-400">—</span>
+                          )}
                         </td>
 
                         {/* Actions */}
@@ -788,6 +807,14 @@ export default function SuppliersPage() {
                         {supplier.paymentTerms || 'NET30'}
                       </span>
                     </div>
+                    {Number(supplier.outstandingBalance) > 0 && (
+                      <div className="flex items-center justify-between text-sm mt-1 pt-1 border-t border-gray-100">
+                        <span className="text-gray-500">Outstanding</span>
+                        <span className="font-semibold text-red-600">
+                          {formatCurrency(Number(supplier.outstandingBalance))}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Card Actions */}
