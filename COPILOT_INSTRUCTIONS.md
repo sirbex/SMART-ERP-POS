@@ -78,6 +78,33 @@ Controller → Service → Repository → Database
 - **Repository**: SQL queries only (parameterized)
 - Never skip layers or access database directly from controller
 
+### 🔒 SECURITY LAW (Zero Tolerance)
+
+**The browser is untrusted. NEVER rely on frontend protection.**
+
+- ❌ **NO frontend-only permission checks** — all permissions enforced at API/service layer
+- ❌ **NO excess data sent to client** — only send what the user role is strictly allowed to see
+- ❌ **NO trust of client-supplied identity/role** — re-validate on every request server-side
+- ✅ **Every endpoint uses `requireAuth`** middleware before processing
+- ✅ **Every privileged action checks `req.user.role`** — never infer role from request body
+- ✅ **SQL queries scope data by tenant/role** — enforce boundaries in the repository layer
+- ✅ **All inputs validated with Zod** before they reach the database
+
+---
+
+### 🧹 SECURITY SANITIZATION RULE (Zero Tolerance)
+
+**No API route may return raw entities.**
+
+- ❌ **NO raw entity responses** — every response passes through a role-based sanitizer
+- ❌ **NO relying on frontend to hide sensitive fields** — backend MUST strip them
+- ❌ **NO cost/margin data sent to CASHIER** — `totalCost`, `profit`, `profitMargin`, `totalProfit` must be stripped
+- ✅ **`sanitizeSaleForRole(data, role)`** applied to every sales response path
+- ✅ **`soldBy` always from `req.user.id`** — never accepted from request body
+- ✅ **CASHIER scoped to own data** — ownership checks on individual records; `cashierId` filter on aggregates
+
+---
+
 ### Database is PASSIVE STORAGE ONLY (Zero Tolerance)
 
 **ABSOLUTE PROHIBITION — NO EXCEPTIONS:**

@@ -83,6 +83,7 @@ import { jobQueue } from './services/jobQueue.js';
 import { connectionManager } from './db/connectionManager.js';
 import { sessionService } from './services/sessionService.js';
 import { authenticate } from './middleware/auth.js';
+import { requirePermission } from './rbac/middleware.js';
 import { correlationId } from './middleware/correlationId.js';
 import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
 import { initInventoryGLIntegrityJobs } from './services/inventoryGLIntegrityJobs.js';
@@ -274,7 +275,7 @@ app.get('/health', async (req, res) => {
 
 // Server time endpoint — SAP/Odoo pattern: server is SOLE authority for business dates.
 // Frontend MUST use this instead of new Date() for any business-critical date defaults.
-app.get('/api/server-time', (_req, res) => {
+app.get('/api/server-time', authenticate, (_req, res) => {
   res.json({
     success: true,
     data: {
@@ -287,15 +288,17 @@ app.get('/api/server-time', (_req, res) => {
   });
 });
 
-// API Documentation (Swagger UI)
+// API Documentation (Swagger UI) — restricted to ADMIN only (SECURITY LAW)
 app.use(
   '/api/docs',
+  authenticate,
+  requirePermission('admin.read'),
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec, {
     customSiteTitle: 'SMART-ERP-POS API Docs',
   })
 );
-app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
+app.get('/api/docs.json', authenticate, requirePermission('admin.read'), (_req, res) => res.json(swaggerSpec));
 
 // API routes
 

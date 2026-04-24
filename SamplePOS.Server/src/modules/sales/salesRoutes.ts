@@ -8,6 +8,24 @@ import { normalizeResponse, normalizePaginatedResponse } from '../../utils/caseC
 import { POSSaleSchema, POSSaleLineItemSchema } from '../../../../shared/zod/pos-sale.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
+// ─── SECURITY: Role-based response sanitization (SECURITY LAW) ───────────────
+// No API route may return raw entities. CASHIER must never see cost or margin
+// intelligence. Applied to every sales response after normalizeResponse.
+const CASHIER_RESTRICTED_FIELDS = ['totalCost', 'profit', 'profitMargin', 'totalProfit'] as const;
+function sanitizeSaleForRole<T extends Record<string, unknown>>(
+  data: T,
+  role: string | undefined
+): Record<string, unknown> {
+  if (role === 'CASHIER') {
+    const sanitized: Record<string, unknown> = { ...data };
+    for (const field of CASHIER_RESTRICTED_FIELDS) {
+      delete sanitized[field];
+    }
+    return sanitized;
+  }
+  return data;
+}
+
 // Internal validation for legacy format compatibility
 const SaleItemSchema = z.object({
   productId: z.string().min(1), // Accept UUID or custom IDs for quotation conversion
@@ -23,7 +41,7 @@ const CreateSaleSchema = z
     items: z.array(SaleItemSchema).min(1),
     paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']),
     paymentReceived: z.number().nonnegative(),
-    soldBy: z.string().uuid(),
+    // soldBy intentionally omitted — always forced from req.user.id (SECURITY LAW)
   })
   .strict();
 
@@ -171,7 +189,10 @@ export const salesController = {
       // Try legacy format
       const legacyValidation = CreateSaleSchema.safeParse(req.body);
       if (legacyValidation.success) {
-        serviceInput = legacyValidation.data;
+        serviceInput = {
+          ...legacyValidation.data,
+          soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // SECURITY LAW: force from JWT, not body
+        };
       } else {
         // Both validations failed - return POS schema errors as they're more relevant
         console.error(
@@ -246,9 +267,16 @@ export const salesController = {
         auditContext
       );
 
+      const normalizedCreateResult = normalizeResponse(result) as Record<string, unknown>;
+      if (normalizedCreateResult.sale && typeof normalizedCreateResult.sale === 'object') {
+        normalizedCreateResult.sale = sanitizeSaleForRole(
+          normalizedCreateResult.sale as Record<string, unknown>,
+          req.user?.role
+        );
+      }
       res.status(201).json({
         success: true,
-        data: normalizeResponse(result),
+        data: normalizedCreateResult,
         message: `Sale ${result.sale.saleNumber} created successfully`,
         warnings: result.warnings,
       });
@@ -278,9 +306,22 @@ export const salesController = {
     const { id } = UuidParamSchema.parse(req.params);
     const result = await salesService.getSaleById(pool, id);
 
+    // SECURITY LAW: CASHIER can only view their own sales
+    if (req.user?.role === 'CASHIER' && result.sale.soldBy !== req.user.id) {
+      res.status(403).json({ success: false, error: 'Forbidden' });
+      return;
+    }
+
+    const normalizedGetById = normalizeResponse(result) as Record<string, unknown>;
+    if (normalizedGetById.sale && typeof normalizedGetById.sale === 'object') {
+      normalizedGetById.sale = sanitizeSaleForRole(
+        normalizedGetById.sale as Record<string, unknown>,
+        req.user?.role
+      );
+    }
     res.json({
       success: true,
-      data: normalizeResponse(result),
+      data: normalizedGetById,
     });
   },
 
@@ -306,7 +347,9 @@ export const salesController = {
 
     res.json({
       success: true,
-      data: result.sales.map((sale) => normalizeResponse(sale)),
+      data: result.sales.map((sale) =>
+        sanitizeSaleForRole(normalizeResponse(sale) as Record<string, unknown>, req.user?.role)
+      ),
       pagination: {
         page: query.page,
         limit: query.limit,
@@ -321,18 +364,18 @@ export const salesController = {
     const pool = req.tenantPool || globalPool;
     const { startDate, endDate, groupBy } = SalesSummaryQuerySchema.parse(req.query);
 
-    // Summary shows store-wide totals (matching Reports page P&L/Sales).
-    // Individual sales list already filters by cashier via getSales().
-    const filters: { startDate?: string; endDate?: string; groupBy?: string } = {};
+    const filters: { startDate?: string; endDate?: string; groupBy?: string; cashierId?: string } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
     if (groupBy) filters.groupBy = groupBy;
+    // SECURITY LAW: CASHIER can only see summary of their own sales
+    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
 
     const result = await salesService.getSalesSummary(pool, filters);
 
     res.json({
       success: true,
-      data: result,
+      data: sanitizeSaleForRole(result as Record<string, unknown>, req.user?.role),
     });
   },
 

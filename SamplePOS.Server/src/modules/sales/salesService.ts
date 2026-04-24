@@ -34,6 +34,7 @@ import {
 } from '../../db/batchFetch.js';
 import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
 
@@ -69,6 +70,7 @@ export interface CreateSaleInput {
   cashRegisterSessionId?: string; // Link to cash register session for drawer tracking
   idempotencyKey?: string; // Offline sync idempotency key
   offlineId?: string; // Offline sale identifier
+  fromOrderId?: string; // POS order ID — if set, mark the order COMPLETED atomically with this sale
 }
 
 export interface RefundItemInput {
@@ -84,63 +86,6 @@ export interface RefundSaleInput {
 }
 
 export const salesService = {
-  /**
-   * Calculate FIFO cost for a sale item (BANK-GRADE PRECISION)
-   */
-  async calculateFIFOCost(pool: Pool, productId: string, quantity: number): Promise<number> {
-    const costLayers = await salesRepository.getFIFOCostLayers(pool, productId);
-
-    if (costLayers.length === 0) {
-      throw new BusinessError(`No cost layers found for product ${productId}`, 'ERR_SALE_001', {
-        productId,
-      });
-    }
-
-    let remainingQty = new Decimal(quantity);
-    let totalCost = new Decimal(0);
-
-    for (const layer of costLayers) {
-      if (remainingQty.lessThanOrEqualTo(0)) break;
-
-      const layerQty = new Decimal(layer.remaining_quantity);
-      const qtyFromLayer = Decimal.min(remainingQty, layerQty);
-      const layerCost = new Decimal(layer.cost_price || 0);
-
-      totalCost = totalCost.plus(qtyFromLayer.times(layerCost));
-      remainingQty = remainingQty.minus(qtyFromLayer);
-    }
-
-    if (remainingQty.greaterThan(0)) {
-      throw new BusinessError(
-        `Insufficient inventory for product ${productId}. Short by ${remainingQty.toFixed(4)} units`,
-        'ERR_STOCK_001',
-        { productId, requested: quantity, shortBy: Money.toNumber(remainingQty) }
-      );
-    }
-
-    // Return average cost per unit with bank precision
-    return Money.toNumber(Money.round(totalCost.dividedBy(quantity), 2));
-  },
-
-  /**
-   * Consume cost layers using FIFO method
-   */
-  async consumeCostLayers(pool: Pool, productId: string, quantity: number): Promise<void> {
-    const costLayers = await salesRepository.getFIFOCostLayers(pool, productId);
-    let remainingQty = new Decimal(quantity);
-
-    for (const layer of costLayers) {
-      if (remainingQty.lessThanOrEqualTo(0)) break;
-
-      const layerRemainingQty = Number(layer.remaining_quantity);
-      const qtyFromLayer = Decimal.min(remainingQty, new Decimal(layerRemainingQty));
-      const newQuantity = new Decimal(layerRemainingQty).minus(qtyFromLayer).toNumber();
-
-      await salesRepository.updateCostLayerQuantity(pool, String(layer.id), newQuantity);
-      remainingQty = remainingQty.minus(qtyFromLayer);
-    }
-  },
-
   /**
    * Create a complete sale with items (ATOMIC TRANSACTION)
    * @param pool - Database connection pool
@@ -1869,6 +1814,29 @@ export const salesService = {
           saleNumber: sale.saleNumber,
           error: stateError instanceof Error ? stateError.message : String(stateError),
         });
+      }
+
+      // ============================================================
+      // ATOMIC ORDER COMPLETION: Mark POS order COMPLETED and link
+      // Must run INSIDE this transaction so sale creation and order
+      // status update are a single atomic unit (prevents duplicate sale risk)
+      // ============================================================
+      if (input.fromOrderId) {
+        await client.query(
+          `UPDATE pos_orders SET status = 'COMPLETED', completed_at = NOW()
+           WHERE id = $1 AND status = 'PENDING'`,
+          [input.fromOrderId]
+        );
+        await client.query(
+          `UPDATE sales SET from_order_id = $1 WHERE id = $2`,
+          [input.fromOrderId, sale.id]
+        );
+        // Document flow: ORDER → SALE (non-fatal)
+        try {
+          await documentFlowService.linkDocuments(client, 'ORDER', input.fromOrderId, 'SALE', sale.id, 'CREATES');
+        } catch (dfErr) {
+          logger.warn('Document flow link ORDER→SALE failed (non-fatal)', { orderId: input.fromOrderId, saleId: sale.id, error: dfErr });
+        }
       }
 
       await client.query('COMMIT');

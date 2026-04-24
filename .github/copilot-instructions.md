@@ -26,6 +26,38 @@
 3. Does this change API response shape? → STOP and extend instead
 4. Could this break existing functionality? → STOP and add, don't modify
 
+### 🔒 SECURITY LAW (Zero Tolerance)
+
+**The browser is untrusted. NEVER rely on frontend protection.**
+
+| Rule | Enforcement |
+|------|-------------|
+| ❌ Frontend-only permission checks | All permissions MUST be enforced at API/service layer |
+| ❌ Sending excess data to client | Only send what the user role is strictly allowed to see |
+| ❌ Trusting client-supplied IDs/roles | Re-validate identity and authorization on every request |
+| ✅ Server-side authorization | Every endpoint checks `req.user.role` before returning data |
+| ✅ Data scoping in queries | SQL WHERE clauses enforce tenant/role boundaries |
+| ✅ Parameterized queries everywhere | No SQL string interpolation — zero injection surface |
+
+**Enforcement checklist for every endpoint:**
+1. Is the user authenticated? → `requireAuth` middleware
+2. Does the user's role allow this action? → `requireRole` / `requireFeature`
+3. Is the returned data scoped to what this role can see? → filter in repository/service
+4. Are all inputs validated before they touch the DB? → Zod schema parse
+
+### 🧹 SECURITY SANITIZATION RULE (Zero Tolerance)
+
+**No API route may return raw entities.**
+
+| Rule | Enforcement |
+|------|-------------|
+| ❌ Raw entity responses | Every response passes through a role-based sanitizer |
+| ❌ Frontend hiding of sensitive fields | Backend MUST strip fields the role must not see |
+| ❌ Cost/margin data sent to CASHIER | `totalCost`, `profit`, `profitMargin`, `totalProfit` must be stripped |
+| ✅ `sanitizeSaleForRole(data, role)` | Applied to every sales response path |
+| ✅ `soldBy` always from `req.user.id` | Never accepted from request body |
+| ✅ CASHIER scoped to own data | Ownership checks on per-record fetches; `cashierId` filter on aggregates |
+
 ### Database is PASSIVE STORAGE ONLY (Zero Tolerance)
 
 **ABSOLUTE PROHIBITION — applies to ALL changes, NO EXCEPTIONS:**
