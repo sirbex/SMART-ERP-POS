@@ -35,7 +35,8 @@ export type PostingSource =
     | 'SALES_INVOICE'           // POS sale / invoice posting
     | 'PAYMENT_RECEIPT'         // Customer payment → Dr Undeposited Funds / Cr AR
     | 'PAYMENT_DEPOSIT'         // Bank deposit → Dr Cash / Cr Undeposited Funds
-    | 'PURCHASE_BILL'           // Supplier bill / goods receipt
+    | 'PURCHASE_BILL'           // Supplier bill / goods receipt (creates AP liability)
+    | 'SUPPLIER_PAYMENT'        // Supplier payment — Dr AP / Cr Cash or Bank
     | 'INVENTORY_MOVE'          // Stock adjustment, damage, expiry, COGS
     | 'OPENING_BALANCE_WIZARD'  // One-time OBE setup — locked after completion
     | 'MANUAL_JOURNAL'          // Human-entered journal entry
@@ -207,17 +208,21 @@ export class PostingGovernanceService {
         }
 
         // ------------------------------------------------------------------
-        // Rule D: Crediting a CASH-tagged account is only allowed from PAYMENT_DEPOSIT
-        //         (cash can only leave via a deposit reversal or deposit itself)
+        // Rule D: Crediting a CASH-tagged account is only allowed from PAYMENT_DEPOSIT,
+        //         SUPPLIER_PAYMENT (AP reduction → cash out), or SYSTEM_CORRECTION.
         // ------------------------------------------------------------------
         for (const line of lines) {
             if (line.creditAmount > 0) {
                 const account = findAccount(accounts, line.accountCode);
                 if (account?.systemAccountTag === 'CASH') {
-                    if (source !== 'PAYMENT_DEPOSIT' && source !== 'SYSTEM_CORRECTION') {
+                    if (
+                        source !== 'PAYMENT_DEPOSIT' &&
+                        source !== 'SUPPLIER_PAYMENT' &&
+                        source !== 'SYSTEM_CORRECTION'
+                    ) {
                         throw new PostingGovernanceError(
                             `Cannot credit Cash account ${account.accountCode} (${account.accountName}) from source '${source}'. ` +
-                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT) or system correction.`,
+                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), supplier payment (SUPPLIER_PAYMENT), or system correction.`,
                             'GOV_RULE_D_CASH_CREDIT',
                             { accountCode: account.accountCode, source }
                         );

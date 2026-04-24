@@ -247,9 +247,11 @@ function classifyPlainError(message: string): {
   // NOTE: 'does not exist' is intentionally excluded: PostgreSQL uses that phrase
   // for missing DB objects (sequences, tables, columns) which should be 500 ERR_DATABASE,
   // not 404. Those are caught before this function via the pgError.code check above.
+  // NOTE: '[gl_error]' prefix is excluded — GL posting errors that contain 'not found'
+  // (e.g. missing account code) must surface as 500, not 404.
   if (
-    msg.includes('not found') ||
-    msg.includes('no active deposits')
+    (msg.includes('not found') || msg.includes('no active deposits')) &&
+    !msg.startsWith('[gl_error]')
   ) {
     return { status: 404, errorCode: 'ERR_NOT_FOUND', details: { reason: message } };
   }

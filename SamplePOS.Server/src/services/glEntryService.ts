@@ -965,7 +965,7 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_PAYMENT-${payment.paymentId}`,
-      source: 'PURCHASE_BILL' as const,
+      source: 'SUPPLIER_PAYMENT' as const,
     }, pool);
 
     logger.info('Recorded supplier payment to GL', {
@@ -975,8 +975,11 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
     });
   } catch (error: unknown) {
     logger.error('Failed to record supplier payment to GL', { error, payment });
-    // CRITICAL: GL failure MUST throw to prevent payments without AP adjustment
-    throw new Error(`GL posting failed for supplier payment ${payment.paymentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+    // CRITICAL: GL failure MUST throw to prevent payments without AP adjustment.
+    // Use [GL_ERROR] prefix so the error handler does not misclassify
+    // nested 'not found' messages (e.g. missing account code) as HTTP 404.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`[GL_ERROR] GL posting failed for supplier payment ${payment.paymentNumber}: ${detail}`);
   }
 }
 
