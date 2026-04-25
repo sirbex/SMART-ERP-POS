@@ -644,6 +644,8 @@ export async function createInvoice(
         taxAmount?: number;
         totalAmount: number;
         notes?: string;
+        currencyCode?: string;
+        initialStatus?: string;
     }
 ): Promise<SupplierInvoice> {
     // Generate invoice number using SQL CURRENT_DATE for timezone consistency
@@ -658,12 +660,15 @@ export async function createInvoice(
     const nextNum = seqResult.rows[0].next_num;
     const invoiceNumber = `SBILL-${year}-${String(nextNum).padStart(4, '0')}`;
 
+    const currencyCode = data.currencyCode ?? 'UGX';
+    const initialStatus = data.initialStatus ?? 'Pending';
+
     const result = await client.query(
         `INSERT INTO supplier_invoices (
        "Id", "SupplierInvoiceNumber", "InternalReferenceNumber", "SupplierId", "InvoiceDate", "DueDate",
        "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance", 
        "Status", "CurrencyCode", "Notes", "CreatedAt", "UpdatedAt"
-     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, 'Pending', 'USD', $9, NOW(), NOW())
+     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, NOW(), NOW())
      RETURNING 
        "Id" as id,
        "SupplierInvoiceNumber" as "invoiceNumber",
@@ -689,6 +694,8 @@ export async function createInvoice(
             data.subtotal,
             data.taxAmount || 0,
             data.totalAmount,
+            currencyCode,
+            initialStatus,
             data.notes || null
         ]
     );

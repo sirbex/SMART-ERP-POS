@@ -689,6 +689,8 @@ export const goodsReceiptService = {
               taxAmount: 0,
               totalAmount,
               notes: `Auto-created from Goods Receipt ${invoiceGrNumber}`,
+              currencyCode: 'UGX',
+              initialStatus: 'RECEIVED',
             });
 
             // Insert line items from GR items into the invoice
