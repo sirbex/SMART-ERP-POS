@@ -1200,7 +1200,7 @@ function SalesTable({
                 )}
                 <td className="px-4 py-3 text-sm text-right font-medium text-green-600">
                   <div>{formatCurrency(sale.profit || 0)}</div>
-                  {sale.profitMargin > 0 && <div className="text-xs text-gray-500">({sale.profitMargin.toFixed(1)}%)</div>}
+                  {sale.profitMargin > 0 && <div className="text-xs text-gray-500">({(sale.profitMargin * 100).toFixed(1)}%)</div>}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <span
