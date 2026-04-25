@@ -219,13 +219,13 @@ export const creditDebitNoteRepository = {
 
         const result = await client.query(
             `INSERT INTO invoices (
-        invoice_number, customer_id, customer_name, sale_id,
+        id, invoice_number, customer_id, customer_name, sale_id,
         issue_date, due_date, subtotal, tax_amount, total_amount,
         amount_paid, amount_due, status, payment_terms,
         notes, created_at, updated_at,
         document_type, reference_invoice_id, reason, returns_goods
       ) VALUES (
-        $1, $2, $3, NULL,
+        gen_random_uuid(), $1, $2, $3, NULL,
         $4, $4, $5, $6, $7,
         0, $7, 'DRAFT', 0,
         $8, $9, $9,

@@ -130,10 +130,10 @@ export const invoiceRepository = {
 
     const result = await pool.query(
       `INSERT INTO invoices (
-        invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
+        id, invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
         subtotal, tax_amount, total_amount, amount_paid, amount_due, 
         notes, status, payment_terms, created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$9,$10,'DRAFT',30,$11,$11)
+      ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,0,$9,$10,'DRAFT',30,$11,$11)
       RETURNING *`,
       [
         invoiceNumber,
@@ -172,10 +172,10 @@ export const invoiceRepository = {
 
     const result = await pool.query(
       `INSERT INTO invoices (
-        invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
+        id, invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
         subtotal, tax_amount, total_amount, amount_paid, amount_due, 
         notes, status, payment_terms, created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,NOW(),NOW() + INTERVAL '30 days',
+      ) VALUES (gen_random_uuid(),$1,$2,$3,$4,NOW(),NOW() + INTERVAL '30 days',
                 $5, 0, $5, 0, $5, $6, 'DRAFT', 30, $7, $7)
       RETURNING *`,
       [
