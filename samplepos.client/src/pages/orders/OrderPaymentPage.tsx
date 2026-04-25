@@ -57,6 +57,10 @@ export default function OrderPaymentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerInitialized, setCustomerInitialized] = useState(false);
+  // Extra discount the cashier can apply at payment time
+  const [cashierDiscount, setCashierDiscount] = useState(0);
+  const [discountInput, setDiscountInput] = useState('');
+  const [showDiscountInput, setShowDiscountInput] = useState(false);
   const [paymentLines, setPaymentLines] = useState<
     Array<{
       id: string;
@@ -94,8 +98,8 @@ export default function OrderPaymentPage() {
 
   const totalAmount = useMemo(() => {
     if (!order) return 0;
-    return parseFloat(order.totalAmount);
-  }, [order]);
+    return Math.max(0, new Decimal(order.totalAmount).minus(cashierDiscount).toNumber());
+  }, [order, cashierDiscount]);
 
   // Split payment calculations
   const totalPaid = useMemo(() => {
@@ -217,6 +221,7 @@ export default function OrderPaymentPage() {
         paymentReceived: number;
         customerId?: string | null;
         paymentLines?: { paymentMethod: string; amount: number; reference?: string }[];
+        extraDiscountAmount?: number;
       } = {
         paymentMethod: effectiveMethod,
         paymentReceived: totalPaidAmount,
@@ -226,6 +231,7 @@ export default function OrderPaymentPage() {
           amount: l.amount,
           reference: l.reference,
         })),
+        ...(cashierDiscount > 0 ? { extraDiscountAmount: cashierDiscount } : {}),
       };
 
       const resp = await api.orders.complete(id!, payload);
@@ -416,6 +422,66 @@ export default function OrderPaymentPage() {
                   <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
                     Payment Method
                   </label>
+
+                {/* Cashier Discount */}
+                <div className="mb-3">
+                  {cashierDiscount > 0 ? (
+                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <span className="text-sm text-green-700 font-medium">
+                        🏷️ Discount: -{formatCurrency(cashierDiscount)}
+                      </span>
+                      <button
+                        onClick={() => { setCashierDiscount(0); setDiscountInput(''); setShowDiscountInput(false); }}
+                        className="text-red-500 hover:text-red-700 text-xs font-bold ml-2"
+                        title="Remove discount"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : showDiscountInput ? (
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="number"
+                        value={discountInput}
+                        onChange={(e) => setDiscountInput(e.target.value)}
+                        placeholder="Discount amount"
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        min={0}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const v = parseFloat(discountInput);
+                            if (!isNaN(v) && v > 0) { setCashierDiscount(v); setShowDiscountInput(false); }
+                          }
+                          if (e.key === 'Escape') { setShowDiscountInput(false); setDiscountInput(''); }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const v = parseFloat(discountInput);
+                          if (!isNaN(v) && v > 0) { setCashierDiscount(v); setShowDiscountInput(false); }
+                        }}
+                        className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={() => { setShowDiscountInput(false); setDiscountInput(''); }}
+                        className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowDiscountInput(true)}
+                      className="w-full py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
+                    >
+                      🏷️ Add Discount
+                    </button>
+                  )}
+                </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     {paymentMethods.map((method) => (
                       <button
@@ -556,6 +622,24 @@ export default function OrderPaymentPage() {
 
                 {/* Running Totals */}
                 <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                  {(parseFloat(order?.discountAmount ?? '0') > 0 || cashierDiscount > 0) && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Subtotal</span>
+                      <span className="font-medium">{formatCurrency(parseFloat(order?.subtotal ?? '0'))}</span>
+                    </div>
+                  )}
+                  {parseFloat(order?.discountAmount ?? '0') > 0 && (
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Discount (order)</span>
+                      <span>-{formatCurrency(parseFloat(order!.discountAmount))}</span>
+                    </div>
+                  )}
+                  {cashierDiscount > 0 && (
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Discount (cashier)</span>
+                      <span>-{formatCurrency(cashierDiscount)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Sale Total</span>
                     <span className="font-semibold">{formatCurrency(totalAmount)}</span>

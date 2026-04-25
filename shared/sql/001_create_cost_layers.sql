@@ -20,12 +20,12 @@ CREATE TABLE IF NOT EXISTS cost_layers (
 );
 
 -- Indexes for optimal query performance
-CREATE INDEX idx_cost_layers_product_id ON cost_layers(product_id);
-CREATE INDEX idx_cost_layers_active_remaining ON cost_layers(is_active, remaining_quantity) 
+CREATE INDEX IF NOT EXISTS idx_cost_layers_product_id ON cost_layers(product_id);
+CREATE INDEX IF NOT EXISTS idx_cost_layers_active_remaining ON cost_layers(is_active, remaining_quantity) 
     WHERE is_active = TRUE AND remaining_quantity > 0;
-CREATE INDEX idx_cost_layers_received_date ON cost_layers(product_id, received_date) 
+CREATE INDEX IF NOT EXISTS idx_cost_layers_received_date ON cost_layers(product_id, received_date) 
     WHERE is_active = TRUE;
-CREATE INDEX idx_cost_layers_goods_receipt ON cost_layers(goods_receipt_id) 
+CREATE INDEX IF NOT EXISTS idx_cost_layers_goods_receipt ON cost_layers(goods_receipt_id) 
     WHERE goods_receipt_id IS NOT NULL;
 
 -- Trigger to update updated_at timestamp

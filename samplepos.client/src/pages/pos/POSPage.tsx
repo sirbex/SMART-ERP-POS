@@ -14,7 +14,6 @@ import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
-import type { OfflineSale } from '../../hooks/useOfflineMode';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { useCreateInvoice } from '../../hooks/useApi';
 import { api } from '../../utils/api';
@@ -2245,6 +2244,8 @@ export default function POSPage() {
         customerId: selectedCustomer?.id,
         notes: '',
         items: orderItems,
+        // Cart-level discount applied by dispenser (passed so backend stores correct total)
+        discountAmount: cartDiscountAmount > 0 ? cartDiscountAmount : undefined,
       };
       const response = await api.orders.create(orderData);
       if (response.data?.success) {
@@ -3122,31 +3123,31 @@ export default function POSPage() {
           </div>
           <div className="max-h-48 overflow-y-auto border rounded divide-y divide-gray-100">
             {syncQueue
-              .filter((s: OfflineSale) => s.status !== 'SYNCED')
-              .map((sale: OfflineSale) => (
-                <div key={sale.idempotencyKey} className="px-3 py-2 flex items-center justify-between">
+              .filter((s) => s.syncStatus !== 'SYNCED')
+              .map((sale) => (
+                <div key={sale.key} className="px-3 py-2 flex items-center justify-between">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-900">{sale.offlineId}</p>
                     <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <span>{sale.data.lineItems.length} items</span>
+                      <span>{sale.lineCount} items</span>
                       <span>•</span>
-                      <span>{formatTimestampTime(String(sale.timestamp))}</span>
+                      <span>{formatTimestampTime(String(sale.ts))}</span>
                     </div>
                     {sale.syncError && (
                       <p className="text-xs text-red-500 mt-0.5 break-words">{sale.syncError}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${sale.status === 'PENDING_SYNC' ? 'bg-yellow-100 text-yellow-700' :
-                      sale.status === 'REQUIRES_REVIEW' ? 'bg-orange-100 text-orange-700' :
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${sale.syncStatus === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
+                      sale.syncStatus === 'REVIEW' ? 'bg-orange-100 text-orange-700' :
                         'bg-red-100 text-red-700'
                       }`}>
-                      {sale.status.replace('_', ' ')}
+                      {sale.syncStatus.replace('_', ' ')}
                     </span>
-                    {(sale.status === 'FAILED' || sale.status === 'REQUIRES_REVIEW') && (
+                    {(sale.syncStatus === 'FAILED' || sale.syncStatus === 'REVIEW') && (
                       <button
                         onClick={() => {
-                          retryFailedSale(sale.idempotencyKey);
+                          retryFailedSale(sale.key);
                           toast.success(`${sale.offlineId} moved to pending`);
                         }}
                         className="text-blue-500 hover:text-blue-700 text-xs font-medium"
@@ -3157,7 +3158,7 @@ export default function POSPage() {
                     <button
                       onClick={() => {
                         if (confirm(`Cancel offline sale ${sale.offlineId}? Stock will be restored.`)) {
-                          cancelOfflineSale(sale.idempotencyKey);
+                          cancelOfflineSale(sale.key);
                           toast.success(`Cancelled ${sale.offlineId}`);
                         }
                       }}

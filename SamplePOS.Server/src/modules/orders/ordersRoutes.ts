@@ -1,5 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
+import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { ordersService, CreateOrderInput, OrderItemInput } from './ordersService.js';
 import { salesService, CreateSaleInput, SaleItemInput } from '../sales/salesService.js';
@@ -45,6 +46,8 @@ const CompleteOrderSchema = z.object({
   })).optional(),
   customerId: z.string().uuid().nullable().optional(),
   cashRegisterSessionId: z.string().uuid().optional(),
+  // Optional additional discount the cashier can apply at payment time
+  extraDiscountAmount: z.number().nonnegative().optional(),
 });
 
 const CancelOrderSchema = z.object({
@@ -192,13 +195,21 @@ router.post(
     // Allow customer override at payment time (cashier can assign/change customer)
     const effectiveCustomerId = paymentData.customerId ?? order.customerId;
 
+    // Combine order's stored discount with any extra discount the cashier adds
+    const orderDiscountAmount = Money.toNumber(Money.parseDb(order.discountAmount));
+    const extraDiscount = paymentData.extraDiscountAmount ?? 0;
+    const effectiveDiscountAmount = new Decimal(orderDiscountAmount).plus(extraDiscount).toNumber();
+    const orderSubtotal = Money.toNumber(Money.parseDb(order.subtotal));
+    const orderTaxAmount = Money.toNumber(Money.parseDb(order.taxAmount));
+    const effectiveTotalAmount = Math.max(0, new Decimal(orderSubtotal).minus(effectiveDiscountAmount).plus(orderTaxAmount).toNumber());
+
     const saleInput: CreateSaleInput = {
       customerId: effectiveCustomerId,
       items: saleItems,
-      subtotal: Money.toNumber(Money.parseDb(order.subtotal)),
-      discountAmount: Money.toNumber(Money.parseDb(order.discountAmount)),
-      taxAmount: Money.toNumber(Money.parseDb(order.taxAmount)),
-      totalAmount: Money.toNumber(Money.parseDb(order.totalAmount)),
+      subtotal: orderSubtotal,
+      discountAmount: effectiveDiscountAmount,
+      taxAmount: orderTaxAmount,
+      totalAmount: effectiveTotalAmount,
       paymentMethod: paymentData.paymentMethod,
       paymentReceived: paymentData.paymentReceived,
       soldBy: userId,

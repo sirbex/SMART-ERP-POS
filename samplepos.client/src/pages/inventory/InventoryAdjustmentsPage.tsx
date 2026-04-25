@@ -19,6 +19,8 @@ import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { BatchAdjustmentSchema } from '@shared/zod/inventory';
 import apiClient from '../../utils/api';
+// apiClient reserved for future direct calls
+void apiClient;
 import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
@@ -88,6 +90,7 @@ export default function InventoryAdjustmentsPage() {
   const queryClient = useQueryClient();
   const { data: stockLevelsData, isLoading, error } = useStockLevels();
   const adjustInventoryMutation = useAdjustInventory();
+  void adjustInventoryMutation;
   const adjustBatchMutation = useAdjustBatch();
   // Load products for category map (static, for batch search)
   const { data: productsData } = useProducts({ limit: 500 });

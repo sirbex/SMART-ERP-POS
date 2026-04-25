@@ -208,11 +208,12 @@ export function deriveOrderState(
             }
             case 'ORDER_UPDATED': {
                 if (derived) {
+                    const d = derived as DerivedOrder;
                     derived = {
-                        ...derived,
-                        lines: event.lines,
-                        customerId: event.customerId ?? derived.customerId,
-                        notes: event.notes ?? derived.notes,
+                        ...d,
+                        lines: (event as { lines: DerivedOrder['lines'] }).lines,
+                        customerId: (event as { customerId?: string }).customerId ?? d.customerId,
+                        notes: (event as { notes?: string }).notes ?? d.notes,
                         updatedTs: event.ts,
                     };
                 }
@@ -220,13 +221,13 @@ export function deriveOrderState(
             }
             case 'ORDER_CANCELLED': {
                 if (derived) {
-                    derived = { ...derived, status: 'CANCELLED', updatedTs: event.ts };
+                    derived = { ...(derived as DerivedOrder), status: 'CANCELLED', updatedTs: event.ts };
                 }
                 break;
             }
             case 'SALE_COMPLETED': {
                 if (derived) {
-                    derived = { ...derived, status: 'COMPLETED', updatedTs: event.ts };
+                    derived = { ...(derived as DerivedOrder), status: 'COMPLETED', updatedTs: event.ts };
                 }
                 break;
             }
