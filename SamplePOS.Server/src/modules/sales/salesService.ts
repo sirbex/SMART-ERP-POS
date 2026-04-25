@@ -3053,6 +3053,72 @@ export const salesService = {
             error: summaryError instanceof Error ? summaryError.message : String(summaryError),
           });
         }
+
+        // STATE TABLES: Reverse product_daily_summary for the full sale
+        // (sales_daily_summary was decremented above; product_daily_summary needs the same)
+        try {
+          await client.query('SAVEPOINT refund_product_daily_summary');
+          const refundSaleDate = String(sale.sale_date).slice(0, 10);
+
+          // Fetch categories for all products on the original sale
+          const fullReturnProductIds = saleItems
+            .map((si) => si.productId)
+            .filter((id): id is string => !!id);
+          const fullReturnCategoryMap = new Map<string, string>();
+          if (fullReturnProductIds.length > 0) {
+            const catRes = await client.query(
+              `SELECT id, COALESCE(NULLIF(TRIM(category), ''), 'Uncategorized') AS category
+               FROM products WHERE id = ANY($1)`,
+              [[...new Set(fullReturnProductIds)]]
+            );
+            for (const row of catRes.rows) {
+              fullReturnCategoryMap.set(row.id, row.category);
+            }
+          }
+
+          // Aggregate all sale items into decrement entries
+          const fullReturnPdsMap = new Map<string, { category: string; unitsSold: Decimal; revenue: Decimal; costOfGoods: Decimal; discountGiven: Decimal }>();
+          for (const si of saleItems) {
+            if (!si.productId) continue;
+            const qty = Money.parseDb(si.quantity);
+            const unitCost = Money.parseDb(si.unitCost);
+            const totalPrice = Money.parseDb(si.totalPrice);
+            const costOfGoods = unitCost.times(qty);
+            const itemDiscount = Money.parseDb(si.discountAmount ?? 0);
+            const existing = fullReturnPdsMap.get(si.productId);
+            if (existing) {
+              existing.unitsSold = existing.unitsSold.plus(qty);
+              existing.revenue = existing.revenue.plus(totalPrice);
+              existing.costOfGoods = existing.costOfGoods.plus(costOfGoods);
+              existing.discountGiven = existing.discountGiven.plus(itemDiscount);
+            } else {
+              fullReturnPdsMap.set(si.productId, {
+                category: fullReturnCategoryMap.get(si.productId) || 'Uncategorized',
+                unitsSold: qty,
+                revenue: totalPrice,
+                costOfGoods,
+                discountGiven: itemDiscount,
+              });
+            }
+          }
+
+          const fullReturnPdsItems = Array.from(fullReturnPdsMap.entries()).map(([productId, agg]) => ({
+            productId,
+            category: agg.category,
+            unitsSold: agg.unitsSold.toNumber(),
+            revenue: agg.revenue.toNumber(),
+            costOfGoods: agg.costOfGoods.toNumber(),
+            discountGiven: agg.discountGiven.toNumber(),
+          }));
+          await stateTablesRepo.batchDecrementProductDailySummary(client, refundSaleDate, fullReturnPdsItems);
+        } catch (pdsError: unknown) {
+          await client.query('ROLLBACK TO SAVEPOINT refund_product_daily_summary');
+          logger.error('Product daily summary decrement failed on full return — will be healed by reconciliation', {
+            saleId,
+            saleNumber: sale.sale_number,
+            error: pdsError instanceof Error ? pdsError.message : String(pdsError),
+          });
+        }
       } else {
         // Partial return: advance status from COMPLETED → PARTIALLY_RETURNED
         // If already PARTIALLY_RETURNED (prior returns exist), leave status as-is
