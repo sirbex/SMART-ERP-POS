@@ -23,6 +23,7 @@ export const ExpenseCategorySchema = z.enum([
   'PROFESSIONAL_SERVICES',
   'ACCOMMODATION',
   'TRAINING',
+  'ALLOWANCE',
   'OTHER'
 ]);
 

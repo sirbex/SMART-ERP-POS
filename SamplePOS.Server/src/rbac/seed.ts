@@ -223,6 +223,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       'settings.read',
       'quotations.read', 'quotations.create',
       'reports.sales_view',
+      'expenses.read', 'expenses.create',
     ];
     for (const permKey of cashierPermissions) {
       await client.query(

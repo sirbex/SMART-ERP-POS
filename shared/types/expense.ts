@@ -19,6 +19,7 @@ export type ExpenseCategory =
   | 'PROFESSIONAL_SERVICES'
   | 'ACCOMMODATION'
   | 'TRAINING'
+  | 'ALLOWANCE'
   | 'OTHER';
 
 export type PaymentMethod =
@@ -190,6 +191,7 @@ export const EXPENSE_CATEGORIES: Record<ExpenseCategory, string> = {
   PROFESSIONAL_SERVICES: 'Professional Services',
   ACCOMMODATION: 'Accommodation',
   TRAINING: 'Training & Education',
+  ALLOWANCE: 'Employee Allowances',
   OTHER: 'Other Expenses'
 };
 

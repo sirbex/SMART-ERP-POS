@@ -133,13 +133,8 @@ const expenseApi = {
   submitExpense: async (id: string): Promise<Expense> => {
     const token = localStorage.getItem('auth_token');
 
-    // Debug: log the token value
-    console.log('[submitExpense] Token from localStorage:', token ? `${token.substring(0, 20)}...` : 'NULL/UNDEFINED');
-    console.log('[submitExpense] Token length:', token?.length || 0);
-
     // Check for missing, null, undefined, or literal string "undefined"
     if (!token || token === 'undefined' || token === 'null' || token.length < 20) {
-      console.error('[submitExpense] Invalid token detected, clearing auth state');
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user');
       localStorage.removeItem('auth-store');
@@ -155,7 +150,6 @@ const expenseApi = {
 
     if (!response.ok) {
       const error = await response.json();
-      console.error('[submitExpense] Server returned error:', error);
       throw new Error(error.error || 'Failed to submit expense');
     }
 
