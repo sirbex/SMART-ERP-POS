@@ -1542,7 +1542,7 @@ export async function recordSaleRefundToGL(
         })),
         userId: SYSTEM_USER_ID,
         idempotencyKey: `SALE_REFUND-${data.refundId}`,
-        source: 'SALES_INVOICE' as const,
+        source: 'SALES_REFUND' as const,
       }, pool, txClient);
       primaryTransactionId = journalResult.transactionId;
     }

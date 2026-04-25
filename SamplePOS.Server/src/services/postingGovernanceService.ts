@@ -33,6 +33,7 @@ import type pg from 'pg';
  */
 export type PostingSource =
     | 'SALES_INVOICE'           // POS sale / invoice posting
+    | 'SALES_REFUND'            // Sale refund/return — reverses revenue and credits cash/AR
     | 'PAYMENT_RECEIPT'         // Customer payment → Dr Undeposited Funds / Cr AR
     | 'PAYMENT_DEPOSIT'         // Bank deposit → Dr Cash / Cr Undeposited Funds
     | 'PURCHASE_BILL'           // Supplier bill / goods receipt (creates AP liability)
@@ -218,11 +219,12 @@ export class PostingGovernanceService {
                     if (
                         source !== 'PAYMENT_DEPOSIT' &&
                         source !== 'SUPPLIER_PAYMENT' &&
+                        source !== 'SALES_REFUND' &&
                         source !== 'SYSTEM_CORRECTION'
                     ) {
                         throw new PostingGovernanceError(
                             `Cannot credit Cash account ${account.accountCode} (${account.accountName}) from source '${source}'. ` +
-                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), supplier payment (SUPPLIER_PAYMENT), or system correction.`,
+                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), supplier payment (SUPPLIER_PAYMENT), sale refund (SALES_REFUND), or system correction.`,
                             'GOV_RULE_D_CASH_CREDIT',
                             { accountCode: account.accountCode, source }
                         );
@@ -298,10 +300,10 @@ export class PostingGovernanceService {
             if (line.debitAmount > 0 || line.creditAmount > 0) {
                 const account = findAccount(accounts, line.accountCode);
                 if (account?.systemAccountTag === 'COGS') {
-                    if (source !== 'INVENTORY_MOVE' && source !== 'SALES_INVOICE' && source !== 'SYSTEM_CORRECTION') {
+                    if (source !== 'INVENTORY_MOVE' && source !== 'SALES_INVOICE' && source !== 'SALES_REFUND' && source !== 'SYSTEM_CORRECTION') {
                         throw new PostingGovernanceError(
                             `Account ${account.accountCode} (${account.accountName}) is the Cost of Goods Sold account. ` +
-                            `Only inventory movements (INVENTORY_MOVE, SALES_INVOICE) may post to COGS. ` +
+                            `Only inventory movements (INVENTORY_MOVE, SALES_INVOICE, SALES_REFUND) may post to COGS. ` +
                             `Received source: '${source}'.`,
                             'GOV_RULE_F_COGS_RESTRICTED',
                             { accountCode: account.accountCode, source }
