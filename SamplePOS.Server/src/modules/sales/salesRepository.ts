@@ -849,79 +849,109 @@ export const salesRepository = {
       cashierId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
-    const whereClauses: string[] = [
-      `lt."Status" = 'POSTED'`,
-      `lt."ReferenceType" = 'SALE'`,
-    ];
+    // For cashier-filtered requests, use the raw sales table (sales_daily_summary has no cashier_id)
+    if (filters?.cashierId) {
+      const whereClauses: string[] = ['s.status = $1'];
+      const values: unknown[] = ['COMPLETED'];
+      let paramIndex = 2;
+
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
+
+      if (filters.startDate) {
+        whereClauses.push(`s.sale_date >= $${paramIndex++}::date`);
+        values.push(filters.startDate);
+      }
+      if (filters.endDate) {
+        whereClauses.push(`s.sale_date <= $${paramIndex++}::date`);
+        values.push(filters.endDate);
+      }
+
+      let dateGroupExpr = '';
+      let dateFormatExpr = '';
+      switch (groupBy) {
+        case 'day':
+          dateGroupExpr = 's.sale_date';
+          dateFormatExpr = `TO_CHAR(s.sale_date, 'Mon DD, YYYY')`;
+          break;
+        case 'week':
+          dateGroupExpr = `DATE_TRUNC('week', s.sale_date)`;
+          dateFormatExpr = `TO_CHAR(DATE_TRUNC('week', s.sale_date), 'Mon DD, YYYY')`;
+          break;
+        case 'month':
+          dateGroupExpr = `DATE_TRUNC('month', s.sale_date)`;
+          dateFormatExpr = `TO_CHAR(DATE_TRUNC('month', s.sale_date), 'Mon YYYY')`;
+          break;
+      }
+
+      const cashierQuery = `
+        SELECT
+          ${dateFormatExpr} AS period,
+          COUNT(*)::integer AS transaction_count,
+          ROUND(COALESCE(SUM(s.total_amount), 0)::numeric, 2) AS total_revenue,
+          ROUND(COALESCE(SUM(s.total_cost), 0)::numeric, 2) AS total_cost,
+          ROUND(COALESCE(SUM(s.total_amount - COALESCE(s.total_cost, 0)), 0)::numeric, 2) AS total_profit,
+          ROUND(
+            COALESCE(SUM(s.total_amount), 0) / NULLIF(COUNT(*), 0)::numeric
+          , 2) AS avg_transaction_value
+        FROM sales s
+        WHERE ${whereClauses.join(' AND ')}
+        GROUP BY ${dateGroupExpr}
+        ORDER BY ${dateGroupExpr} DESC
+      `;
+      const cashierResult = await pool.query(cashierQuery, values);
+      return cashierResult.rows;
+    }
+
+    // Non-cashier case: use sales_daily_summary state table for accurate pre-computed totals.
+    // The GL-based query was unreliable (COGS only captured account '5000', missing COGS for
+    // some entries). The state table is the single source of truth for daily sales figures.
+    const whereClauses: string[] = [];
     const values: unknown[] = [];
     let paramIndex = 1;
 
-    // For cashier filtering we still join the sales table — the GL
-    // doesn't store cashier_id, but the link is via ReferenceNumber.
-    let cashierJoin = '';
-    if (filters?.cashierId) {
-      cashierJoin = `JOIN sales s ON lt."ReferenceNumber" = s.sale_number`;
-      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
-      values.push(filters.cashierId);
-    }
-
     if (filters?.startDate) {
-      whereClauses.push(`lt."TransactionDate"::date >= $${paramIndex++}::date`);
+      whereClauses.push(`sale_date >= $${paramIndex++}::date`);
       values.push(filters.startDate);
     }
-
     if (filters?.endDate) {
-      whereClauses.push(`lt."TransactionDate"::date <= $${paramIndex++}::date`);
+      whereClauses.push(`sale_date <= $${paramIndex++}::date`);
       values.push(filters.endDate);
     }
 
-    let dateExpr = '';
-    let dateFormat = '';
+    const whereClause = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+    let dateGroupExpr = '';
+    let dateFormatExpr = '';
     switch (groupBy) {
       case 'day':
-        dateExpr = `lt."TransactionDate"::date`;
-        dateFormat = `TO_CHAR(lt."TransactionDate"::date, 'Mon DD, YYYY')`;
+        dateGroupExpr = 'sale_date';
+        dateFormatExpr = `TO_CHAR(sale_date, 'Mon DD, YYYY')`;
         break;
       case 'week':
-        dateExpr = `DATE_TRUNC('week', lt."TransactionDate")`;
-        dateFormat = `TO_CHAR(DATE_TRUNC('week', lt."TransactionDate"), 'Mon DD, YYYY')`;
+        dateGroupExpr = `DATE_TRUNC('week', sale_date)`;
+        dateFormatExpr = `TO_CHAR(DATE_TRUNC('week', sale_date), 'Mon DD, YYYY')`;
         break;
       case 'month':
-        dateExpr = `DATE_TRUNC('month', lt."TransactionDate")`;
-        dateFormat = `TO_CHAR(DATE_TRUNC('month', lt."TransactionDate"), 'Mon YYYY')`;
+        dateGroupExpr = `DATE_TRUNC('month', sale_date)`;
+        dateFormatExpr = `TO_CHAR(DATE_TRUNC('month', sale_date), 'Mon YYYY')`;
         break;
     }
 
     const query = `
       SELECT
-        ${dateFormat} AS period,
-        COUNT(DISTINCT lt."Id") AS transaction_count,
-        ROUND(SUM(
-          CASE WHEN a."AccountType" = 'REVENUE'
-               THEN le."CreditAmount" - le."DebitAmount" ELSE 0 END
-        )::numeric, 2) AS total_revenue,
-        ROUND(SUM(
-          CASE WHEN a."AccountCode" = '5000'
-               THEN le."DebitAmount" - le."CreditAmount" ELSE 0 END
-        )::numeric, 2) AS total_cost,
+        ${dateFormatExpr} AS period,
+        COALESCE(SUM(transaction_count), 0)::integer AS transaction_count,
+        ROUND(COALESCE(SUM(total_amount), 0)::numeric, 2) AS total_revenue,
+        ROUND(COALESCE(SUM(total_cost), 0)::numeric, 2) AS total_cost,
+        ROUND(COALESCE(SUM(total_profit), 0)::numeric, 2) AS total_profit,
         ROUND(
-          SUM(CASE WHEN a."AccountType" = 'REVENUE'
-                   THEN le."CreditAmount" - le."DebitAmount" ELSE 0 END)
-        - SUM(CASE WHEN a."AccountCode" = '5000'
-                   THEN le."DebitAmount" - le."CreditAmount" ELSE 0 END)
-        , 2) AS total_profit,
-        ROUND(
-          SUM(CASE WHEN a."AccountType" = 'REVENUE'
-                   THEN le."CreditAmount" - le."DebitAmount" ELSE 0 END)
-          / NULLIF(COUNT(DISTINCT lt."Id"), 0)
+          COALESCE(SUM(total_amount), 0) / NULLIF(COALESCE(SUM(transaction_count), 0), 0)::numeric
         , 2) AS avg_transaction_value
-      FROM ledger_entries le
-      JOIN accounts a ON le."AccountId" = a."Id"
-      JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-      ${cashierJoin}
-      WHERE ${whereClauses.join(' AND ')}
-      GROUP BY ${dateExpr}
-      ORDER BY ${dateExpr} DESC
+      FROM sales_daily_summary
+      ${whereClause}
+      GROUP BY ${dateGroupExpr}
+      ORDER BY ${dateGroupExpr} DESC
     `;
 
     const result = await pool.query(query, values);
