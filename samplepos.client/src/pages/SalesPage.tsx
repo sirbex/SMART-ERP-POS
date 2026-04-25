@@ -306,6 +306,9 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
   };
 }
 
+// Statuses that should not count in revenue/profit totals
+const VOID_STATUSES = ['VOID', 'REFUNDED', 'VOIDED_BY_RETURN'];
+
 export default function SalesPage() {
   const { user } = useAuth();
   const isCashier = user?.role === 'CASHIER';
@@ -505,7 +508,9 @@ export default function SalesPage() {
   const salesByCustomer = useMemo(() => {
     const grouped = new Map<string, CustomerGroup>();
 
-    filteredSales.forEach((sale) => {
+    filteredSales
+      .filter((sale) => !VOID_STATUSES.includes(sale.status))
+      .forEach((sale) => {
       const customerId = sale.customerId || 'WALK-IN';
       const customerName = sale.customerName || 'Walk-in Customer';
 
@@ -559,7 +564,9 @@ export default function SalesPage() {
 
     // Fallback: client-side grouping if server data not yet loaded
     const grouped = new Map<string, UserGroup>();
-    filteredSales.forEach((sale) => {
+    filteredSales
+      .filter((sale) => !VOID_STATUSES.includes(sale.status))
+      .forEach((sale) => {
       const userId = sale.cashierId || sale.soldById || 'UNKNOWN';
       const userName = sale.cashierName || sale.soldByName || 'Unknown User';
 

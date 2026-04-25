@@ -4206,7 +4206,7 @@ export const reportsRepository = {
         FROM sales s
         LEFT JOIN customers c ON c.id = s.customer_id
         WHERE s.cash_register_session_id = $1
-          AND s.status NOT IN ('VOID')
+          AND s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED')
         ORDER BY s.created_at ASC
       `,
         [actualSessionId]
