@@ -95,6 +95,7 @@ interface HoldOrder {
   id: string;
   holdNumber: string;
   customerName?: string;
+  discountAmount?: number;
   items: HoldLineItem[];
 }
 
@@ -1492,6 +1493,18 @@ export default function POSPage() {
           };
         })
       );
+
+      // Restore cart-level discount if the dispenser applied one
+      if (hold.discountAmount && hold.discountAmount > 0) {
+        setCartDiscount({
+          type: 'FIXED_AMOUNT' as DiscountType,
+          value: hold.discountAmount,
+          amount: hold.discountAmount,
+          reason: '',
+        });
+      } else {
+        setCartDiscount(null);
+      }
 
       if (hold.customerName) {
         toast(`Customer: ${hold.customerName}`, {
