@@ -473,4 +473,47 @@ export const purchaseOrderRepository = {
       // Note: PO items are preserved for audit trail since the PO still exists
     });
   },
+
+  /**
+   * Hard-delete a CANCELLED purchase order and all its items.
+   * Only allowed when status = 'CANCELLED' and no goods receipts exist.
+   */
+  async purgeCancelledPO(pool: Pool, id: string): Promise<void> {
+    await UnitOfWork.run(pool, async (client) => {
+      // Verify PO exists and is CANCELLED
+      const poCheck = await client.query(
+        `SELECT id, status FROM purchase_orders WHERE id = $1`,
+        [id]
+      );
+
+      if (poCheck.rowCount === 0) {
+        throw new Error(`Purchase order ${id} not found`);
+      }
+
+      if (poCheck.rows[0].status !== 'CANCELLED') {
+        throw new Error('Can only permanently delete CANCELLED purchase orders');
+      }
+
+      // Block if any goods receipts were ever created against this PO
+      const grCheck = await client.query(
+        'SELECT COUNT(*) FROM goods_receipts WHERE purchase_order_id = $1',
+        [id]
+      );
+
+      if (parseInt(grCheck.rows[0].count) > 0) {
+        throw new Error('Cannot delete purchase order that has goods receipts attached');
+      }
+
+      // Hard delete items first (FK constraint), then the PO
+      await client.query(
+        'DELETE FROM purchase_order_items WHERE purchase_order_id = $1',
+        [id]
+      );
+
+      await client.query(
+        'DELETE FROM purchase_orders WHERE id = $1',
+        [id]
+      );
+    });
+  },
 };

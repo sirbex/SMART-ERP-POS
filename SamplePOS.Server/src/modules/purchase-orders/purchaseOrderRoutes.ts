@@ -293,6 +293,20 @@ export const purchaseOrderController = {
   },
 
   /**
+   * Permanently delete a CANCELLED purchase order
+   */
+  async purgeCancelledPO(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    await purchaseOrderService.purgeCancelledPO(pool, id);
+
+    res.json({
+      success: true,
+      message: 'Cancelled purchase order permanently deleted',
+    });
+  },
+
+  /**
    * Update draft purchase order (SAP ME22N pattern)
    */
   async updateDraftPO(req: Request, res: Response): Promise<void> {
@@ -491,6 +505,12 @@ purchaseOrderRoutes.delete(
   authenticate,
   requirePermission('purchasing.delete'),
   asyncHandler(purchaseOrderController.deletePO)
+);
+purchaseOrderRoutes.delete(
+  '/:id/purge',
+  authenticate,
+  requirePermission('purchasing.delete'),
+  asyncHandler(purchaseOrderController.purgeCancelledPO)
 );
 
 // Invoice and payment routes

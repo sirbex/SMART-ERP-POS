@@ -444,6 +444,13 @@ export const purchaseOrderService = {
   },
 
   /**
+   * Permanently delete a CANCELLED purchase order (no GL impact — no goods were ever received).
+   */
+  async purgeCancelledPO(pool: Pool, id: string): Promise<void> {
+    return purchaseOrderRepository.purgeCancelledPO(pool, id);
+  },
+
+  /**
    * Send PO to supplier and auto-create goods receipt draft
    * This implements the workflow: PO Sent → Awaiting Delivery → Goods Receipt
    */
