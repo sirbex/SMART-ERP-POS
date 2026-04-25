@@ -3845,10 +3845,33 @@ export default function POSPage() {
               Payment
             </div>
             <div className="mb-3 sm:mb-4">
-              <div className="flex justify-between mb-2">
+              {cartDiscountAmount > 0 && (
+                <>
+                  <div className="flex justify-between mb-1 text-gray-600">
+                    <span className="text-sm sm:text-base">Subtotal:</span>
+                    <span className="text-sm sm:text-base">{formatCurrency(subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between mb-2 text-green-700 font-medium">
+                    <span className="text-sm sm:text-base">Discount:</span>
+                    <span className="text-sm sm:text-base">-{formatCurrency(cartDiscountAmount)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between mb-1">
                 <span className="font-medium text-sm sm:text-base">Total Amount:</span>
                 <span className="font-bold text-lg sm:text-xl">{formatCurrency(grandTotal)}</span>
               </div>
+              {isOnline && (
+                <button
+                  onClick={() => handleOpenDiscountDialog('cart')}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline mt-1"
+                  type="button"
+                >
+                  {cartDiscountAmount > 0
+                    ? `Edit Discount (-${formatCurrency(cartDiscountAmount)})`
+                    : '+ Add Discount'}
+                </button>
+              )}
             </div>
             <div className="mb-4 sm:mb-6">
               <label className="block text-sm sm:text-base font-semibold text-gray-800 mb-2">
@@ -4086,6 +4109,16 @@ export default function POSPage() {
             {/* Running Totals - Large & Prominent */}
             <div className="mb-4 sm:mb-6 border-t-2 sm:border-t-4 border-gray-200 pt-3 sm:pt-4">
               <div className="space-y-2 sm:space-y-3">
+                {cartDiscountAmount > 0 && (
+                  <div className="flex justify-between items-center bg-green-50 p-2 sm:p-3 rounded-lg">
+                    <span className="font-semibold text-sm sm:text-lg text-green-700">
+                      Discount:
+                    </span>
+                    <span className="font-bold text-lg sm:text-2xl text-green-600">
+                      -{formatCurrency(cartDiscountAmount)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center bg-gray-100 p-2 sm:p-3 rounded-lg">
                   <span className="font-semibold text-sm sm:text-lg text-gray-700">
                     Sale Total:
