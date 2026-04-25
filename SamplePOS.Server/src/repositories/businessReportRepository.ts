@@ -117,11 +117,7 @@ export async function getMoneyIn(
   const db = dbPool || globalPool;
 
   // Debit side of sales shows WHERE money landed (Cash 1010, AR 1200, etc.)
-  // Optionally filter by payment method via the sales table join
-  const paymentMethodJoin = filters.paymentMethod
-    ? `JOIN sales s2 ON lt."ReferenceNumber" = s2.sale_number AND s2.payment_method = $3`
-    : '';
-
+  // Always join sales to exclude void/returned sales; optionally filter by payment method
   const query = `
     SELECT
       a."AccountCode"  AS account_code,
@@ -131,11 +127,13 @@ export async function getMoneyIn(
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
-    ${paymentMethodJoin}
+    LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
     WHERE lt."ReferenceType" = 'SALE'
       AND lt."Status" = 'POSTED'
       AND le."DebitAmount" > 0
       AND a."AccountType" = 'ASSET'
+      AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
+      ${filters.paymentMethod ? `AND s.payment_method = $3` : ''}
       ${dateClause(1)}
     GROUP BY a."AccountCode", a."AccountName"
     ORDER BY total_amount DESC
@@ -222,11 +220,13 @@ export async function getCostAndStock(
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
+    LEFT JOIN sales s ON lt."ReferenceType" = 'SALE' AND lt."ReferenceNumber" = s.sale_number
     WHERE lt."Status" = 'POSTED'
       AND lt."ReferenceType" = ANY($3::text[])
       AND (
         a."AccountCode" IN ('5000','5010','5110','5120','5130','4110')
       )
+      AND (lt."ReferenceType" != 'SALE' OR s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
       ${dateClause(1)}
     GROUP BY a."AccountCode", a."AccountName", a."NormalBalance"
     ORDER BY a."AccountCode"
@@ -343,6 +343,7 @@ export async function getSummaryTotals(
   const db = dbPool || globalPool;
 
   // Total revenue from GL (CR on REVENUE accounts for SALE reference type)
+  // Exclude void/returned sales so they don't inflate revenue or sale count
   const revenueQuery = `
     SELECT
       ROUND(COALESCE(SUM(le."CreditAmount"), 0)::numeric, 2) AS total_revenue,
@@ -350,24 +351,29 @@ export async function getSummaryTotals(
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
+    LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
     WHERE lt."ReferenceType" = 'SALE'
       AND lt."Status" = 'POSTED'
       AND a."AccountType" = 'REVENUE'
       AND le."CreditAmount" > 0
+      AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
       ${dateClause(1)}
   `;
 
   // Total COGS from GL (DR on account 5000 for SALE reference type)
+  // Exclude void/returned sales so COGS is not inflated
   const cogsQuery = `
     SELECT
       ROUND(COALESCE(SUM(le."DebitAmount"), 0)::numeric, 2) AS total_cogs
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
+    LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
     WHERE lt."ReferenceType" = 'SALE'
       AND lt."Status" = 'POSTED'
       AND a."AccountCode" = '5000'
       AND le."DebitAmount" > 0
+      AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
       ${dateClause(1)}
   `;
 
