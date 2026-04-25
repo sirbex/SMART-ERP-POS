@@ -3078,6 +3078,55 @@ export const salesService = {
         isFullRefund,
       });
 
+      // CASH REGISTER INTEGRATION: Record refund movement for drawer tracking
+      // Non-blocking — refund is already committed; failure only affects drawer count
+      const isCashPayment = sale.payment_method === 'CASH';
+      const isMobilePayment = sale.payment_method === 'MOBILE_MONEY';
+      if ((isCashPayment || isMobilePayment) && refundTotalAmount.greaterThan(0)) {
+        try {
+          // Use original sale's session if still open; otherwise find user's open session
+          let sessionId: string | null = sale.cash_register_session_id || null;
+          if (sessionId) {
+            const origSession = await cashRegisterRepository.getSessionById(pool, sessionId);
+            if (!origSession || origSession.status !== 'OPEN') {
+              sessionId = null;
+            }
+          }
+          if (!sessionId) {
+            const openSession = await cashRegisterRepository.getUserOpenSession(pool, refundedById);
+            sessionId = openSession?.id || null;
+          }
+          if (sessionId) {
+            await cashRegisterService.recordRefundMovement(
+              sessionId,
+              refund.id,
+              refundTotalAmount.toNumber(),
+              refundedById,
+              `Refund ${refund.refundNumber}: ${input.reason}`,
+              pool
+            );
+            logger.info('Cash register refund movement recorded', {
+              refundId: refund.id,
+              refundNumber: refund.refundNumber,
+              sessionId,
+              amount: refundTotalAmount.toNumber(),
+            });
+          } else {
+            logger.warn('No open cash register session found for refund — drawer tracking incomplete', {
+              refundId: refund.id,
+              saleId,
+              paymentMethod: sale.payment_method,
+            });
+          }
+        } catch (regError: unknown) {
+          logger.error('Cash register refund movement failed — drawer tracking incomplete', {
+            refundId: refund.id,
+            saleId,
+            error: regError instanceof Error ? regError.message : String(regError),
+          });
+        }
+      }
+
       return {
         refund,
         refundItems,
