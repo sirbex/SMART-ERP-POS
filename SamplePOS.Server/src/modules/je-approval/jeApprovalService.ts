@@ -110,6 +110,83 @@ export const updateApprovalRule = async (
 };
 
 // =============================================================================
+// GL PERIOD BALANCE HELPERS (for approval parking / unparking)
+// =============================================================================
+
+/**
+ * Reverse gl_period_balances for a transaction that is being parked as DRAFT.
+ * Called inside the same DB transaction so the reversal is atomic with the
+ * Status → DRAFT change.
+ */
+async function reverseGlPeriodBalancesForTx(
+  client: pg.PoolClient,
+  transactionId: string
+): Promise<void> {
+  await client.query(
+    `UPDATE gl_period_balances gpb
+     SET
+       debit_total     = gpb.debit_total     - agg.debit_sum,
+       credit_total    = gpb.credit_total    - agg.credit_sum,
+       running_balance = (gpb.debit_total    - agg.debit_sum)
+                       - (gpb.credit_total   - agg.credit_sum),
+       last_updated    = NOW()
+     FROM (
+       SELECT
+         le."AccountId"                                                              AS account_id,
+         EXTRACT(YEAR  FROM le."EntryDate")::int                                     AS fiscal_year,
+         EXTRACT(MONTH FROM le."EntryDate")::int                                     AS fiscal_period,
+         SUM(CASE WHEN le."EntryType" = 'DEBIT'  THEN le."Amount" ELSE 0 END)       AS debit_sum,
+         SUM(CASE WHEN le."EntryType" = 'CREDIT' THEN le."Amount" ELSE 0 END)       AS credit_sum
+       FROM ledger_entries le
+       WHERE le."TransactionId" = $1
+       GROUP BY le."AccountId",
+                EXTRACT(YEAR  FROM le."EntryDate"),
+                EXTRACT(MONTH FROM le."EntryDate")
+     ) agg
+     WHERE gpb.account_id    = agg.account_id
+       AND gpb.fiscal_year   = agg.fiscal_year
+       AND gpb.fiscal_period = agg.fiscal_period`,
+    [transactionId]
+  );
+}
+
+/**
+ * Re-apply gl_period_balances for a transaction that is being approved (DRAFT → POSTED).
+ * Called inside the same DB transaction so the update is atomic with the
+ * Status → POSTED change.
+ */
+async function applyGlPeriodBalancesForTx(
+  client: pg.PoolClient,
+  transactionId: string
+): Promise<void> {
+  await client.query(
+    `INSERT INTO gl_period_balances
+       (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+     SELECT
+       le."AccountId",
+       EXTRACT(YEAR  FROM le."EntryDate")::int,
+       EXTRACT(MONTH FROM le."EntryDate")::int,
+       SUM(CASE WHEN le."EntryType" = 'DEBIT'  THEN le."Amount" ELSE 0 END),
+       SUM(CASE WHEN le."EntryType" = 'CREDIT' THEN le."Amount" ELSE 0 END),
+       SUM(CASE WHEN le."EntryType" = 'DEBIT'  THEN le."Amount" ELSE 0 END)
+         - SUM(CASE WHEN le."EntryType" = 'CREDIT' THEN le."Amount" ELSE 0 END),
+       NOW()
+     FROM ledger_entries le
+     WHERE le."TransactionId" = $1
+     GROUP BY le."AccountId",
+              EXTRACT(YEAR  FROM le."EntryDate"),
+              EXTRACT(MONTH FROM le."EntryDate")
+     ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
+       debit_total     = gl_period_balances.debit_total     + EXCLUDED.debit_total,
+       credit_total    = gl_period_balances.credit_total    + EXCLUDED.credit_total,
+       running_balance = (gl_period_balances.debit_total    + EXCLUDED.debit_total)
+                       - (gl_period_balances.credit_total   + EXCLUDED.credit_total),
+       last_updated    = NOW()`,
+    [transactionId]
+  );
+}
+
+// =============================================================================
 // APPROVAL WORKFLOW
 // =============================================================================
 
@@ -167,21 +244,29 @@ export const submitForApproval = async (
     return normalizeRequest(result.rows[0]);
   }
 
-  // Requires approval → park as DRAFT
-  await dbPool.query(
-    `UPDATE ledger_transactions SET "Status" = 'DRAFT', "UpdatedAt" = NOW() WHERE "Id" = $1`,
-    [transactionId]
-  );
+  // Requires approval → park as DRAFT and reverse gl_period_balances atomically
+  return UnitOfWork.run(dbPool, async (client) => {
+    // Park transaction
+    await client.query(
+      `UPDATE ledger_transactions SET "Status" = 'DRAFT', "UpdatedAt" = NOW() WHERE "Id" = $1`,
+      [transactionId]
+    );
 
-  const result = await dbPool.query(
-    `INSERT INTO je_approval_requests (id, transaction_id, requested_by, status, total_amount, approval_rule_id)
-     VALUES ($1, $2, $3, 'PENDING', $4, $5)
-     RETURNING *`,
-    [uuidv4(), transactionId, requestedBy, totalAmount, rule.id]
-  );
+    // Reverse gl_period_balances — amounts must not affect reports while parked
+    await reverseGlPeriodBalancesForTx(client, transactionId);
 
-  logger.info('Journal entry submitted for approval', { transactionId, amount: totalAmount, rule: rule.name, requiredRole: rule.requiredRole });
-  return normalizeRequest(result.rows[0]);
+    const requestResult = await client.query(
+      `INSERT INTO je_approval_requests (id, transaction_id, requested_by, status, total_amount, approval_rule_id)
+       VALUES ($1, $2, $3, 'PENDING', $4, $5)
+       RETURNING *`,
+      [uuidv4(), transactionId, requestedBy, totalAmount, rule.id]
+    );
+
+    logger.info('Journal entry submitted for approval — gl_period_balances reversed', {
+      transactionId, amount: totalAmount, rule: rule.name, requiredRole: rule.requiredRole,
+    });
+    return normalizeRequest(requestResult.rows[0]);
+  });
 };
 
 /**
@@ -224,8 +309,10 @@ export const reviewApproval = async (
         `UPDATE ledger_transactions SET "Status" = 'POSTED', "UpdatedAt" = NOW() WHERE "Id" = $1`,
         [request.transactionId]
       );
+      // Re-apply gl_period_balances — was reversed when parked as DRAFT
+      await applyGlPeriodBalancesForTx(client, request.transactionId);
     }
-    // REJECTED transactions remain as DRAFT — can be modified and resubmitted
+    // REJECTED transactions remain as DRAFT — gl_period_balances already reversed at parking
 
     logger.info('Approval request reviewed', { requestId, decision: decision.action, reviewedBy });
     return normalizeRequest(updateResult.rows[0]);
