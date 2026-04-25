@@ -57,8 +57,14 @@ export function ProtectedRoute({
         ? requiredPermissions.some(key => permissions.has(key))
         : false;
 
-    // Grant access if EITHER check passes
-    if (hasRequiredRole || hasRbacPermission) {
+    // Legacy role fallback — mirrors backend LEGACY_ROLE_PERMISSIONS
+    // Ensures ADMIN/MANAGER can access pages even while RBAC permissions are loading
+    const hasLegacyPerm = !hasRbacPermission && requiredPermissions && requiredPermissions.length > 0
+        ? requiredPermissions.some(key => legacyRoleGrantsPermission(user.role, key))
+        : false;
+
+    // Grant access if ANY check passes
+    if (hasRequiredRole || hasRbacPermission || hasLegacyPerm) {
         // Plan feature gate — wrap in FeatureGate if a feature is required
         if (requiredFeature) {
             return <FeatureGate feature={requiredFeature}>{children}</FeatureGate>;
@@ -91,8 +97,30 @@ export function ProtectedRoute({
 }
 
 /**
+ * Mirrors the backend's LEGACY_ROLE_PERMISSIONS fallback.
+ * Used when RBAC permissions haven't loaded yet (page refresh race condition)
+ * or when the user has no RBAC roles assigned.
+ */
+function legacyRoleGrantsPermission(role: UserRole, permissionKey: string): boolean {
+    if (role === 'ADMIN') return true;
+    if (role === 'MANAGER') {
+        const module = permissionKey.split('.')[0];
+        return ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports',
+            'pos', 'accounting', 'banking', 'delivery', 'settings', 'hr', 'expenses',
+            'quotations', 'crm', 'orders', 'distribution'].includes(module);
+    }
+    return false;
+}
+
+/**
  * Hook to check if user can access a feature
  * Synchronous — reads from AuthContext (no async fetch)
+ *
+ * Access order:
+ * 1. Explicit role check (requiredRoles array)
+ * 2. RBAC permission check (requiredPermissions from server)
+ * 3. Legacy role fallback — mirrors backend LEGACY_ROLE_PERMISSIONS so ADMIN/MANAGER
+ *    see the correct UI even while RBAC permissions are still loading on page refresh.
  */
 export function useCanAccess(requiredRoles?: UserRole[], requiredPermissions?: string[], requireAnyRole: boolean = true): boolean {
     const { isAuthenticated, user, permissions } = useAuth();
@@ -102,17 +130,28 @@ export function useCanAccess(requiredRoles?: UserRole[], requiredPermissions?: s
     // No requirements — always accessible
     if ((!requiredRoles || requiredRoles.length === 0) && (!requiredPermissions || requiredPermissions.length === 0)) return true;
 
-    // Legacy role check
+    // Legacy role check (explicit roles array)
     const hasRole = requiredRoles && requiredRoles.length > 0
         ? (requireAnyRole ? requiredRoles.includes(user.role) : requiredRoles.every(r => user.role === r))
         : false;
 
-    // RBAC permission check (synchronous)
+    if (hasRole) return true;
+
+    // RBAC permission check (synchronous — loaded at login/refresh)
     const hasPerm = requiredPermissions && requiredPermissions.length > 0
         ? requiredPermissions.some(k => permissions.has(k))
         : false;
 
-    return hasRole || hasPerm;
+    if (hasPerm) return true;
+
+    // Legacy role fallback — allows buttons to show for ADMIN/MANAGER even when
+    // RBAC permissions are still loading (page-refresh race condition) or when no
+    // RBAC roles are assigned (matches backend requirePermission() legacy fallback).
+    if (requiredPermissions && requiredPermissions.length > 0) {
+        return requiredPermissions.some(k => legacyRoleGrantsPermission(user.role, k));
+    }
+
+    return false;
 }
 
 /**
