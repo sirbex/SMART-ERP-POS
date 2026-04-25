@@ -12,11 +12,13 @@
 -- ============================================================
 
 -- Revenue (4000)
+-- NOTE: We SET the full array rather than appending because this account previously had
+-- an empty AllowedSources (meaning "unrestricted"). Appending would lock it to
+-- ONLY SALES_REFUND and break regular SALES_INVOICE posts to revenue.
 UPDATE accounts
-SET "AllowedSources" = array_append("AllowedSources", 'SALES_REFUND'),
+SET "AllowedSources" = ARRAY['SALES_INVOICE','SALES_REFUND','SYSTEM_CORRECTION','MANUAL_JOURNAL','OPENING_BALANCE_WIZARD'],
     "UpdatedAt" = NOW()
-WHERE "AccountCode" = '4000'
-  AND NOT ('SALES_REFUND' = ANY("AllowedSources"));
+WHERE "AccountCode" = '4000';
 
 -- Cash (1010)
 UPDATE accounts
