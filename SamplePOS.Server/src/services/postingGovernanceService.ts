@@ -43,6 +43,7 @@ export type PostingSource =
     | 'MANUAL_JOURNAL'          // Human-entered journal entry
     | 'SYSTEM_CORRECTION'       // Admin remediation scripts (e.g. data-fix)
     | 'PAYROLL'                 // Payroll disbursements
+    | 'EXPENSE_PAYMENT'         // Expense payment — Dr AP / Cr Cash or Bank
     | 'ASSET_DEPRECIATION'      // Fixed asset depreciation runs
     | 'PERIOD_CLOSE'            // Retained earnings close-out
     | 'FX_REVALUATION';         // Foreign currency revaluation
@@ -219,6 +220,7 @@ export class PostingGovernanceService {
                     if (
                         source !== 'PAYMENT_DEPOSIT' &&
                         source !== 'SUPPLIER_PAYMENT' &&
+                        source !== 'EXPENSE_PAYMENT' &&
                         source !== 'SALES_REFUND' &&
                         source !== 'SYSTEM_CORRECTION'
                     ) {

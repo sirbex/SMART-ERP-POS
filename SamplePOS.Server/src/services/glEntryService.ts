@@ -2209,7 +2209,7 @@ export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE_PAYMENT-${payment.expenseId}`,
-      source: 'PURCHASE_BILL' as const,
+      source: 'EXPENSE_PAYMENT' as const,
     }, pool);
 
     logger.info('Recorded expense payment to GL', {
