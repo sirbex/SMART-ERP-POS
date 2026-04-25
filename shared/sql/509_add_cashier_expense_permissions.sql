@@ -6,19 +6,12 @@ DECLARE
   v_cashier_role_id UUID;
   v_system_user_id UUID;
 BEGIN
-  -- Get the system user ID
+  -- Get the system user ID (first admin user)
   SELECT id INTO v_system_user_id
   FROM users
-  WHERE username = 'system' OR email = 'system@system.local'
+  WHERE role = 'ADMIN'
+  ORDER BY created_at ASC
   LIMIT 1;
-
-  -- Fall back to first admin user if no system user
-  IF v_system_user_id IS NULL THEN
-    SELECT id INTO v_system_user_id
-    FROM users
-    ORDER BY created_at ASC
-    LIMIT 1;
-  END IF;
 
   -- Get the Cashier role ID
   SELECT id INTO v_cashier_role_id
