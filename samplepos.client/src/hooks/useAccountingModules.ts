@@ -431,6 +431,19 @@ export function useRunDepreciation() {
   });
 }
 
+export function useDisposeAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { assetId: string; disposalDate: string; disposalAmount: number }) =>
+      api.assets.dispose(data.assetId, { disposalDate: data.disposalDate, disposalAmount: data.disposalAmount }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
+      toast.success('Asset disposed and GL posted');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
 // ── JE Approval ─────────────────────────────────────────────────────
 
 export function useJeApprovalRules() {

@@ -670,6 +670,8 @@ export const api = {
       apiClient.post<ApiResponse>('assets/depreciation/run', data),
     getSchedule: (assetId: string) =>
       apiClient.get<ApiResponse>(`assets/${assetId}/schedule`),
+    dispose: (assetId: string, data: { disposalDate: string; disposalAmount: number }) =>
+      apiClient.post<ApiResponse>(`assets/${assetId}/dispose`, data),
   },
 
   jeApproval: {

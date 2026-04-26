@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   useAssetCategories, useCreateAssetCategory, useAssets, useCreateAsset, useRunDepreciation,
+  useDisposeAsset,
 } from '../../hooks/useAccountingModules';
 import {
   Building, Plus, X, Play, Package, Search, Eye,
@@ -87,6 +88,10 @@ export default function AssetAccountingPage() {
   const createCategory = useCreateAssetCategory();
   const createAsset = useCreateAsset();
   const runDep = useRunDepreciation();
+  const disposeAsset = useDisposeAsset();
+
+  const [showDisposeForm, setShowDisposeForm] = useState(false);
+  const [disposeForm, setDisposeForm] = useState({ disposalDate: '', disposalAmount: '0' });
 
   const cats: AssetCategory[] = useMemo(() => Array.isArray(categories) ? categories : [], [categories]);
   const assetList: Asset[] = useMemo(() => Array.isArray(assets) ? assets : [], [assets]);
@@ -198,6 +203,18 @@ export default function AssetAccountingPage() {
     e.preventDefault();
     await runDep.mutateAsync({ year: depForm.year, month: depForm.month });
     setShowDepRun(false);
+  };
+
+  const handleDispose = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAsset) return;
+    await disposeAsset.mutateAsync({
+      assetId: selectedAsset.id,
+      disposalDate: disposeForm.disposalDate,
+      disposalAmount: parseFloat(disposeForm.disposalAmount) || 0,
+    });
+    setShowDisposeForm(false);
+    setSelectedAsset(null);
   };
 
   const getAccountLabel = (code: string) => {
@@ -556,6 +573,56 @@ export default function AssetAccountingPage() {
                 <span>NBV: {formatCurrency(selectedAsset.netBookValue)}</span>
               </div>
             </div>
+
+            {/* Dispose Action (ACTIVE only) */}
+            {selectedAsset.status === 'ACTIVE' && (
+              <div className="border border-red-200 bg-red-50 rounded-lg p-4">
+                {!showDisposeForm ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-red-800">Dispose Asset</p>
+                      <p className="text-xs text-red-600 mt-0.5">
+                        Removes asset from register and posts disposal journal: DR Cash + Accum. Depr., CR Fixed Asset, +/– Gain/Loss.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setDisposeForm({ disposalDate: '', disposalAmount: '0' }); setShowDisposeForm(true); }}
+                      className="ml-4 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 inline-flex items-center gap-1.5 shrink-0"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Dispose
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleDispose} className="space-y-3">
+                    <p className="text-sm font-semibold text-red-800">Confirm Disposal — {selectedAsset.assetNumber}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Disposal Date *</label>
+                        <input type="date" required value={disposeForm.disposalDate}
+                          onChange={e => setDisposeForm({ ...disposeForm, disposalDate: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Proceeds / Sale Amount</label>
+                        <input type="number" min={0} step="0.01" value={disposeForm.disposalAmount}
+                          onChange={e => setDisposeForm({ ...disposeForm, disposalAmount: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500" />
+                        <p className="text-xs text-gray-500 mt-0.5">Enter 0 for write-off with no proceeds</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setShowDisposeForm(false)}
+                        className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50">Cancel</button>
+                      <button type="submit" disabled={disposeAsset.isPending}
+                        className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-1.5">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {disposeAsset.isPending ? 'Posting GL...' : 'Confirm Disposal'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
         </Modal>
       )}
