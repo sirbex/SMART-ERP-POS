@@ -223,7 +223,9 @@ export const acquireAsset = async (
       lines,
       userId: data.userId,
       idempotencyKey: `ASSET-ACQ-${result.rows[0].id}`,
-      source: 'PURCHASE_BILL' as const,
+      // CASH method credits cash directly (EXPENSE_PAYMENT passes Rule D).
+      // AP method creates a payable (PURCHASE_BILL is the correct AP source).
+      source: data.paymentMethod === 'CASH' ? 'EXPENSE_PAYMENT' : 'PURCHASE_BILL',
     }, undefined, client);
 
     logger.info('Fixed asset acquired', { assetNumber, cost: data.acquisitionCost });
@@ -464,7 +466,8 @@ export const disposeAsset = async (
       lines,
       userId: data.userId,
       idempotencyKey: `ASSET-DISP-${asset.id}`,
-      source: 'PURCHASE_BILL' as const,
+      // EXPENSE_PAYMENT allows debiting/crediting cash and is unrestricted on asset/income accounts.
+      source: 'EXPENSE_PAYMENT',
     }, undefined, client);
 
     // Update asset record
