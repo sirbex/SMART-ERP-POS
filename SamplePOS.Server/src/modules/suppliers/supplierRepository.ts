@@ -310,11 +310,20 @@ export async function softDeleteSupplier(client: PoolClient, id: string): Promis
 }
 
 /**
- * Recalculate supplier outstanding balance from source data (Odoo "compute field" pattern).
- * 
- * Formula: SUM(completed GR items excl. bonus) - SUM(completed payments)
- * This is a full recalculation — not incremental — to prevent balance drift.
- * 
+ * Recalculate supplier outstanding balance from the invoice sub-ledger.
+ *
+ * Formula: SUM(supplier_invoices.OutstandingBalance) for active (non-paid, non-cancelled)
+ *   SUPPLIER_INVOICE and SUPPLIER_DEBIT_NOTE documents, minus
+ *   SUPPLIER_CREDIT_NOTE outstanding (unapplied credit).
+ *
+ * This is the single source of truth for all AP-related UI displays:
+ * - SuppliersPage "Total Outstanding" aggregate
+ * - SupplierPaymentsPage per-supplier balance
+ * - Accounting Dashboard AP card
+ *
+ * By deriving from supplier_invoices (same table the SupplierPaymentsPage reads),
+ * it is definitionally impossible for the cache to diverge from the sub-ledger.
+ *
  * Must be called within a transaction (PoolClient) after any operation that
  * changes the supplier's financial position: GR finalization, payment, allocation.
  */
@@ -323,32 +332,20 @@ export async function recalculateOutstandingBalance(
   supplierId: string
 ): Promise<number> {
   const result = await client.query(
-    `WITH gr_total AS (
-       SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) AS total
-       FROM goods_receipt_items gri
-       JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
-       JOIN purchase_orders po ON gr.purchase_order_id = po.id
-       WHERE po.supplier_id = $1
-         AND gr.status = 'COMPLETED'
-         AND (gri.is_bonus = false OR gri.is_bonus IS NULL)
-     ),
-     return_total AS (
-       SELECT COALESCE(SUM(rl.line_total), 0) AS total
-       FROM return_grn_lines rl
-       JOIN return_grn rg ON rg.id = rl.rgrn_id
-       WHERE rg.supplier_id = $1
-         AND rg.status = 'POSTED'
-     ),
-     payment_total AS (
-       SELECT COALESCE(SUM("Amount"), 0) AS total
-       FROM supplier_payments
+    `WITH invoice_net AS (
+       SELECT COALESCE(SUM(
+         CASE
+           WHEN document_type = 'SUPPLIER_CREDIT_NOTE' THEN -COALESCE("OutstandingBalance", 0)
+           ELSE  COALESCE("OutstandingBalance", 0)
+         END
+       ), 0) AS net_outstanding
+       FROM supplier_invoices
        WHERE "SupplierId" = $1
-         AND "Status" = 'COMPLETED'
+         AND deleted_at IS NULL
+         AND "Status" NOT IN ('Paid', 'PAID', 'Cancelled', 'CANCELLED', 'DELETED')
      )
      UPDATE suppliers
-     SET "OutstandingBalance" = (SELECT total FROM gr_total)
-                              - (SELECT total FROM return_total)
-                              - (SELECT total FROM payment_total),
+     SET "OutstandingBalance" = GREATEST((SELECT net_outstanding FROM invoice_net), 0),
          "UpdatedAt" = NOW()
      WHERE "Id" = $1
      RETURNING "OutstandingBalance" as "outstandingBalance"`,

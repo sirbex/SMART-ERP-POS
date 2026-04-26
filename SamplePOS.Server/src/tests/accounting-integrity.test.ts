@@ -225,6 +225,46 @@ async function runTests() {
     Math.abs(apDiff) >= 0.01 ? { glBalance: apGl, subledgerBalance: apSub, difference: apDiff } : undefined
   );
 
+  // Supplier cache vs invoice sub-ledger consistency
+  // recalculateOutstandingBalance() now derives from supplier_invoices, so this
+  // must always be 0 mismatches on any tenant — new or existing.
+  const cacheVsInvoice = await pool.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE ABS(
+        COALESCE(s."OutstandingBalance", 0) -
+        COALESCE(inv.net_outstanding, 0)
+      ) > 0.01) AS mismatched,
+      COUNT(*) AS total_suppliers
+    FROM suppliers s
+    LEFT JOIN (
+      SELECT
+        "SupplierId",
+        GREATEST(COALESCE(SUM(
+          CASE
+            WHEN document_type = 'SUPPLIER_CREDIT_NOTE' THEN -COALESCE("OutstandingBalance", 0)
+            ELSE  COALESCE("OutstandingBalance", 0)
+          END
+        ), 0), 0) AS net_outstanding
+      FROM supplier_invoices
+      WHERE deleted_at IS NULL
+        AND "Status" NOT IN ('Paid', 'PAID', 'Cancelled', 'CANCELLED', 'DELETED')
+      GROUP BY "SupplierId"
+    ) inv ON inv."SupplierId" = s."Id"
+    WHERE s."IsActive" = true
+  `);
+
+  const mismatchedSuppliers = parseInt(cacheVsInvoice.rows[0].mismatched || '0', 10);
+  const totalSuppliers = parseInt(cacheVsInvoice.rows[0].total_suppliers || '0', 10);
+
+  test(
+    'AP: Supplier Cache vs Invoice Sub-ledger',
+    mismatchedSuppliers === 0,
+    mismatchedSuppliers === 0
+      ? `All ${totalSuppliers} active suppliers: cache = invoice sub-ledger`
+      : `${mismatchedSuppliers}/${totalSuppliers} suppliers have cache ≠ invoice sub-ledger (run recalculateOutstandingBalance)`,
+    mismatchedSuppliers > 0 ? { mismatched: mismatchedSuppliers, total: totalSuppliers } : undefined
+  );
+
   // ═══════════════════════════════════════════════════════════════
   // TEST 6: Inventory Reconciliation
   // ═══════════════════════════════════════════════════════════════
