@@ -178,6 +178,28 @@ function App() {
     return () => window.removeEventListener('app:session-warning', handler);
   }, []);
 
+  // PWA update banner — fires when the service worker activates a new version
+  useEffect(() => {
+    const handler = () => {
+      toast(
+        (t) => (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>New version available</span>
+            <button
+              onClick={() => { toast.dismiss(t.id); window.location.reload(); }}
+              style={{ padding: '2px 10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+            >
+              Update
+            </button>
+          </span>
+        ),
+        { duration: Infinity, icon: '🔄', id: 'sw-update' }
+      );
+    };
+    window.addEventListener('sw-updated', handler);
+    return () => window.removeEventListener('sw-updated', handler);
+  }, []);
+
   // Show loading screen while authentication is being initialized
   if (isLoading) {
     return (

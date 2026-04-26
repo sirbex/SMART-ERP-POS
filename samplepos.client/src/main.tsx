@@ -141,6 +141,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       });
     }
 
+    // New SW activated — notify the app to show a reload banner
+    if (event.data?.type === 'SW_UPDATED') {
+      window.dispatchEvent(new CustomEvent('sw-updated'));
+    }
+
     // SW finished Background Sync — mark synced keys in the journal
     if (event.data?.type === 'BACKGROUND_SYNC_COMPLETE') {
       const syncedKeys: string[] = event.data.syncedKeys || [];

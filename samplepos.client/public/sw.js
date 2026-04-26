@@ -11,7 +11,7 @@
  * already queues those locally and syncs on reconnect.
  */
 
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const STATIC_CACHE = `pos-static-${CACHE_VERSION}`;
 const API_CACHE = `pos-api-${CACHE_VERSION}`;
 const APP_SHELL_CACHE = `pos-shell-${CACHE_VERSION}`;
@@ -66,7 +66,12 @@ self.addEventListener('activate', (event) => {
           })
           .map((key) => caches.delete(key))
       );
-    }).then(() => self.clients.claim())
+    }).then(() => self.clients.claim()).then(() => {
+      // Notify all controlled clients that a new version is live
+      self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => client.postMessage({ type: 'SW_UPDATED' }));
+      });
+    })
   );
 });
 
