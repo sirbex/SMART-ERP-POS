@@ -249,7 +249,7 @@ router.get('/manifest.json', (req: Request, res: Response) => {
       start_url: '/',
       scope: '/',
       display: 'standalone',
-      orientation: 'any',
+      orientation: 'landscape',
       background_color: backgroundColor,
       theme_color: themeColor,
       icons: [
@@ -276,7 +276,7 @@ router.get('/manifest.json', (req: Request, res: Response) => {
       start_url: '/',
       scope: '/',
       display: 'standalone',
-      orientation: 'any',
+      orientation: 'landscape',
       background_color: '#0f172a',
       theme_color: '#3b82f6',
       icons: [

@@ -399,6 +399,19 @@ export default function POSPage() {
     }
   }, []);
 
+  // ── Fullscreen: enter fullscreen when not already in standalone/fullscreen mode ──
+  useEffect(() => {
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      ('standalone' in window.navigator &&
+        (window.navigator as { standalone?: boolean }).standalone === true);
+    if (!isStandalone && document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(() => {
+        // requestFullscreen requires a user gesture in some browsers; silently ignore
+      });
+    }
+  }, []);
+
   // Watch for storage changes (login/logout events)
   const [storageVersion, setStorageVersion] = useState(0);
 

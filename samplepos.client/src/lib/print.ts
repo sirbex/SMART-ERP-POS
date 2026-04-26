@@ -56,20 +56,42 @@ export interface ReceiptData {
 }
 
 /**
- * Print a receipt using browser's print functionality
+ * Print a receipt using a pluggable print strategy:
+ *   1. If http://localhost:1811/print is reachable, POST the receipt HTML to it
+ *      (used by Sunmi and other ESC/POS bridge agents running locally).
+ *   2. Otherwise, fall back to browser window.print() via a hidden iframe.
  * @param receiptData - The receipt data to print
  * @param options - Print options including format
  */
 export async function printReceipt(receiptData: ReceiptData, options: PrintOptions = {}): Promise<void> {
+  // Validate receipt data
+  if (!receiptData || !receiptData.saleNumber) {
+    throw new Error('Invalid receipt data: saleNumber is required');
+  }
+
+  const printFormat = options.format || 'detailed';
+
+  // Generate receipt HTML (shared by both strategies)
+  const receiptHTML = printFormat === 'compact'
+    ? generateCompactReceiptHTML(receiptData)
+    : generateDetailedReceiptHTML(receiptData);
+
+  // ── Strategy 1: local print bridge (e.g. Sunmi ESC/POS bridge on localhost:1811) ──
+  try {
+    const bridgeRes = await fetch('http://localhost:1811/print', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: receiptHTML,
+      signal: AbortSignal.timeout(1500),
+    });
+    if (bridgeRes.ok) return; // Bridge handled printing — done
+  } catch {
+    // Bridge not reachable — fall through to browser print
+  }
+
+  // ── Strategy 2: browser window.print() via hidden iframe ──
   return new Promise((resolve, reject) => {
     try {
-      // Validate receipt data
-      if (!receiptData || !receiptData.saleNumber) {
-        throw new Error('Invalid receipt data: saleNumber is required');
-      }
-
-      const printFormat = options.format || 'detailed';
-
       // Create a hidden iframe for printing
       const printFrame = document.createElement('iframe');
       printFrame.style.position = 'absolute';
@@ -82,11 +104,6 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
       if (!printWindow) {
         throw new Error('Unable to create print window');
       }
-
-      // Generate receipt HTML based on format
-      const receiptHTML = printFormat === 'compact'
-        ? generateCompactReceiptHTML(receiptData)
-        : generateDetailedReceiptHTML(receiptData);
 
       // Write content to iframe
       printWindow.document.open();
