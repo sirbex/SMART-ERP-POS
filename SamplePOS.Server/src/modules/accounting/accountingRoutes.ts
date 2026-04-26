@@ -919,7 +919,7 @@ router.get(
       // Accounts payable — from GL account 2100 balance
       pool.query(`
     SELECT 
-      0 as supplier_count,
+      (SELECT COUNT(*) FROM suppliers WHERE "IsActive" = true AND "OutstandingBalance" > 0)::int as supplier_count,
       COALESCE(SUM(gpb.credit_total) - SUM(gpb.debit_total), 0) as total_payables
     FROM gl_period_balances gpb
     JOIN accounts a ON a."Id" = gpb.account_id

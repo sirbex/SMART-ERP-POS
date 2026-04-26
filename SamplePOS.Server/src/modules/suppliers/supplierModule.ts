@@ -247,14 +247,18 @@ const supplierRepository = {
 const supplierService = {
   async getAllSuppliers(pool: Pool, page: number = 1, limit: number = 50) {
     const offset = (page - 1) * limit;
-    const [data, total] = await Promise.all([
+    const [data, total, statsResult] = await Promise.all([
       supplierRepository.findAll(pool, limit, offset),
       supplierRepository.countAll(pool),
+      pool.query(`SELECT COALESCE(SUM("OutstandingBalance"), 0) as total_outstanding FROM suppliers WHERE "IsActive" = true`),
     ]);
 
     return {
       data,
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      stats: {
+        totalOutstanding: new Decimal(statsResult.rows[0]?.total_outstanding || 0).toNumber(),
+      },
     };
   },
 
@@ -362,6 +366,7 @@ export async function getSuppliers(req: Request, res: Response, next: NextFuncti
       success: true,
       data: result.data,
       pagination: result.pagination,
+      stats: result.stats,
     });
   } catch (error) {
     next(error);

@@ -263,18 +263,17 @@ export default function SuppliersPage() {
       });
   }, []);
 
-  // Calculate statistics
+  // Calculate statistics — use API-level aggregates to avoid pagination skewing totals
   const stats = useMemo(() => {
     const total = allSuppliers.length;
-    const active = allSuppliers.filter((s: Supplier) => s.isActive).length;
-
-    // Total outstanding across all suppliers
-    const totalOutstanding = allSuppliers.reduce((sum: number, s: Supplier) => {
-      return sum + Number(s.outstandingBalance || 0);
-    }, 0);
+    // Active count: use pagination.total (API already filters WHERE IsActive=true)
+    const active = (suppliersData as { pagination?: { total?: number } } | null)?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
+    // Total outstanding: use server-computed aggregate across ALL active suppliers (not just current page)
+    const totalOutstanding = (suppliersData as { stats?: { totalOutstanding?: number } } | null)?.stats?.totalOutstanding
+      ?? allSuppliers.reduce((sum: number, s: Supplier) => sum + Number(s.outstandingBalance || 0), 0);
 
     return { total, active, totalOutstanding };
-  }, [allSuppliers]);
+  }, [allSuppliers, suppliersData]);
 
   // Currency formatter for summary cards — uses shared formatCurrency
   const formatCurrencyTop = (amount: number): string => formatCurrency(amount, true, 0);
