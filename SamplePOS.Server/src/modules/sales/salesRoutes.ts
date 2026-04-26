@@ -173,7 +173,7 @@ export const salesController = {
               posData.paymentLines[0]
             ).paymentMethod
             : 'CASH'), // Use highest-amount payment line as primary method
-        paymentReceived: posData.amountTendered || posData.totalAmount,
+        paymentReceived: posData.amountTendered ?? posData.totalAmount,
         soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // From auth middleware - null UUID for system
         saleDate: posData.saleDate || undefined, // Backdated sale date if provided
         paymentLines: posData.paymentLines || undefined, // Include payment lines for split payment
