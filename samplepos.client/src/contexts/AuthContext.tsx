@@ -81,6 +81,44 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (token && savedUser) {
           const userData = JSON.parse(savedUser);
+
+          // ── SERVER-SIDE TOKEN VALIDATION ─────────────────────────────────────
+          // SECURITY: Never trust localStorage alone. If online, verify the token
+          // is still valid with the server before granting frontend access.
+          // This prevents: expired sessions, revoked accounts, spoofed localStorage.
+          if (navigator.onLine) {
+            const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+            try {
+              const validationRes = await fetch(`${baseUrl}/auth/profile`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (validationRes.status === 401 || validationRes.status === 403) {
+                // Token is invalid/expired/revoked — force re-login
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('rbac_permissions');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('token_expiry');
+                return; // isLoading set to false in finally
+              }
+              // 200: sync role/id from server to prevent localStorage role spoofing
+              if (validationRes.ok) {
+                const json = await validationRes.json();
+                if (json.success && json.data) {
+                  userData.id = json.data.id ?? userData.id;
+                  userData.email = json.data.email ?? userData.email;
+                  userData.fullName = json.data.fullName ?? json.data.full_name ?? userData.fullName;
+                  userData.role = json.data.role ?? userData.role;
+                  localStorage.setItem('user', JSON.stringify(userData));
+                }
+              }
+              // Any other non-401/403 status (e.g. 500 server error) → allow cached access
+            } catch {
+              // Network error (fetch threw) — server unreachable, allow cached access
+            }
+          }
+          // ─────────────────────────────────────────────────────────────────────
+
           setUser(userData);
           setIsAuthenticated(true);
 
