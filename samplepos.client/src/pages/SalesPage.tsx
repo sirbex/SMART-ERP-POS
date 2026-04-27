@@ -511,26 +511,26 @@ export default function SalesPage() {
     filteredSales
       .filter((sale) => !VOID_STATUSES.includes(sale.status))
       .forEach((sale) => {
-      const customerId = sale.customerId || 'WALK-IN';
-      const customerName = sale.customerName || 'Walk-in Customer';
+        const customerId = sale.customerId || 'WALK-IN';
+        const customerName = sale.customerName || 'Walk-in Customer';
 
-      if (!grouped.has(customerId)) {
-        grouped.set(customerId, {
-          customerId,
-          customerName,
-          salesCount: 0,
-          totalAmount: new Decimal(0),
-          totalProfit: new Decimal(0),
-          sales: [],
-        });
-      }
+        if (!grouped.has(customerId)) {
+          grouped.set(customerId, {
+            customerId,
+            customerName,
+            salesCount: 0,
+            totalAmount: new Decimal(0),
+            totalProfit: new Decimal(0),
+            sales: [],
+          });
+        }
 
-      const customer = grouped.get(customerId)!;
-      customer.salesCount++;
-      customer.totalAmount = customer.totalAmount.plus(sale.totalAmount || 0);
-      customer.totalProfit = customer.totalProfit.plus(sale.profit || 0);
-      customer.sales.push(sale);
-    });
+        const customer = grouped.get(customerId)!;
+        customer.salesCount++;
+        customer.totalAmount = customer.totalAmount.plus(sale.totalAmount || 0);
+        customer.totalProfit = customer.totalProfit.plus(sale.profit || 0);
+        customer.sales.push(sale);
+      });
 
     return Array.from(grouped.values()).sort(
       (a, b) => b.totalAmount.toNumber() - a.totalAmount.toNumber()
@@ -567,26 +567,26 @@ export default function SalesPage() {
     filteredSales
       .filter((sale) => !VOID_STATUSES.includes(sale.status))
       .forEach((sale) => {
-      const userId = sale.cashierId || sale.soldById || 'UNKNOWN';
-      const userName = sale.cashierName || sale.soldByName || 'Unknown User';
+        const userId = sale.cashierId || sale.soldById || 'UNKNOWN';
+        const userName = sale.cashierName || sale.soldByName || 'Unknown User';
 
-      if (!grouped.has(userId)) {
-        grouped.set(userId, {
-          userId,
-          userName,
-          salesCount: 0,
-          totalAmount: new Decimal(0),
-          totalProfit: new Decimal(0),
-          sales: [],
-        });
-      }
+        if (!grouped.has(userId)) {
+          grouped.set(userId, {
+            userId,
+            userName,
+            salesCount: 0,
+            totalAmount: new Decimal(0),
+            totalProfit: new Decimal(0),
+            sales: [],
+          });
+        }
 
-      const user = grouped.get(userId)!;
-      user.salesCount++;
-      user.totalAmount = user.totalAmount.plus(sale.totalAmount || 0);
-      user.totalProfit = user.totalProfit.plus(sale.profit || 0);
-      user.sales.push(sale);
-    });
+        const user = grouped.get(userId)!;
+        user.salesCount++;
+        user.totalAmount = user.totalAmount.plus(sale.totalAmount || 0);
+        user.totalProfit = user.totalProfit.plus(sale.profit || 0);
+        user.sales.push(sale);
+      });
 
     return Array.from(grouped.values()).sort((a, b) => b.salesCount - a.salesCount);
   }, [filteredSales, cashierData]);

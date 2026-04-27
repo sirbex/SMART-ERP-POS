@@ -265,9 +265,9 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     const accountantPerms = permissions.filter(p =>
       ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
       ['sales.read', 'sales.export', 'purchasing.read', 'purchasing.create',
-       'customers.read', 'customers.export',
-       'suppliers.read', 'suppliers.create', 'suppliers.update',
-       'inventory.read', 'settings.read', 'quotations.read'].includes(p.key)
+        'customers.read', 'customers.export',
+        'suppliers.read', 'suppliers.create', 'suppliers.update',
+        'inventory.read', 'settings.read', 'quotations.read'].includes(p.key)
     );
     for (const permission of accountantPerms) {
       await client.query(

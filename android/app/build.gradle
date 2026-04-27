@@ -1,0 +1,53 @@
+// android/app/build.gradle
+//
+// SUNMI WebView POS app — wraps the production PWA in a WebView and
+// injects the SunmiPrinter bridge for hardware receipt printing.
+//
+// Dependencies:
+//  • Gson — deserialises receipt JSON from the JS bridge
+//  • SUNMI SDK (woyou-service-sdk) — AIDL interface to built-in printer
+//    Source: https://github.com/shangmisunmi/SunmiPrinterDemo
+//    or add as a local aar: libs/woyou-service-sdk-*.aar
+
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    compileSdk 34
+    namespace 'com.smarterp.pos'
+
+    defaultConfig {
+        applicationId "com.smarterp.pos"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // SUNMI printer AIDL SDK — place the aar in android/app/libs/
+    // Download from: https://github.com/shangmisunmi/SunmiPrinterDemo/tree/master/app/libs
+    implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
+}

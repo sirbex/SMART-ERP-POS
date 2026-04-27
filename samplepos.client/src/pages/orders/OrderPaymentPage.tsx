@@ -423,64 +423,64 @@ export default function OrderPaymentPage() {
                     Payment Method
                   </label>
 
-                {/* Cashier Discount */}
-                <div className="mb-3">
-                  {cashierDiscount > 0 ? (
-                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                      <span className="text-sm text-green-700 font-medium">
-                        🏷️ Discount: -{formatCurrency(cashierDiscount)}
-                      </span>
-                      <button
-                        onClick={() => { setCashierDiscount(0); setDiscountInput(''); setShowDiscountInput(false); }}
-                        className="text-red-500 hover:text-red-700 text-xs font-bold ml-2"
-                        title="Remove discount"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : showDiscountInput ? (
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="number"
-                        value={discountInput}
-                        onChange={(e) => setDiscountInput(e.target.value)}
-                        placeholder="Discount amount"
-                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        min={0}
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                  {/* Cashier Discount */}
+                  <div className="mb-3">
+                    {cashierDiscount > 0 ? (
+                      <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                        <span className="text-sm text-green-700 font-medium">
+                          🏷️ Discount: -{formatCurrency(cashierDiscount)}
+                        </span>
+                        <button
+                          onClick={() => { setCashierDiscount(0); setDiscountInput(''); setShowDiscountInput(false); }}
+                          className="text-red-500 hover:text-red-700 text-xs font-bold ml-2"
+                          title="Remove discount"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : showDiscountInput ? (
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="number"
+                          value={discountInput}
+                          onChange={(e) => setDiscountInput(e.target.value)}
+                          placeholder="Discount amount"
+                          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          min={0}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const v = parseFloat(discountInput);
+                              if (!isNaN(v) && v > 0) { setCashierDiscount(v); setShowDiscountInput(false); }
+                            }
+                            if (e.key === 'Escape') { setShowDiscountInput(false); setDiscountInput(''); }
+                          }}
+                        />
+                        <button
+                          onClick={() => {
                             const v = parseFloat(discountInput);
                             if (!isNaN(v) && v > 0) { setCashierDiscount(v); setShowDiscountInput(false); }
-                          }
-                          if (e.key === 'Escape') { setShowDiscountInput(false); setDiscountInput(''); }
-                        }}
-                      />
+                          }}
+                          className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          onClick={() => { setShowDiscountInput(false); setDiscountInput(''); }}
+                          className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={() => {
-                          const v = parseFloat(discountInput);
-                          if (!isNaN(v) && v > 0) { setCashierDiscount(v); setShowDiscountInput(false); }
-                        }}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+                        onClick={() => setShowDiscountInput(true)}
+                        className="w-full py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
                       >
-                        Apply
+                        🏷️ Add Discount
                       </button>
-                      <button
-                        onClick={() => { setShowDiscountInput(false); setDiscountInput(''); }}
-                        className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowDiscountInput(true)}
-                      className="w-full py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
-                    >
-                      🏷️ Add Discount
-                    </button>
-                  )}
-                </div>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     {paymentMethods.map((method) => (

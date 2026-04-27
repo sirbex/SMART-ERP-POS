@@ -76,6 +76,16 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
     ? generateCompactReceiptHTML(receiptData)
     : generateDetailedReceiptHTML(receiptData);
 
+  // ── Strategy 0: SUNMI Android WebView bridge ──
+  // When the app runs inside a SUNMI WebView, the native app injects a
+  // `SunmiPrinter` object into the JS context. If present, delegate directly
+  // to the hardware printer and return — no other strategy is needed.
+  if (typeof (window as unknown as { SunmiPrinter?: unknown }).SunmiPrinter !== 'undefined') {
+    (window as unknown as { SunmiPrinter: { printReceipt: (json: string) => void } })
+      .SunmiPrinter.printReceipt(JSON.stringify(receiptData));
+    return;
+  }
+
   // ── Strategy 1: local print bridge (e.g. Sunmi ESC/POS bridge on localhost:1811) ──
   try {
     const bridgeRes = await fetch('http://localhost:1811/print', {
