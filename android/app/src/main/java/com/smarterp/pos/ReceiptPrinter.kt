@@ -2,6 +2,7 @@ package com.smarterp.pos
 
 import java.text.NumberFormat
 import java.util.Locale
+import woyou.aidlservice.jiuiv5.IWoyouService
 
 /**
  * ReceiptPrinter — formats and sends receipt data to the SUNMI built-in
@@ -16,9 +17,31 @@ import java.util.Locale
  */
 object ReceiptPrinter {
 
+    /**
+     * Hard test — call this from ADB or a debug button to bypass receipt
+     * formatting entirely.  If this prints → formatting is the issue.
+     * If this does NOT print → the service is still not bound.
+     *
+     *   Usage (from PrintBridge for testing):
+     *     ReceiptPrinter.hardTest()
+     */
+    fun hardTest() {
+        val p = SunmiPrinterManager.get() ?: run {
+            android.util.Log.e("SUNMI_TEST", "hardTest: printer not connected")
+            return
+        }
+        try {
+            p.printText("SUNMI HARD TEST\n", null)
+            p.lineWrap(3, null)
+            android.util.Log.e("SUNMI_TEST", "hardTest: sent to printer")
+        } catch (e: Exception) {
+            android.util.Log.e("SUNMI_TEST", "hardTest error: ${e.message}", e)
+        }
+    }
+
     fun printReceipt(data: ReceiptData) {
         val p = SunmiPrinterManager.get() ?: run {
-            android.util.Log.w("ReceiptPrinter", "Printer not connected — skipping print")
+            android.util.Log.e("SUNMI_TEST", "printReceipt: printer not connected — skipping")
             return
         }
 
@@ -116,7 +139,7 @@ object ReceiptPrinter {
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
-    private fun printLabelValue(p: woyou.aidlservice.jiuiv5.IWoyouService, label: String, value: String) {
+    private fun printLabelValue(p: IWoyouService, label: String, value: String) {
         p.printColumnsText(
             arrayOf(label, value),
             intArrayOf(24, 8),

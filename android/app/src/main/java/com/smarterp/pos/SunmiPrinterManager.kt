@@ -11,7 +11,11 @@ import woyou.aidlservice.jiuiv5.IWoyouService
 
 /**
  * SunmiPrinterManager — singleton that owns the AIDL service binding to the
- * SUNMI built-in printer daemon (woyou.aidlservice.jiuiv5).
+ * SUNMI built-in printer daemon.
+ *
+ * Correct service endpoint (com.sunmi:printerlibrary:1.0.18):
+ *   package : com.sunmi.peripheral.printer
+ *   action  : com.sunmi.peripheral.printer.InnerPrinterService
  *
  * Behaviour:
  *  • Connects on first call to init().
@@ -20,9 +24,6 @@ import woyou.aidlservice.jiuiv5.IWoyouService
  *  • Callers obtain the live service reference via get(); if the printer is
  *    temporarily disconnected, get() returns null and the call is silently
  *    skipped (ReceiptPrinter checks for null before using it).
- *
- * This object is completely independent of the ESC/POS / browser print paths
- * used on non-SUNMI devices.
  */
 object SunmiPrinterManager {
 
@@ -39,7 +40,9 @@ object SunmiPrinterManager {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             printer = IWoyouService.Stub.asInterface(service)
             service?.linkToDeath(deathRecipient, 0)
-            android.util.Log.i("SunmiPrinterManager", "Printer service connected")
+            // SUNMI_TEST — look for this in Logcat to confirm binding succeeded.
+            // If you never see this line the service is not connecting.
+            android.util.Log.e("SUNMI_TEST", "Printer service connected")
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -53,6 +56,20 @@ object SunmiPrinterManager {
         scheduleRebind(0)
     }
 
+    /**
+     * Release the service connection.  Call from Activity.onDestroy() to
+     * prevent a ServiceConnection leak.
+     */
+    fun destroy(ctx: Context) {
+        handler.removeCallbacksAndMessages(null)
+        printer = null
+        try {
+            ctx.applicationContext.unbindService(connection)
+        } catch (e: Exception) {
+            android.util.Log.w("SunmiPrinterManager", "unbindService failed: ${e.message}")
+        }
+    }
+
     fun get(): IWoyouService? = printer
 
     private fun scheduleRebind(delayMs: Long) {
@@ -62,10 +79,14 @@ object SunmiPrinterManager {
     private fun bind() {
         val ctx = context ?: return
         val intent = Intent().apply {
-            setPackage("woyou.aidlservice.jiuiv5")
-            action = "woyou.aidlservice.jiuiv5.IWoyouService"
+            setPackage("com.sunmi.peripheral.printer")
+            action = "com.sunmi.peripheral.printer.InnerPrinterService"
         }
         try {
+            // Some SUNMI firmware variants (V2 Pro, V2s, P2) require an explicit
+            // startService call before bindService or the daemon never wakes up.
+            // This is safe to call even on devices that do not need it.
+            try { ctx.startService(intent) } catch (_: Exception) { }
             ctx.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         } catch (e: Exception) {
             android.util.Log.e("SunmiPrinterManager", "bindService failed: ${e.message}", e)

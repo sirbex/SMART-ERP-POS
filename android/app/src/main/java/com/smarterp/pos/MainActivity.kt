@@ -6,31 +6,39 @@ import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * MainActivity — hosts the React PWA in a WebView and injects the SUNMI
- * printer bridge so that `window.SunmiPrinter.printReceipt(json)` calls
- * from JavaScript are dispatched to the hardware printer.
+ * MainActivity — thin WebView shell that loads the production PWA and
+ * exposes window.SunmiPrinter to JS via PrintBridge.
  *
- * The existing ESC/POS / browser-print pipeline used on Windows/LAN
- * devices is completely unaffected; it is only ever reached when this
- * bridge is NOT present in the window context.
+ * This is a hardware driver bridge, not an app.
+ * It does nothing except host the WebView and inject the printer interface.
+ * All POS logic stays in the PWA — this file must NOT be modified for
+ * any business logic purpose.
  */
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var webView: WebView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialise the SUNMI printer service connection (auto-reconnects on crash)
+        // Connect to the SUNMI internal printer service.
         SunmiPrinterManager.init(this)
 
-        val webView = WebView(this)
+        webView = WebView(this)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.webViewClient = WebViewClient()
 
-        // Inject the bridge: `window.SunmiPrinter` becomes available to JS
+        // Inject the bridge BEFORE loadUrl so window.SunmiPrinter is
+        // available on the very first page load.
         webView.addJavascriptInterface(PrintBridge(), "SunmiPrinter")
 
         setContentView(webView)
-        webView.loadUrl("https://wizarddigital-inv.com")   // Production PWA URL
+        webView.loadUrl("https://wizarddigital-inv.com")
+    }
+
+    override fun onDestroy() {
+        SunmiPrinterManager.destroy(this)
+        super.onDestroy()
     }
 }

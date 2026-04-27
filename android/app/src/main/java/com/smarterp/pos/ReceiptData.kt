@@ -26,6 +26,8 @@ data class ReceiptData(
     val companyAddress: String? = null,
     val companyPhone: String? = null,
     val customReceiptNote: String? = null,
+    // Payment account details (MobileMoney / bank numbers shown on receipt)
+    val paymentAccounts: List<PaymentAccount>? = null,
 )
 
 data class ReceiptItem(
@@ -41,4 +43,12 @@ data class SplitPayment(
     val method: String = "",
     val amount: Double = 0.0,
     val reference: String? = null,
+)
+
+data class PaymentAccount(
+    val type: String = "",
+    val provider: String = "",
+    val accountName: String = "",
+    val accountNumber: String = "",
+    val branchOrCode: String? = null,
 )

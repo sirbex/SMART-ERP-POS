@@ -20,13 +20,29 @@ class PrintBridge {
 
     @JavascriptInterface
     fun printReceipt(json: String) {
+        // SUNMI_TEST — look for this in Logcat to confirm JS reached Android.
+        // If you never see this line, window.SunmiPrinter injection failed.
+        android.util.Log.e("SUNMI_TEST", "Bridge called — json length=${json.length}")
         try {
             val data = gson.fromJson(json, ReceiptData::class.java)
             ReceiptPrinter.printReceipt(data)
         } catch (e: Exception) {
-            // Silently absorb parse / print errors so the JS caller is not
-            // disrupted; real errors are visible in logcat.
+            // @JavascriptInterface methods cannot propagate exceptions to JS callers,
+            // so we log the full stack trace to logcat instead of letting it crash.
             android.util.Log.e("PrintBridge", "printReceipt failed: ${e.message}", e)
         }
+    }
+
+    /**
+     * Hard test — call from the DevTools console to bypass receipt formatting:
+     *   window.SunmiPrinter.hardTest()
+     * Prints "SUNMI HARD TEST" directly to the printer.
+     * If this prints → receipt formatting is the issue.
+     * If this does NOT print → the service is still not bound.
+     */
+    @JavascriptInterface
+    fun hardTest() {
+        android.util.Log.e("SUNMI_TEST", "hardTest called from JS")
+        ReceiptPrinter.hardTest()
     }
 }

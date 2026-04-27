@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required for WebView to load the production PWA -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        Required on SUNMI devices to bind to the internal printer service.
+        Without this the OS will reject bindService() with a permission error.
+    -->
+    <uses-permission android:name="com.sunmi.peripheral.printer.permission.BIND_PRINTER_SERVICE" />
+
+    <!--
+        Undocumented SUNMI requirement: some V2/V2s/P2 firmware variants also
+        require BIND_SERVICE or binding silently fails even with correct package
+        and action. Adding it here causes no harm on devices that do not need it.
+    -->
+    <uses-permission android:name="android.permission.BIND_SERVICE" />
+
+    <!--
+        Android 11+ (API 30+) package visibility.
+        Without this <queries> block, bindService() for the SUNMI printer
+        daemon silently returns false and the printer NEVER connects.
+    -->
+    <queries>
+        <package android:name="com.sunmi.peripheral.printer" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="SmartERP POS"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>
