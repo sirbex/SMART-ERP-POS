@@ -11,7 +11,7 @@
  * already queues those locally and syncs on reconnect.
  */
 
-const CACHE_VERSION = 'v7';
+const CACHE_VERSION = 'v8';
 const STATIC_CACHE = `pos-static-${CACHE_VERSION}`;
 const API_CACHE = `pos-api-${CACHE_VERSION}`;
 const APP_SHELL_CACHE = `pos-shell-${CACHE_VERSION}`;
