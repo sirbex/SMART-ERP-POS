@@ -903,18 +903,14 @@ export const reportsRepository = {
           p.sku,
           pi.reorder_level,
           0 as reorder_quantity,
-          COALESCE(SUM(
-            CASE 
-              WHEN sm.movement_type IN ('GOODS_RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'TRANSFER_IN', 'OPENING_BALANCE')
-              THEN sm.quantity
-              WHEN sm.movement_type IN ('SALE', 'ADJUSTMENT_OUT', 'EXPIRY', 'DAMAGE', 'TRANSFER_OUT')
-              THEN -sm.quantity
-              ELSE 0
-            END
+          COALESCE((
+            SELECT SUM(ib.remaining_quantity)
+            FROM inventory_batches ib
+            WHERE ib.product_id = p.id
+              AND ib.status = 'ACTIVE'
           ), 0) as current_stock
         FROM products p
         LEFT JOIN product_inventory pi ON pi.product_id = p.id
-        LEFT JOIN stock_movements sm ON sm.product_id = p.id
         WHERE p.is_active = true
           ${categoryFilter}
         GROUP BY p.id, p.name, p.sku, pi.reorder_level

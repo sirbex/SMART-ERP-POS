@@ -16,8 +16,8 @@ export async function checkAccountingPeriodOpen(
   transactionDate: string
 ): Promise<void> {
   const result = await client.query(
-    `SELECT status
-     FROM accounting_periods
+    `SELECT "Status" AS status
+     FROM financial_periods
      WHERE period_year  = EXTRACT(YEAR  FROM $1::date)::int
        AND period_month = EXTRACT(MONTH FROM $1::date)::int`,
     [transactionDate]

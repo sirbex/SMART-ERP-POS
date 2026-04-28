@@ -422,8 +422,10 @@ export const salesService = {
         // use it instead of the frontend-supplied price.
         const resolvedPrice = resolvedPriceMap.get(`${item.productId}:${item.quantity}`);
         let effectiveUnitPrice = item.unitPrice;
-        if (resolvedPrice && resolvedPrice.appliedRule.scope !== 'base') {
-          // Engine found a tier/rule/group discount — enforce it
+        if (resolvedPrice) {
+          // Always enforce the server-side resolved price (base or tiered).
+          // For base-scope items this uses the catalog selling_price from the DB,
+          // preventing offline devices from submitting a tampered price.
           if (resolvedPrice.finalPrice !== item.unitPrice) {
             logger.info('Pricing engine adjusted unit price', {
               productId: item.productId,
