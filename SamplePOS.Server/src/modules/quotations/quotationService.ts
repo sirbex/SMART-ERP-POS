@@ -18,6 +18,7 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import crypto from 'crypto';
+import { deductStockFEFO } from '../../utils/fefoDeduction.js';
 import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository.js';
 import { salesService } from '../sales/salesService.js';
 import { invoiceService } from '../invoices/invoiceService.js';
@@ -512,15 +513,21 @@ export const quotationService = {
     notes?: string
   ): Promise<Quotation> {
     return UnitOfWork.run(pool, async (client) => {
-      // CRITICAL: Check current quotation state before allowing status change
-      const existingQuote = await quotationRepository.getQuotationById(pool, id);
+      // CRITICAL: Check current quotation state before allowing status change.
+      // Use FOR UPDATE via the transaction client (not pool) to prevent a concurrent
+      // convertQuotationToSale from slipping between this read and the UPDATE below.
+      // (Issue #3 forensic audit — TOCTOU race with pool-based read outside transaction)
+      const lockRow = await client.query(
+        `SELECT status, converted_to_sale_id FROM quotations WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
 
-      if (!existingQuote) {
+      if (!lockRow.rows[0]) {
         throw new Error('Quotation not found');
       }
 
-      const currentStatus = existingQuote.quotation.status;
-      const convertedToSaleId = existingQuote.quotation.converted_to_sale_id;
+      const currentStatus = lockRow.rows[0].status as string;
+      const convertedToSaleId = lockRow.rows[0].converted_to_sale_id as string | null;
 
       // BR-QUOTE-007: CONVERTED quotes are locked - deal is closed
       if (currentStatus === 'CONVERTED') {
@@ -810,6 +817,25 @@ export const quotationService = {
             item.uomId,
           ]
         );
+      }
+
+      // FEFO STOCK DEDUCTION: Deduct physical inventory for each non-service item.
+      // CRITICAL: Was missing — GL was posting COGS but inventory_batches were not
+      // consumed, causing permanent GL/physical stock drift (Issue #1 forensic audit).
+      // Must run BEFORE GL posting (same order as salesService.createSale) so that
+      // if deduction fails the entire transaction rolls back before GL journals are written.
+      for (const item of saleItems) {
+        const isServiceItem = !item.productId || item.productId.startsWith('custom_');
+        if (isServiceItem) continue;
+        await deductStockFEFO(client, {
+          productId: item.productId!,
+          quantity: new Decimal(item.quantity),
+          movementType: 'SALE',
+          referenceType: 'SALE',
+          referenceId: saleRecord.id,
+          createdById: data.cashierId,
+          productName: item.productName,
+        });
       }
 
       // BR-QUOTE-011: GL posting for quotation→sale conversion

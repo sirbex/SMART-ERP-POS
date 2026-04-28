@@ -431,23 +431,18 @@ export const deliveryNoteService = {
     });
 
     // ── Post COGS GL entry after transaction commits ─────────
-    // SAP: Goods Issue posts DR COGS / CR Inventory in the same period
+    // SAP: Goods Issue posts DR COGS / CR Inventory in the same period.
+    // GL failure is FATAL (not silently swallowed) — same behaviour as salesService.
+    // recordDeliveryNoteGoodsIssueToGL uses idempotency key DN_PGI_COGS-<id>,
+    // so a retry after transient failure will not double-post.
+    // (Issue #2 forensic audit — GL error was previously ignored, causing silent drift)
     if (pgiResult.totalCost > 0) {
-      try {
-        await recordDeliveryNoteGoodsIssueToGL({
-          deliveryNoteId,
-          deliveryNoteNumber: pgiResult.dn.deliveryNoteNumber,
-          postingDate: getBusinessDate(),
-          totalCost: pgiResult.totalCost,
-        }, pool);
-      } catch (glError) {
-        logger.warn('GL COGS posting deferred for DN PGI', {
-          deliveryNoteId,
-          deliveryNoteNumber: pgiResult.dn.deliveryNoteNumber,
-          totalCost: pgiResult.totalCost,
-          error: glError instanceof Error ? glError.message : String(glError),
-        });
-      }
+      await recordDeliveryNoteGoodsIssueToGL({
+        deliveryNoteId,
+        deliveryNoteNumber: pgiResult.dn.deliveryNoteNumber,
+        postingDate: getBusinessDate(),
+        totalCost: pgiResult.totalCost,
+      }, pool);
     }
 
     return pgiResult.dn;
