@@ -425,10 +425,10 @@ BEGIN
     
     -- Get sum of outstanding invoice balances
     -- Handle both PascalCase (PartiallyPaid) and SCREAMING_SNAKE_CASE (PARTIALLY_PAID) status values
-    SELECT COALESCE(SUM("OutstandingBalance"), 0)
+    SELECT COALESCE(SUM(amount_due), 0)
     INTO v_invoice_balance
     FROM invoices
-    WHERE UPPER(REPLACE("Status", '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING');
+    WHERE UPPER(REPLACE(invoices.status, '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING');
     
     v_difference := v_gl_balance - v_invoice_balance;
     
@@ -443,10 +443,10 @@ BEGIN
     INTO v_customer_details
     FROM customers c
     LEFT JOIN (
-        SELECT "CustomerId" as customer_id, SUM("OutstandingBalance") as total_due
+        SELECT customer_id, SUM(amount_due) as total_due
         FROM invoices
-        WHERE UPPER(REPLACE("Status", '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING')
-        GROUP BY "CustomerId"
+        WHERE UPPER(REPLACE(invoices.status, '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING')
+        GROUP BY customer_id
     ) inv ON inv.customer_id = c.id
     WHERE ABS(c.balance - COALESCE(inv.total_due, 0)) > 0.01;
     
@@ -725,10 +725,10 @@ BEGIN
     WHERE a."AccountCode" = '1200'
       AND lt."TransactionDate"::DATE <= p_as_of_date;
     
-    SELECT COALESCE(SUM("OutstandingBalance"), 0)
+    SELECT COALESCE(SUM(amount_due), 0)
     INTO v_ar_sub
     FROM invoices
-    WHERE UPPER(REPLACE("Status", '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING');
+    WHERE UPPER(REPLACE(invoices.status, '_', '')) IN ('ISSUED', 'UNPAID', 'PARTIALLYPAID', 'PENDING');
     
     RETURN QUERY SELECT 
         'Accounts Receivable (1200)'::TEXT,
