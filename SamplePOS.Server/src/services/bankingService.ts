@@ -356,7 +356,7 @@ export class BankingService {
             idempotencyKey: `OPEN-${bankAccountId}`,
         };
 
-        await AccountingCore.createJournalEntry(request, dbPool);
+        await AccountingCore.createJournalEntry(request, undefined, client);
     }
 
     // ---------------------------------------------------------------------------
@@ -644,8 +644,8 @@ export class BankingService {
                 idempotencyKey: `BANK-${transactionId}`,
             };
 
-            // Post to GL
-            const glResult = await AccountingCore.createJournalEntry(journalRequest, dbPool);
+            // Post to GL (inside UnitOfWork — pass client so GL is atomic with bank_transactions insert)
+            const glResult = await AccountingCore.createJournalEntry(journalRequest, undefined, client);
 
             // Create bank transaction record
             await client.query(
@@ -803,7 +803,7 @@ export class BankingService {
                 idempotencyKey: `TRANSFER-${outTxnId}`,
             };
 
-            const glResult = await AccountingCore.createJournalEntry(journalRequest, dbPool);
+            const glResult = await AccountingCore.createJournalEntry(journalRequest, undefined, client);
 
             // Create TRANSFER_OUT transaction first (without transfer_pair_id to avoid FK violation)
             await client.query(
