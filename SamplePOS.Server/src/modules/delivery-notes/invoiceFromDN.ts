@@ -108,29 +108,19 @@ export async function invoiceFromDeliveryNote(
     // Document flow: Delivery Note → Invoice
     await documentFlowService.linkDocuments(client, 'DELIVERY_NOTE', deliveryNoteId, 'INVOICE', freshInvoice.id, 'CREATED_FROM');
 
-    return freshInvoice;
-  });
-
-  // GL posting AFTER transaction commits (same pattern as goodsReceiptService)
-  // Uses glEntryService → AccountingCore (single source of truth for GL writes)
-  try {
+    // GL posting inside UnitOfWork — atomic with invoice creation
     await recordDeliveryNoteInvoiceToGL({
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.invoice_number,
+      invoiceId: freshInvoice.id,
+      invoiceNumber: freshInvoice.invoice_number,
       invoiceDate: getBusinessDate(),
       totalAmount,
       deliveryNoteNumber: dn.deliveryNoteNumber,
       customerId: dn.customerId,
       customerName,
-    }, pool);
-  } catch (glError) {
-    logger.error('GL posting failed for DN invoice', {
-      invoiceId: invoice.id,
-      deliveryNoteId,
-      error: glError instanceof Error ? glError.message : String(glError),
-    });
-    // GL failure logged but does not block invoice creation
-  }
+    }, undefined, client);
+
+    return freshInvoice;
+  });
 
   logger.info('Invoice created from delivery note', {
     invoiceId: invoice.id,

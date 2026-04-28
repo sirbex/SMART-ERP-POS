@@ -1280,6 +1280,7 @@ export interface DeliveryNoteInvoiceData {
 export async function recordDeliveryNoteInvoiceToGL(
   data: DeliveryNoteInvoiceData,
   pool?: pg.Pool,
+  txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
     if (data.totalAmount <= 0) {
@@ -1316,7 +1317,7 @@ export async function recordDeliveryNoteInvoiceToGL(
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DN_INVOICE-${data.invoiceId}`,
       source: 'SALES_INVOICE' as const,
-    }, pool);
+    }, txClient ? undefined : pool, txClient);
 
     logger.info('Recorded DN invoice to GL', {
       invoiceId: data.invoiceId,
