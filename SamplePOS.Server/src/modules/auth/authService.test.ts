@@ -96,7 +96,7 @@ describe('authService', () => {
             expect(result.token).toBe('jwt-token-123');
             expect(result.user.email).toBe('a@b.com');
             expect(mockFindUserByEmail).toHaveBeenCalledWith(mockPool, 'a@b.com');
-            expect(mockCheckAccountLockout).toHaveBeenCalledWith('u1');
+            expect(mockCheckAccountLockout).toHaveBeenCalledWith('u1', mockPool);
         });
 
         it('should throw for unknown email', async () => {
@@ -122,7 +122,7 @@ describe('authService', () => {
             await expect(
                 authenticateUser(mockPool, { email: 'a@b.com', password: 'wrong' })
             ).rejects.toThrow();
-            expect(mockRecordFailedLoginAttempt).toHaveBeenCalledWith('u1');
+            expect(mockRecordFailedLoginAttempt).toHaveBeenCalledWith('u1', mockPool);
         });
     });
 

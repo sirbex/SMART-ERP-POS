@@ -24,6 +24,7 @@ const mockSalesRepo = {
     getSalesSummaryByDate: jest.fn<MockFn>(),
     getSalesDetailsReport: jest.fn<MockFn>(),
     getSalesByCashier: jest.fn<MockFn>(),
+    getSalesSummaryFromRollup: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('./salesRepository.js', () => ({
@@ -47,6 +48,10 @@ jest.unstable_mockModule('../cash-register/index.js', () => ({
     cashRegisterService: {
         recordSaleMovement: jest.fn<MockFn>().mockResolvedValue(undefined),
     },
+    cashRegisterRepository: {
+        getSessionById: jest.fn<MockFn>().mockResolvedValue(null),
+        getUserOpenSession: jest.fn<MockFn>().mockResolvedValue(null),
+    },
 }));
 
 jest.unstable_mockModule('../../middleware/errorHandler.js', () => ({
@@ -68,6 +73,12 @@ jest.unstable_mockModule('../../middleware/errorHandler.js', () => ({
         constructor(msg: string) {
             super(`${msg} not found`);
             this.name = 'NotFoundError';
+        }
+    },
+    ConflictError: class extends Error {
+        constructor(msg: string) {
+            super(msg);
+            this.name = 'ConflictError';
         }
     },
 }));
@@ -149,7 +160,7 @@ describe('salesService', () => {
 
     describe('getSalesSummary', () => {
         it('should return summary data', async () => {
-            mockSalesRepo.getSalesSummary.mockResolvedValue({
+            mockSalesRepo.getSalesSummaryFromRollup.mockResolvedValue({
                 totalSales: 10,
                 totalRevenue: '50000',
             });

@@ -146,7 +146,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
 
             // Journal 2 — source: INVENTORY_MOVE
             expect(capturedEntries[1].source).toBe('INVENTORY_MOVE');
-            expect(capturedEntries[1].idempotencyKey).toBe('SALE-COGS-sale-1');
+            expect(capturedEntries[1].idempotencyKey).toBe('SALE-COGS-SALE-2026-0001');
 
             // DR COGS 6000
             const cogsLine = findLine(cogsLines, AccountCodes.COGS);
@@ -172,7 +172,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
                 paymentMethod: 'CASH',
             });
 
-            expect(capturedEntries[0].idempotencyKey).toBe('SALE-sale-123');
+            expect(capturedEntries[0].idempotencyKey).toBe('SALE-SALE-2026-0005');
             expect(capturedEntries[0].referenceType).toBe('SALE');
         });
     });
