@@ -7,6 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
+import { Money } from '../utils/money.js';
 import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 
 // Configure Decimal for financial calculations
@@ -57,7 +58,7 @@ export class InventoryBusinessRules {
     const params = batchId ? [productId, batchId] : [productId];
     const result = await pool.query(query, params);
 
-    const available = parseFloat(result.rows[0].available);
+    const available = Money.toNumber(Money.parseDb(result.rows[0].available));
 
     if (available < requestedQuantity) {
       throw new BusinessRuleViolation(
@@ -443,7 +444,7 @@ export class SalesBusinessRules {
     const result = await pool.query('SELECT min_price FROM products WHERE id = $1', [productId]);
 
     if (result.rows.length > 0 && result.rows[0].min_price) {
-      const minPrice = parseFloat(result.rows[0].min_price);
+      const minPrice = Money.toNumber(Money.parseDb(result.rows[0].min_price));
       if (sellingPrice < minPrice) {
         throw new BusinessRuleViolation(
           'BR-SAL-004',
@@ -491,7 +492,7 @@ export class SalesBusinessRules {
     ]);
 
     if (result.rows.length > 0 && result.rows[0].max_discount_percentage) {
-      const maxDiscount = parseFloat(result.rows[0].max_discount_percentage);
+      const maxDiscount = Money.toNumber(Money.parseDb(result.rows[0].max_discount_percentage));
       const actualDiscount = new Decimal(originalPrice).minus(sellingPrice).dividedBy(originalPrice).times(100).toNumber();
 
       if (actualDiscount > maxDiscount) {

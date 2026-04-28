@@ -40,7 +40,8 @@ export const pool = new Pool({
 // Set session timezone to UTC for all connections
 // Also set statement_timeout to prevent runaway queries
 pool.on('connect', (client) => {
-  client.query("SET timezone = 'UTC'; SET statement_timeout = '30s'");
+  client.query("SET timezone = 'UTC'; SET statement_timeout = '30s'")
+    .catch(err => logger.error('Failed to configure session settings on new connection', { err }));
   logger.info('Database connected | Strategy: UTC everywhere | DATE parser: string');
 });
 

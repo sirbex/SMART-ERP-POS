@@ -84,6 +84,7 @@ export async function deductStockFEFO(
       `SELECT id, remaining_quantity, cost_price
        FROM inventory_batches
        WHERE id = $1 AND product_id = $2 AND status = 'ACTIVE'
+         AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
        FOR UPDATE`,
       [request.specificBatchId, request.productId]
     );

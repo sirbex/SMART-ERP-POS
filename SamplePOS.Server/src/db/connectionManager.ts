@@ -131,7 +131,8 @@ class ConnectionManager {
       });
 
       this.masterPool.on('connect', (client) => {
-        client.query('SET timezone = "UTC"');
+        client.query('SET timezone = "UTC"')
+          .catch(err => logger.error('Master pool: failed to set session timezone', { err }));
       });
 
       this.masterPool.on('error', (err) => {
@@ -195,7 +196,8 @@ class ConnectionManager {
     });
 
     pool.on('connect', (client) => {
-      client.query('SET timezone = "UTC"');
+      client.query('SET timezone = "UTC"')
+        .catch(err => logger.error(`Tenant pool [${config.slug}]: failed to set session timezone`, { err }));
     });
 
     pool.on('error', (err) => {
@@ -220,7 +222,8 @@ class ConnectionManager {
         connectionTimeoutMillis: 2000,
       });
       readPool.on('connect', (client) => {
-        client.query('SET timezone = "UTC"');
+        client.query('SET timezone = "UTC"')
+          .catch(err => logger.error(`Tenant read-replica pool [${config.slug}]: failed to set session timezone`, { err }));
       });
       readPool.on('error', (err) => {
         logger.error(`Tenant read-replica pool error [${config.slug}]`, {

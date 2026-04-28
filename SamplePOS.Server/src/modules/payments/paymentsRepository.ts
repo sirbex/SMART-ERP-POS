@@ -7,6 +7,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 
 // ============================================================================
 // TYPES
@@ -220,7 +221,7 @@ export const paymentsRepository = {
     `;
 
     const result = await pool.query<{ total: string }>(query, [saleId]);
-    return parseFloat(result.rows[0].total);
+    return Money.toNumber(Money.parseDb(result.rows[0].total));
   },
 
   /**
@@ -250,7 +251,7 @@ export const paymentsRepository = {
 
     const result = await pool.query<{ balance: string }>(query, [customerId]);
     if (result.rows.length === 0) return 0;
-    return parseFloat(result.rows[0].balance);
+    return Money.toNumber(Money.parseDb(result.rows[0].balance));
   },
 
   /**
