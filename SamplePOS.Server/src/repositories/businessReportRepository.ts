@@ -342,21 +342,45 @@ export async function getSummaryTotals(
 ): Promise<SummaryTotalsRow> {
   const db = dbPool || globalPool;
 
-  // Total revenue from GL (CR on REVENUE accounts for SALE reference type)
-  // Exclude void/returned sales so they don't inflate revenue or sale count
+  // Total revenue from GL — net of partial refunds.
+  //
+  // SALE entries:      CR on REVENUE accounts (positive revenue)
+  // SALE_REFUND entries: DR on REVENUE accounts (revenue reversal, negative)
+  //
+  // Full refunds (VOIDED_BY_RETURN): original SALE excluded via status check,
+  // AND SALE_REFUND excluded via refund_sale status check → net = 0 (correct).
+  //
+  // Partial refunds (PARTIALLY_RETURNED): original SALE included,
+  // SALE_REFUND debit subtracted → net = actual collected revenue (fix for #7).
   const revenueQuery = `
     SELECT
-      ROUND(COALESCE(SUM(le."CreditAmount"), 0)::numeric, 2) AS total_revenue,
-      COUNT(DISTINCT lt."Id")::integer AS sale_count
+      ROUND(COALESCE(SUM(
+        CASE
+          WHEN lt."ReferenceType" = 'SALE' AND le."CreditAmount" > 0
+               AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
+            THEN le."CreditAmount"
+          WHEN lt."ReferenceType" = 'SALE_REFUND' AND le."DebitAmount" > 0
+               AND (refund_sale.status IS NULL OR refund_sale.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
+            THEN -le."DebitAmount"
+          ELSE 0
+        END
+      ), 0)::numeric, 2) AS total_revenue,
+      COUNT(DISTINCT CASE
+        WHEN lt."ReferenceType" = 'SALE' AND le."CreditAmount" > 0
+             AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
+        THEN lt."Id"
+      END)::integer AS sale_count
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
-    LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
-    WHERE lt."ReferenceType" = 'SALE'
+    LEFT JOIN sales s
+      ON lt."ReferenceType" = 'SALE' AND lt."ReferenceNumber" = s.sale_number
+    LEFT JOIN sale_refunds sr
+      ON lt."ReferenceType" = 'SALE_REFUND' AND lt."ReferenceId" = sr.id
+    LEFT JOIN sales refund_sale ON sr.sale_id = refund_sale.id
+    WHERE lt."ReferenceType" IN ('SALE', 'SALE_REFUND')
       AND lt."Status" = 'POSTED'
       AND a."AccountType" = 'REVENUE'
-      AND le."CreditAmount" > 0
-      AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
       ${dateClause(1)}
   `;
 
