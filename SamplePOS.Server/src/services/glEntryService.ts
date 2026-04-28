@@ -918,7 +918,7 @@ export interface SupplierPaymentData {
  *   DR Accounts Payable (2100) amount
  *   CR Cash/Bank (1010/1030)   amount
  */
-export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, pool?: pg.Pool): Promise<void> {
+export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     // Determine credit account based on payment method
     let creditAccountCode: string;
@@ -966,7 +966,7 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_PAYMENT-${payment.paymentId}`,
       source: 'SUPPLIER_PAYMENT' as const,
-    }, pool);
+    }, txClient ? undefined : pool, txClient);
 
     logger.info('Recorded supplier payment to GL', {
       paymentId: payment.paymentId,

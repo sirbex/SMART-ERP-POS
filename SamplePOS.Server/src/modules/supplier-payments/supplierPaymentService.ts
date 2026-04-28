@@ -300,7 +300,21 @@ export async function createSupplierPayment(
             invoicesAffected: allocations.length,
         });
 
-        // GL POSTING: Done after UnitOfWork via glEntryService.recordSupplierPaymentToGL()
+        // GL POSTING: DR Accounts Payable (2100) / CR Cash or Bank
+        // Done inside UnitOfWork so the payment and its AP/Cash GL entry are atomic.
+        await glEntryService.recordSupplierPaymentToGL(
+            {
+                paymentId: payment.id,
+                paymentNumber: payment.paymentNumber,
+                paymentDate: data.paymentDate,
+                amount: paymentAmount.toNumber(),
+                paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK',
+                supplierId: data.supplierId,
+                supplierName: supplier?.CompanyName || 'Unknown',
+            },
+            undefined,
+            client
+        );
 
         // Recalculate supplier balance from source (replaces trg_sync_supplier_balance_on_payment)
         await recalcSupplierBalance(client, data.supplierId);
@@ -310,32 +324,6 @@ export async function createSupplierPayment(
 
     // WHT (Withholding Tax) is available via the standalone WHT module API when needed.
     // Odoo-style: simple direct payment without automatic WHT deduction.
-
-    // ============================================================
-    // GL POSTING: Record supplier payment to ledger
-    // DR Accounts Payable (2100)  /  CR Cash or Bank
-    // ============================================================
-    try {
-        await glEntryService.recordSupplierPaymentToGL(
-            {
-                paymentId: receiptData.payment.id,
-                paymentNumber: receiptData.payment.paymentNumber,
-                paymentDate: data.paymentDate,
-                amount: receiptData.payment.amount,
-                paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK',
-                supplierId: data.supplierId,
-                supplierName: receiptData.supplier.name,
-            },
-            pool
-        );
-    } catch (glError) {
-        logger.error('GL posting failed for supplier payment — will propagate error', {
-            paymentId: receiptData.payment.id,
-            paymentNumber: receiptData.payment.paymentNumber,
-            error: glError instanceof Error ? glError.message : String(glError),
-        });
-        throw glError;
-    }
 
     return receiptData;
 }
