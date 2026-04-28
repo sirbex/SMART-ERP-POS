@@ -777,7 +777,7 @@ export const hrService = {
                     idempotencyKey: `PAYROLL-${periodId}-${entry.Id}`,
                 };
 
-                const glResult = await AccountingCore.createJournalEntry(request, pool);
+                const glResult = await AccountingCore.createJournalEntry(request, undefined, client);
                 await payrollEntryRepository.setJournalEntryId(client, entry.Id, glResult.transactionId);
             }
 
