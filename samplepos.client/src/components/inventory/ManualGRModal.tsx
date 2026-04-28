@@ -15,7 +15,6 @@ import type { ApiResponse } from "@/types/api";
 import { AxiosError } from "axios";
 import { getBusinessDate } from "@/utils/businessDate";
 import { UomSelector } from "./UomSelector";
-import { convertQtyToBase, convertCostToBase } from "@/utils/uom";
 import {
   SupplierSelector,
   NotesField,
@@ -141,6 +140,9 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
     }
 
     const costPrice = product.costPrice ?? product.cost_price ?? 0;
+    // Pre-select the product's purchase UoM (purchase_uom_id → uoms.id master FK)
+    // so the receiver defaults to the correct unit without manual selection.
+    const purchaseUomId = (product.purchaseUomId as string | undefined) || null;
     const newItem: ManualGRItem = {
       productId: product.id,
       productName: product.name,
@@ -150,7 +152,7 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
       batchNumber: "",
       expiryDate: "",
       trackExpiry: !!(product.trackExpiry ?? false),
-      selectedUomId: null,
+      selectedUomId: purchaseUomId,
     };
 
     setSelectedItems((prev) => [...prev, newItem]);
@@ -228,21 +230,18 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
         notes: notes || null,
         source: "MANUAL",
         items: selectedItems.map((item) => {
-          // Convert quantity to base units if UoM is selected
-          let baseQuantity = Number(item.receivedQuantity);
-          let baseUnitCost = Number(item.unitCost);
-          if (item.selectedUomId && item.conversionFactor) {
-            baseQuantity = parseFloat(convertQtyToBase(item.receivedQuantity, item.conversionFactor));
-            baseUnitCost = parseFloat(convertCostToBase(item.unitCost, item.conversionFactor));
-          }
-
+          // SAP pattern: send original (entered) quantity and cost in the selected UoM,
+          // plus the UoM ID so the server can apply the correct conversion factor.
+          // The goodsReceiptService will convert to base units server-side, matching
+          // the PO-based GR flow and preserving the UoM audit trail in GR items.
           return {
             poItemId: undefined,
             productId: String(item.productId),
             productName: item.productName,
-            orderedQuantity: baseQuantity,
-            receivedQuantity: baseQuantity,
-            unitCost: baseUnitCost,
+            orderedQuantity: Number(item.receivedQuantity),
+            receivedQuantity: Number(item.receivedQuantity),
+            unitCost: Number(item.unitCost),
+            uomId: item.selectedUomId || undefined,
             batchNumber: item.batchNumber || undefined,
             expiryDate: item.expiryDate && item.expiryDate.trim() !== "" ? item.expiryDate : undefined,
           };
