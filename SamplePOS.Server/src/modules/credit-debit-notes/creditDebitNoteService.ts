@@ -38,6 +38,7 @@ import type {
 } from '../../../../shared/zod/creditDebitNote.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
+import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 
 // ============================================================
 // CUSTOMER SIDE
@@ -679,6 +680,13 @@ export const supplierCreditDebitNoteService = {
                 );
             }
 
+            // Recalculate supplier outstanding balance from sub-ledger (SSOT).
+            // adjustSupplierInvoiceBalance only updates supplier_invoices; without this
+            // call, suppliers."OutstandingBalance" stays stale after note posting.
+            if (note.supplierId) {
+                await recalcSupplierBalance(client, note.supplierId);
+            }
+
             logger.info('Supplier note posted', {
                 noteId: note.id, noteNumber: note.invoiceNumber, type: note.documentType,
             });
@@ -752,6 +760,13 @@ export const supplierCreditDebitNoteService = {
                     noteData.totalAmount,
                     'CREDIT',
                 );
+            }
+
+            // Recalculate supplier outstanding balance from sub-ledger (SSOT).
+            // adjustSupplierInvoiceBalance only updates supplier_invoices; without this
+            // call, suppliers."OutstandingBalance" stays stale after note cancellation.
+            if (noteData.supplierId) {
+                await recalcSupplierBalance(client, noteData.supplierId);
             }
 
             logger.info('Supplier note cancelled with GL reversal', {
