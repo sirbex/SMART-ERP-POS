@@ -397,14 +397,24 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
     }
 
     // CREDIT: Tax Payable (Account 2300) - Tax collected on sale
-    // Tax is the difference between tax-inclusive total_amount and pre-tax revenue
-    const taxAmount = sale.taxAmount ?? 0;
-    if (taxAmount > 0) {
+    // Derive effective tax as the gap between sale.totalAmount (which may be tax-inclusive)
+    // and the sum of item revenues. This ensures a balanced entry even when sale.taxAmount
+    // was not populated (e.g., stored as 0 in DB but totalAmount includes tax).
+    // Example: totalAmount=9000, items sum=8100, sale.taxAmount=0 → effectiveTax=900 → balanced.
+    // Fallback: when no gap exists (items are tax-inclusive), use explicit sale.taxAmount.
+    const revenueGap = Money.subtract(
+      Money.parseDb(sale.totalAmount),
+      Money.add(inventoryRevenue, serviceRevenue)
+    );
+    const effectiveTaxAmount = revenueGap.greaterThan(0.005)
+      ? revenueGap.toNumber()
+      : (sale.taxAmount ?? 0);
+    if (effectiveTaxAmount > 0) {
       ledgerLines.push({
         accountCode: AccountCodes.TAX_PAYABLE,
         description: `Tax collected on sale ${sale.saleNumber}`,
         debitAmount: 0,
-        creditAmount: taxAmount
+        creditAmount: effectiveTaxAmount
       });
     }
 
