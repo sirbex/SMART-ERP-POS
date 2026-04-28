@@ -316,7 +316,8 @@ export class JournalEntryService {
           idempotencyKey: `JE-${entryId}`,
           source: 'MANUAL_JOURNAL',
         },
-        this.pool
+        undefined,
+        client
       );
 
       // JE Approval (SAP parking/approval workflow) is available via the
