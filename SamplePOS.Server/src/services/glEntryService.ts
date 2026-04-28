@@ -557,7 +557,7 @@ export interface CustomerPaymentData {
  *   DR Cash (1010)                amount
  *   CR Customer Deposits (2200)   amount  (liability - customer prepayment)
  */
-export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, pool?: pg.Pool): Promise<void> {
+export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     // Determine debit account based on payment method
     let debitAccountCode: string;
@@ -617,7 +617,7 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CUSTOMER_PAYMENT-${payment.paymentId}`,
       source: 'PAYMENT_RECEIPT' as const,
-    }, pool);
+    }, txClient ? undefined : pool, txClient);
 
     logger.info('Recorded customer payment to GL', {
       paymentId: payment.paymentId,

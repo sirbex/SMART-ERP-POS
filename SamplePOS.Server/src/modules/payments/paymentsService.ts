@@ -280,27 +280,20 @@ export const paymentsService = {
         });
       }
 
-      return {
-        newBalance: Money.toNumber(Money.max(0, newBalance)),
-        transactionId: transaction.id,
-      };
-    });
-
-    // ============================================================
-    // GL POSTING: Record customer payment reducing AR
-    // DR Cash/Card/Bank | CR Accounts Receivable
-    // ============================================================
-    try {
-      // Fetch customer name for GL description
-      const custRow = await pool.query('SELECT name FROM customers WHERE id = $1', [
+      // ============================================================
+      // GL POSTING: Record customer payment reducing AR
+      // DR Cash/Card/Bank | CR Accounts Receivable
+      // Atomic with the credit transaction — inside UnitOfWork
+      // ============================================================
+      const custRow = await client.query('SELECT name FROM customers WHERE id = $1', [
         input.customerId,
       ]);
       const customerName = (custRow.rows[0]?.name as string) || 'Unknown';
 
       await glEntryService.recordCustomerPaymentToGL(
         {
-          paymentId: result.transactionId,
-          paymentNumber: input.reference || `CPAY-${result.transactionId.slice(0, 8)}`,
+          paymentId: transaction.id,
+          paymentNumber: input.reference || `CPAY-${transaction.id.slice(0, 8)}`,
           paymentDate: getBusinessDate(),
           amount: input.amount,
           paymentMethod:
@@ -309,16 +302,15 @@ export const paymentsService = {
           customerName,
           reducesAR: true,
         },
-        pool
+        undefined,
+        client
       );
-    } catch (glError) {
-      logger.error('GL posting failed for customer payment — will propagate error', {
-        transactionId: result.transactionId,
-        customerId: input.customerId,
-        error: glError instanceof Error ? glError.message : String(glError),
-      });
-      throw glError;
-    }
+
+      return {
+        newBalance: Money.toNumber(Money.max(0, newBalance)),
+        transactionId: transaction.id,
+      };
+    });
 
     return result;
   },
