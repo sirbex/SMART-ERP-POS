@@ -534,48 +534,41 @@ export async function createDeliveryWithInvoice(
     const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
     await syncCustomerBalanceFromInvoices(client, order.customer_id, 'DIST_INVOICE_CREATED');
 
-    return { delivery: delivery!, invoice: invoice!, totalCost: totalCost.toNumber() };
-  });
-
-  // Post GL entries after transaction
-  // DR COGS / CR Inventory (goods issue)
-  if (result.totalCost > 0) {
-    try {
+    // Post GL entries atomically — inside the same transaction so any GL failure
+    // rolls back the delivery, invoice, and stock deduction together (SAP LUW pattern)
+    // DR COGS / CR Inventory (goods issue)
+    if (totalCost.greaterThan(0)) {
       await AccountingCore.createJournalEntry({
         entryDate: deliveryDate,
-        description: `Distribution delivery ${result.delivery.delivery_number} — COGS`,
+        description: `Distribution delivery ${delivery!.delivery_number} — COGS`,
         referenceType: 'DIST_DELIVERY',
-        referenceId: result.delivery.id,
-        referenceNumber: result.delivery.delivery_number,
+        referenceId: delivery!.id,
+        referenceNumber: delivery!.delivery_number,
         lines: [
-          { accountCode: AccountCodes.COGS, description: `COGS — ${result.delivery.delivery_number}`, debitAmount: result.totalCost, creditAmount: 0 },
-          { accountCode: AccountCodes.INVENTORY, description: `Inventory reduction — ${result.delivery.delivery_number}`, debitAmount: 0, creditAmount: result.totalCost },
+          { accountCode: AccountCodes.COGS, description: `COGS — ${delivery!.delivery_number}`, debitAmount: totalCost.toNumber(), creditAmount: 0 },
+          { accountCode: AccountCodes.INVENTORY, description: `Inventory reduction — ${delivery!.delivery_number}`, debitAmount: 0, creditAmount: totalCost.toNumber() },
         ],
         userId: input.createdBy,
-        idempotencyKey: `DIST_DELIVERY_COGS-${result.delivery.id}`,
+        idempotencyKey: `DIST_DELIVERY_COGS-${delivery!.id}`,
         source: 'INVENTORY_MOVE' as const,
-      }, pool);
-    } catch (e) {
-      logger.warn('GL COGS posting deferred for dist delivery', { deliveryId: result.delivery.id, error: e });
+      }, undefined, client);
     }
-  }
 
-  // DR AR / CR Revenue (invoice)
-  const invoiceTotal = Money.toNumber(Money.parseDb(result.invoice.total_amount));
-  if (invoiceTotal > 0) {
-    try {
+    // DR AR / CR Revenue (invoice)
+    const invoiceTotalAmt = Money.toNumber(Money.parseDb(invoice!.total_amount));
+    if (invoiceTotalAmt > 0) {
       await recordCustomerInvoiceToGL({
-        invoiceId: result.invoice.id,
-        invoiceNumber: result.invoice.invoice_number,
+        invoiceId: invoice!.id,
+        invoiceNumber: invoice!.invoice_number,
         invoiceDate: issueDate,
-        totalAmount: invoiceTotal,
+        totalAmount: invoiceTotalAmt,
         customerId: order.customer_id,
         customerName: order.customer_name,
-      }, pool);
-    } catch (e) {
-      logger.warn('GL invoice posting deferred for dist invoice', { invoiceId: result.invoice.id, error: e });
+      }, undefined, client);
     }
-  }
+
+    return { delivery: delivery!, invoice: invoice! };
+  });
 
   return {
     delivery: normalizeDelivery(result.delivery),
@@ -740,11 +733,9 @@ export async function processClearing(
     // Sync customer balance & AR from invoices (SSOT)
     const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
     await syncCustomerBalanceFromInvoices(client, input.customerId, 'DIST_CLEARING');
-  });
 
-  // GL entries — deposit clearing (one per allocation)
-  for (const cl of clearings) {
-    try {
+    // GL entries — deposit clearing (one per allocation) — atomic with the clearing
+    for (const cl of clearings) {
       await recordDownPaymentClearingToGL({
         clearingId: cl.id,
         clearingNumber: cl.clearingNumber,
@@ -754,15 +745,11 @@ export async function processClearing(
         invoiceNumber: invoice.invoice_number,
         customerId: input.customerId,
         customerName: '',
-      }, pool);
-    } catch (e) {
-      logger.warn('GL deposit clearing deferred', { clearingNumber: cl.clearingNumber, error: e });
+      }, undefined, client);
     }
-  }
 
-  // GL entry — cash/card/bank payment
-  if (cashAmount.gt(0) && input.cashPayment && receiptNumber && receiptId) {
-    try {
+    // GL entry — cash/card/bank payment — atomic with the clearing
+    if (cashAmount.gt(0) && input.cashPayment && receiptNumber && receiptId) {
       await recordInvoicePaymentToGL({
         paymentId: receiptId,
         receiptNumber,
@@ -771,11 +758,9 @@ export async function processClearing(
         paymentMethod: input.cashPayment.paymentMethod,
         invoiceId: input.invoiceId,
         invoiceNumber: invoice.invoice_number,
-      }, pool);
-    } catch (e) {
-      logger.warn('GL cash receipt deferred', { receiptNumber, error: e });
+      }, undefined, client);
     }
-  }
+  });
 
   return {
     clearingNumbers: clearings.map(c => c.clearingNumber),

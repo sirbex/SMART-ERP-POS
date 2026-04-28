@@ -1774,7 +1774,7 @@ export interface CustomerInvoiceData {
  *   DR Accounts Receivable (1200) totalAmount
  *   CR Sales Revenue (4000)       totalAmount
  */
-export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData, pool?: pg.Pool): Promise<void> {
+export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     await AccountingCore.createJournalEntry({
       entryDate: invoice.invoiceDate,
@@ -1803,7 +1803,7 @@ export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData, po
       userId: SYSTEM_USER_ID,
       idempotencyKey: `INVOICE-${invoice.invoiceId}`,
       source: 'SALES_INVOICE' as const,
-    }, pool);
+    }, txClient ? undefined : pool, txClient);
 
     logger.info('Recorded customer invoice to GL', {
       invoiceId: invoice.invoiceId,
