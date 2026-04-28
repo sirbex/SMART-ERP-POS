@@ -3,10 +3,23 @@
  */
 
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
-import { asyncHandler } from '../../middleware/errorHandler.js';
+import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import * as paymentProgramService from './paymentProgramService.js';
+
+const CreatePaymentRunSchema = z.object({
+  runDate: z.string().min(1, 'runDate is required'),
+  paymentMethod: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'MOBILE_MONEY'], {
+    errorMap: () => ({ message: 'paymentMethod must be CASH, BANK_TRANSFER, CHEQUE, or MOBILE_MONEY' }),
+  }),
+  bankAccountCode: z.string().optional(),
+  dueDateCutoff: z.string().optional(),
+  minAmount: z.number().nonnegative().optional(),
+  maxAmount: z.number().positive().optional(),
+  notes: z.string().optional(),
+});
 
 const router = Router();
 
@@ -38,8 +51,12 @@ router.get('/:id/items', authenticate, asyncHandler(async (req, res) => {
 
 // POST /api/payment-program — Create run
 router.post('/', authenticate, requirePermission('accounting.manage'), asyncHandler(async (req, res) => {
+  const parsed = CreatePaymentRunSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError(parsed.error.errors.map(e => e.message).join('; '));
+  }
   const userId = req.user!.id;
-  const run = await paymentProgramService.createPaymentRun({ ...req.body, userId }, req.tenantPool);
+  const run = await paymentProgramService.createPaymentRun({ ...parsed.data, userId }, req.tenantPool);
   res.status(201).json({ success: true, data: run });
 }));
 
