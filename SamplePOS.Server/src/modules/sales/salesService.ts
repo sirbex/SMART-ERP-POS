@@ -3131,6 +3131,91 @@ export const salesService = {
             saleNumber: sale.sale_number,
           });
         }
+
+        // STATE TABLES: Decrement product_daily_summary for the returned items.
+        // Full refund path does the same at line ~3115; partial refund must mirror it
+        // so that category-level revenue/COGS breakdown stays accurate.
+        try {
+          await client.query('SAVEPOINT partial_refund_pds');
+          const partialRefundSaleDate = String(sale.sale_date).slice(0, 10);
+
+          // Fetch categories for the returned products
+          const partialProductIds = validatedItems
+            .map(({ saleItem }) => saleItem.productId)
+            .filter((id): id is string => !!id);
+          const partialCategoryMap = new Map<string, string>();
+          if (partialProductIds.length > 0) {
+            const catRes = await client.query(
+              `SELECT id, COALESCE(NULLIF(TRIM(category), ''), 'Uncategorized') AS category
+               FROM products WHERE id = ANY($1)`,
+              [[...new Set(partialProductIds)]]
+            );
+            for (const row of catRes.rows as Array<{ id: string; category: string }>) {
+              partialCategoryMap.set(row.id, row.category);
+            }
+          }
+
+          // Aggregate returned items by productId (same product may appear twice
+          // if the caller submitted two line items for the same product)
+          const partialPdsMap = new Map<string, {
+            category: string;
+            unitsSold: Decimal;
+            revenue: Decimal;
+            costOfGoods: Decimal;
+            discountGiven: Decimal;
+          }>();
+
+          for (const { saleItem, refundQty, lineTotal, costTotal } of validatedItems) {
+            if (!saleItem.productId) continue;
+            // Pro-rate the original item discount by the returned fraction
+            const originalQty = new Decimal(saleItem.quantity);
+            const itemDiscount = originalQty.greaterThan(0)
+              ? Money.parseDb(saleItem.discountAmount ?? 0)
+                  .times(refundQty)
+                  .dividedBy(originalQty)
+              : new Decimal(0);
+
+            const existing = partialPdsMap.get(saleItem.productId);
+            if (existing) {
+              existing.unitsSold = existing.unitsSold.plus(refundQty);
+              existing.revenue = existing.revenue.plus(lineTotal);
+              existing.costOfGoods = existing.costOfGoods.plus(costTotal);
+              existing.discountGiven = existing.discountGiven.plus(itemDiscount);
+            } else {
+              partialPdsMap.set(saleItem.productId, {
+                category: partialCategoryMap.get(saleItem.productId) || 'Uncategorized',
+                unitsSold: refundQty,
+                revenue: lineTotal,
+                costOfGoods: costTotal,
+                discountGiven: itemDiscount,
+              });
+            }
+          }
+
+          const partialPdsItems = Array.from(partialPdsMap.entries()).map(([productId, agg]) => ({
+            productId,
+            category: agg.category,
+            unitsSold: agg.unitsSold.toNumber(),
+            revenue: agg.revenue.toNumber(),
+            costOfGoods: agg.costOfGoods.toNumber(),
+            discountGiven: agg.discountGiven.toNumber(),
+          }));
+
+          if (partialPdsItems.length > 0) {
+            await stateTablesRepo.batchDecrementProductDailySummary(
+              client,
+              partialRefundSaleDate,
+              partialPdsItems
+            );
+          }
+        } catch (pdsError: unknown) {
+          await client.query('ROLLBACK TO SAVEPOINT partial_refund_pds');
+          logger.error('Product daily summary decrement failed on partial return — will be healed by reconciliation', {
+            saleId,
+            saleNumber: sale.sale_number,
+            error: pdsError instanceof Error ? pdsError.message : String(pdsError),
+          });
+        }
       }
 
       await client.query('COMMIT');
