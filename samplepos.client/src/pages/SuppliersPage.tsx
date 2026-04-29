@@ -189,7 +189,7 @@ export default function SuppliersPage() {
   }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
   // API queries
-  const { data: suppliersData, isLoading, isFetching, error, refetch } = useSuppliers({ page, limit, search: debouncedSearch || undefined });
+  const { data: suppliersData, isLoading, isFetching, isPlaceholderData, error, refetch } = useSuppliers({ page, limit, search: debouncedSearch || undefined });
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
@@ -264,12 +264,12 @@ export default function SuppliersPage() {
 
   // Calculate statistics — use API-level aggregates to avoid pagination skewing totals
   const stats = useMemo(() => {
-    // Use pagination.total from API (true count across all pages), not allSuppliers.length (current page only)
-    const total = (suppliersData as { pagination?: { total?: number } } | null)?.pagination?.total ?? allSuppliers.length;
+    // pagination.total = true count across all pages (top-level in API response)
+    const total = suppliersData?.pagination?.total ?? allSuppliers.length;
     // Active count: use pagination.total (API already filters WHERE IsActive=true)
-    const active = (suppliersData as { pagination?: { total?: number } } | null)?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
+    const active = suppliersData?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
     // Total outstanding: use server-computed aggregate across ALL active suppliers (not just current page)
-    const totalOutstanding = (suppliersData as { stats?: { totalOutstanding?: number } } | null)?.stats?.totalOutstanding
+    const totalOutstanding = (suppliersData as (typeof suppliersData) & { stats?: { totalOutstanding?: number } })?.stats?.totalOutstanding
       ?? allSuppliers.reduce((sum: number, s: Supplier) => sum + Number(s.outstandingBalance || 0), 0);
 
     return { total, active, totalOutstanding };
@@ -352,8 +352,9 @@ export default function SuppliersPage() {
     }
   };
 
-  // Loading state
-  if (isLoading) {
+  // Loading state — only show full-page loader on first load (no data yet).
+  // isPlaceholderData=true means keepPreviousData is active; old results stay visible.
+  if (isLoading && !isPlaceholderData) {
     return (
       <Layout>
         <div className="p-6">
