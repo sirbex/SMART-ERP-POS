@@ -189,7 +189,7 @@ export default function SuppliersPage() {
   }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
   // API queries
-  const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit, search: debouncedSearch || undefined });
+  const { data: suppliersData, isLoading, isFetching, error, refetch } = useSuppliers({ page, limit, search: debouncedSearch || undefined });
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
@@ -264,7 +264,8 @@ export default function SuppliersPage() {
 
   // Calculate statistics — use API-level aggregates to avoid pagination skewing totals
   const stats = useMemo(() => {
-    const total = allSuppliers.length;
+    // Use pagination.total from API (true count across all pages), not allSuppliers.length (current page only)
+    const total = (suppliersData as { pagination?: { total?: number } } | null)?.pagination?.total ?? allSuppliers.length;
     // Active count: use pagination.total (API already filters WHERE IsActive=true)
     const active = (suppliersData as { pagination?: { total?: number } } | null)?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
     // Total outstanding: use server-computed aggregate across ALL active suppliers (not just current page)
@@ -473,7 +474,7 @@ export default function SuppliersPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search suppliers by name, contact, email, phone, address..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${isFetching ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
               />
             </div>
 

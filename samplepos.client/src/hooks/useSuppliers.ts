@@ -2,7 +2,7 @@
  * React Query hooks for Suppliers API
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../utils/api';
 import type { CreateSupplierInput, UpdateSupplierInput } from '../types/inputs';
 
@@ -34,6 +34,7 @@ export function useSuppliers(params?: {
       return response.data;
     },
     staleTime: 60000, // 1 minute
+    placeholderData: keepPreviousData, // keep previous results visible during search/pagination
   });
 }
 
