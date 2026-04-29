@@ -167,6 +167,7 @@ export default function SuppliersPage() {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
@@ -188,7 +189,7 @@ export default function SuppliersPage() {
   }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
   // API queries
-  const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit, search: searchQuery || undefined });
+  const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit, search: debouncedSearch || undefined });
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
@@ -240,10 +241,16 @@ export default function SuppliersPage() {
     return filtered;
   }, [allSuppliers, filterPaymentTerms, sortField, sortOrder]);
 
-  // Reset to page 1 whenever search changes so results are always from page 1
+  // Debounce search — wait 350ms after last keystroke before firing API call
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset to page 1 whenever debounced search changes so results are always from page 1
   useEffect(() => {
     setPage(1);
-  }, [searchQuery]);
+  }, [debouncedSearch]);
 
   // Fetch invoice summary on mount
   useEffect(() => {
