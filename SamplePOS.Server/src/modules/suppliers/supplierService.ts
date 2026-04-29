@@ -39,14 +39,16 @@ function assertNotSystemSupplier(supplier: { id?: string; SupplierCode?: string 
 export async function getAllSuppliers(pool: Pool, page: number = 1, limit: number = 50, search?: string) {
   const offset = (page - 1) * limit;
   const normalizedSearch = search && search.trim().length > 0 ? search.trim() : undefined;
-  const [data, total] = await Promise.all([
+  const [data, total, totalOutstanding] = await Promise.all([
     supplierRepository.findAll(pool, limit, offset, normalizedSearch),
     supplierRepository.countAll(pool, normalizedSearch),
+    supplierRepository.getTotalOutstanding(pool),
   ]);
 
   return {
     data,
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    stats: { totalOutstanding },
   };
 }
 

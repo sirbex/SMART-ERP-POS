@@ -268,7 +268,7 @@ export default function SuppliersPage() {
     const total = suppliersData?.pagination?.total ?? allSuppliers.length;
     // Active count: use pagination.total (API already filters WHERE IsActive=true)
     const active = suppliersData?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
-    // Total outstanding: use server-computed aggregate across ALL active suppliers (not just current page)
+    // Total outstanding: server-computed SUM across ALL active suppliers (not just current page)
     const totalOutstanding = (suppliersData as (typeof suppliersData) & { stats?: { totalOutstanding?: number } })?.stats?.totalOutstanding
       ?? allSuppliers.reduce((sum: number, s: Supplier) => sum + Number(s.outstandingBalance || 0), 0);
 

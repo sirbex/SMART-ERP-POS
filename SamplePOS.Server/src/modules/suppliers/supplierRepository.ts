@@ -391,6 +391,17 @@ export async function countAll(pool: Pool, search?: string, includeInactive: boo
 }
 
 /**
+ * Sum OutstandingBalance across ALL active suppliers (ignores search/pagination).
+ * Used for the "Total Outstanding" summary card on SuppliersPage.
+ */
+export async function getTotalOutstanding(pool: Pool): Promise<number> {
+  const result = await pool.query(
+    `SELECT COALESCE(SUM("OutstandingBalance"), 0) as total FROM suppliers WHERE "IsActive" = true`
+  );
+  return parseFloat(result.rows[0].total);
+}
+
+/**
  * Check if supplier has active purchase orders
  */
 export async function hasActivePurchaseOrders(client: PoolClient, supplierId: string): Promise<boolean> {

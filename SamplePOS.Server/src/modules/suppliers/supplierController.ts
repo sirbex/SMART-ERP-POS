@@ -41,6 +41,7 @@ export const getSuppliers = asyncHandler(async (req: Request, res: Response) => 
     success: true,
     data: result.data,
     pagination: result.pagination,
+    stats: result.stats,
   });
 });
 
