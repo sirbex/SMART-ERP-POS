@@ -358,6 +358,12 @@ export default function POSPage() {
   const [showManagerApprovalDialog, setShowManagerApprovalDialog] = useState(false);
   const [pendingDiscount, setPendingDiscount] = useState<PendingDiscount | null>(null);
 
+  // Below-cost sale override state
+  const [showBelowCostOverrideDialog, setShowBelowCostOverrideDialog] = useState(false);
+  const [belowCostOverridePin, setBelowCostOverridePin] = useState('');
+  const [belowCostOverrideError, setBelowCostOverrideError] = useState('');
+  const [belowCostItems, setBelowCostItems] = useState<Array<{ name: string; unitPrice: number; costPrice: number }>>([]);
+
   // Hold/Resume Cart state
   const [showResumeDialog, setShowResumeDialog] = useState(false);
   const [heldOrdersCount, setHeldOrdersCount] = useState(0);
@@ -1349,6 +1355,30 @@ export default function POSPage() {
     } catch (error) {
       toast.error('Manager approval failed');
     }
+  };
+
+  // Below-cost override: verify manager role then proceed with sale
+  const handleBelowCostOverrideApprove = async () => {
+    const role = currentUser?.role || 'CASHIER';
+    if (role !== 'ADMIN' && role !== 'MANAGER') {
+      setBelowCostOverrideError('Only ADMIN or MANAGER can override below-cost sales. Please call a manager.');
+      return;
+    }
+
+    if (!belowCostOverridePin || belowCostOverridePin.length < 4) {
+      setBelowCostOverrideError('Manager PIN required (minimum 4 digits)');
+      return;
+    }
+
+    // Override approved — close dialog and proceed with sale
+    setShowBelowCostOverrideDialog(false);
+    setBelowCostOverridePin('');
+    setBelowCostOverrideError('');
+    setBelowCostItems([]);
+    toast.success('Below-cost override approved. Proceeding with sale.');
+
+    // Re-invoke finalize (now that the dialog is closed, the check won't re-trigger)
+    handleFinalizeSale();
   };
 
   const handleRemoveDiscount = (type: 'cart' | 'item', itemIndex?: number) => {
@@ -2429,6 +2459,19 @@ export default function POSPage() {
       return;
     }
 
+    // SAP-CLASS BELOW-COST CONTROL: Require manager override when any line sells below cost.
+    // This catches misconfigured UoM price_overrides (e.g., PACKET sold at per-unit price).
+    // Non-blocking for ADMIN/MANAGER — they see the warning but must PIN-confirm.
+    // CASHIER is always blocked and must call a manager.
+    const itemsBelowCost = items.filter((item) => item.costPrice > 0 && item.unitPrice < item.costPrice);
+    if (itemsBelowCost.length > 0 && !showBelowCostOverrideDialog) {
+      setBelowCostItems(itemsBelowCost.map((i) => ({ name: i.name, unitPrice: i.unitPrice, costPrice: i.costPrice })));
+      setShowBelowCostOverrideDialog(true);
+      setBelowCostOverridePin('');
+      setBelowCostOverrideError('');
+      return;
+    }
+
     // Set both ref and state
     isSubmittingRef.current = true;
     setIsProcessingSale(true);
@@ -3351,9 +3394,15 @@ export default function POSPage() {
                       </div>
                     )}
                     <div className="flex items-center justify-between mt-1">
-                      <span className={`text-xs ${item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600'}`}>
-                        Margin: {item.marginPct.toFixed(1)}%
-                      </span>
+                      {item.costPrice > 0 && item.unitPrice < item.costPrice ? (
+                        <span className="text-xs text-red-700 font-bold" title={`Price ${formatCurrency(item.unitPrice)} is below cost ${formatCurrency(item.costPrice)}`}>
+                          ⚠ BELOW COST — manager override required
+                        </span>
+                      ) : (
+                        <span className={`text-xs ${item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600'}`}>
+                          Margin: {item.marginPct.toFixed(1)}%
+                        </span>
+                      )}
                       {!item.discount && item.pricingRule?.scope !== 'at_cost' && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleOpenDiscountDialog('item', idx); }}
@@ -3475,14 +3524,22 @@ export default function POSPage() {
                         <td
                           className={
                             'px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm ' +
-                            (item.marginPct < 10
-                              ? 'text-red-600'
-                              : item.marginPct < 20
-                                ? 'text-yellow-600'
-                                : 'text-green-600')
+                            (item.costPrice > 0 && item.unitPrice < item.costPrice
+                              ? 'text-red-700 font-bold'
+                              : item.marginPct < 10
+                                ? 'text-red-600'
+                                : item.marginPct < 20
+                                  ? 'text-yellow-600'
+                                  : 'text-green-600')
                           }
                         >
-                          {item.marginPct.toFixed(1)}%
+                          {item.costPrice > 0 && item.unitPrice < item.costPrice ? (
+                            <span title={`Selling price (${formatCurrency(item.unitPrice)}) is below cost (${formatCurrency(item.costPrice)})`}>
+                              ⚠ BELOW COST
+                            </span>
+                          ) : (
+                            `${item.marginPct.toFixed(1)}%`
+                          )}
                         </td>
                         <td className="px-2 py-2 text-center">
                           <div className="flex items-center justify-center gap-1">
@@ -4494,6 +4551,87 @@ export default function POSPage() {
         discountPercentage={pendingDiscount?.discountPercentage || 0}
         reason={pendingDiscount?.reason || ''}
       />
+
+      {/* Below-Cost Sale Override Dialog */}
+      {showBelowCostOverrideDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="below-cost-dialog-title"
+        >
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-3xl" aria-hidden="true">⚠️</span>
+              <h2 id="below-cost-dialog-title" className="text-xl font-bold text-red-700">
+                Below-Cost Sale Detected
+              </h2>
+            </div>
+            <p className="text-sm text-gray-700 mb-3">
+              The following items are priced <strong>below their cost price</strong>. This sale
+              will result in a guaranteed loss. A manager must authorise to proceed.
+            </p>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 space-y-1 max-h-40 overflow-y-auto">
+              {belowCostItems.map((item, i) => (
+                <div key={i} className="flex justify-between text-xs">
+                  <span className="font-medium text-gray-800 truncate mr-2">{item.name}</span>
+                  <span className="text-red-700 whitespace-nowrap shrink-0">
+                    {formatCurrency(item.unitPrice)} &lt; cost {formatCurrency(item.costPrice)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {currentUser?.role === 'CASHIER' ? (
+              <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 mb-4">
+                🔒 Your role (<strong>CASHIER</strong>) cannot override below-cost sales.
+                Please call a <strong>Manager</strong> or <strong>Admin</strong> to correct the price or authorise this sale.
+              </div>
+            ) : (
+              <>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="below-cost-pin">
+                  Manager PIN (your 4+ digit PIN to authorise)
+                </label>
+                <input
+                  id="below-cost-pin"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={8}
+                  autoFocus
+                  value={belowCostOverridePin}
+                  onChange={(e) => { setBelowCostOverridePin(e.target.value); setBelowCostOverrideError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleBelowCostOverrideApprove(); }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 mb-1"
+                  placeholder="Enter PIN"
+                />
+              </>
+            )}
+            {belowCostOverrideError && (
+              <p className="text-xs text-red-600 mt-1 mb-2">{belowCostOverrideError}</p>
+            )}
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => {
+                  setShowBelowCostOverrideDialog(false);
+                  setBelowCostOverridePin('');
+                  setBelowCostOverrideError('');
+                  setBelowCostItems([]);
+                }}
+                className="flex-1 py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              {currentUser?.role !== 'CASHIER' && (
+                <button
+                  onClick={handleBelowCostOverrideApprove}
+                  className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors"
+                >
+                  Override &amp; Complete Sale
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hold Cart Dialog - Removed: Now instant one-click action */}
 
