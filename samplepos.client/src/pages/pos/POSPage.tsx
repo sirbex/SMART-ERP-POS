@@ -254,6 +254,10 @@ interface LineItem {
     price: number;
     cost: number;
     isDefault: boolean;
+    /** True when price comes from product_uoms.price_override rather than selling_price × factor */
+    priceIsOverridden?: boolean;
+    /** The formula-computed price (selling_price × conversionFactor) for invariant checks */
+    computedPrice?: number;
   }>;
   selectedUomId?: string;
   baseCost?: number;
@@ -2457,6 +2461,32 @@ export default function POSPage() {
     if (isProcessingSale || createSale.isPending) {
       console.log('⚠️ BLOCKED: Sale already processing');
       return;
+    }
+
+    // SAP MUoM STEP 6 — Price invariant check: displayPrice must equal basePrice × conversionFactor.
+    // Detects price_override corruption early (e.g., PACKET stored at tablet price instead of 30× tablet price).
+    // This is advisory-only on the frontend — the backend pricing engine will correct the price at commit.
+    // A toast warning is shown so managers can investigate the product_uoms table.
+    for (const item of items) {
+      if (!item.availableUoms || item.availableUoms.length === 0) continue;
+      const selectedUom = item.availableUoms.find((u) => u.uomId === item.selectedUomId);
+      if (!selectedUom || selectedUom.isDefault || selectedUom.conversionFactor <= 1) continue;
+      // Use backend-supplied computedPrice if available; fall back to frontend recalculation
+      const baseUom = item.availableUoms.find((u) => u.isDefault);
+      const expectedPrice = selectedUom.computedPrice != null
+        ? selectedUom.computedPrice
+        : baseUom
+          ? new Decimal(baseUom.price).times(selectedUom.conversionFactor).toNumber()
+          : null;
+      if (expectedPrice == null) continue;
+      // Allow 1% or 1-unit tolerance (whichever is larger) for intentional rounding
+      const tolerance = Math.max(1, expectedPrice * 0.01);
+      if (selectedUom.priceIsOverridden && Math.abs(selectedUom.price - expectedPrice) > tolerance) {
+        toast.error(
+          `⚠️ MUoM price anomaly: "${item.name}" (${selectedUom.name || selectedUom.symbol}) — price_override ${formatCurrency(selectedUom.price)} ≠ expected ${formatCurrency(expectedPrice)}. Backend will auto-correct. Please fix product_uoms.price_override.`,
+          { duration: 8000 }
+        );
+      }
     }
 
     // SAP-CLASS BELOW-COST CONTROL: Require manager override when any line sells below cost.

@@ -420,22 +420,33 @@ export const salesService = {
         // ========== PRICING ENGINE OVERRIDE ==========
         // If the pricing engine resolved a better price for this customer/quantity,
         // use it instead of the frontend-supplied price.
+        //
+        // SAP MUoM RULE: The pricing engine returns prices per BASE unit.
+        // We must multiply by snapshotConversionFactor to get price per SELLING unit.
+        // Example: base = 1,500/tablet, factor = 30 → effective PACKET price = 45,000.
+        // Without this multiplication, a PACKET sale would be charged at 1,500 (tablet price).
         const resolvedPrice = resolvedPriceMap.get(`${item.productId}:${item.quantity}`);
         let effectiveUnitPrice = item.unitPrice;
         if (resolvedPrice) {
-          // Always enforce the server-side resolved price (base or tiered).
-          // For base-scope items this uses the catalog selling_price from the DB,
-          // preventing offline devices from submitting a tampered price.
-          if (resolvedPrice.finalPrice !== item.unitPrice) {
-            logger.info('Pricing engine adjusted unit price', {
+          // Scale base-unit price to selling-UoM price.
+          const uomAdjustedPrice = Money.toNumber(
+            Money.round(
+              new Decimal(resolvedPrice.finalPrice).times(snapshotConversionFactor),
+              2,
+            ),
+          );
+          if (uomAdjustedPrice !== item.unitPrice) {
+            logger.info('Pricing engine adjusted unit price (UoM-normalised)', {
               productId: item.productId,
               frontendPrice: item.unitPrice,
-              enginePrice: resolvedPrice.finalPrice,
+              engineBasePrice: resolvedPrice.finalPrice,
+              conversionFactor: snapshotConversionFactor.toNumber(),
+              uomAdjustedPrice,
               rule: resolvedPrice.appliedRule.scope,
               ruleName: resolvedPrice.appliedRule.ruleName,
             });
           }
-          effectiveUnitPrice = resolvedPrice.finalPrice;
+          effectiveUnitPrice = uomAdjustedPrice;
         }
 
         const lineTotal = new Decimal(item.quantity).times(effectiveUnitPrice);
@@ -452,8 +463,14 @@ export const salesService = {
           | 'FIFO'
           | 'AVCO'
           | 'STANDARD';
+        // SAP MUoM: originalPrice must also be in selling-UoM for correct discount comparison.
+        // base selling_price × conversionFactor = catalog price per selling unit.
         const originalPrice = Money.toNumber(
-          Money.parse(productData.selling_price || String(effectiveUnitPrice))
+          Money.round(
+            Money.parse(productData.selling_price || String(effectiveUnitPrice))
+              .times(snapshotConversionFactor),
+            2,
+          )
         );
 
         // BR-SAL-004: Validate minimum price
