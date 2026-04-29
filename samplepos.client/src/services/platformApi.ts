@@ -98,10 +98,6 @@ export interface DashboardSummary {
     status: string;
     createdAt: string;
   }>;
-  suppliers?: {
-    totalCount: number;
-    totalOutstanding: number;
-  };
 }
 
 export interface PoolInfo {
