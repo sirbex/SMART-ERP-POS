@@ -188,7 +188,7 @@ export default function SuppliersPage() {
   }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
   // API queries
-  const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit });
+  const { data: suppliersData, isLoading, error, refetch } = useSuppliers({ page, limit, search: searchQuery || undefined });
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
@@ -204,20 +204,7 @@ export default function SuppliersPage() {
   const suppliers = useMemo(() => {
     let filtered = [...allSuppliers];
 
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (supplier: Supplier) =>
-          supplier.name?.toLowerCase().includes(query) ||
-          supplier.contactPerson?.toLowerCase().includes(query) ||
-          supplier.email?.toLowerCase().includes(query) ||
-          supplier.phone?.toLowerCase().includes(query) ||
-          supplier.address?.toLowerCase().includes(query)
-      );
-    }
-
-    // Payment terms filter
+    // Payment terms filter (client-side: lightweight, no DB round-trip per change)
     if (filterPaymentTerms) {
       filtered = filtered.filter(
         (supplier: Supplier) => supplier.paymentTerms === filterPaymentTerms
@@ -251,7 +238,12 @@ export default function SuppliersPage() {
     });
 
     return filtered;
-  }, [allSuppliers, searchQuery, filterPaymentTerms, sortField, sortOrder]);
+  }, [allSuppliers, filterPaymentTerms, sortField, sortOrder]);
+
+  // Reset to page 1 whenever search changes so results are always from page 1
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
 
   // Fetch invoice summary on mount
   useEffect(() => {

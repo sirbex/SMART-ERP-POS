@@ -70,8 +70,28 @@ describe('supplierService', () => {
             const result = await supplierService.getAllSuppliers(mockPool, 1, 20);
 
             expect(result).toBeDefined();
-            expect(mockFindAll).toHaveBeenCalled();
-            expect(mockCountAll).toHaveBeenCalled();
+            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, undefined);
+            expect(mockCountAll).toHaveBeenCalledWith(mockPool, undefined);
+        });
+
+        it('should pass search term to repository when provided', async () => {
+            mockFindAll.mockResolvedValue([{ id: 's1', name: 'Acme' }]);
+            mockCountAll.mockResolvedValue(1);
+
+            await supplierService.getAllSuppliers(mockPool, 1, 20, 'acme');
+
+            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, 'acme');
+            expect(mockCountAll).toHaveBeenCalledWith(mockPool, 'acme');
+        });
+
+        it('should treat blank search as no search', async () => {
+            mockFindAll.mockResolvedValue([]);
+            mockCountAll.mockResolvedValue(0);
+
+            await supplierService.getAllSuppliers(mockPool, 1, 20, '   ');
+
+            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, undefined);
+            expect(mockCountAll).toHaveBeenCalledWith(mockPool, undefined);
         });
     });
 

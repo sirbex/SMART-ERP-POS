@@ -36,11 +36,12 @@ function assertNotSystemSupplier(supplier: { id?: string; SupplierCode?: string 
  * - Includes active and inactive suppliers
  * - Returns total count for pagination UI
  */
-export async function getAllSuppliers(pool: Pool, page: number = 1, limit: number = 50) {
+export async function getAllSuppliers(pool: Pool, page: number = 1, limit: number = 50, search?: string) {
   const offset = (page - 1) * limit;
+  const normalizedSearch = search && search.trim().length > 0 ? search.trim() : undefined;
   const [data, total] = await Promise.all([
-    supplierRepository.findAll(pool, limit, offset),
-    supplierRepository.countAll(pool),
+    supplierRepository.findAll(pool, limit, offset, normalizedSearch),
+    supplierRepository.countAll(pool, normalizedSearch),
   ]);
 
   return {

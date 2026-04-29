@@ -25,6 +25,7 @@ export const supplierKeys = {
 export function useSuppliers(params?: {
   page?: number;
   limit?: number;
+  search?: string;
 }) {
   return useQuery({
     queryKey: supplierKeys.list(params || {}),

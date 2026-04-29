@@ -71,9 +71,21 @@ function normalizeSupplierRow(row: Record<string, unknown>): Supplier {
 }
 
 /**
- * Find all suppliers with pagination
+ * Find all suppliers with pagination and optional search
  */
-export async function findAll(pool: Pool, limit: number, offset: number): Promise<Supplier[]> {
+export async function findAll(pool: Pool, limit: number, offset: number, search?: string): Promise<Supplier[]> {
+  const params: unknown[] = [];
+  let whereClause = '"IsActive" = true';
+
+  if (search && search.trim().length > 0) {
+    params.push(`%${search.trim()}%`);
+    whereClause += ` AND ("CompanyName" ILIKE $1 OR "ContactName" ILIKE $1 OR "Phone" ILIKE $1 OR "Email" ILIKE $1 OR "SupplierCode" ILIKE $1 OR "TaxId" ILIKE $1)`;
+  }
+
+  params.push(limit, offset);
+  const limitParam = `$${params.length - 1}`;
+  const offsetParam = `$${params.length}`;
+
   const result = await pool.query(
     `SELECT 
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
@@ -84,10 +96,10 @@ export async function findAll(pool: Pool, limit: number, offset: number): Promis
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
     FROM suppliers 
-    WHERE "IsActive" = true
+    WHERE ${whereClause}
     ORDER BY "CompanyName" ASC
-    LIMIT $1 OFFSET $2`,
-    [limit, offset]
+    LIMIT ${limitParam} OFFSET ${offsetParam}`,
+    params
   );
   return result.rows.map(normalizeSupplierRow);
 }
@@ -357,10 +369,23 @@ export async function recalculateOutstandingBalance(
 /**
  * Count all active suppliers
  */
-export async function countAll(pool: Pool, includeInactive: boolean = false): Promise<number> {
-  const whereClause = includeInactive ? '' : 'WHERE "IsActive" = true';
+export async function countAll(pool: Pool, search?: string, includeInactive: boolean = false): Promise<number> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (!includeInactive) {
+    conditions.push('"IsActive" = true');
+  }
+
+  if (search && search.trim().length > 0) {
+    params.push(`%${search.trim()}%`);
+    conditions.push(`("CompanyName" ILIKE $${params.length} OR "ContactName" ILIKE $${params.length} OR "Phone" ILIKE $${params.length} OR "Email" ILIKE $${params.length} OR "SupplierCode" ILIKE $${params.length} OR "TaxId" ILIKE $${params.length})`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await pool.query(
-    `SELECT COUNT(*) as count FROM suppliers ${whereClause}`
+    `SELECT COUNT(*) as count FROM suppliers ${whereClause}`,
+    params
   );
   return parseInt(result.rows[0].count, 10);
 }

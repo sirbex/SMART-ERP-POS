@@ -16,6 +16,7 @@ const SupplierNumberParamSchema = z.object({ supplierNumber: z.string().min(1) }
 const PaginationQuerySchema = z.object({
   page: z.string().optional().transform(v => v ? parseInt(v) : 1),
   limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
+  search: z.string().optional(),
 });
 const SearchQuerySchema = z.object({
   q: z.string().optional().default(''),
@@ -32,9 +33,9 @@ const OrdersPaginationSchema = z.object({
  */
 export const getSuppliers = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { page, limit } = PaginationQuerySchema.parse(req.query);
+  const { page, limit, search } = PaginationQuerySchema.parse(req.query);
 
-  const result = await supplierService.getAllSuppliers(pool, page, limit);
+  const result = await supplierService.getAllSuppliers(pool, page, limit, search);
 
   res.json({
     success: true,

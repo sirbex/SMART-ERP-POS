@@ -302,7 +302,7 @@ export const api = {
 
   // Suppliers
   suppliers: {
-    list: (params?: { page?: number; limit?: number }) =>
+    list: (params?: { page?: number; limit?: number; search?: string }) =>
       apiClient.get<ApiResponse>('suppliers', { params }),
     getById: (id: string) => apiClient.get<ApiResponse>(`suppliers/${id}`),
     create: (data: CreateSupplierInput) => apiClient.post<ApiResponse>('suppliers', data),
