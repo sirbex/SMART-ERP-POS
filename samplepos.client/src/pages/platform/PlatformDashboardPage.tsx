@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { platformApi } from '../../services/platformApi';
 import type { DashboardSummary, PlatformHealthData } from '../../services/platformApi';
-import { Building2, Users, Database, Activity, AlertCircle, RefreshCw } from 'lucide-react';
+import { Building2, Users, Database, Activity, AlertCircle, RefreshCw, ShoppingCart, TrendingDown } from 'lucide-react';
 import { formatTimestampDate } from '../../utils/businessDate';
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ElementType; color: string }) {
@@ -120,6 +120,24 @@ export default function PlatformDashboardPage() {
                     color={health?.status === 'ok' || health?.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}
                 />
             </div>
+
+            {/* Supplier stats — aggregated across all tenants */}
+            {dashboard?.suppliers && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <StatCard
+                        label="Total Suppliers (All Tenants)"
+                        value={dashboard.suppliers.totalCount}
+                        icon={ShoppingCart}
+                        color="bg-violet-500"
+                    />
+                    <StatCard
+                        label="Total Outstanding (All Tenants)"
+                        value={`UGX ${dashboard.suppliers.totalOutstanding.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                        icon={TrendingDown}
+                        color="bg-rose-500"
+                    />
+                </div>
+            )}
 
             {/* Grid: By Plan + By Status */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

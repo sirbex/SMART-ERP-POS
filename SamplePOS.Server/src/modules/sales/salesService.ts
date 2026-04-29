@@ -3171,8 +3171,8 @@ export const salesService = {
             const originalQty = new Decimal(saleItem.quantity);
             const itemDiscount = originalQty.greaterThan(0)
               ? Money.parseDb(saleItem.discountAmount ?? 0)
-                  .times(refundQty)
-                  .dividedBy(originalQty)
+                .times(refundQty)
+                .dividedBy(originalQty)
               : new Decimal(0);
 
             const existing = partialPdsMap.get(saleItem.productId);

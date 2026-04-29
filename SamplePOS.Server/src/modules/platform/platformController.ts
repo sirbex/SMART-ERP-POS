@@ -332,7 +332,7 @@ export const platformController = {
   dashboardSummary: asyncHandler(async (_req: Request, res: Response) => {
     const masterPool = connectionManager.getMasterPool();
 
-    const [tenantCounts, planDistribution, recentTenants] = await Promise.all([
+    const [tenantCounts, planDistribution, recentTenants, activeTenants] = await Promise.all([
       masterPool.query(
         `SELECT status, COUNT(*)::int as count FROM tenants GROUP BY status`
       ),
@@ -342,6 +342,10 @@ export const platformController = {
       masterPool.query(
         `SELECT id, slug, name, plan, status, created_at as "createdAt"
          FROM tenants ORDER BY created_at DESC LIMIT 10`
+      ),
+      masterPool.query<{ id: string; slug: string; database_name: string; database_host: string; database_port: number }>(
+        `SELECT id, slug, database_name, database_host, database_port
+         FROM tenants WHERE status = 'ACTIVE'`
       ),
     ]);
 
@@ -355,6 +359,46 @@ export const platformController = {
       planMap[row.plan] = row.count;
     }
 
+    // Aggregate supplier stats across ALL active tenant databases
+    let totalSuppliers = 0;
+    let totalOutstanding = 0;
+
+    const supplierResults = await Promise.allSettled(
+      activeTenants.rows.map(async (tenant) => {
+        const tenantPool = connectionManager.getPool({
+          tenantId: tenant.id,
+          slug: tenant.slug,
+          databaseName: tenant.database_name,
+          databaseHost: tenant.database_host,
+          databasePort: tenant.database_port,
+        });
+
+        const [countRes, outstandingRes] = await Promise.all([
+          tenantPool.query<{ count: string }>(
+            `SELECT COUNT(*)::text as count FROM suppliers WHERE "IsActive" = true`
+          ),
+          tenantPool.query<{ total: string }>(
+            `SELECT COALESCE(SUM("OutstandingBalance"), 0)::text as total
+             FROM supplier_invoices
+             WHERE "Status" IN ('UNPAID', 'PARTIALLY_PAID', 'OVERDUE')
+               AND deleted_at IS NULL`
+          ),
+        ]);
+
+        return {
+          supplierCount: parseInt(countRes.rows[0].count, 10),
+          outstandingBalance: parseFloat(outstandingRes.rows[0].total),
+        };
+      })
+    );
+
+    for (const result of supplierResults) {
+      if (result.status === 'fulfilled') {
+        totalSuppliers += result.value.supplierCount;
+        totalOutstanding += result.value.outstandingBalance;
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -365,6 +409,10 @@ export const platformController = {
         },
         activePools: connectionManager.getActivePoolCount(),
         recentTenants: recentTenants.rows,
+        suppliers: {
+          totalCount: totalSuppliers,
+          totalOutstanding,
+        },
       },
     });
   }),
