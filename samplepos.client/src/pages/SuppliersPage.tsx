@@ -268,11 +268,8 @@ export default function SuppliersPage() {
     const total = suppliersData?.pagination?.total ?? allSuppliers.length;
     // Active count: use pagination.total (API already filters WHERE IsActive=true)
     const active = suppliersData?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
-    // Total outstanding: server-computed SUM across ALL active suppliers (not just current page)
-    const totalOutstanding = (suppliersData as (typeof suppliersData) & { stats?: { totalOutstanding?: number } })?.stats?.totalOutstanding
-      ?? allSuppliers.reduce((sum: number, s: Supplier) => sum + Number(s.outstandingBalance || 0), 0);
 
-    return { total, active, totalOutstanding };
+    return { total, active };
   }, [allSuppliers, suppliersData]);
 
   // Currency formatter for summary cards — uses shared formatCurrency
@@ -459,9 +456,11 @@ export default function SuppliersPage() {
           <div className="bg-white rounded-lg shadow p-4">
             <div className="text-sm text-gray-600">Total Outstanding</div>
             <div className="text-2xl font-bold text-red-600 mt-1">
-              {formatCurrencyTop(stats.totalOutstanding)}
+              {formatCurrencyTop(invoiceSummary.totalOutstanding)}
             </div>
-            <div className="text-xs text-gray-500 mt-1">Across all suppliers</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {invoiceSummary.unpaidInvoices > 0 ? `${invoiceSummary.unpaidInvoices} unpaid invoices` : 'Across all suppliers'}
+            </div>
           </div>
         </div>
 
