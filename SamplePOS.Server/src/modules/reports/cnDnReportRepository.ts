@@ -551,7 +551,9 @@ export async function getSupplierStatementOpeningBalance(
  * GL-driven supplier statement entries.
  * Reads from AP (2100) ledger entries tagged to this supplier.
  * - Credit to AP → "debit" column (liability increased: GR, debit note)  → itemStatus = 'Open'
- * - Debit to AP  → "credit" column (liability reduced: payment, credit note) → itemStatus = 'Applied'
+ * - Debit to AP  → "credit" column (liability reduced: payment, credit note)
+ *     - SUPPLIER_PAYMENT → itemStatus = 'Applied'
+ *     - RETURN_GRN / SUPPLIER_CREDIT_NOTE → itemStatus = 'Return'
  * - IsReversed = true → itemStatus = 'Voided'
  */
 export async function getSupplierStatementEntries(
@@ -569,10 +571,14 @@ export async function getSupplierStatementEntries(
            COALESCE(le."Description", lt."Description", '') AS description,
            le."CreditAmount" AS debit,
            le."DebitAmount" AS credit,
-           COALESCE(lt."IsReversed", false) AS is_reversed
+           COALESCE(lt."IsReversed", false) AS is_reversed,
+           sp."PaymentMethod" AS payment_method
          FROM ledger_entries le
          JOIN accounts a ON le."AccountId" = a."Id"
          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+         LEFT JOIN supplier_payments sp
+           ON lt."ReferenceType" = 'SUPPLIER_PAYMENT'
+           AND sp."PaymentNumber" = lt."ReferenceNumber"
          WHERE a."AccountCode" = '2100'
            AND le."EntityId" = $1
            AND UPPER(le."EntityType") = 'SUPPLIER'
@@ -587,17 +593,27 @@ export async function getSupplierStatementEntries(
     const isReversed = r.is_reversed as boolean;
     const debit = toNum(r.debit);
     const credit = toNum(r.credit);
-    const itemStatus: 'Open' | 'Applied' | 'Voided' =
-      isReversed ? 'Voided' : debit > 0 ? 'Open' : 'Applied';
+    const type = r.type as string;
+    let itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
+    if (isReversed) {
+      itemStatus = 'Voided';
+    } else if (debit > 0) {
+      itemStatus = 'Open';
+    } else if (type === 'RETURN_GRN' || type === 'SUPPLIER_CREDIT_NOTE') {
+      itemStatus = 'Return';
+    } else {
+      itemStatus = 'Applied';
+    }
     return {
       date: r.date,
       docNumber: r.doc_number || '',
-      type: r.type,
+      type,
       reference: r.reference || '',
       description: r.description || '',
       debit,
       credit,
       itemStatus,
+      paymentMethod: r.payment_method ?? undefined,
     };
   });
 }

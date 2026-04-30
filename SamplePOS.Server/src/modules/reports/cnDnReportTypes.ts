@@ -87,13 +87,15 @@ export interface SupplierStatementEntry {
     date: string;
     /** GL transaction number (e.g. TXN-2025-0001) */
     docNumber: string;
-    type: string;   // SUPPLIER_INVOICE, SUPPLIER_CREDIT_NOTE, SUPPLIER_DEBIT_NOTE, PAYMENT
+    type: string;   // SUPPLIER_INVOICE, SUPPLIER_CREDIT_NOTE, SUPPLIER_DEBIT_NOTE, SUPPLIER_PAYMENT, RETURN_GRN
     reference: string;
     description: string;
     debit: number;
     credit: number;
-    /** Open = invoice/debit note outstanding, Applied = payment/credit note, Voided = reversed */
-    itemStatus: 'Open' | 'Applied' | 'Voided';
+    /** Open = invoice/debit note outstanding, Applied = payment made, Return = goods return/credit note, Voided = reversed */
+    itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
+    /** Payment method — populated for SUPPLIER_PAYMENT entries (e.g. CASH, BANK_TRANSFER) */
+    paymentMethod?: string;
 }
 
 export interface SupplierStatementData {
