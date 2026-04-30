@@ -85,11 +85,15 @@ export interface InvoiceAdjustmentRow {
 // ── Supplier Statement ──
 export interface SupplierStatementEntry {
     date: string;
+    /** GL transaction number (e.g. TXN-2025-0001) */
+    docNumber: string;
     type: string;   // SUPPLIER_INVOICE, SUPPLIER_CREDIT_NOTE, SUPPLIER_DEBIT_NOTE, PAYMENT
     reference: string;
     description: string;
     debit: number;
     credit: number;
+    /** Open = invoice/debit note outstanding, Applied = payment/credit note, Voided = reversed */
+    itemStatus: 'Open' | 'Applied' | 'Voided';
 }
 
 export interface SupplierStatementData {

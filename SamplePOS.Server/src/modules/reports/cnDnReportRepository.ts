@@ -550,8 +550,9 @@ export async function getSupplierStatementOpeningBalance(
 /**
  * GL-driven supplier statement entries.
  * Reads from AP (2100) ledger entries tagged to this supplier.
- * - Credit to AP → "debit" column (liability increased: GR, debit note)
- * - Debit to AP  → "credit" column (liability reduced: payment, credit note)
+ * - Credit to AP → "debit" column (liability increased: GR, debit note)  → itemStatus = 'Open'
+ * - Debit to AP  → "credit" column (liability reduced: payment, credit note) → itemStatus = 'Applied'
+ * - IsReversed = true → itemStatus = 'Voided'
  */
 export async function getSupplierStatementEntries(
   pool: Pool,
@@ -562,17 +563,19 @@ export async function getSupplierStatementEntries(
   const result = await pool.query(
     `SELECT
            le."EntryDate"::date AS date,
+           COALESCE(lt."TransactionNumber", '') AS doc_number,
            lt."ReferenceType" AS type,
            COALESCE(lt."ReferenceNumber", '') AS reference,
            COALESCE(le."Description", lt."Description", '') AS description,
            le."CreditAmount" AS debit,
-           le."DebitAmount" AS credit
+           le."DebitAmount" AS credit,
+           COALESCE(lt."IsReversed", false) AS is_reversed
          FROM ledger_entries le
          JOIN accounts a ON le."AccountId" = a."Id"
          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
          WHERE a."AccountCode" = '2100'
            AND le."EntityId" = $1
-           AND le."EntityType" = 'supplier'
+           AND UPPER(le."EntityType") = 'SUPPLIER'
            AND lt."Status" = 'POSTED'
            AND le."EntryDate"::date >= $2::date
            AND le."EntryDate"::date <= $3::date
@@ -580,14 +583,23 @@ export async function getSupplierStatementEntries(
     [supplierId, startDate, endDate],
   );
 
-  return result.rows.map((r) => ({
-    date: r.date,
-    type: r.type,
-    reference: r.reference || '',
-    description: r.description || '',
-    debit: toNum(r.debit),
-    credit: toNum(r.credit),
-  }));
+  return result.rows.map((r) => {
+    const isReversed = r.is_reversed as boolean;
+    const debit = toNum(r.debit);
+    const credit = toNum(r.credit);
+    const itemStatus: 'Open' | 'Applied' | 'Voided' =
+      isReversed ? 'Voided' : debit > 0 ? 'Open' : 'Applied';
+    return {
+      date: r.date,
+      docNumber: r.doc_number || '',
+      type: r.type,
+      reference: r.reference || '',
+      description: r.description || '',
+      debit,
+      credit,
+      itemStatus,
+    };
+  });
 }
 
 // ─── 9. Supplier Aging (Aged Payables) — GL-driven ─────────────────

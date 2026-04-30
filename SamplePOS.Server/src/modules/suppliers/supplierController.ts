@@ -7,6 +7,7 @@ import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { CreateSupplierSchema, UpdateSupplierSchema } from '../../../../shared/zod/supplier.js';
 import * as supplierService from './supplierService.js';
+import * as cnDnReportService from '../reports/cnDnReportService.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 
@@ -25,6 +26,10 @@ const SearchQuerySchema = z.object({
 const OrdersPaginationSchema = z.object({
   page: z.string().optional().transform(v => v ? parseInt(v) : 1),
   limit: z.string().optional().transform(v => v ? parseInt(v) : 20),
+});
+const LedgerQuerySchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD'),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'endDate must be YYYY-MM-DD'),
 });
 
 /**
@@ -279,4 +284,16 @@ export const getSupplierProducts = asyncHandler(async (req: Request, res: Respon
   }));
 
   res.json({ success: true, data: productsWithPrecision });
+});
+
+/**
+ * Get GL-driven supplier ledger statement
+ * GET /api/suppliers/:id/ledger?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+export const getSupplierLedger = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id: supplierId } = UuidParamSchema.parse(req.params);
+  const { startDate, endDate } = LedgerQuerySchema.parse(req.query);
+  const data = await cnDnReportService.getSupplierStatement(pool, supplierId, startDate, endDate);
+  res.json({ success: true, data });
 });

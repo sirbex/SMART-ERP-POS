@@ -161,6 +161,28 @@ interface SupplierFormData {
   notes?: string;
 }
 
+interface SupplierLedgerEntry {
+  date: string;
+  docNumber: string;
+  type: string;
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+  itemStatus: 'Open' | 'Applied' | 'Voided';
+  balanceAfter: number;
+}
+
+interface SupplierLedgerData {
+  supplierId: string;
+  supplierName: string;
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: number;
+  closingBalance: number;
+  entries: SupplierLedgerEntry[];
+}
+
 export default function SuppliersPage() {
   // State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -935,7 +957,7 @@ interface SupplierDetailModalProps {
 
 function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalProps) {
   const [activeTab, setActiveTab] = useState<
-    'info' | 'performance' | 'orders' | 'products' | 'invoices'
+    'info' | 'performance' | 'orders' | 'products' | 'invoices' | 'ledger'
   >('info');
   const [performance, setPerformance] = useState<SupplierPerformance | null>(null);
   const [orders, setOrders] = useState<SupplierOrder[]>([]);
@@ -946,6 +968,20 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [loadingInvoiceDetails, setLoadingInvoiceDetails] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
+
+  // Ledger state
+  const defaultEnd = new Date().toLocaleDateString('en-CA');
+  const defaultStart = (() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toLocaleDateString('en-CA');
+  })();
+  const [ledger, setLedger] = useState<SupplierLedgerData | null>(null);
+  const [ledgerStartDate, setLedgerStartDate] = useState(defaultStart);
+  const [ledgerEndDate, setLedgerEndDate] = useState(defaultEnd);
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'Open' | 'Applied' | 'Voided'>('all');
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
 
   // Payment modal state
   const [payingInvoice, setPayingInvoice] = useState<SupplierInvoiceSummary | null>(null);
@@ -1056,6 +1092,27 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (tab === 'orders') loadOrders();
     if (tab === 'products') loadProducts();
     if (tab === 'invoices') loadInvoices();
+    if (tab === 'ledger') loadLedger(ledgerStartDate, ledgerEndDate);
+  };
+
+  const loadLedger = async (start: string, end: string) => {
+    setLedgerLoading(true);
+    setLedgerError(null);
+    try {
+      const { data } = await api.get(`/suppliers/${supplier.id}/ledger`, {
+        params: { startDate: start, endDate: end },
+      });
+      if (data.success) {
+        setLedger(data.data);
+      } else {
+        setLedgerError(data.error || 'Failed to load ledger');
+      }
+    } catch (err) {
+      setLedgerError('Failed to load ledger statement');
+      console.error('Failed to load ledger:', err);
+    } finally {
+      setLedgerLoading(false);
+    }
   };
 
   const openPayModal = (inv: SupplierInvoiceSummary) => {
@@ -1184,6 +1241,15 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               }`}
           >
             📄 Invoices
+          </button>
+          <button
+            onClick={() => handleTabChange('ledger')}
+            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'ledger'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            📒 Ledger
           </button>
         </div>
 
@@ -1895,6 +1961,163 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                 <div className="text-center py-12 text-gray-500">
                   No invoices from this supplier yet
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Ledger Tab ── */}
+          {activeTab === 'ledger' && (
+            <div>
+              {/* Date range + filter bar */}
+              <div className="flex flex-wrap gap-3 mb-4 items-end">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+                  <input
+                    type="date"
+                    value={ledgerStartDate}
+                    onChange={(e) => setLedgerStartDate(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+                  <input
+                    type="date"
+                    value={ledgerEndDate}
+                    onChange={(e) => setLedgerEndDate(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={() => loadLedger(ledgerStartDate, ledgerEndDate)}
+                  disabled={ledgerLoading}
+                  className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {ledgerLoading ? '⏳ Loading...' : '🔍 Fetch'}
+                </button>
+                <div className="flex gap-1 ml-auto">
+                  {(['all', 'Open', 'Applied', 'Voided'] as const).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setLedgerFilter(f)}
+                      className={`px-3 py-1 text-xs rounded-full font-medium ${ledgerFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    >
+                      {f === 'all' ? 'All' : f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {ledgerError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">
+                  {ledgerError}
+                </div>
+              )}
+
+              {!ledger && !ledgerLoading && (
+                <div className="text-center py-12 text-gray-400 text-sm">
+                  Select a date range and click Fetch to load the ledger statement.
+                </div>
+              )}
+
+              {ledger && (
+                <>
+                  {/* Summary strip */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-gray-500 mb-1">Opening Balance</div>
+                      <div className={`text-sm font-bold ${ledger.openingBalance >= 0 ? 'text-red-700' : 'text-green-700'}`}>
+                        {formatCurrency(Math.abs(ledger.openingBalance))}
+                        {ledger.openingBalance < 0 ? ' (Cr)' : ''}
+                      </div>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-red-600 mb-1">Total Invoiced</div>
+                      <div className="text-sm font-bold text-red-800">
+                        {formatCurrency(ledger.entries.reduce((s, e) => s + e.debit, 0))}
+                      </div>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-green-600 mb-1">Total Paid</div>
+                      <div className="text-sm font-bold text-green-800">
+                        {formatCurrency(ledger.entries.reduce((s, e) => s + e.credit, 0))}
+                      </div>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-blue-600 mb-1">Closing Balance</div>
+                      <div className={`text-sm font-bold ${ledger.closingBalance >= 0 ? 'text-red-700' : 'text-green-700'}`}>
+                        {formatCurrency(Math.abs(ledger.closingBalance))}
+                        {ledger.closingBalance < 0 ? ' (Cr)' : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ledger Table */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Doc No</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Description</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Debit</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Credit</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                          <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {/* Opening balance row */}
+                        <tr className="bg-yellow-50 font-medium">
+                          <td className="px-3 py-2 text-xs text-gray-500">{ledger.periodStart}</td>
+                          <td colSpan={6} className="px-3 py-2 text-xs text-gray-500 italic">Opening Balance</td>
+                          <td className="px-3 py-2 text-right text-xs font-bold text-gray-800">{formatCurrency(ledger.openingBalance)}</td>
+                          <td></td>
+                        </tr>
+                        {ledger.entries
+                          .filter((e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter)
+                          .map((entry, idx) => (
+                            <tr key={idx} className={`hover:bg-gray-50 ${entry.itemStatus === 'Voided' ? 'opacity-50 line-through' : ''}`}>
+                              <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{entry.date}</td>
+                              <td className="px-3 py-2 text-xs font-mono text-blue-700 whitespace-nowrap">{entry.docNumber || '—'}</td>
+                              <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                                {entry.type?.replace(/_/g, ' ')}
+                              </td>
+                              <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{entry.reference || '—'}</td>
+                              <td className="px-3 py-2 text-xs text-gray-500 hidden md:table-cell max-w-[180px] truncate">{entry.description || '—'}</td>
+                              <td className="px-3 py-2 text-right text-xs font-medium text-red-700">
+                                {entry.debit > 0 ? formatCurrency(entry.debit) : '—'}
+                              </td>
+                              <td className="px-3 py-2 text-right text-xs font-medium text-green-700">
+                                {entry.credit > 0 ? formatCurrency(entry.credit) : '—'}
+                              </td>
+                              <td className="px-3 py-2 text-right text-xs font-medium text-gray-800">
+                                {formatCurrency(entry.balanceAfter)}
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' :
+                                  entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' :
+                                  'bg-gray-100 text-gray-500'
+                                }`}>
+                                  {entry.itemStatus}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        {ledger.entries.filter((e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter).length === 0 && (
+                          <tr>
+                            <td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
+                              No entries match the selected filter.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           )}
