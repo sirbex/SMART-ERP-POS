@@ -497,7 +497,7 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
              FROM supplier_invoices si
              LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
              WHERE si."Id" = $1
-             FOR UPDATE`,
+             FOR UPDATE OF si`,
             [invoiceId],
         );
 
