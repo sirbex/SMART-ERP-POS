@@ -966,6 +966,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [orders, setOrders] = useState<SupplierOrder[]>([]);
   const [products, setProducts] = useState<SupplierProduct[]>([]);
   const [invoices, setInvoices] = useState<SupplierInvoiceSummary[]>([]);
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>('');
+  const [invoicePage, setInvoicePage] = useState(1);
+  const INVOICE_PAGE_SIZE = 25;
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
   const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetails | null>(null);
   const [loadingInvoiceDetails, setLoadingInvoiceDetails] = useState(false);
@@ -995,6 +999,29 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
+
+  // Filtered + paginated invoices
+  const filteredInvoices = useMemo(() => {
+    let result = invoices;
+    const q = invoiceSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(
+        (inv) =>
+          inv.invoiceNumber?.toLowerCase().includes(q) ||
+          (inv.supplierInvoiceNumber ?? '').toLowerCase().includes(q)
+      );
+    }
+    if (invoiceStatusFilter) {
+      result = result.filter((inv) => inv.status === invoiceStatusFilter);
+    }
+    return result;
+  }, [invoices, invoiceSearch, invoiceStatusFilter]);
+
+  const invoiceTotalPages = Math.max(1, Math.ceil(filteredInvoices.length / INVOICE_PAGE_SIZE));
+  const paginatedInvoices = useMemo(() => {
+    const start = (invoicePage - 1) * INVOICE_PAGE_SIZE;
+    return filteredInvoices.slice(start, start + INVOICE_PAGE_SIZE);
+  }, [filteredInvoices, invoicePage, INVOICE_PAGE_SIZE]);
 
   const paymentTermInfo = PAYMENT_TERMS.find((t) => t.value === supplier.paymentTerms);
 
@@ -1676,17 +1703,40 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                 </div>
               ) : invoices.length > 0 ? (
                 <div className="space-y-3">
+                  {/* Search + filter controls */}
+                  <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                    <input
+                      type="text"
+                      placeholder="Search invoice # or ref..."
+                      value={invoiceSearch}
+                      onChange={(e) => { setInvoiceSearch(e.target.value); setInvoicePage(1); }}
+                      className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <select
+                      value={invoiceStatusFilter}
+                      onChange={(e) => { setInvoiceStatusFilter(e.target.value); setInvoicePage(1); }}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">All Statuses</option>
+                      <option value="Pending">Pending</option>
+                      <option value="PartiallyPaid">Partially Paid</option>
+                      <option value="Paid">Paid</option>
+                      <option value="Overdue">Overdue</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
+
                   {/* Invoice Summary Cards */}
                   <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
                     <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <div className="text-xs text-blue-600 mb-1">Total Invoices</div>
-                      <div className="text-xl font-bold text-blue-900">{invoices.length}</div>
+                      <div className="text-xs text-blue-600 mb-1">Showing</div>
+                      <div className="text-xl font-bold text-blue-900">{filteredInvoices.length} <span className="text-sm font-normal text-blue-500">/ {invoices.length}</span></div>
                     </div>
                     <div className="bg-green-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-green-600 mb-1">Total Amount</div>
                       <div className="text-lg font-bold text-green-900">
                         {formatCurrency(
-                          invoices.reduce(
+                          filteredInvoices.reduce(
                             (sum: number, inv: SupplierInvoiceSummary) =>
                               new Decimal(sum).plus(Number(inv.totalAmount || 0)).toNumber(),
                             0
@@ -1700,7 +1750,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                         {formatCurrency(
                           Math.max(
                             0,
-                            invoices.reduce(
+                            filteredInvoices.reduce(
                               (sum: number, inv: SupplierInvoiceSummary) =>
                                 new Decimal(sum)
                                   .plus(Number(inv.outstandingBalance || 0))
@@ -1716,7 +1766,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   {/* Invoice List — mobile cards + desktop table */}
                   {/* Mobile cards */}
                   <div className="block sm:hidden space-y-3">
-                    {invoices.map((inv: SupplierInvoiceSummary) => {
+                    {filteredInvoices.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500 text-sm">No invoices match your search.</div>
+                    ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
                       const balance = Number(inv.outstandingBalance || 0);
                       const statusColor =
                         inv.status === 'Paid' ? 'bg-green-100 text-green-800'
@@ -1766,7 +1818,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {invoices.map((inv: SupplierInvoiceSummary) => {
+                        {filteredInvoices.length === 0 ? (
+                          <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">No invoices match your search.</td></tr>
+                        ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
                           const total = Number(inv.totalAmount || 0);
                           const paid = Number(inv.amountPaid || 0);
                           const balance = Number(inv.outstandingBalance || 0);
@@ -1805,6 +1859,55 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Pagination */}
+                  {invoiceTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                      <span className="text-xs text-gray-500">
+                        Showing {Math.min((invoicePage - 1) * INVOICE_PAGE_SIZE + 1, filteredInvoices.length)}–{Math.min(invoicePage * INVOICE_PAGE_SIZE, filteredInvoices.length)} of {filteredInvoices.length}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setInvoicePage((p) => Math.max(1, p - 1))}
+                          disabled={invoicePage === 1}
+                          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          ‹ Prev
+                        </button>
+                        {Array.from({ length: invoiceTotalPages }, (_, i) => i + 1)
+                          .filter((p) => p === 1 || p === invoiceTotalPages || Math.abs(p - invoicePage) <= 1)
+                          .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                            if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                            acc.push(p);
+                            return acc;
+                          }, [])
+                          .map((p, i) =>
+                            p === '...' ? (
+                              <span key={`ellipsis-${i}`} className="px-1 text-xs text-gray-400">…</span>
+                            ) : (
+                              <button
+                                key={p}
+                                onClick={() => setInvoicePage(p as number)}
+                                className={`px-2 py-1 text-xs border rounded ${
+                                  invoicePage === p
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'border-gray-300 hover:bg-gray-100'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            )
+                          )}
+                        <button
+                          onClick={() => setInvoicePage((p) => Math.min(invoiceTotalPages, p + 1))}
+                          disabled={invoicePage === invoiceTotalPages}
+                          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Next ›
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Invoice Detail Panel */}
                   {selectedInvoice && invoiceDetails && (
