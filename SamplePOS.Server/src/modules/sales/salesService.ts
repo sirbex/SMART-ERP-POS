@@ -2329,7 +2329,14 @@ export const salesService = {
 
       // Restore inventory for each item
       for (const item of saleItems) {
-        const quantity = Money.toNumber(Money.parseDb(item.quantity ?? 0));
+        // SAP MUoM: inventory_batches, cost_layers, and stock_movements all store BASE units.
+        // sale_items.quantity is the DISPLAY (selling-UoM) quantity; base_qty is the physical
+        // base-unit quantity. Use base_qty when available, fall back to quantity × conversion_factor.
+        const displayQty = Money.toNumber(Money.parseDb(item.quantity ?? 0));
+        const cf = item.conversionFactor ? new Decimal(item.conversionFactor).toNumber() : 1;
+        const quantity = item.baseQty
+          ? Money.toNumber(Money.parseDb(item.baseQty))
+          : Money.toNumber(new Decimal(displayQty).times(cf));
         const productId = String(item.productId);
         const batchId = item.batchId;
 
@@ -2889,7 +2896,13 @@ export const salesService = {
       for (const { saleItem, refundQty } of validatedItems) {
         const productId = saleItem.productId;
         const batchId = saleItem.batchId;
-        const quantity = refundQty.toNumber();
+        // SAP MUoM: inventory_batches, cost_layers, and stock_movements all store BASE units.
+        // refundQty is expressed in the original selling UoM (display units).
+        // Multiply by conversionFactor to get the physical base-unit quantity to restore.
+        const storedConvFactor = saleItem.conversionFactor
+          ? new Decimal(saleItem.conversionFactor).toNumber()
+          : 1;
+        const quantity = Money.toNumber(new Decimal(refundQty).times(storedConvFactor));
         const unitCost = Money.toNumber(Money.parseDb(saleItem.unitCost));
 
         // Skip custom items (no inventory)

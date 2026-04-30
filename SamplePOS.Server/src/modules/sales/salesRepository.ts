@@ -47,6 +47,8 @@ export interface VoidSaleItemRecord {
   productId: string;
   batchId: string | null;
   quantity: string;
+  baseQty: string | null;         // SAP MUoM: base-unit qty at posting time
+  conversionFactor: string | null; // SAP MUoM: display→base factor at posting time
   unitPrice: string;
   unitCost: string;
   totalPrice: string;
@@ -63,6 +65,8 @@ export interface RefundableSaleItemRecord {
   productId: string | null;
   batchId: string | null;
   quantity: string;
+  baseQty: string | null;         // SAP MUoM: base-unit qty at posting time
+  conversionFactor: string | null; // SAP MUoM: display→base factor at posting time
   refundedQty: string;
   remainingQty: string;
   unitPrice: string;
@@ -1122,6 +1126,8 @@ export const salesRepository = {
         si.product_id as "productId",
         si.batch_id as "batchId",
         si.quantity,
+        si.base_qty AS "baseQty",
+        si.conversion_factor AS "conversionFactor",
         si.unit_price as "unitPrice",
         si.unit_cost as "unitCost",
         si.total_price as "totalPrice",
@@ -1132,7 +1138,7 @@ export const salesRepository = {
         p.sku
        FROM sale_items si
        JOIN products p ON si.product_id = p.id
-       WHERE si.sale_id = $1`,
+       WHERE si.sale_id = $1`,  
       [saleId]
     );
 
@@ -1172,6 +1178,8 @@ export const salesRepository = {
         si.product_id AS "productId",
         si.batch_id AS "batchId",
         si.quantity,
+        si.base_qty AS "baseQty",
+        si.conversion_factor AS "conversionFactor",
         si.refunded_qty AS "refundedQty",
         (si.quantity - si.refunded_qty) AS "remainingQty",
         si.unit_price AS "unitPrice",
@@ -1187,7 +1195,7 @@ export const salesRepository = {
        FROM sale_items si
        LEFT JOIN products p ON si.product_id = p.id
        WHERE si.sale_id = $1
-       ORDER BY si.created_at`,
+       ORDER BY si.created_at`,  
       [saleId]
     );
 
