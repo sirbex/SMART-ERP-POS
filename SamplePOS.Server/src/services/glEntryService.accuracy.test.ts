@@ -599,7 +599,12 @@ describe('glEntryService — GL Posting Accuracy', () => {
     // recordGoodsReceiptToGL
     // ========================================================================
     describe('recordGoodsReceiptToGL', () => {
-        it('should DR Inventory / CR AP', async () => {
+        it('should DR Inventory / CR GRN/IR Clearing (SAP 3-way match — AP is NOT touched on GRN)', async () => {
+            // SAP / Odoo pattern: GRN does NOT post to AP.
+            // AP is only created when the Supplier Invoice is posted.
+            // The sequence is:
+            //   1. GRN:      DR Inventory (1300) / CR GRN Clearing (2150)
+            //   2. Invoice:  DR GRN Clearing (2150) / CR AP (2100)  ← clears the clearing account
             await recordGoodsReceiptToGL({
                 grId: 'gr-1',
                 grNumber: 'GR-2026-0001',
@@ -612,7 +617,9 @@ describe('glEntryService — GL Posting Accuracy', () => {
             const lines = capturedEntries[0].lines;
 
             expect(findLine(lines, AccountCodes.INVENTORY)!.debitAmount).toBe(50000);
-            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.creditAmount).toBe(50000);
+            expect(findLine(lines, AccountCodes.GRIR_CLEARING)!.creditAmount).toBe(50000);
+            // AP must NOT be touched on GRN posting
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)).toBeUndefined();
             assertBalanced(lines);
         });
     });
