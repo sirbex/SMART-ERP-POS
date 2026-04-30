@@ -979,8 +979,8 @@ export async function getInvoiceSummary(pool: Pool | PoolClient): Promise<{
     const result = await pool.query(`
         SELECT
             COUNT(*)::int AS total_invoices,
-            COUNT(*) FILTER (WHERE "Status" IN ('UNPAID', 'PARTIALLY_PAID', 'OVERDUE'))::int AS unpaid_invoices,
-            COALESCE(SUM("OutstandingBalance") FILTER (WHERE "Status" IN ('UNPAID', 'PARTIALLY_PAID', 'OVERDUE')), 0) AS total_outstanding
+            COUNT(*) FILTER (WHERE "Status" NOT IN ('Paid', 'Cancelled'))::int AS unpaid_invoices,
+            COALESCE(SUM("OutstandingBalance") FILTER (WHERE "Status" NOT IN ('Paid', 'Cancelled')), 0) AS total_outstanding
         FROM supplier_invoices
         WHERE deleted_at IS NULL
     `);
