@@ -487,6 +487,7 @@ export const api = {
     create: (data: { grnId: string; returnDate?: string; reason: string; lines: Array<{ productId: string; batchId?: string; uomId?: string; quantity: number; unitCost: number }> }) =>
       apiClient.post<ApiResponse>('return-grn', data),
     post: (id: string) => apiClient.post<ApiResponse>(`return-grn/${id}/post`),
+    createCreditNote: (id: string) => apiClient.post<ApiResponse>(`return-grn/${id}/credit-note`),
     getReturnableItems: (grnId: string) =>
       apiClient.get<ApiResponse>(`return-grn/grn/${grnId}/returnable`),
     getByGrnId: (grnId: string) =>

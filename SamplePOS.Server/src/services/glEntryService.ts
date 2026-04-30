@@ -2317,6 +2317,13 @@ export interface CreditNoteGLData {
   customerName?: string;
   supplierId?: string;
   supplierName?: string;
+  /**
+   * Override the credit-side account for supplier credit notes.
+   * Default: PURCHASE_RETURNS (5010) for price adjustments.
+   * For Return-GRN-linked notes use GRIR_CLEARING (2150) to clear the
+   * GRN clearing debit that was created when the Return GRN was posted.
+   */
+  clearingAccountCode?: string;
 }
 
 /**
@@ -2476,8 +2483,8 @@ export async function recordSupplierCreditNoteToGL(
 
     if (data.subtotal > 0) {
       lines.push({
-        accountCode: AccountCodes.PURCHASE_RETURNS,
-        description: `Supplier credit note ${data.noteNumber} - purchase return`,
+        accountCode: data.clearingAccountCode || AccountCodes.PURCHASE_RETURNS,
+        description: `Supplier credit note ${data.noteNumber} - ${data.clearingAccountCode === AccountCodes.GRIR_CLEARING ? 'clear GRN/IR' : 'purchase return'}`,
         debitAmount: 0,
         creditAmount: data.subtotal,
       });

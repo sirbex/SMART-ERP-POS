@@ -8,7 +8,9 @@
  * - Creates SUPPLIER_RETURN stock movements (decreases stock)
  * - Reduces batch remaining_quantity
  * - Recalculates product_inventory.quantity_on_hand
- * - Posts GL: DR Accounts Payable (2100) / CR Inventory (1300) — inside same transaction
+ * - Posts GL: DR GRN/IR Clearing (2150) / CR Inventory (1300) — inside same transaction
+ *   ⚠️  AP (2100) is NOT touched on Return GRN post.
+ *       Only a manually-created Supplier Credit Note reduces AP.
  */
 
 import type { Pool } from 'pg';
@@ -27,7 +29,7 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
     supplierCreditDebitNoteRepository,
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
-import { recordSupplierCreditNoteToGL } from '../../services/glEntryService.js';
+import { recordSupplierCreditNoteToGL, AccountCodes } from '../../services/glEntryService.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
@@ -312,118 +314,18 @@ export const returnGrnService = {
                 );
             }
 
-            // 5b. Recalculate supplier balance (accounts for GR, returns, payments)
-            if (supplierId) {
-                await recalcSupplierBalance(client, supplierId);
-            }
+            // NOTE: supplier balance is NOT updated here.
+            // AP (2100) is untouched by a Return GRN.
+            // Only a Supplier Credit Note (created manually via POST /:id/credit-note)
+            // should reduce AP and update the supplier's outstanding balance.
 
-            logger.info('Return GRN posted — stock decreased, GL posted, supplier balance updated', {
+            logger.info('Return GRN posted — stock decreased, GL posted (GRN Clearing / Inventory)', {
                 rgrnId: posted.id,
                 rgrnNumber: posted.returnGrnNumber,
                 grnId: posted.grnId,
                 lineCount: lines.length,
                 glAmount: returnTotalNum,
             });
-
-            // 6. SAP MIRO: Auto-create & auto-post Supplier Credit Note
-            //    This gives accounting full product-level visibility of the return.
-            //    Linked via document flow: RETURN_GRN → SUPPLIER_CREDIT_NOTE
-            let supplierCreditNoteId: string | undefined;
-            try {
-                // Find the supplier invoice linked to the original GR (via document_flow or PO)
-                const siResult = await client.query(
-                    `SELECT si."Id" FROM supplier_invoices si
-                     WHERE si."PurchaseOrderId" = (
-                       SELECT purchase_order_id FROM goods_receipts WHERE id = $1
-                     )
-                     AND si.document_type = 'SUPPLIER_INVOICE'
-                     ORDER BY si."CreatedAt" DESC LIMIT 1`,
-                    [rgrn.grnId]
-                );
-                const referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
-
-                if (referenceInvoiceId) {
-                    // Generate SCN number
-                    const scnNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
-
-                    // Create the SCN header (DRAFT → will auto-post below)
-                    const scn = await supplierCreditDebitNoteRepository.createSupplierNote(client, {
-                        invoiceNumber: scnNumber,
-                        documentType: 'SUPPLIER_CREDIT_NOTE',
-                        referenceInvoiceId,
-                        supplierId: supplierId || rgrn.supplierId,
-                        issueDate: getBusinessDate(),
-                        subtotal: returnTotalNum,
-                        taxAmount: 0,
-                        totalAmount: returnTotalNum,
-                        reason: `Auto-generated from ${posted.returnGrnNumber}: ${rgrn.reason}`,
-                        notes: `Source: ${posted.returnGrnNumber} against ${originalGrNumber || rgrn.grnId}`,
-                        returnGrnId: rgrnId,
-                    });
-
-                    // Create line items with product detail
-                    await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
-                        client,
-                        scn.id,
-                        lines.map((line, idx) => ({
-                            productId: line.productId,
-                            productName: line.productName || `Product ${idx + 1}`,
-                            description: `Returned: ${line.baseQuantity} × ${line.unitCost} (${rgrn.reason})`,
-                            quantity: line.baseQuantity,
-                            unitCost: line.unitCost,
-                            taxRate: 0,
-                        })),
-                    );
-
-                    // Auto-post the SCN
-                    const postedScn = await supplierCreditDebitNoteRepository.postSupplierNote(client, scn.id);
-                    if (postedScn) {
-                        supplierCreditNoteId = postedScn.id;
-
-                        // Post SCN GL: DR AP (2100) / CR Purchase Returns (5010)
-                        await recordSupplierCreditNoteToGL({
-                            noteId: postedScn.id,
-                            noteNumber: postedScn.invoiceNumber,
-                            noteDate: getBusinessDate(),
-                            subtotal: returnTotalNum,
-                            taxAmount: 0,
-                            totalAmount: returnTotalNum,
-                            supplierId: supplierId || rgrn.supplierId,
-                            supplierName,
-                        }, undefined, client);
-
-                        // Reduce outstanding on original supplier invoice
-                        await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
-                            client,
-                            referenceInvoiceId,
-                            returnTotalNum,
-                            'CREDIT',
-                        );
-
-                        // Document Flow: RETURN_GRN → SUPPLIER_CREDIT_NOTE
-                        await documentFlowService.linkDocuments(
-                            client, 'RETURN_GRN', rgrnId,
-                            'SUPPLIER_CREDIT_NOTE', postedScn.id, 'CREATES',
-                        );
-
-                        logger.info('Auto-created Supplier Credit Note from RGRN', {
-                            scnId: postedScn.id,
-                            scnNumber: postedScn.invoiceNumber,
-                            rgrnNumber: posted.returnGrnNumber,
-                            amount: returnTotalNum,
-                        });
-                    }
-                } else {
-                    logger.warn('No supplier invoice found for GR — Supplier Credit Note not auto-created', {
-                        rgrnId, grnId: rgrn.grnId,
-                    });
-                }
-            } catch (scnError: unknown) {
-                // Non-fatal: RGRN + GL are already committed, SCN is a convenience document
-                logger.error('Failed to auto-create Supplier Credit Note (non-fatal)', {
-                    rgrnId, error: scnError instanceof Error ? scnError.message : String(scnError),
-                });
-            }
 
             return posted;
         });
@@ -472,5 +374,165 @@ export const returnGrnService = {
      */
     async getByGrnId(pool: Pool, grnId: string) {
         return returnGrnRepository.getByGrnId(pool, grnId);
+    },
+
+    /**
+     * Create a Supplier Credit Note from a POSTED Return GRN.
+     *
+     * This is the ONLY way a Return GRN should reduce AP (2100).
+     *
+     * GL posted by this method (SAP / Odoo standard):
+     *   DR Accounts Payable (2100)   — reduce what we owe the supplier
+     *   CR GRN/IR Clearing  (2150)   — clear the debit created when the Return GRN was posted
+     *
+     * The Return GRN itself posts:
+     *   DR GRN/IR Clearing  (2150)
+     *   CR Inventory        (1300)
+     *
+     * Together, the two entries net to: DR AP / CR Inventory — the correct
+     * accounting for goods returned to a supplier.
+     */
+    async createCreditNoteFromReturn(pool: Pool, rgrnId: string): Promise<{ creditNoteId: string; creditNoteNumber: string }> {
+        return UnitOfWork.run(pool, async (client) => {
+            // 1. Validate RGRN exists and is POSTED
+            const rgrn = await returnGrnRepository.getById(client, rgrnId);
+            if (!rgrn) throw new Error('Return GRN not found');
+            if (rgrn.status !== 'POSTED') throw new Error('Return GRN must be POSTED before creating a Credit Note');
+
+            // 2. Prevent duplicate: check if a Credit Note already exists for this RGRN
+            const existing = await client.query(
+                `SELECT "Id" FROM supplier_invoices
+                 WHERE return_grn_id = $1 AND document_type = 'SUPPLIER_CREDIT_NOTE' AND deleted_at IS NULL
+                 LIMIT 1`,
+                [rgrnId],
+            );
+            if (existing.rows.length > 0) {
+                throw new Error('A Supplier Credit Note already exists for this Return GRN');
+            }
+
+            // 3. Load lines to calculate total and build line items
+            const lines = await returnGrnRepository.getLines(client, rgrnId);
+            if (lines.length === 0) throw new Error('Return GRN has no line items');
+
+            // Use the same amount that was posted to GRN Clearing when the RGRN was posted.
+            // Sum line totals (baseQuantity × unitCost) — same logic as the RGRN post step.
+            let returnTotal = new Decimal(0);
+            for (const line of lines) {
+                returnTotal = returnTotal.plus(
+                    new Decimal(String(line.baseQuantity)).times(String(line.unitCost)),
+                );
+            }
+            const returnTotalNum = Money.toNumber(returnTotal);
+            if (returnTotalNum <= 0) throw new Error('Return GRN total amount is zero — cannot create Credit Note');
+
+            // 4. Resolve supplier info
+            const grResult = await client.query(
+                `SELECT COALESCE(po.supplier_id, po2.supplier_id) AS supplier_id,
+                        COALESCE(s."CompanyName", s2."CompanyName") AS supplier_name
+                 FROM goods_receipts g
+                 LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
+                 LEFT JOIN suppliers s ON s."Id" = po.supplier_id
+                 LEFT JOIN inventory_batches ib_any ON ib_any.goods_receipt_id = g.id
+                 LEFT JOIN purchase_orders po2 ON po2.id = ib_any.purchase_order_id
+                 LEFT JOIN suppliers s2 ON s2."Id" = po2.supplier_id
+                 WHERE g.id = $1
+                 LIMIT 1`,
+                [rgrn.grnId],
+            );
+            const supplierId: string = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
+            const supplierName: string = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
+
+            // 5. Find the original Supplier Invoice (to reduce its outstanding balance)
+            const siResult = await client.query(
+                `SELECT si."Id" FROM supplier_invoices si
+                 WHERE si."PurchaseOrderId" = (
+                   SELECT purchase_order_id FROM goods_receipts WHERE id = $1
+                 )
+                 AND si.document_type = 'SUPPLIER_INVOICE'
+                 ORDER BY si."CreatedAt" DESC LIMIT 1`,
+                [rgrn.grnId],
+            );
+            const referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
+
+            // 6. Generate SCN number and create header
+            const scnNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
+
+            const scn = await supplierCreditDebitNoteRepository.createSupplierNote(client, {
+                invoiceNumber: scnNumber,
+                documentType: 'SUPPLIER_CREDIT_NOTE',
+                referenceInvoiceId: referenceInvoiceId ?? '',
+                supplierId,
+                issueDate: getBusinessDate(),
+                subtotal: returnTotalNum,
+                taxAmount: 0,
+                totalAmount: returnTotalNum,
+                reason: `Credit Note for ${rgrn.returnGrnNumber}: ${rgrn.reason}`,
+                notes: `Linked to Return GRN ${rgrn.returnGrnNumber}`,
+                returnGrnId: rgrnId,
+            });
+
+            // 7. Create line items
+            await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
+                client,
+                scn.id,
+                lines.map((line, idx) => ({
+                    productId: line.productId,
+                    productName: line.productName || `Product ${idx + 1}`,
+                    description: `Returned: ${line.baseQuantity} × ${line.unitCost} (${rgrn.reason})`,
+                    quantity: line.baseQuantity,
+                    unitCost: line.unitCost,
+                    taxRate: 0,
+                })),
+            );
+
+            // 8. Post the SCN
+            const postedScn = await supplierCreditDebitNoteRepository.postSupplierNote(client, scn.id);
+            if (!postedScn) throw new Error('Failed to post Supplier Credit Note');
+
+            // 9. GL: DR AP (2100) / CR GRN/IR Clearing (2150)
+            //    Clears the GRN Clearing debit that was posted when the Return GRN was posted.
+            await recordSupplierCreditNoteToGL({
+                noteId: postedScn.id,
+                noteNumber: postedScn.invoiceNumber,
+                noteDate: getBusinessDate(),
+                subtotal: returnTotalNum,
+                taxAmount: 0,
+                totalAmount: returnTotalNum,
+                supplierId,
+                supplierName,
+                clearingAccountCode: AccountCodes.GRIR_CLEARING,
+            }, undefined, client);
+
+            // 10. Reduce outstanding on original supplier invoice (if found)
+            if (referenceInvoiceId) {
+                await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+                    client,
+                    referenceInvoiceId,
+                    returnTotalNum,
+                    'CREDIT',
+                );
+            }
+
+            // 11. Recalculate supplier outstanding balance
+            if (supplierId) {
+                await recalcSupplierBalance(client, supplierId);
+            }
+
+            // 12. Document Flow: RETURN_GRN → SUPPLIER_CREDIT_NOTE
+            await documentFlowService.linkDocuments(
+                client, 'RETURN_GRN', rgrnId,
+                'SUPPLIER_CREDIT_NOTE', postedScn.id, 'CREATES',
+            );
+
+            logger.info('Supplier Credit Note created from Return GRN', {
+                scnId: postedScn.id,
+                scnNumber: postedScn.invoiceNumber,
+                rgrnId,
+                rgrnNumber: rgrn.returnGrnNumber,
+                amount: returnTotalNum,
+            });
+
+            return { creditNoteId: postedScn.id, creditNoteNumber: postedScn.invoiceNumber };
+        });
     },
 };

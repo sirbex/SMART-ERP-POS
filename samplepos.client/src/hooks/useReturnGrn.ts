@@ -130,3 +130,18 @@ export function usePostReturnGrn() {
         },
     });
 }
+
+// Create a Supplier Credit Note from a POSTED Return GRN
+export function useCreateCreditNoteFromReturn() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (rgrnId: string) => api.returnGrn.createCreditNote(rgrnId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: RETURN_GRN_KEYS.all });
+            // Supplier balance and invoices changed
+            queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+            queryClient.invalidateQueries({ queryKey: ['supplier-invoices'] });
+        },
+    });
+}

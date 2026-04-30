@@ -17,6 +17,7 @@ import {
   useReturnGrnsByGrn,
   useCreateReturnGrn,
   usePostReturnGrn,
+  useCreateCreditNoteFromReturn,
 } from '../../hooks/useReturnGrn';
 import type { ReturnableItem } from '../../hooks/useReturnGrn';
 import { useAuth } from '../../hooks/useAuth';
@@ -284,6 +285,7 @@ export default function GoodsReceiptsPage() {
   const finalizeMutation = useFinalizeGoodsReceipt();
   const createReturnGrnMutation = useCreateReturnGrn();
   const postReturnGrnMutation = usePostReturnGrn();
+  const createCreditNoteMutation = useCreateCreditNoteFromReturn();
   const addGRItemMutation = useAddGRItem();
   const removeGRItemMutation = useRemoveGRItem();
 
@@ -728,7 +730,7 @@ export default function GoodsReceiptsPage() {
       // Post it immediately (stock reduction)
       await postReturnGrnMutation.mutateAsync(rgrnId);
 
-      alert('Return GRN created and posted successfully. Stock has been reduced.');
+      alert('Return GRN created and posted. Stock has been reduced.\n\nNext step: click "Create Credit Note" on the return to reduce the supplier payable.');
       setShowReturnModal(false);
       setShowDetailsModal(false);
     } catch (err: unknown) {
@@ -1325,6 +1327,26 @@ export default function GoodsReceiptsPage() {
                           >
                             {r.returnGrnNumber || r.return_grn_number} ({r.status})
                           </span>
+                        ))}
+                        {existingReturns.filter((r) => r.status === 'POSTED').map((r) => (
+                          <button
+                            key={`cn-${r.id}`}
+                            onClick={() =>
+                              createCreditNoteMutation.mutate(r.id, {
+                                onSuccess: (res) => {
+                                  const num = (res as { data?: { creditNoteNumber?: string } })?.data?.creditNoteNumber;
+                                  alert(`Supplier Credit Note ${num ?? ''} created. Supplier payable reduced.`);
+                                },
+                                onError: (err) =>
+                                  alert(`Error: ${err instanceof Error ? err.message : 'Failed to create Credit Note'}`),
+                              })
+                            }
+                            disabled={createCreditNoteMutation.isPending}
+                            title={`Create Credit Note for ${r.returnGrnNumber || r.return_grn_number}`}
+                            className="text-xs px-2 py-1 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {createCreditNoteMutation.isPending ? 'Creating…' : 'Create Credit Note'}
+                          </button>
                         ))}
                       </div>
                     )}

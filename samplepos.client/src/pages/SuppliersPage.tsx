@@ -171,7 +171,7 @@ interface SupplierLedgerEntry {
   description: string;
   debit: number;
   credit: number;
-  itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
+  itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided';
   paymentMethod?: string;
   balanceAfter: number;
 }
@@ -986,7 +986,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [ledger, setLedger] = useState<SupplierLedgerData | null>(null);
   const [ledgerStartDate, setLedgerStartDate] = useState(defaultStart);
   const [ledgerEndDate, setLedgerEndDate] = useState(defaultEnd);
-  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'Open' | 'Return' | 'Applied' | 'Voided'>('all');
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'Open' | 'Credit Note' | 'Applied' | 'Voided'>('all');
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [ledgerPage, setLedgerPage] = useState(1);
   const LEDGER_PAGE_SIZE = 25;
@@ -1395,11 +1395,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
             <button
               key={key}
               onClick={() => handleTabChange(key)}
-              className={`flex-shrink-0 flex items-center gap-1 px-2.5 sm:px-4 py-2 font-medium text-xs sm:text-sm whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === key
+              className={`flex-shrink-0 flex items-center gap-1 px-2.5 sm:px-4 py-2 font-medium text-xs sm:text-sm whitespace-nowrap border-b-2 transition-colors ${activeTab === key
                   ? 'text-blue-600 border-blue-600'
                   : 'text-gray-500 border-transparent hover:text-gray-900 hover:border-gray-300'
-              }`}
+                }`}
             >
               <span>{icon}</span>
               <span className="hidden xs:inline sm:inline">{label}</span>
@@ -1801,9 +1800,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       const balance = Number(inv.outstandingBalance || 0);
                       const statusColor =
                         inv.status === 'Paid' ? 'bg-green-100 text-green-800'
-                        : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
-                        : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
-                        : 'bg-gray-100 text-gray-800';
+                          : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
+                            : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
+                              : 'bg-gray-100 text-gray-800';
                       return (
                         <div key={inv.id} className="border border-gray-200 rounded-lg p-3">
                           <div className="flex items-center justify-between mb-2">
@@ -1917,11 +1916,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                               <button
                                 key={p}
                                 onClick={() => setInvoicePage(p as number)}
-                                className={`px-2 py-1 text-xs border rounded ${
-                                  invoicePage === p
+                                className={`px-2 py-1 text-xs border rounded ${invoicePage === p
                                     ? 'bg-blue-600 text-white border-blue-600'
                                     : 'border-gray-300 hover:bg-gray-100'
-                                }`}
+                                  }`}
                               >
                                 {p}
                               </button>
@@ -2214,7 +2212,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   >
                     <option value="all">All Statuses</option>
                     <option value="Open">Open</option>
-                    <option value="Return">Return</option>
+                    <option value="Credit Note">Credit Note</option>
                     <option value="Applied">Applied</option>
                     <option value="Voided">Voided</option>
                   </select>
@@ -2297,39 +2295,39 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           <td></td>
                         </tr>
                         {paginatedLedgerEntries.map((entry, idx) => (
-                            <tr key={idx} className={`hover:bg-gray-50 ${entry.itemStatus === 'Voided' ? 'opacity-50 line-through' : ''}`}>
-                              <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{entry.date}</td>
-                              <td className="px-3 py-2 text-xs font-mono text-blue-700 whitespace-nowrap">{entry.docNumber || '—'}</td>
-                              <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
-                                {entry.type?.replace(/_/g, ' ')}
-                              </td>
-                              <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{entry.reference || '—'}</td>
-                              <td className="px-3 py-2 text-xs text-gray-500 hidden md:table-cell max-w-[180px] truncate">{entry.description || '—'}</td>
-                              <td className="px-3 py-2 text-right text-xs font-medium text-red-700">
-                                {entry.debit > 0 ? formatCurrency(entry.debit) : '—'}
-                              </td>
-                              <td className="px-3 py-2 text-right text-xs font-medium text-green-700">
-                                {entry.credit > 0 ? formatCurrency(entry.credit) : '—'}
-                              </td>
-                              <td className="px-3 py-2 text-right text-xs font-medium text-gray-800">
-                                {formatCurrency(entry.balanceAfter)}
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' :
-                                    entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' :
-                                      entry.itemStatus === 'Return' ? 'bg-amber-100 text-amber-700' :
-                                        'bg-gray-100 text-gray-500'
-                                  }`}>
-                                  {entry.itemStatus}
+                          <tr key={idx} className={`hover:bg-gray-50 ${entry.itemStatus === 'Voided' ? 'opacity-50 line-through' : ''}`}>
+                            <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{entry.date}</td>
+                            <td className="px-3 py-2 text-xs font-mono text-blue-700 whitespace-nowrap">{entry.docNumber || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                              {entry.type?.replace(/_/g, ' ')}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{entry.reference || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-gray-500 hidden md:table-cell max-w-[180px] truncate">{entry.description || '—'}</td>
+                            <td className="px-3 py-2 text-right text-xs font-medium text-red-700">
+                              {entry.debit > 0 ? formatCurrency(entry.debit) : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs font-medium text-green-700">
+                              {entry.credit > 0 ? formatCurrency(entry.credit) : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs font-medium text-gray-800">
+                              {formatCurrency(entry.balanceAfter)}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' :
+                                entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' :
+                                  entry.itemStatus === 'Credit Note' ? 'bg-amber-100 text-amber-700' :
+                                    'bg-gray-100 text-gray-500'
+                                }`}>
+                                {entry.itemStatus}
+                              </span>
+                              {entry.itemStatus === 'Applied' && entry.paymentMethod && (
+                                <span className="ml-1 inline-flex px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 font-medium">
+                                  {entry.paymentMethod.replace(/_/g, ' ')}
                                 </span>
-                                {entry.itemStatus === 'Applied' && entry.paymentMethod && (
-                                  <span className="ml-1 inline-flex px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 font-medium">
-                                    {entry.paymentMethod.replace(/_/g, ' ')}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                              )}
+                            </td>
+                          </tr>
+                        ))}
                         {filteredLedgerEntries.length === 0 && (
                           <tr>
                             <td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
@@ -2369,11 +2367,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                               <button
                                 key={p}
                                 onClick={() => setLedgerPage(p as number)}
-                                className={`px-2 py-1 text-xs border rounded ${
-                                  ledgerPage === p
+                                className={`px-2 py-1 text-xs border rounded ${ledgerPage === p
                                     ? 'bg-blue-600 text-white border-blue-600'
                                     : 'border-gray-300 hover:bg-gray-100'
-                                }`}
+                                  }`}
                               >
                                 {p}
                               </button>

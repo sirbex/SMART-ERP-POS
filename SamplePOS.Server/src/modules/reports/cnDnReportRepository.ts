@@ -555,7 +555,7 @@ export async function getSupplierStatementOpeningBalance(
  *   Entries shown in AP account (business documents only):
  *     - SUPPLIER_INVOICE (DR GRIR 2150 / CR AP 2100) → itemStatus = 'Open'
  *     - SUPPLIER_PAYMENT (DR AP / CR Cash)            → itemStatus = 'Applied'
- *     - SUPPLIER_CREDIT_NOTE (DR AP / CR GRIR 2150)   → itemStatus = 'Return'
+ *     - SUPPLIER_CREDIT_NOTE (DR AP / CR GRIR 2150)   → itemStatus = 'Credit Note'
  *   Excluded from ledger view (internal/correction entries):
  *     - GOODS_RECEIPT → excluded after migration 514 (historical AP credits rerouted)
  *     - SYSTEM_CORRECTION → migration correction entries, not business documents
@@ -600,13 +600,13 @@ export async function getSupplierStatementEntries(
     const debit = toNum(r.debit);
     const credit = toNum(r.credit);
     const type = r.type as string;
-    let itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
+    let itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided';
     if (isReversed) {
       itemStatus = 'Voided';
     } else if (type === 'SUPPLIER_INVOICE') {
       itemStatus = 'Open';
-    } else if (type === 'RETURN_GRN' || type === 'SUPPLIER_CREDIT_NOTE') {
-      itemStatus = 'Return';
+    } else if (type === 'SUPPLIER_CREDIT_NOTE') {
+      itemStatus = 'Credit Note';
     } else if (debit > 0) {
       // Catch-all for other AP credits (debit in statement = liability increased)
       itemStatus = 'Open';

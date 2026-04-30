@@ -55,3 +55,12 @@ returnGrnRoutes.post(
     requirePermission('inventory.create'),
     returnGrnController.post,
 );
+
+// Create a Supplier Credit Note from a POSTED Return GRN
+// This is the ONLY way a Return GRN reduces AP.
+returnGrnRoutes.post(
+    '/:id/credit-note',
+    authenticate,
+    requirePermission('suppliers.create'),
+    returnGrnController.createCreditNote,
+);

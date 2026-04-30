@@ -92,8 +92,8 @@ export interface SupplierStatementEntry {
     description: string;
     debit: number;
     credit: number;
-    /** Open = invoice/debit note outstanding, Applied = payment made, Return = goods return/credit note, Voided = reversed */
-    itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
+    /** Open = invoice/debit note outstanding, Applied = payment made, Credit Note = supplier credit note, Voided = reversed */
+    itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided';
     /** Payment method — populated for SUPPLIER_PAYMENT entries (e.g. CASH, BANK_TRANSFER) */
     paymentMethod?: string;
 }

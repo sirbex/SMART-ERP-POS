@@ -147,4 +147,24 @@ export const returnGrnController = {
         const returns = await returnGrnService.getByGrnId(pool, id);
         res.json({ success: true, data: returns });
     }),
+
+    createCreditNote: asyncHandler(async (req: Request, res: Response) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParam.parse(req.params);
+
+        try {
+            const result = await returnGrnService.createCreditNoteFromReturn(pool, id);
+            res.status(201).json({
+                success: true,
+                data: result,
+                message: `Supplier Credit Note ${result.creditNoteNumber} created — AP reduced`,
+            });
+        } catch (error: unknown) {
+            if (error instanceof AppError) throw error;
+            const msg = error instanceof Error ? error.message : String(error);
+            if (msg.includes('not found')) throw new NotFoundError(msg);
+            if (msg.includes('already exists') || msg.includes('must be POSTED')) throw new ConflictError(msg);
+            throw new ValidationError(msg);
+        }
+    }),
 };
