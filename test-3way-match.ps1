@@ -168,7 +168,7 @@ if ($suppId) {
     # GL BALANCE SNAPSHOT before posting
     $gl2 = Api "GET" "/accounting/trial-balance" -token $tok
     $ap_pre   = [double]($gl2.data.accounts | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
-    $grir_pre = [double]($gl2.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
+    $grir_pre = [double]($gl2.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).debitBalance
 
     # Post invoice to GL
     $postNewR = Api "POST" "/supplier-payments/invoices/$newInvId/post" -token $tok
@@ -178,7 +178,7 @@ if ($suppId) {
       # GL BALANCE SNAPSHOT after posting
       $gl3 = Api "GET" "/accounting/trial-balance" -token $tok
       $ap_post   = [double]($gl3.data.accounts | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
-      $grir_post = [double]($gl3.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
+      $grir_post = [double]($gl3.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).debitBalance
 
       $ap_delta   = $ap_post - $ap_pre
       $grir_delta = $grir_post - $grir_pre
@@ -186,11 +186,11 @@ if ($suppId) {
       Write-Host ""
       Write-Host "  GL IMPACT of posting invoice (amount: 5,000 UGX):" -ForegroundColor Cyan
       Write-Host "    Account 2100 (AP)   credit change: $ap_delta   (expected: +5000)" -ForegroundColor White
-      Write-Host "    Account 2150 (GRIR) credit change: $grir_delta (expected: -5000 / DR side)" -ForegroundColor White
+      Write-Host "    Account 2150 (GRIR) debit  change: $grir_delta (expected: +5000 / DR side)" -ForegroundColor White
 
       Check "AP (2100) increased by invoice amount (+5000)" { [Math]::Abs($ap_delta - 5000) -lt 1 }
-      Check "GRIR (2150) decreased (debited) by invoice amount (net -5000)" { [Math]::Abs($grir_delta + 5000) -lt 1 -or [Math]::Abs($grir_delta - 5000) -lt 1 }
-      Check "AP and GRIR changes are equal (double-entry balanced)" { [Math]::Abs([Math]::Abs($ap_delta) - [Math]::Abs($grir_delta)) -lt 1 }
+      Check "GRIR (2150) debited by invoice amount (+5000 debit)" { [Math]::Abs($grir_delta - 5000) -lt 1 }
+      Check "AP and GRIR changes are equal (double-entry balanced)" { [Math]::Abs($ap_delta - $grir_delta) -lt 1 }
 
       # Idempotency: re-post same invoice
       $repost2 = Api "POST" "/supplier-payments/invoices/$newInvId/post" -token $tok
