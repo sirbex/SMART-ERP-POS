@@ -77,9 +77,9 @@ Write-Host ""
 Write-Host "[ 3 ] GL ACCOUNT BALANCE SNAPSHOT (BEFORE TEST)" -ForegroundColor Yellow
 # ─────────────────────────────────────────────────────────────────────────────
 $gl = Api "GET" "/accounting/trial-balance" -token $tok
-$ap2100_before   = ($gl.data | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
-$grir2150_before = ($gl.data | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
-$inv1300_before  = ($gl.data | Where-Object { $_.accountCode -eq "1300" } | Select-Object -First 1).debitBalance
+$ap2100_before   = ($gl.data.accounts | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
+$grir2150_before = ($gl.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
+$inv1300_before  = ($gl.data.accounts | Where-Object { $_.accountCode -eq "1300" } | Select-Object -First 1).debitBalance
 
 Write-Host "  Account 2100 (AP)       BEFORE credit: $ap2100_before" -ForegroundColor DarkGray
 Write-Host "  Account 2150 (GRIR)     BEFORE credit: $grir2150_before" -ForegroundColor DarkGray
@@ -167,8 +167,8 @@ if ($suppId) {
   if ($newInvId) {
     # GL BALANCE SNAPSHOT before posting
     $gl2 = Api "GET" "/accounting/trial-balance" -token $tok
-    $ap_pre   = [double]($gl2.data | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
-    $grir_pre = [double]($gl2.data | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
+    $ap_pre   = [double]($gl2.data.accounts | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
+    $grir_pre = [double]($gl2.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
 
     # Post invoice to GL
     $postNewR = Api "POST" "/supplier-payments/invoices/$newInvId/post" -token $tok
@@ -177,8 +177,8 @@ if ($suppId) {
     if ($postNewR.success) {
       # GL BALANCE SNAPSHOT after posting
       $gl3 = Api "GET" "/accounting/trial-balance" -token $tok
-      $ap_post   = [double]($gl3.data | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
-      $grir_post = [double]($gl3.data | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
+      $ap_post   = [double]($gl3.data.accounts | Where-Object { $_.accountCode -eq "2100" } | Select-Object -First 1).creditBalance
+      $grir_post = [double]($gl3.data.accounts | Where-Object { $_.accountCode -eq "2150" } | Select-Object -First 1).creditBalance
 
       $ap_delta   = $ap_post - $ap_pre
       $grir_delta = $grir_post - $grir_pre
