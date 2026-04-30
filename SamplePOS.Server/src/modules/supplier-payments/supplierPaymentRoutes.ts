@@ -273,6 +273,34 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         })
     );
 
+    // ─── 3-way match: unbilled GRNs ──────────────────────────────────────────
+    // Returns GRNs that have been received but not yet linked to a posted invoice.
+    // Used by the Supplier Bills UI to let the user select which GRNs to bill.
+    router.get(
+        '/invoices/unbilled-grns',
+        requirePermission('suppliers.view'),
+        asyncHandler(async (req, res) => {
+            const supplierId = typeof req.query.supplierId === 'string'
+                ? req.query.supplierId
+                : undefined;
+            const grns = await supplierPaymentService.getUnbilledGRNs(p(req), supplierId);
+            res.json({ success: true, data: grns });
+        }),
+    );
+
+    // ─── 3-way match: post invoice to GL ─────────────────────────────────────
+    // Posts DR GRN/IR Clearing (2150) / CR Accounts Payable (2100).
+    // SYSTEM RULE: AP is only created via this endpoint, never from GRN finalization.
+    router.post(
+        '/invoices/:id/post',
+        requirePermission('suppliers.create'),
+        asyncHandler(async (req, res) => {
+            const { id } = UuidParamSchema.parse(req.params);
+            await supplierPaymentService.postInvoiceToGL(p(req), id);
+            res.json({ success: true, message: 'Invoice posted to GL' });
+        }),
+    );
+
     // Get supplier invoice with full details (line items + allocations)
     router.get(
         '/invoices/:id/details',

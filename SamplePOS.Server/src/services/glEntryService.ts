@@ -782,10 +782,11 @@ export interface GoodsReceiptData {
  * 
  * Journal entry for receiving inventory:
  *   DR Inventory (1300)        totalAmount
- *   CR Accounts Payable (2100) totalAmount
+ *   CR GRN/IR Clearing (2150) totalAmount
  *
- * Odoo-style: direct AP posting. SAP 3-way matching (GR/IR Clearing)
- * is available via the standalone GR/IR Clearing module API when needed.
+ * SYSTEM RULE: GRN must NEVER create Accounts Payable.
+ * Only a Supplier Invoice (Bill) can create AP (2100).
+ * SAP/Odoo 3-way matching: GRN → GRIR Clearing → Supplier Invoice → AP.
  */
 export async function recordGoodsReceiptToGL(
   gr: GoodsReceiptData,
@@ -793,8 +794,8 @@ export async function recordGoodsReceiptToGL(
   txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
-    // Odoo-style: GR posts directly to AP. No clearing account.
-    // SAP 3-way matching (GR/IR Clearing 2150) is available via the GR/IR Clearing module API when needed.
+    // 3-way match (SAP pattern): GRN posts to GRN/IR Clearing (2150), NOT AP.
+    // AP is only created when the Supplier Invoice is posted via recordSupplierInvoiceToGL().
     await AccountingCore.createJournalEntry({
       entryDate: gr.grDate,
       description: `Goods Receipt: ${gr.grNumber} from ${gr.supplierName}`,
@@ -811,8 +812,8 @@ export async function recordGoodsReceiptToGL(
           entityId: gr.supplierId
         },
         {
-          accountCode: AccountCodes.ACCOUNTS_PAYABLE,
-          description: `Payable to ${gr.supplierName}: ${gr.grNumber}`,
+          accountCode: AccountCodes.GRIR_CLEARING,
+          description: `GRN clearing (pending invoice): ${gr.grNumber}`,
           debitAmount: 0,
           creditAmount: gr.totalAmount,
           entityType: 'supplier',
@@ -821,19 +822,18 @@ export async function recordGoodsReceiptToGL(
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `GOODS_RECEIPT-${gr.grId}`,
-      // SAP governance (migration 013): inventory leg controls the source.
-      // Account 2100 (AP) accepts INVENTORY_MOVE for composite GR journals.
+      // INVENTORY_MOVE: inventory leg drives this journal (SAP governance Rule H).
       source: 'INVENTORY_MOVE' as const,
     }, pool, txClient);
 
-    logger.info('Recorded goods receipt to GL', {
+    logger.info('Recorded goods receipt to GL (GRN Clearing)', {
       grId: gr.grId,
       grNumber: gr.grNumber,
       amount: gr.totalAmount
     });
   } catch (error: unknown) {
     logger.error('Failed to record goods receipt to GL', { error, gr });
-    // CRITICAL: GL failure MUST throw to prevent GR without inventory/AP entries
+    // CRITICAL: GL failure MUST throw to prevent GRN without inventory/GRIR entries
     throw new Error(`GL posting failed for goods receipt ${gr.grNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
@@ -842,13 +842,24 @@ export async function recordGoodsReceiptToGL(
 // RETURN GRN (SUPPLIER RETURN) JOURNAL ENTRIES
 // =============================================================================
 // SAP pattern: Goods return to supplier reverses the original GR posting.
-// DR Accounts Payable (2100) — reduce what we owe (we returned the goods)
+// DR GRN/IR Clearing (2150) — reverses the GRN clearing credit
 // CR Inventory (1300) — reduce inventory value (goods left the warehouse)
 //
 // This is the inverse of recordGoodsReceiptToGL(). Without this entry,
 // inventory_batches would decrease but GL account 1300 would remain
 // unchanged — a guaranteed GL-vs-subledger discrepancy.
+// NOTE: AP is NOT debited here. If a credit note is issued by the supplier
+// after an invoice was already posted, use the Supplier Credit Note workflow.
 // =============================================================================
+
+export interface SupplierInvoiceGLData {
+  invoiceId: string;
+  invoiceNumber: string;   // SBILL-YYYY-NNNN
+  invoiceDate: string;     // YYYY-MM-DD
+  totalAmount: number;
+  supplierId: string;
+  supplierName: string;
+}
 
 export interface ReturnGrnGLData {
   returnGrnId: string;
@@ -874,8 +885,8 @@ export async function recordReturnGrnToGL(
       referenceNumber: data.returnGrnNumber,
       lines: [
         {
-          accountCode: AccountCodes.ACCOUNTS_PAYABLE,
-          description: `Reduce payable — returned goods: ${data.returnGrnNumber}`,
+          accountCode: AccountCodes.GRIR_CLEARING,
+          description: `Reverse GRN clearing — returned goods: ${data.returnGrnNumber}`,
           debitAmount: data.totalAmount,
           creditAmount: 0,
           entityType: 'supplier',
@@ -892,11 +903,11 @@ export async function recordReturnGrnToGL(
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `RETURN_GRN-${data.returnGrnId}`,
-      // SAP governance (migration 013): inventory leg controls the source.
+      // INVENTORY_MOVE: inventory leg drives this reversal (SAP governance Rule H).
       source: 'INVENTORY_MOVE' as const,
     }, pool, txClient);
 
-    logger.info('Recorded return GRN to GL', {
+    logger.info('Recorded return GRN to GL (GRIR Clearing reversed)', {
       returnGrnId: data.returnGrnId,
       returnGrnNumber: data.returnGrnNumber,
       amount: data.totalAmount,
@@ -904,6 +915,61 @@ export async function recordReturnGrnToGL(
   } catch (error: unknown) {
     logger.error('Failed to record return GRN to GL', { error, data });
     throw new Error(`GL posting failed for return GRN ${data.returnGrnNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// =============================================================================
+// SUPPLIER INVOICE (BILL) GL POSTING — 3-WAY MATCH CLEARING
+// =============================================================================
+// Posted when the user confirms a Supplier Invoice (Bill) against received GRNs.
+//   DR GRN/IR Clearing (2150) — clears the outstanding GRN clearing balance
+//   CR Accounts Payable (2100) — creates the formal AP liability to supplier
+//
+// This is the ONLY way AP (2100) should be credited in the procure-to-pay cycle.
+// =============================================================================
+export async function recordSupplierInvoiceToGL(
+  data: SupplierInvoiceGLData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
+  try {
+    await AccountingCore.createJournalEntry({
+      entryDate: data.invoiceDate,
+      description: `Supplier Invoice: ${data.invoiceNumber} — ${data.supplierName}`,
+      referenceType: 'SUPPLIER_INVOICE',
+      referenceId: data.invoiceId,
+      referenceNumber: data.invoiceNumber,
+      lines: [
+        {
+          accountCode: AccountCodes.GRIR_CLEARING,
+          description: `Clear GRN/IR — Invoice ${data.invoiceNumber}`,
+          debitAmount: data.totalAmount,
+          creditAmount: 0,
+          entityType: 'supplier',
+          entityId: data.supplierId,
+        },
+        {
+          accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+          description: `Payable to ${data.supplierName}: ${data.invoiceNumber}`,
+          debitAmount: 0,
+          creditAmount: data.totalAmount,
+          entityType: 'supplier',
+          entityId: data.supplierId,
+        },
+      ],
+      userId: SYSTEM_USER_ID,
+      idempotencyKey: `SUPPLIER_INVOICE-${data.invoiceId}`,
+      source: 'PURCHASE_BILL' as const,
+    }, pool, txClient);
+
+    logger.info('Recorded supplier invoice to GL (GRIR → AP)', {
+      invoiceId: data.invoiceId,
+      invoiceNumber: data.invoiceNumber,
+      amount: data.totalAmount,
+    });
+  } catch (error: unknown) {
+    logger.error('Failed to record supplier invoice to GL', { error, data });
+    throw new Error(`[GL_ERROR] GL posting failed for supplier invoice ${data.invoiceNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

@@ -550,10 +550,15 @@ export async function getSupplierStatementOpeningBalance(
 /**
  * GL-driven supplier statement entries.
  * Reads from AP (2100) ledger entries tagged to this supplier.
- * - Credit to AP → "debit" column (liability increased: GR, debit note)  → itemStatus = 'Open'
- * - Debit to AP  → "credit" column (liability reduced: payment, credit note)
- *     - SUPPLIER_PAYMENT → itemStatus = 'Applied'
- *     - RETURN_GRN / SUPPLIER_CREDIT_NOTE → itemStatus = 'Return'
+ *
+ * Architecture (3-way match — post migration 513):
+ *   NEW entries in AP account:
+ *     - SUPPLIER_INVOICE (DR GRIR 2150 / CR AP 2100) → itemStatus = 'Open'
+ *     - SUPPLIER_PAYMENT (DR AP / CR Cash)            → itemStatus = 'Applied'
+ *     - SUPPLIER_CREDIT_NOTE (DR AP / CR GRIR 2150)   → itemStatus = 'Return'
+ *   HISTORICAL entries (pre-migration 513) still present in AP account:
+ *     - GOODS_RECEIPT (DR Inventory / CR AP)          → itemStatus = 'Open'
+ *     - RETURN_GRN (DR AP / CR Inventory)             → itemStatus = 'Return'
  * - IsReversed = true → itemStatus = 'Voided'
  */
 export async function getSupplierStatementEntries(
@@ -597,11 +602,16 @@ export async function getSupplierStatementEntries(
     let itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
     if (isReversed) {
       itemStatus = 'Voided';
-    } else if (debit > 0) {
+    } else if (type === 'SUPPLIER_INVOICE' || type === 'GOODS_RECEIPT') {
+      // Both new (SUPPLIER_INVOICE) and historical (GOODS_RECEIPT) AP credits = Open
       itemStatus = 'Open';
     } else if (type === 'RETURN_GRN' || type === 'SUPPLIER_CREDIT_NOTE') {
       itemStatus = 'Return';
+    } else if (debit > 0) {
+      // Catch-all for other AP credits (debit in statement = liability increased)
+      itemStatus = 'Open';
     } else {
+      // SUPPLIER_PAYMENT and any other AP debits
       itemStatus = 'Applied';
     }
     return {

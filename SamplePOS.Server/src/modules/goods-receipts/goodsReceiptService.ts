@@ -12,7 +12,6 @@ import {
 } from './goodsReceiptRepository.js';
 import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
 import { inventoryRepository } from '../inventory/inventoryRepository.js';
-import * as supplierPaymentRepository from '../supplier-payments/supplierPaymentRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import * as pricingService from '../../services/pricingService.js';
 import * as glEntryService from '../../services/glEntryService.js';
@@ -631,9 +630,10 @@ export const goodsReceiptService = {
       }
 
       // ============================================================
-      // CREATE SUPPLIER INVOICE for payment tracking
-      // This creates a payable in the supplier payments module
-      // IDEMPOTENCY: Check if invoice already exists for this GR
+      // SYSTEM RULE: GRN does NOT create Accounts Payable.
+      // The GL posting below (GRIR Clearing) is the only GRN GL entry.
+      // AP (2100) is created only when a Supplier Invoice is posted
+      // via the 3-way match workflow (POST /supplier-payments/invoices/:id/post).
       // ============================================================
       const totalAmountDec = items.reduce((sum: Decimal, item: GoodsReceiptItem) => {
         if (item.isBonus) return sum; // Bonus items are free, excluded from invoice
@@ -642,101 +642,6 @@ export const goodsReceiptService = {
         return sum.plus(qty.times(cost));
       }, new Decimal(0));
       const totalAmount = Money.toNumber(totalAmountDec);
-
-      if (totalAmount > 0 && supplierId) {
-        const invoiceGrNumber = grNumber || id;
-        const invoiceReceiptDate: string = receiptDateStr;
-
-        // IDEMPOTENCY CHECK: Don't create duplicate invoice for same GR
-        const existingInvoice = await client.query(
-          `SELECT "Id" FROM supplier_invoices 
-           WHERE "InternalReferenceNumber" = $1 AND deleted_at IS NULL`,
-          [invoiceGrNumber]
-        );
-
-        if (existingInvoice.rows.length > 0) {
-          logger.info('Supplier invoice already exists for GR, skipping creation', {
-            grId: id,
-            grNumber: invoiceGrNumber,
-            existingInvoiceId: existingInvoice.rows[0].Id,
-          });
-        } else {
-          // Get supplier payment terms for due date calculation
-          const supplierResult = await client.query(
-            'SELECT "DefaultPaymentTerms" FROM suppliers WHERE "Id" = $1',
-            [supplierId]
-          );
-          const paymentTermsDays = supplierResult.rows[0]?.DefaultPaymentTerms ?? 30;
-
-          // Calculate invoice date and due date using SQL for timezone safety
-          // Avoids JS Date object construction which violates timezone strategy
-          const dateCalcResult = await client.query(
-            `SELECT 
-               COALESCE($1::date, CURRENT_DATE)::text as invoice_date,
-               (COALESCE($1::date, CURRENT_DATE) + ($2 || ' days')::interval)::date::text as due_date`,
-            [invoiceReceiptDate || null, paymentTermsDays]
-          );
-          const invoiceDateStr = dateCalcResult.rows[0].invoice_date;
-          const dueDateStr = dateCalcResult.rows[0].due_date;
-
-          try {
-            const createdInvoice = await supplierPaymentRepository.createInvoice(client, {
-              supplierId,
-              supplierInvoiceNumber: invoiceGrNumber, // Use GR number as reference
-              invoiceDate: invoiceDateStr,
-              dueDate: dueDateStr,
-              subtotal: totalAmount,
-              taxAmount: 0,
-              totalAmount,
-              notes: `Auto-created from Goods Receipt ${invoiceGrNumber}`,
-              currencyCode: 'UGX',
-              initialStatus: 'RECEIVED',
-            });
-
-            // Insert line items from GR items into the invoice
-            const invoiceLineItems = items
-              .filter((lineItem) => Money.parseDb(lineItem.receivedQuantity).toNumber() > 0)
-              .map((lineItem) => ({
-                productId: lineItem.productId,
-                productName: lineItem.productName ?? 'Unknown product',
-                description: `From GR ${invoiceGrNumber}`,
-                quantity: Money.parseDb(lineItem.receivedQuantity).toNumber(),
-                unitOfMeasure: 'EA',
-                unitCost: Money.parseDb(lineItem.unitCost).toNumber(),
-                taxRate: 0,
-                taxAmount: 0,
-              }));
-
-            if (invoiceLineItems.length > 0) {
-              await supplierPaymentRepository.createInvoiceLineItems(
-                client,
-                createdInvoice.id,
-                invoiceLineItems
-              );
-            }
-
-            logger.info('Supplier invoice created from GR with line items', {
-              grId: id,
-              grNumber: invoiceGrNumber,
-              supplierId,
-              totalAmount,
-              lineItemCount: invoiceLineItems.length,
-            });
-          } catch (invoiceError: unknown) {
-            const errMsg =
-              invoiceError instanceof Error ? invoiceError.message : String(invoiceError);
-            logger.error('Failed to create supplier invoice from GR', {
-              grId: id,
-              error: errMsg,
-            });
-            // Don't fail the GR finalization if invoice creation fails
-            // The invoice can be created manually
-            warnings.push(
-              `Supplier invoice creation failed: ${errMsg}. AP tracking requires manual action.`
-            );
-          }
-        }
-      }
 
       // ============================================================
       // PRE-COMMIT: Create cost layers and update pricing
@@ -856,8 +761,9 @@ export const goodsReceiptService = {
 
       // ============================================================
       // GL POSTING — INSIDE transaction (SAP LUW pattern)
-      // DR Inventory (1300), CR Accounts Payable (2100)
+      // DR Inventory (1300), CR GRN/IR Clearing (2150)
       // Atomic: if GL fails, entire GR + inventory rollback together.
+      // AP (2100) is NOT touched here — only when Supplier Invoice is posted.
       // ============================================================
       if (totalAmount > 0 && supplierId) {
         const supplierRes = await client.query(
@@ -879,9 +785,6 @@ export const goodsReceiptService = {
           undefined, // pool — not needed when txClient is provided
           client,    // atomic: GL commits/rolls back with inventory
         );
-
-        // GR/IR Clearing (SAP 3-way matching) is available via the standalone
-        // GR/IR Clearing module API when needed. Odoo-style: AP is hit directly above.
       }
 
       return { alerts, warnings };

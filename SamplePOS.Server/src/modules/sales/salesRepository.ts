@@ -1138,7 +1138,7 @@ export const salesRepository = {
         p.sku
        FROM sale_items si
        JOIN products p ON si.product_id = p.id
-       WHERE si.sale_id = $1`,  
+       WHERE si.sale_id = $1`,
       [saleId]
     );
 
@@ -1195,7 +1195,7 @@ export const salesRepository = {
        FROM sale_items si
        LEFT JOIN products p ON si.product_id = p.id
        WHERE si.sale_id = $1
-       ORDER BY si.created_at`,  
+       ORDER BY si.created_at`,
       [saleId]
     );
 

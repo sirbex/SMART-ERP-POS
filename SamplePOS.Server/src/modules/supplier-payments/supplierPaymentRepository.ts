@@ -991,3 +991,82 @@ export async function getInvoiceSummary(pool: Pool | PoolClient): Promise<{
         totalOutstanding: new Decimal(row.total_outstanding || 0).toNumber(),
     };
 }
+
+/**
+ * Mark a supplier invoice as posted to GL (3-way match architecture).
+ * Called by supplierPaymentService.postInvoiceToGL() after the GL journal is written.
+ */
+export async function markInvoicePostedToGL(
+    client: PoolClient,
+    invoiceId: string,
+): Promise<void> {
+    await client.query(
+        `UPDATE supplier_invoices
+         SET is_posted_to_gl = TRUE, posted_to_gl_at = NOW(), "UpdatedAt" = NOW()
+         WHERE "Id" = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+    );
+}
+
+/**
+ * Return GRNs not yet linked to any posted supplier invoice.
+ * Used by the 3-way match UI to let the user select which GRNs to bill.
+ */
+export async function findUnbilledGRNs(
+    pool: Pool | PoolClient,
+    supplierId?: string,
+): Promise<Array<{
+    id: string;
+    receiptNumber: string;
+    receiptDate: string;
+    supplierId: string;
+    supplierName: string;
+    totalAmount: number;
+    itemCount: number;
+}>> {
+    const params: unknown[] = [];
+    const supplierFilter = supplierId
+        ? (params.push(supplierId), `AND po.supplier_id = $${params.length}`)
+        : '';
+
+    const result = await pool.query(
+        `SELECT
+           gr.id,
+           gr.receipt_number      AS "receiptNumber",
+           gr.received_date::text AS "receiptDate",
+           po.supplier_id         AS "supplierId",
+           s."CompanyName"        AS "supplierName",
+           COALESCE(SUM(gri.received_quantity * gri.unit_cost)
+                    FILTER (WHERE NOT COALESCE(gri.is_bonus, FALSE)), 0) AS "totalAmount",
+           COUNT(gri.id)::int     AS "itemCount"
+         FROM goods_receipts gr
+         JOIN purchase_orders po ON gr.purchase_order_id = po.id
+         LEFT JOIN suppliers s ON po.supplier_id = s."Id"
+         LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+         WHERE gr.status = 'COMPLETED'
+           ${supplierFilter}
+           AND NOT EXISTS (
+             SELECT 1 FROM supplier_invoice_grn_links sigl
+             JOIN supplier_invoices si ON si."Id" = sigl.invoice_id
+             WHERE sigl.grn_id = gr.id
+               AND si.is_posted_to_gl = TRUE
+               AND si.deleted_at IS NULL
+           )
+         GROUP BY gr.id, gr.receipt_number, gr.received_date, po.supplier_id, s."CompanyName"
+         HAVING COALESCE(SUM(gri.received_quantity * gri.unit_cost)
+                         FILTER (WHERE NOT COALESCE(gri.is_bonus, FALSE)), 0) > 0
+         ORDER BY gr.received_date DESC`,
+        params,
+    );
+
+    return result.rows.map((r) => ({
+        id: r.id as string,
+        receiptNumber: r.receiptNumber as string,
+        receiptDate: r.receiptDate as string,
+        supplierId: r.supplierId as string,
+        supplierName: r.supplierName as string,
+        totalAmount: new Decimal(r.totalAmount || 0).toNumber(),
+        itemCount: r.itemCount as number,
+    }));
+}
+

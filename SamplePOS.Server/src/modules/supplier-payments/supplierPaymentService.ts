@@ -482,6 +482,73 @@ export async function deleteSupplierInvoice(pool: Pool, id: string) {
 }
 
 // ============================================================
+// 3-WAY MATCH: POST SUPPLIER INVOICE TO GL
+// ============================================================
+// System rule: AP (2100) is created ONLY when a Supplier Invoice is posted.
+// Flow: DR GRN/IR Clearing (2150) → CR Accounts Payable (2100)
+
+export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<void> {
+    return UnitOfWork.run(pool, async (client) => {
+        // Fetch invoice with lock to prevent concurrent posting
+        const result = await client.query(
+            `SELECT "Id", "SupplierInvoiceNumber", "SupplierId", "InvoiceDate",
+                    "TotalAmount", is_posted_to_gl, "Status", deleted_at,
+                    s."CompanyName" AS supplier_name
+             FROM supplier_invoices si
+             LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
+             WHERE si."Id" = $1
+             FOR UPDATE`,
+            [invoiceId],
+        );
+
+        if (result.rows.length === 0) {
+            throw new Error(`Supplier invoice ${invoiceId} not found`);
+        }
+
+        const inv = result.rows[0];
+
+        if (inv.deleted_at) {
+            throw new Error(`Supplier invoice ${inv.SupplierInvoiceNumber} has been deleted`);
+        }
+        if (inv.is_posted_to_gl) {
+            throw new Error(`Supplier invoice ${inv.SupplierInvoiceNumber} is already posted to GL`);
+        }
+        if (inv.Status === 'Cancelled') {
+            throw new Error(`Cannot post a cancelled supplier invoice`);
+        }
+
+        const totalAmount = new Decimal(inv.TotalAmount).toNumber();
+        if (totalAmount <= 0) {
+            throw new Error(`Supplier invoice ${inv.SupplierInvoiceNumber} has zero amount — nothing to post`);
+        }
+
+        // Post GL: DR GRN/IR Clearing (2150) / CR Accounts Payable (2100)
+        await glEntryService.recordSupplierInvoiceToGL(
+            {
+                invoiceId: inv.Id,
+                invoiceNumber: inv.SupplierInvoiceNumber,
+                invoiceDate: inv.InvoiceDate,
+                totalAmount,
+                supplierId: inv.SupplierId,
+                supplierName: inv.supplier_name || 'Unknown Supplier',
+            },
+            undefined,
+            client,
+        );
+
+        // Mark posted
+        await supplierPaymentRepository.markInvoicePostedToGL(client, invoiceId);
+    });
+}
+
+/**
+ * Return GRNs that have not yet been billed (no posted supplier invoice linked).
+ */
+export async function getUnbilledGRNs(pool: Pool, supplierId?: string) {
+    return supplierPaymentRepository.findUnbilledGRNs(pool, supplierId);
+}
+
+// ============================================================
 // PAYMENT ALLOCATIONS
 // ============================================================
 
