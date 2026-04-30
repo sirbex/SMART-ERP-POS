@@ -551,14 +551,14 @@ export async function getSupplierStatementOpeningBalance(
  * GL-driven supplier statement entries.
  * Reads from AP (2100) ledger entries tagged to this supplier.
  *
- * Architecture (3-way match — post migration 513):
- *   NEW entries in AP account:
+ * Architecture (3-way match — post migration 513 + 514):
+ *   Entries shown in AP account (business documents only):
  *     - SUPPLIER_INVOICE (DR GRIR 2150 / CR AP 2100) → itemStatus = 'Open'
  *     - SUPPLIER_PAYMENT (DR AP / CR Cash)            → itemStatus = 'Applied'
  *     - SUPPLIER_CREDIT_NOTE (DR AP / CR GRIR 2150)   → itemStatus = 'Return'
- *   HISTORICAL entries (pre-migration 513) still present in AP account:
- *     - GOODS_RECEIPT (DR Inventory / CR AP)          → itemStatus = 'Open'
- *     - RETURN_GRN (DR AP / CR Inventory)             → itemStatus = 'Return'
+ *   Excluded from ledger view (internal/correction entries):
+ *     - GOODS_RECEIPT → excluded after migration 514 (historical AP credits rerouted)
+ *     - SYSTEM_CORRECTION → migration correction entries, not business documents
  * - IsReversed = true → itemStatus = 'Voided'
  */
 export async function getSupplierStatementEntries(
@@ -588,6 +588,7 @@ export async function getSupplierStatementEntries(
            AND le."EntityId" = $1
            AND UPPER(le."EntityType") = 'SUPPLIER'
            AND lt."Status" = 'POSTED'
+           AND lt."ReferenceType" NOT IN ('GOODS_RECEIPT', 'SYSTEM_CORRECTION')
            AND le."EntryDate"::date >= $2::date
            AND le."EntryDate"::date <= $3::date
          ORDER BY le."EntryDate" ASC, le."CreatedAt" ASC`,
@@ -602,8 +603,7 @@ export async function getSupplierStatementEntries(
     let itemStatus: 'Open' | 'Applied' | 'Return' | 'Voided';
     if (isReversed) {
       itemStatus = 'Voided';
-    } else if (type === 'SUPPLIER_INVOICE' || type === 'GOODS_RECEIPT') {
-      // Both new (SUPPLIER_INVOICE) and historical (GOODS_RECEIPT) AP credits = Open
+    } else if (type === 'SUPPLIER_INVOICE') {
       itemStatus = 'Open';
     } else if (type === 'RETURN_GRN' || type === 'SUPPLIER_CREDIT_NOTE') {
       itemStatus = 'Return';

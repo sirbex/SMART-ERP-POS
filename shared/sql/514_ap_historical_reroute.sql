@@ -75,7 +75,7 @@ BEGIN
       lt."Id"              AS txn_id,
       lt."ReferenceId"     AS grn_id,
       lt."ReferenceNumber" AS grn_number,
-      lt."EntryDate"       AS entry_date,
+      le."EntryDate"       AS entry_date,
       le."CreditAmount"    AS amount,
       le."EntityId"        AS supplier_id,
       si."Id"              AS invoice_id,
@@ -107,9 +107,10 @@ BEGIN
     v_txn_id := gen_random_uuid();
 
     INSERT INTO ledger_transactions (
-      "Id", "EntryDate", "Description", "ReferenceType", "ReferenceId",
+      "Id", "TransactionDate", "Description", "ReferenceType", "ReferenceId",
       "ReferenceNumber", "Status", "PostingSource", "IdempotencyKey",
-      "CreatedBy", "CreatedAt", "UpdatedAt", "TransactionNumber"
+      "CreatedBy", "CreatedAt", "UpdatedAt", "TransactionNumber",
+      "TotalDebitAmount", "TotalCreditAmount", "IsReversed"
     ) VALUES (
       v_txn_id,
       r.entry_date,
@@ -122,20 +123,24 @@ BEGIN
       v_idem_reversal,
       v_system_user,
       NOW(), NOW(),
-      v_txn_number
+      v_txn_number,
+      r.amount, r.amount, FALSE
     );
 
     INSERT INTO ledger_entries (
       "Id", "TransactionId", "AccountId", "EntryDate",
+      "EntryType", "Amount", "LineNumber",
       "DebitAmount", "CreditAmount", "Description",
       "EntityType", "EntityId", "CreatedAt"
     ) VALUES
     -- DR AP (2100)
     (gen_random_uuid(), v_txn_id, v_account_2100, r.entry_date,
+     'DEBIT', r.amount, 1,
      r.amount, 0, 'Historical: remove GRN ' || r.grn_number || ' from AP',
      'supplier', r.supplier_id, NOW()),
     -- CR GRIR Clearing (2150)
     (gen_random_uuid(), v_txn_id, v_account_2150, r.entry_date,
+     'CREDIT', r.amount, 2,
      0, r.amount, 'Historical: route GRN ' || r.grn_number || ' through GRIR',
      'supplier', r.supplier_id, NOW());
 
@@ -151,9 +156,10 @@ BEGIN
       v_txn_id := gen_random_uuid();
 
       INSERT INTO ledger_transactions (
-        "Id", "EntryDate", "Description", "ReferenceType", "ReferenceId",
+        "Id", "TransactionDate", "Description", "ReferenceType", "ReferenceId",
         "ReferenceNumber", "Status", "PostingSource", "IdempotencyKey",
-        "CreatedBy", "CreatedAt", "UpdatedAt", "TransactionNumber"
+        "CreatedBy", "CreatedAt", "UpdatedAt", "TransactionNumber",
+        "TotalDebitAmount", "TotalCreditAmount", "IsReversed"
       ) VALUES (
         v_txn_id,
         COALESCE(r.invoice_date, r.entry_date),
@@ -166,20 +172,24 @@ BEGIN
         v_idem_invoice,
         v_system_user,
         NOW(), NOW(),
-        v_txn_number
+        v_txn_number,
+        r.amount, r.amount, FALSE
       );
 
       INSERT INTO ledger_entries (
         "Id", "TransactionId", "AccountId", "EntryDate",
+        "EntryType", "Amount", "LineNumber",
         "DebitAmount", "CreditAmount", "Description",
         "EntityType", "EntityId", "CreatedAt"
       ) VALUES
       -- DR GRIR Clearing (2150)
       (gen_random_uuid(), v_txn_id, v_account_2150, COALESCE(r.invoice_date, r.entry_date),
+       'DEBIT', r.amount, 1,
        r.amount, 0, 'Historical: clear GRIR for invoice ' || r.invoice_number,
        'supplier', r.supplier_id, NOW()),
       -- CR AP (2100)
       (gen_random_uuid(), v_txn_id, v_account_2100, COALESCE(r.invoice_date, r.entry_date),
+       'CREDIT', r.amount, 2,
        0, r.amount, 'Historical: AP for invoice ' || r.invoice_number,
        'supplier', r.supplier_id, NOW());
     END IF;
