@@ -1036,7 +1036,7 @@ export async function findUnbilledGRNs(
            gr.received_date::text AS "receiptDate",
            po.supplier_id         AS "supplierId",
            s."CompanyName"        AS "supplierName",
-           COALESCE(SUM(gri.received_quantity * gri.unit_cost)
+           COALESCE(SUM(gri.received_quantity * gri.cost_price)
                     FILTER (WHERE NOT COALESCE(gri.is_bonus, FALSE)), 0) AS "totalAmount",
            COUNT(gri.id)::int     AS "itemCount"
          FROM goods_receipts gr
@@ -1053,7 +1053,7 @@ export async function findUnbilledGRNs(
                AND si.deleted_at IS NULL
            )
          GROUP BY gr.id, gr.receipt_number, gr.received_date, po.supplier_id, s."CompanyName"
-         HAVING COALESCE(SUM(gri.received_quantity * gri.unit_cost)
+         HAVING COALESCE(SUM(gri.received_quantity * gri.cost_price)
                          FILTER (WHERE NOT COALESCE(gri.is_bonus, FALSE)), 0) > 0
          ORDER BY gr.received_date DESC`,
         params,
