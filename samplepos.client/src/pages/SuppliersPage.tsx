@@ -2205,19 +2205,19 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     </>
                   )}
                 </div>
-                {/* Row 2: status filters + search */}
+                {/* Row 2: status filter dropdown + search */}
                 <div className="flex flex-wrap gap-2 items-center">
-                  <div className="flex flex-wrap gap-1">
-                    {(['all', 'Open', 'Return', 'Applied', 'Voided'] as const).map((f) => (
-                      <button
-                        key={f}
-                        onClick={() => { setLedgerFilter(f); setLedgerPage(1); }}
-                        className={`px-2.5 py-1 text-xs rounded-full font-medium ${ledgerFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                      >
-                        {f === 'all' ? 'All' : f}
-                      </button>
-                    ))}
-                  </div>
+                  <select
+                    value={ledgerFilter}
+                    onChange={(e) => { setLedgerFilter(e.target.value as typeof ledgerFilter); setLedgerPage(1); }}
+                    className="px-3 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="Open">Open</option>
+                    <option value="Return">Return</option>
+                    <option value="Applied">Applied</option>
+                    <option value="Voided">Voided</option>
+                  </select>
                   <input
                     type="text"
                     placeholder="Search doc #, ref, description..."
