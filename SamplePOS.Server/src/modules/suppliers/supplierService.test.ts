@@ -18,6 +18,7 @@ const mockCreate = jest.fn<MockFn>();
 const mockUpdate = jest.fn<MockFn>();
 const mockHasActivePurchaseOrders = jest.fn<MockFn>();
 const mockSoftDeleteSupplier = jest.fn<MockFn>();
+const mockGetTotalOutstanding = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./supplierRepository.js', () => ({
     findAll: mockFindAll,
@@ -29,6 +30,7 @@ jest.unstable_mockModule('./supplierRepository.js', () => ({
     update: mockUpdate,
     hasActivePurchaseOrders: mockHasActivePurchaseOrders,
     softDeleteSupplier: mockSoftDeleteSupplier,
+    getTotalOutstanding: mockGetTotalOutstanding,
 }));
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
@@ -66,6 +68,7 @@ describe('supplierService', () => {
         it('should return paginated suppliers', async () => {
             mockFindAll.mockResolvedValue([{ id: 's1', name: 'Acme' }]);
             mockCountAll.mockResolvedValue(1);
+            mockGetTotalOutstanding.mockResolvedValue(0);
 
             const result = await supplierService.getAllSuppliers(mockPool, 1, 20);
 
@@ -77,6 +80,7 @@ describe('supplierService', () => {
         it('should pass search term to repository when provided', async () => {
             mockFindAll.mockResolvedValue([{ id: 's1', name: 'Acme' }]);
             mockCountAll.mockResolvedValue(1);
+            mockGetTotalOutstanding.mockResolvedValue(0);
 
             await supplierService.getAllSuppliers(mockPool, 1, 20, 'acme');
 
@@ -87,6 +91,7 @@ describe('supplierService', () => {
         it('should treat blank search as no search', async () => {
             mockFindAll.mockResolvedValue([]);
             mockCountAll.mockResolvedValue(0);
+            mockGetTotalOutstanding.mockResolvedValue(0);
 
             await supplierService.getAllSuppliers(mockPool, 1, 20, '   ');
 

@@ -454,35 +454,35 @@ export default function SuppliersPage() {
         )}
 
         {/* Summary Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-600">Total Suppliers</div>
-            <div className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</div>
-            <div className="text-xs text-gray-500 mt-1">All registered vendors</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <div className="text-xs sm:text-sm text-gray-600">Total Suppliers</div>
+            <div className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{stats.total}</div>
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">All registered vendors</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-600">Active Suppliers</div>
-            <div className="text-2xl font-bold text-green-600 mt-1">{stats.active}</div>
-            <div className="text-xs text-gray-500 mt-1">Available for POs</div>
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <div className="text-xs sm:text-sm text-gray-600">Active Suppliers</div>
+            <div className="text-xl sm:text-2xl font-bold text-green-600 mt-1">{stats.active}</div>
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">Available for POs</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-600">Total Invoices</div>
-            <div className="text-2xl font-bold text-blue-600 mt-1">
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <div className="text-xs sm:text-sm text-gray-600">Total Invoices</div>
+            <div className="text-xl sm:text-2xl font-bold text-blue-600 mt-1">
               {invoiceSummary.totalInvoices}
             </div>
-            <div className="text-xs text-gray-500 mt-1">
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
               {invoiceSummary.unpaidInvoices > 0
                 ? `${invoiceSummary.unpaidInvoices} unpaid`
                 : 'All paid'}
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-600">Total Outstanding</div>
-            <div className="text-2xl font-bold text-red-600 mt-1">
+          <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+            <div className="text-xs sm:text-sm text-gray-600">Outstanding</div>
+            <div className="text-xl sm:text-2xl font-bold text-red-600 mt-1">
               {formatCurrencyTop(invoiceSummary.totalOutstanding)}
             </div>
-            <div className="text-xs text-gray-500 mt-1">
-              {invoiceSummary.unpaidInvoices > 0 ? `${invoiceSummary.unpaidInvoices} unpaid invoices` : 'Across all suppliers'}
+            <div className="text-xs text-gray-500 mt-1 hidden sm:block">
+              {invoiceSummary.unpaidInvoices > 0 ? `${invoiceSummary.unpaidInvoices} unpaid` : 'Across all suppliers'}
             </div>
           </div>
         </div>
@@ -872,22 +872,22 @@ export default function SuppliersPage() {
 
         {/* Pagination */}
         {suppliers.length > 0 && (
-          <div className="mt-6 flex justify-between items-center">
+          <div className="mt-6 flex flex-col sm:flex-row justify-between items-center gap-3">
             <div className="text-sm text-gray-600">
               Page {page} • Showing {suppliers.length} suppliers
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 w-full sm:w-auto">
               <button
                 onClick={() => setPage(Math.max(1, page - 1))}
                 disabled={page === 1}
-                className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 sm:flex-none px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ← Previous
               </button>
               <button
                 onClick={() => setPage(page + 1)}
                 disabled={suppliers.length < limit}
-                className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 sm:flex-none px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next →
               </button>
@@ -1294,76 +1294,48 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg p-4 sm:p-6 max-w-[95vw] sm:max-w-5xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-lg p-3 sm:p-6 max-w-[98vw] sm:max-w-5xl w-full mx-1 sm:mx-4 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold text-gray-900">{supplier.name}</h3>
+        <div className="flex justify-between items-start mb-4 sm:mb-6">
+          <div className="flex-1 min-w-0 pr-3">
+            <h3 className="text-lg sm:text-xl font-bold text-gray-900 truncate">{supplier.name}</h3>
+            {supplier.contactPerson && (
+              <p className="text-xs text-gray-500 mt-0.5 sm:hidden">{supplier.contactPerson}</p>
+            )}
+          </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 sm:gap-2 mb-6 border-b border-gray-200 overflow-x-auto">
-          <button
-            onClick={() => handleTabChange('info')}
-            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'info'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
+        {/* Tabs — scrollable on mobile */}
+        <div className="flex mb-4 sm:mb-6 border-b border-gray-200 overflow-x-auto scrollbar-none -mx-3 sm:mx-0 px-3 sm:px-0">
+          {([
+            { key: 'info', icon: '📋', label: 'Info' },
+            { key: 'performance', icon: '📊', label: 'Performance' },
+            { key: 'orders', icon: '📦', label: 'Orders' },
+            { key: 'products', icon: '🏷️', label: 'Items' },
+            { key: 'invoices', icon: '📄', label: 'Invoices' },
+            { key: 'ledger', icon: '📒', label: 'Ledger' },
+          ] as const).map(({ key, icon, label }) => (
+            <button
+              key={key}
+              onClick={() => handleTabChange(key)}
+              className={`flex-shrink-0 flex items-center gap-1 px-2.5 sm:px-4 py-2 font-medium text-xs sm:text-sm whitespace-nowrap border-b-2 transition-colors ${
+                activeTab === key
+                  ? 'text-blue-600 border-blue-600'
+                  : 'text-gray-500 border-transparent hover:text-gray-900 hover:border-gray-300'
               }`}
-          >
-            📋 Info
-          </button>
-          <button
-            onClick={() => handleTabChange('performance')}
-            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'performance'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
-          >
-            📊 Performance
-          </button>
-          <button
-            onClick={() => handleTabChange('orders')}
-            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'orders'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
-          >
-            📦 Orders
-          </button>
-          <button
-            onClick={() => handleTabChange('products')}
-            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'products'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
-          >
-            🏷️ Items
-          </button>
-          <button
-            onClick={() => handleTabChange('invoices')}
-            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'invoices'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
-          >
-            📄 Invoices
-          </button>
-          <button
-            onClick={() => handleTabChange('ledger')}
-            className={`px-3 sm:px-4 py-2 font-medium text-sm whitespace-nowrap ${activeTab === 'ledger'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
-          >
-            📒 Ledger
-          </button>
+            >
+              <span>{icon}</span>
+              <span className="hidden xs:inline sm:inline">{label}</span>
+            </button>
+          ))}
         </div>
 
         {/* Tab Content */}
@@ -1371,7 +1343,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           {activeTab === 'info' && (
             <div>
               {/* Supplier Info Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                 {/* Left Column */}
                 <div className="space-y-4">
                   <div>
@@ -1469,16 +1441,16 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               )}
 
               {/* Quick Stats */}
-              <div className="mb-6 grid grid-cols-3 gap-4">
-                <div className="bg-blue-50 rounded-lg p-3 text-center">
+              <div className="mb-6 grid grid-cols-3 gap-2 sm:gap-4">
+                <div className="bg-blue-50 rounded-lg p-2 sm:p-3 text-center">
                   <div className="text-xs text-blue-600 mb-1">Supplier ID</div>
-                  <div className="text-sm font-mono text-blue-900">
+                  <div className="text-xs sm:text-sm font-mono text-blue-900">
                     {supplier.id.slice(0, 8)}...
                   </div>
                 </div>
-                <div className="bg-purple-50 rounded-lg p-3 text-center">
-                  <div className="text-xs text-purple-600 mb-1">Payment Days</div>
-                  <div className="text-lg font-bold text-purple-900">
+                <div className="bg-purple-50 rounded-lg p-2 sm:p-3 text-center">
+                  <div className="text-xs text-purple-600 mb-1">Pay Days</div>
+                  <div className="text-base sm:text-lg font-bold text-purple-900">
                     {paymentTermInfo?.days !== undefined
                       ? paymentTermInfo.days >= 0
                         ? `${paymentTermInfo.days} days`
@@ -1486,9 +1458,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       : 'N/A'}
                   </div>
                 </div>
-                <div className="bg-green-50 rounded-lg p-3 text-center">
+                <div className="bg-green-50 rounded-lg p-2 sm:p-3 text-center">
                   <div className="text-xs text-green-600 mb-1">Status</div>
-                  <div className="text-sm font-bold text-green-900">
+                  <div className="text-xs sm:text-sm font-bold text-green-900">
                     {supplier.isActive ? 'Active' : 'Inactive'}
                   </div>
                 </div>
@@ -1505,7 +1477,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               ) : performance ? (
                 <div>
                   {/* Performance Metrics */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6">
                     <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
                       <div className="text-xs text-blue-600 mb-1">Total Orders</div>
                       <div className="text-2xl font-bold text-blue-900">
@@ -1533,7 +1505,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   </div>
 
                   {/* Financial Summary */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                     <div className="bg-white border-2 border-blue-200 rounded-lg p-6">
                       <div className="text-sm text-gray-600 mb-2">Total Purchase Value</div>
                       <div className="text-3xl font-bold text-blue-600">
@@ -1628,57 +1600,55 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <div className="text-gray-600">Loading products...</div>
                 </div>
               ) : products.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Product
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Orders
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Total Qty
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Avg Cost
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                          Price Range
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                          Last Order
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {products.map((product: SupplierProduct, idx: number) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                            {product.productName}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {product.orderCount}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
-                            {product.totalQuantity}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900">
-                            {formatCurrency(product.avgUnitCost)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {formatCurrency(product.minUnitCost)} -{' '}
-                            {formatCurrency(product.maxUnitCost)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">
-                            {formatDisplayDate(product.lastOrderDate)}
-                          </td>
+                <>
+                  {/* Mobile card layout */}
+                  <div className="block sm:hidden space-y-3">
+                    {products.map((product: SupplierProduct, idx: number) => (
+                      <div key={idx} className="border border-gray-200 rounded-lg p-3">
+                        <div className="font-medium text-gray-900 mb-2">{product.productName}</div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                          <span className="text-gray-500">Orders</span>
+                          <span className="text-right font-medium">{product.orderCount}</span>
+                          <span className="text-gray-500">Total Qty</span>
+                          <span className="text-right font-semibold">{product.totalQuantity}</span>
+                          <span className="text-gray-500">Avg Cost</span>
+                          <span className="text-right">{formatCurrency(product.avgUnitCost)}</span>
+                          <span className="text-gray-500">Range</span>
+                          <span className="text-right text-gray-600">{formatCurrency(product.minUnitCost)}–{formatCurrency(product.maxUnitCost)}</span>
+                          <span className="text-gray-500">Last Order</span>
+                          <span className="text-right">{formatDisplayDate(product.lastOrderDate)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Desktop table */}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Orders</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Qty</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Avg Cost</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Price Range</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Order</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {products.map((product: SupplierProduct, idx: number) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{product.productName}</td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">{product.orderCount}</td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{product.totalQuantity}</td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-900">{formatCurrency(product.avgUnitCost)}</td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(product.minUnitCost)} – {formatCurrency(product.maxUnitCost)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{formatDisplayDate(product.lastOrderDate)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               ) : (
                 <div className="text-center py-12 text-gray-500">No products supplied yet</div>
               )}
@@ -1694,7 +1664,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               ) : invoices.length > 0 ? (
                 <div className="space-y-3">
                   {/* Invoice Summary Cards */}
-                  <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
                     <div className="bg-blue-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-blue-600 mb-1">Total Invoices</div>
                       <div className="text-xl font-bold text-blue-900">{invoices.length}</div>
@@ -1730,38 +1700,56 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     </div>
                   </div>
 
-                  {/* Invoice List */}
-                  <div className="overflow-x-auto">
+                  {/* Invoice List — mobile cards + desktop table */}
+                  {/* Mobile cards */}
+                  <div className="block sm:hidden space-y-3">
+                    {invoices.map((inv: SupplierInvoiceSummary) => {
+                      const balance = Number(inv.outstandingBalance || 0);
+                      const statusColor =
+                        inv.status === 'Paid' ? 'bg-green-100 text-green-800'
+                        : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
+                        : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
+                        : 'bg-gray-100 text-gray-800';
+                      return (
+                        <div key={inv.id} className="border border-gray-200 rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-semibold text-blue-600 text-sm">{inv.invoiceNumber}</span>
+                            <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
+                            <span className="text-gray-500">Date</span>
+                            <span className="text-right">{formatDisplayDate(inv.invoiceDate)}</span>
+                            <span className="text-gray-500">Due</span>
+                            <span className="text-right">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '—'}</span>
+                            <span className="text-gray-500">Total</span>
+                            <span className="text-right font-semibold">{formatCurrency(Number(inv.totalAmount || 0))}</span>
+                            <span className="text-gray-500">Paid</span>
+                            <span className="text-right text-green-600">{formatCurrency(Number(inv.amountPaid || 0))}</span>
+                            {balance > 0 && <><span className="text-gray-500">Balance</span><span className="text-right font-bold text-red-600">{formatCurrency(balance)}</span></>}
+                          </div>
+                          <div className="flex gap-2 pt-2 border-t border-gray-100">
+                            <button onClick={() => loadInvoiceDetails(inv.id)} className="flex-1 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">👁️ View</button>
+                            <button onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)} disabled={downloadingPdf === inv.id} className="flex-1 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50">{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
+                            {balance > 0 && <button onClick={() => openPayModal(inv)} className="flex-1 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-semibold">💰 Pay</button>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Desktop table */}
+                  <div className="hidden sm:block overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Invoice #
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Ref
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Date
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Due Date
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Status
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                            Total
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                            Paid
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                            Balance
-                          </th>
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
-                            Actions
-                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1779,68 +1767,23 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                   : 'bg-gray-100 text-gray-800';
                           return (
                             <tr key={inv.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm font-medium text-blue-600">
-                                {inv.invoiceNumber}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
-                                {inv.supplierInvoiceNumber || '-'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-900">
-                                {formatDisplayDate(inv.invoiceDate)}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600">
-                                {inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}
-                              </td>
+                              <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
                               <td className="px-4 py-3">
-                                <span
-                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}
-                                >
-                                  {inv.status}
-                                </span>
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
                               </td>
-                              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
-                                {formatCurrency(total)}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right text-green-600">
-                                {formatCurrency(paid)}
-                              </td>
+                              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
+                              <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
                               <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
-                                {balance > 0 ? (
-                                  formatCurrency(balance)
-                                ) : balance < 0 ? (
-                                  <span className="text-green-600">
-                                    Overpaid {formatCurrency(Math.abs(balance))}
-                                  </span>
-                                ) : (
-                                  <span className="text-green-600">Paid</span>
-                                )}
+                                {balance > 0 ? formatCurrency(balance) : balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  <button
-                                    onClick={() => loadInvoiceDetails(inv.id)}
-                                    className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
-                                    title="View Details"
-                                  >
-                                    👁️ View
-                                  </button>
-                                  <button
-                                    onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
-                                    disabled={downloadingPdf === inv.id}
-                                    className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50"
-                                    title="Download PDF"
-                                  >
-                                    {downloadingPdf === inv.id ? '⏳' : '📄'} PDF
-                                  </button>
-                                  {balance > 0 && (
-                                    <button
-                                      onClick={() => openPayModal(inv)}
-                                      className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold"
-                                      title="Record Payment"
-                                    >
-                                      💰 Pay
-                                    </button>
-                                  )}
+                                  <button onClick={() => loadInvoiceDetails(inv.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors" title="View Details">👁️ View</button>
+                                  <button onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)} disabled={downloadingPdf === inv.id} className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50" title="Download PDF">{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
+                                  {balance > 0 && <button onClick={() => openPayModal(inv)} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold" title="Record Payment">💰 Pay</button>}
                                 </div>
                               </td>
                             </tr>
@@ -2082,56 +2025,48 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
           {activeTab === 'ledger' && (
             <div>
               {/* Date range + filter bar */}
-              <div className="flex flex-wrap gap-3 mb-4 items-end">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
-                  <input
-                    type="date"
-                    value={ledgerStartDate}
-                    onChange={(e) => setLedgerStartDate(e.target.value)}
-                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
-                  />
+              <div className="space-y-3 mb-4">
+                {/* Row 1: date range + actions */}
+                <div className="flex flex-wrap gap-2 items-end">
+                  <div className="flex-1 min-w-[130px]">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+                    <input
+                      type="date"
+                      value={ledgerStartDate}
+                      onChange={(e) => setLedgerStartDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[130px]">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+                    <input
+                      type="date"
+                      value={ledgerEndDate}
+                      onChange={(e) => setLedgerEndDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <button
+                    onClick={() => loadLedger(ledgerStartDate, ledgerEndDate)}
+                    disabled={ledgerLoading}
+                    className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {ledgerLoading ? '⏳' : '🔍 Fetch'}
+                  </button>
+                  {ledger && (
+                    <>
+                      <button onClick={handleExportCSV} className="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700" title="Download CSV">⬇ CSV</button>
+                      <button onClick={handleExportPDF} className="px-3 py-1.5 bg-rose-600 text-white text-sm rounded-lg hover:bg-rose-700" title="Print / Save PDF">🖨 PDF</button>
+                    </>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
-                  <input
-                    type="date"
-                    value={ledgerEndDate}
-                    onChange={(e) => setLedgerEndDate(e.target.value)}
-                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <button
-                  onClick={() => loadLedger(ledgerStartDate, ledgerEndDate)}
-                  disabled={ledgerLoading}
-                  className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {ledgerLoading ? '⏳ Loading...' : '🔍 Fetch'}
-                </button>
-                {ledger && (
-                  <>
-                    <button
-                      onClick={handleExportCSV}
-                      className="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 flex items-center gap-1"
-                      title="Download CSV"
-                    >
-                      ⬇ CSV
-                    </button>
-                    <button
-                      onClick={handleExportPDF}
-                      className="px-3 py-1.5 bg-rose-600 text-white text-sm rounded-lg hover:bg-rose-700 flex items-center gap-1"
-                      title="Print / Save PDF"
-                    >
-                      🖨 PDF
-                    </button>
-                  </>
-                )}
-                <div className="flex gap-1 ml-auto">
+                {/* Row 2: status filters */}
+                <div className="flex flex-wrap gap-1">
                   {(['all', 'Open', 'Return', 'Applied', 'Voided'] as const).map((f) => (
                     <button
                       key={f}
                       onClick={() => setLedgerFilter(f)}
-                      className={`px-3 py-1 text-xs rounded-full font-medium ${ledgerFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                      className={`px-2.5 py-1 text-xs rounded-full font-medium ${ledgerFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                     >
                       {f === 'all' ? 'All' : f}
                     </button>
@@ -2228,12 +2163,11 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                 {formatCurrency(entry.balanceAfter)}
                               </td>
                               <td className="px-3 py-2 text-center">
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' :
-                                  entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' :
-                                  entry.itemStatus === 'Return' ? 'bg-amber-100 text-amber-700' :
-                                  'bg-gray-100 text-gray-500'
-                                }`}>
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' :
+                                    entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' :
+                                      entry.itemStatus === 'Return' ? 'bg-amber-100 text-amber-700' :
+                                        'bg-gray-100 text-gray-500'
+                                  }`}>
                                   {entry.itemStatus}
                                 </span>
                                 {entry.itemStatus === 'Applied' && entry.paymentMethod && (
@@ -2419,17 +2353,17 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
         )}
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-6">
+        <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-4 sm:mt-6">
           <button
             onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
           >
             Close
           </button>
           {onEdit && (
             <button
               onClick={onEdit}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 text-sm"
             >
               ✏️ Edit Supplier
             </button>
