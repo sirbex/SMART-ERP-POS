@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import Decimal from 'decimal.js';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import Layout from '../components/Layout';
 import {
   useSuppliers,
@@ -1157,75 +1159,86 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     const filteredEntries = ledger.entries.filter(
       (e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter,
     );
-    const fmt = (n: number) => n.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-    const statusColor = (s: string) => {
-      if (s === 'Open') return '#b91c1c';
-      if (s === 'Applied') return '#15803d';
-      if (s === 'Return') return '#b45309';
-      return '#6b7280';
-    };
-    const rows = filteredEntries
-      .map(
-        (e) => `
-      <tr>
-        <td>${e.date}</td>
-        <td style="font-family:monospace">${e.docNumber || '—'}</td>
-        <td>${(e.type || '').replace(/_/g, ' ')}</td>
-        <td>${e.reference || '—'}</td>
-        <td class="desc">${e.description || '—'}</td>
-        <td class="num" style="color:#b91c1c">${e.debit > 0 ? fmt(e.debit) : '—'}</td>
-        <td class="num" style="color:#15803d">${e.credit > 0 ? fmt(e.credit) : '—'}</td>
-        <td class="num">${fmt(e.balanceAfter)}</td>
-        <td style="color:${statusColor(e.itemStatus)};font-weight:600">${e.itemStatus}${e.paymentMethod ? ` <small style="color:#6b7280;font-weight:400">(${e.paymentMethod.replace(/_/g, ' ')})</small>` : ''}</td>
-      </tr>`,
-      )
-      .join('');
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<title>Supplier Ledger — ${ledger.supplierName}</title>
-<style>
-  body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
-  h2 { margin: 0 0 2px; font-size: 15px; }
-  .sub { color: #555; font-size: 11px; margin-bottom: 14px; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: #f3f4f6; border-bottom: 2px solid #d1d5db; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
-  td { border-bottom: 1px solid #e5e7eb; padding: 5px 8px; vertical-align: top; }
-  .num { text-align: right; white-space: nowrap; }
-  .desc { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .opening { background: #fefce8; font-style: italic; }
-  .summary { margin-top: 12px; display: flex; gap: 24px; }
-  .card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 14px; min-width: 120px; }
-  .card .label { font-size: 10px; color: #6b7280; }
-  .card .value { font-size: 13px; font-weight: 700; margin-top: 2px; }
-  @media print { body { margin: 10px; } }
-</style></head><body>
-<h2>Supplier Ledger Statement</h2>
-<div class="sub">${ledger.supplierName} &nbsp;|&nbsp; Period: ${ledger.periodStart} to ${ledger.periodEnd}</div>
-<table>
-  <thead><tr>
-    <th>Date</th><th>Doc No</th><th>Type</th><th>Reference</th><th>Description</th>
-    <th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th><th>Status</th>
-  </tr></thead>
-  <tbody>
-    <tr class="opening">
-      <td>${ledger.periodStart}</td><td colspan="6"><em>Opening Balance</em></td>
-      <td class="num">${fmt(ledger.openingBalance)}</td><td></td>
-    </tr>
-    ${rows}
-  </tbody>
-</table>
-<div class="summary">
-  <div class="card"><div class="label">Opening Balance</div><div class="value">${fmt(ledger.openingBalance)}</div></div>
-  <div class="card"><div class="label">Total Invoiced</div><div class="value" style="color:#b91c1c">${fmt(ledger.entries.reduce((s, e) => s + e.debit, 0))}</div></div>
-  <div class="card"><div class="label">Total Paid/Returned</div><div class="value" style="color:#15803d">${fmt(ledger.entries.reduce((s, e) => s + e.credit, 0))}</div></div>
-  <div class="card"><div class="label">Closing Balance</div><div class="value" style="color:#1d4ed8">${fmt(ledger.closingBalance)}</div></div>
-</div>
-</body></html>`;
-    const w = window.open('', '_blank', 'width=1000,height=750');
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 600);
+    const fmt = (n: number) =>
+      n.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    // Header
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Supplier Ledger Statement', 14, 16);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    doc.text(`${ledger.supplierName}   |   Period: ${ledger.periodStart} to ${ledger.periodEnd}`, 14, 22);
+    doc.setTextColor(0, 0, 0);
+
+    // Opening balance row + transaction rows
+    const openingRow = [ledger.periodStart, '—', 'Opening Balance', '—', '—', '', '', fmt(ledger.openingBalance), ''];
+    const dataRows = filteredEntries.map((e) => [
+      e.date,
+      e.docNumber || '—',
+      (e.type || '').replace(/_/g, ' '),
+      e.reference || '—',
+      e.description || '—',
+      e.debit > 0 ? fmt(e.debit) : '',
+      e.credit > 0 ? fmt(e.credit) : '',
+      fmt(e.balanceAfter),
+      e.itemStatus + (e.paymentMethod ? ` (${e.paymentMethod.replace(/_/g, ' ')})` : ''),
+    ]);
+
+    autoTable(doc, {
+      startY: 27,
+      head: [['Date', 'Doc No', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance', 'Status']],
+      body: [openingRow, ...dataRows],
+      styles: { fontSize: 7.5, cellPadding: 1.8, overflow: 'ellipsize' },
+      headStyles: { fillColor: [243, 244, 246], textColor: [30, 30, 30], fontStyle: 'bold', fontSize: 7 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 24, font: 'courier' },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 22 },
+        4: { cellWidth: 'auto' },
+        5: { cellWidth: 22, halign: 'right', textColor: [185, 28, 28] },
+        6: { cellWidth: 22, halign: 'right', textColor: [21, 128, 61] },
+        7: { cellWidth: 24, halign: 'right', textColor: [29, 78, 216] },
+        8: { cellWidth: 28 },
+      },
+      didParseCell: (data) => {
+        // Highlight opening balance row
+        if (data.row.index === 0) {
+          data.cell.styles.fillColor = [254, 252, 232];
+          data.cell.styles.fontStyle = 'italic';
+        }
+      },
+    });
+
+    // Summary footer
+    const finalY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+    const totalDebits = ledger.entries.reduce((s, e) => s + e.debit, 0);
+    const totalCredits = ledger.entries.reduce((s, e) => s + e.credit, 0);
+    const summaryItems = [
+      ['Opening Balance', fmt(ledger.openingBalance)],
+      ['Total Invoiced', fmt(totalDebits)],
+      ['Total Paid / Returned', fmt(totalCredits)],
+      ['Closing Balance', fmt(ledger.closingBalance)],
+    ];
+    let x = 14;
+    summaryItems.forEach(([label, value]) => {
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 100, 100);
+      doc.text(label, x, finalY);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text(value, x, finalY + 5);
+      x += 55;
+    });
+
+    const filename = `supplier-ledger-${ledger.supplierName.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${ledger.periodStart}-${ledger.periodEnd}.pdf`;
+    doc.save(filename);
   };
 
   const openPayModal = (inv: SupplierInvoiceSummary) => {
