@@ -987,6 +987,9 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [ledgerStartDate, setLedgerStartDate] = useState(defaultStart);
   const [ledgerEndDate, setLedgerEndDate] = useState(defaultEnd);
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'Open' | 'Return' | 'Applied' | 'Voided'>('all');
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const LEDGER_PAGE_SIZE = 25;
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
 
@@ -1022,6 +1025,32 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     const start = (invoicePage - 1) * INVOICE_PAGE_SIZE;
     return filteredInvoices.slice(start, start + INVOICE_PAGE_SIZE);
   }, [filteredInvoices, invoicePage, INVOICE_PAGE_SIZE]);
+
+  // Filtered + paginated ledger entries
+  const filteredLedgerEntries = useMemo(() => {
+    const entries = ledger?.entries ?? [];
+    let result = entries;
+    if (ledgerFilter !== 'all') {
+      result = result.filter((e) => e.itemStatus === ledgerFilter);
+    }
+    const q = ledgerSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(
+        (e) =>
+          (e.docNumber ?? '').toLowerCase().includes(q) ||
+          (e.reference ?? '').toLowerCase().includes(q) ||
+          (e.description ?? '').toLowerCase().includes(q) ||
+          (e.type ?? '').toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [ledger, ledgerFilter, ledgerSearch]);
+
+  const ledgerTotalPages = Math.max(1, Math.ceil(filteredLedgerEntries.length / LEDGER_PAGE_SIZE));
+  const paginatedLedgerEntries = useMemo(() => {
+    const start = (ledgerPage - 1) * LEDGER_PAGE_SIZE;
+    return filteredLedgerEntries.slice(start, start + LEDGER_PAGE_SIZE);
+  }, [filteredLedgerEntries, ledgerPage, LEDGER_PAGE_SIZE]);
 
   const paymentTermInfo = PAYMENT_TERMS.find((t) => t.value === supplier.paymentTerms);
 
@@ -2176,17 +2205,26 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     </>
                   )}
                 </div>
-                {/* Row 2: status filters */}
-                <div className="flex flex-wrap gap-1">
-                  {(['all', 'Open', 'Return', 'Applied', 'Voided'] as const).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => setLedgerFilter(f)}
-                      className={`px-2.5 py-1 text-xs rounded-full font-medium ${ledgerFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                    >
-                      {f === 'all' ? 'All' : f}
-                    </button>
-                  ))}
+                {/* Row 2: status filters + search */}
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex flex-wrap gap-1">
+                    {(['all', 'Open', 'Return', 'Applied', 'Voided'] as const).map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => { setLedgerFilter(f); setLedgerPage(1); }}
+                        className={`px-2.5 py-1 text-xs rounded-full font-medium ${ledgerFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                      >
+                        {f === 'all' ? 'All' : f}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Search doc #, ref, description..."
+                    value={ledgerSearch}
+                    onChange={(e) => { setLedgerSearch(e.target.value); setLedgerPage(1); }}
+                    className="flex-1 min-w-[180px] px-3 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
 
@@ -2258,9 +2296,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           <td className="px-3 py-2 text-right text-xs font-bold text-gray-800">{formatCurrency(ledger.openingBalance)}</td>
                           <td></td>
                         </tr>
-                        {ledger.entries
-                          .filter((e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter)
-                          .map((entry, idx) => (
+                        {paginatedLedgerEntries.map((entry, idx) => (
                             <tr key={idx} className={`hover:bg-gray-50 ${entry.itemStatus === 'Voided' ? 'opacity-50 line-through' : ''}`}>
                               <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{entry.date}</td>
                               <td className="px-3 py-2 text-xs font-mono text-blue-700 whitespace-nowrap">{entry.docNumber || '—'}</td>
@@ -2294,7 +2330,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                               </td>
                             </tr>
                           ))}
-                        {ledger.entries.filter((e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter).length === 0 && (
+                        {filteredLedgerEntries.length === 0 && (
                           <tr>
                             <td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
                               No entries match the selected filter.
@@ -2304,6 +2340,55 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Pagination */}
+                  {ledgerTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-200 mt-2">
+                      <span className="text-xs text-gray-500">
+                        Showing {Math.min((ledgerPage - 1) * LEDGER_PAGE_SIZE + 1, filteredLedgerEntries.length)}–{Math.min(ledgerPage * LEDGER_PAGE_SIZE, filteredLedgerEntries.length)} of {filteredLedgerEntries.length}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setLedgerPage((p) => Math.max(1, p - 1))}
+                          disabled={ledgerPage === 1}
+                          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          ‹ Prev
+                        </button>
+                        {Array.from({ length: ledgerTotalPages }, (_, i) => i + 1)
+                          .filter((p) => p === 1 || p === ledgerTotalPages || Math.abs(p - ledgerPage) <= 1)
+                          .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                            if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                            acc.push(p);
+                            return acc;
+                          }, [])
+                          .map((p, i) =>
+                            p === '...' ? (
+                              <span key={`ellipsis-${i}`} className="px-1 text-xs text-gray-400">…</span>
+                            ) : (
+                              <button
+                                key={p}
+                                onClick={() => setLedgerPage(p as number)}
+                                className={`px-2 py-1 text-xs border rounded ${
+                                  ledgerPage === p
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'border-gray-300 hover:bg-gray-100'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            )
+                          )}
+                        <button
+                          onClick={() => setLedgerPage((p) => Math.min(ledgerTotalPages, p + 1))}
+                          disabled={ledgerPage === ledgerTotalPages}
+                          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Next ›
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
