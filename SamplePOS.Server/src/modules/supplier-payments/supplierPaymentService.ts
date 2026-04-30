@@ -432,11 +432,18 @@ export async function createSupplierInvoice(
         const taxAmount = new Decimal(0); // Can be calculated if tax logic is needed
         const totalAmount = subtotal.plus(taxAmount);
 
+        // Default dueDate to invoiceDate + 30 days when not provided (DueDate is NOT NULL in DB)
+        const resolvedDueDate = data.dueDate || (() => {
+            const d = new Date(data.invoiceDate + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + 30);
+            return d.toISOString().slice(0, 10);
+        })();
+
         const invoice = await supplierPaymentRepository.createInvoice(client, {
             supplierId: data.supplierId,
             supplierInvoiceNumber: data.supplierInvoiceNumber,
             invoiceDate: data.invoiceDate,
-            dueDate: data.dueDate,
+            dueDate: resolvedDueDate,
             subtotal: subtotal.toNumber(),
             taxAmount: taxAmount.toNumber(),
             totalAmount: totalAmount.toNumber(),

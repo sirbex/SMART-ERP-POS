@@ -51,7 +51,7 @@ const CreatePaymentSchema = z.object({
         .optional(),
     reference: z.string().optional(),
     notes: z.string().optional(),
-    targetInvoiceId: z.string().uuid().optional(),
+    targetInvoiceId: z.string().uuid().nullable().optional(),
 });
 const InvoicesQuerySchema = z.object({
     page: z
@@ -173,7 +173,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                     paymentDate: resolvedPaymentDate!,
                     reference: validated.reference,
                     notes: validated.notes,
-                    targetInvoiceId: validated.targetInvoiceId,
+                    targetInvoiceId: validated.targetInvoiceId ?? undefined,
                 },
                 userId
             );
