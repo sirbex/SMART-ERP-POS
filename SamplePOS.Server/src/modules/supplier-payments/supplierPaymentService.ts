@@ -491,7 +491,8 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
     return UnitOfWork.run(pool, async (client) => {
         // Fetch invoice with lock to prevent concurrent posting
         const result = await client.query(
-            `SELECT si."Id", si."SupplierInvoiceNumber", si."SupplierId", si."InvoiceDate",
+            `SELECT si."Id", si."SupplierInvoiceNumber", si."SupplierId",
+                    TO_CHAR(si."InvoiceDate", 'YYYY-MM-DD') AS "InvoiceDate",
                     si."TotalAmount", si.is_posted_to_gl, si."Status", si.deleted_at,
                     s."CompanyName" AS supplier_name
              FROM supplier_invoices si
