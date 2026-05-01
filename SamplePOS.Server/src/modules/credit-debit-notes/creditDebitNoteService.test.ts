@@ -905,6 +905,96 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             expect(reverseArgs.originalTransactionId).toBe('gl-txn-supp-1');
         });
     });
+
+    // ── Create: amount-only path (PRICE_CORRECTION without lines) ─
+
+    describe('createCreditNote — amount-only (PRICE_CORRECTION, no line items)', () => {
+        it('synthesizes a single "Price Correction" line with qty=1 and unitCost=amount', async () => {
+            mockSupplierRepo.getSupplierInvoiceById.mockResolvedValue(baseSupplierInvoice); // total=80000
+            mockSupplierRepo.getNotesForSupplierInvoice.mockResolvedValue([]);
+            mockSupplierRepo.generateSupplierCreditNoteNumber.mockResolvedValue('SCN-2026-0020');
+            mockSupplierRepo.createSupplierNote.mockResolvedValue({
+                id: 'scn-amount-1',
+                invoiceNumber: 'SCN-2026-0020',
+                documentType: 'SUPPLIER_CREDIT_NOTE',
+                status: 'DRAFT',
+                subtotal: 5000,
+                taxAmount: 0,
+                totalAmount: 5000,
+                supplierId: 'sup-001',
+                referenceInvoiceId: 'sinv-001',
+                issueDate: '2026-05-01',
+            });
+            mockSupplierRepo.createSupplierNoteLineItems.mockResolvedValue([]);
+
+            const result = await supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                invoiceId: 'sinv-001',
+                reason: 'Supplier overcharged — unit price correction',
+                noteType: 'PRICE_CORRECTION',
+                amount: 5000,   // no `lines` provided
+            });
+
+            expect(result.note.documentType).toBe('SUPPLIER_CREDIT_NOTE');
+            expect(result.note.status).toBe('DRAFT');
+
+            // createSupplierNote must have been called with correct totals derived from amount
+            const createArgs = mockSupplierRepo.createSupplierNote.mock.calls[0][1] as Record<string, unknown>;
+            expect(createArgs.subtotal).toBe(5000);
+            expect(createArgs.taxAmount).toBe(0);
+            expect(createArgs.totalAmount).toBe(5000);
+
+            // createSupplierNoteLineItems must receive the synthesized "Price Correction" line
+            const lineArgs = mockSupplierRepo.createSupplierNoteLineItems.mock.calls[0][2] as Array<Record<string, unknown>>;
+            expect(lineArgs).toHaveLength(1);
+            expect(lineArgs[0].productName).toBe('Price Correction');
+            expect(lineArgs[0].quantity).toBe(1);
+            expect(lineArgs[0].unitCost).toBe(5000);
+            expect(lineArgs[0].taxRate).toBe(0);
+        });
+
+        it('correctly calculates totals when amount-only path has tax (taxRate defaults to 0 for synthetic line)', async () => {
+            // The synthetic line created by the service always has taxRate:0.
+            // Tax is only applied when explicit lines carry taxRate > 0.
+            mockSupplierRepo.getSupplierInvoiceById.mockResolvedValue(baseSupplierInvoice);
+            mockSupplierRepo.getNotesForSupplierInvoice.mockResolvedValue([]);
+            mockSupplierRepo.generateSupplierCreditNoteNumber.mockResolvedValue('SCN-2026-0021');
+            mockSupplierRepo.createSupplierNote.mockResolvedValue({
+                id: 'scn-amount-2', invoiceNumber: 'SCN-2026-0021', documentType: 'SUPPLIER_CREDIT_NOTE',
+                status: 'DRAFT', subtotal: 10000, taxAmount: 0, totalAmount: 10000,
+                supplierId: 'sup-001', referenceInvoiceId: 'sinv-001', issueDate: '2026-05-01',
+            });
+            mockSupplierRepo.createSupplierNoteLineItems.mockResolvedValue([]);
+
+            await supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                invoiceId: 'sinv-001',
+                reason: 'Price correction allowance',
+                noteType: 'PRICE_CORRECTION',
+                amount: 10000,
+            });
+
+            const createArgs = mockSupplierRepo.createSupplierNote.mock.calls[0][1] as Record<string, unknown>;
+            // Synthetic line taxRate=0 → taxAmount must be 0, total = subtotal
+            expect(createArgs.taxAmount).toBe(0);
+            expect(createArgs.totalAmount).toBe(Number(createArgs.subtotal));
+        });
+
+        it('cumulative check applies to amount-only credit notes (prevents exceeding invoice total)', async () => {
+            // Invoice total=80000, existing=75000, amount=10000 → 85000 > 80000 → throw
+            mockSupplierRepo.getSupplierInvoiceById.mockResolvedValue(baseSupplierInvoice);
+            mockSupplierRepo.getNotesForSupplierInvoice.mockResolvedValue([
+                { totalAmount: '75000' },
+            ]);
+
+            await expect(
+                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                    invoiceId: 'sinv-001',
+                    reason: 'Should fail cumulative check',
+                    noteType: 'PRICE_CORRECTION',
+                    amount: 10000,  // 75000 + 10000 = 85000 > 80000
+                }),
+            ).rejects.toThrow(/would exceed invoice total/);
+        });
+    });
 });
 
 // ============================================================
@@ -915,6 +1005,73 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
 
 describe('supplierCreditDebitNoteService — Supplier Debit Note', () => {
     beforeEach(resetAll);
+
+    // ── Create: amount-only path ──────────────────────────────
+
+    describe('createDebitNote — amount-only (no line items)', () => {
+        it('synthesizes a single "Additional Charge" line with qty=1 and unitCost=amount', async () => {
+            mockSupplierRepo.getSupplierInvoiceById.mockResolvedValue(baseSupplierInvoice);
+            mockSupplierRepo.generateSupplierDebitNoteNumber.mockResolvedValue('SDN-2026-0020');
+            mockSupplierRepo.createSupplierNote.mockResolvedValue({
+                id: 'sdn-amount-1',
+                invoiceNumber: 'SDN-2026-0020',
+                documentType: 'SUPPLIER_DEBIT_NOTE',
+                status: 'DRAFT',
+                subtotal: 3000,
+                taxAmount: 0,
+                totalAmount: 3000,
+                supplierId: 'sup-001',
+                referenceInvoiceId: 'sinv-001',
+                issueDate: '2026-05-01',
+            });
+            mockSupplierRepo.createSupplierNoteLineItems.mockResolvedValue([]);
+
+            const result = await supplierCreditDebitNoteService.createDebitNote(mockPool, {
+                invoiceId: 'sinv-001',
+                reason: 'Additional handling fee',
+                amount: 3000,   // no `lines` provided
+            });
+
+            expect(result.note.documentType).toBe('SUPPLIER_DEBIT_NOTE');
+
+            // Repository called with correct totals
+            const createArgs = mockSupplierRepo.createSupplierNote.mock.calls[0][1] as Record<string, unknown>;
+            expect(createArgs.subtotal).toBe(3000);
+            expect(createArgs.taxAmount).toBe(0);
+            expect(createArgs.totalAmount).toBe(3000);
+
+            // Synthesized "Additional Charge" line
+            const lineArgs = mockSupplierRepo.createSupplierNoteLineItems.mock.calls[0][2] as Array<Record<string, unknown>>;
+            expect(lineArgs).toHaveLength(1);
+            expect(lineArgs[0].productName).toBe('Additional Charge');
+            expect(lineArgs[0].quantity).toBe(1);
+            expect(lineArgs[0].unitCost).toBe(3000);
+            expect(lineArgs[0].taxRate).toBe(0);
+        });
+
+        it('amount-only debit note is uncapped (can exceed original invoice total)', async () => {
+            // Invoice total=80000, amount=100000 → allowed (debit notes are uncapped)
+            mockSupplierRepo.getSupplierInvoiceById.mockResolvedValue(baseSupplierInvoice);
+            mockSupplierRepo.generateSupplierDebitNoteNumber.mockResolvedValue('SDN-2026-0021');
+            mockSupplierRepo.createSupplierNote.mockResolvedValue({
+                id: 'sdn-amount-2', invoiceNumber: 'SDN-2026-0021', documentType: 'SUPPLIER_DEBIT_NOTE',
+                status: 'DRAFT', subtotal: 100000, taxAmount: 0, totalAmount: 100000,
+                supplierId: 'sup-001', referenceInvoiceId: 'sinv-001', issueDate: '2026-05-01',
+            });
+            mockSupplierRepo.createSupplierNoteLineItems.mockResolvedValue([]);
+
+            await expect(
+                supplierCreditDebitNoteService.createDebitNote(mockPool, {
+                    invoiceId: 'sinv-001',
+                    reason: 'Large penalty charge',
+                    amount: 100000, // > 80000 original invoice — must be allowed
+                }),
+            ).resolves.toBeDefined();
+
+            // Cumulative check must NOT be called for debit notes
+            expect(mockSupplierRepo.getNotesForSupplierInvoice).not.toHaveBeenCalled();
+        });
+    });
 
     describe('createDebitNote — no cumulative cap', () => {
         it('does NOT check cumulative total for supplier debit notes', async () => {
