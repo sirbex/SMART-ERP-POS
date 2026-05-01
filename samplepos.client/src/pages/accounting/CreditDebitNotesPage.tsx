@@ -876,10 +876,10 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
         if (q.length < 2) { setInvoiceResults([]); return; }
         try {
             const res = await api.get('/supplier-payments/invoices', { params: { search: q, limit: 10 } });
-            const data = res.data?.data?.data || res.data?.data || [];
+            const data = res.data?.data?.items || res.data?.data?.data || res.data?.data || [];
             setInvoiceResults(data.map((inv: Record<string, unknown>) => ({
                 id: inv.id,
-                invoiceNumber: inv.supplierInvoiceNumber || inv.invoiceNumber,
+                invoiceNumber: inv.invoiceNumber || inv.supplierInvoiceNumber,
                 supplierName: inv.supplierName || '',
                 totalAmount: String(inv.totalAmount || 0),
             })));

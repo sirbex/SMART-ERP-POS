@@ -59,7 +59,7 @@ export const SupplierNoteLineItemSchema = z.object({
 export const CreateSupplierCreditNoteSchema = z.object({
     invoiceId: z.string().uuid('Supplier Invoice ID must be a valid UUID'),
     reason: z.string().min(1, 'Reason is required').max(500),
-    noteType: z.enum(['FULL', 'PARTIAL', 'PRICE_CORRECTION']),
+    noteType: z.enum(['FULL', 'PARTIAL', 'PRICE_CORRECTION']).default('PRICE_CORRECTION'),
     returnGrnId: z.string().uuid().optional(),
     issueDate: z.string().optional(),
     // For FULL/PARTIAL: lines required. For PRICE_CORRECTION: lines OR amount required.
