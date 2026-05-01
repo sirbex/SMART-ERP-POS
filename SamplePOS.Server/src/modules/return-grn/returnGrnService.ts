@@ -460,7 +460,7 @@ export const returnGrnService = {
             const scn = await supplierCreditDebitNoteRepository.createSupplierNote(client, {
                 invoiceNumber: scnNumber,
                 documentType: 'SUPPLIER_CREDIT_NOTE',
-                referenceInvoiceId: referenceInvoiceId ?? '',
+                referenceInvoiceId: referenceInvoiceId || null,
                 supplierId,
                 issueDate: getBusinessDate(),
                 subtotal: returnTotalNum,

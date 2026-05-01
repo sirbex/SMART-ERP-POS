@@ -2508,6 +2508,7 @@ export async function recordSupplierCreditNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_CREDIT_NOTE-${data.noteId}`,
+      source: 'PURCHASE_BILL' as const,
     }, pool, txClient);
 
     logger.info('Recorded supplier credit note to GL', {
@@ -2578,6 +2579,7 @@ export async function recordSupplierDebitNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_DEBIT_NOTE-${data.noteId}`,
+      source: 'INVENTORY_MOVE' as const,
     }, pool, txClient);
 
     logger.info('Recorded supplier debit note to GL', {

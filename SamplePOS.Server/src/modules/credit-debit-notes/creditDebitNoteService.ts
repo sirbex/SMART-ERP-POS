@@ -671,13 +671,12 @@ export const supplierCreditDebitNoteService = {
                 );
             } else {
                 await recordSupplierDebitNoteToGL(glData, pool);
-                // Increase AP on original invoice
-                await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
-                    client,
-                    note.referenceInvoiceId,
-                    note.totalAmount,
-                    'DEBIT',
-                );
+                // Debit notes track their additional AP obligation via the note's own
+                // OutstandingBalance in recalcSupplierBalance. Do NOT adjust the reference
+                // invoice's AmountPaid — that mechanism relies on AmountPaid > 0, and
+                // silently fails for unpaid invoices (clamped to 0), causing cancel to
+                // incorrectly reduce invoice OB. The note's OB in recalcSupplierBalance
+                // is the authoritative signal for this additional obligation.
             }
 
             // Recalculate supplier outstanding balance from sub-ledger (SSOT).
@@ -753,13 +752,9 @@ export const supplierCreditDebitNoteService = {
                     'DEBIT',
                 );
             } else {
-                // Debit note increased AP → reverse by reducing AP (credit direction)
-                await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
-                    client,
-                    noteData.referenceInvoiceId,
-                    noteData.totalAmount,
-                    'CREDIT',
-                );
+                // Debit note: no invoice balance was adjusted during post (see postNote),
+                // so no reversal is needed here. The note's CANCELLED status is sufficient
+                // for recalcSupplierBalance to exclude it from the total.
             }
 
             // Recalculate supplier outstanding balance from sub-ledger (SSOT).

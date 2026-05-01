@@ -631,7 +631,7 @@ export const supplierCreditDebitNoteRepository = {
         data: {
             invoiceNumber: string;
             documentType: SupplierDocumentType;
-            referenceInvoiceId: string;
+            referenceInvoiceId: string | null | undefined;
             supplierId: string;
             issueDate: string;
             subtotal: number;
