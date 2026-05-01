@@ -105,7 +105,8 @@ export interface CreateSupplierCreditNoteRequest {
     reason: string;
     noteType: 'FULL' | 'PARTIAL' | 'PRICE_CORRECTION';
     issueDate?: string;
-    lines: CreateSupplierNoteLineInput[];
+    lines?: CreateSupplierNoteLineInput[];
+    amount?: number;
     notes?: string;
 }
 
@@ -113,7 +114,8 @@ export interface CreateSupplierDebitNoteRequest {
     invoiceId: string;
     reason: string;
     issueDate?: string;
-    lines: CreateSupplierNoteLineInput[];
+    lines?: CreateSupplierNoteLineInput[];
+    amount?: number;
     notes?: string;
 }
 

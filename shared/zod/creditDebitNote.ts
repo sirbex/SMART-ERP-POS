@@ -62,17 +62,32 @@ export const CreateSupplierCreditNoteSchema = z.object({
     noteType: z.enum(['FULL', 'PARTIAL', 'PRICE_CORRECTION']),
     returnGrnId: z.string().uuid().optional(),
     issueDate: z.string().optional(),
-    lines: z.array(SupplierNoteLineItemSchema).min(1, 'At least one line item is required'),
+    // For FULL/PARTIAL: lines required. For PRICE_CORRECTION: lines OR amount required.
+    lines: z.array(SupplierNoteLineItemSchema).min(1).optional(),
+    amount: z.number().positive('Amount must be positive').optional(),
     notes: z.string().max(1000).optional(),
-}).strict();
+}).strict().refine(
+    (data) => {
+        if (data.noteType === 'PRICE_CORRECTION') {
+            return (data.lines != null && data.lines.length > 0) || (data.amount != null && data.amount > 0);
+        }
+        return data.lines != null && data.lines.length > 0;
+    },
+    { message: 'Line items are required for FULL/PARTIAL credit notes; amount or line items required for PRICE_CORRECTION' },
+);
 
 export const CreateSupplierDebitNoteSchema = z.object({
     invoiceId: z.string().uuid('Supplier Invoice ID must be a valid UUID'),
     reason: z.string().min(1, 'Reason is required').max(500),
     issueDate: z.string().optional(),
-    lines: z.array(SupplierNoteLineItemSchema).min(1, 'At least one line item is required'),
+    // Either line items or a single amount is required.
+    lines: z.array(SupplierNoteLineItemSchema).min(1).optional(),
+    amount: z.number().positive('Amount must be positive').optional(),
     notes: z.string().max(1000).optional(),
-}).strict();
+}).strict().refine(
+    (data) => (data.lines != null && data.lines.length > 0) || (data.amount != null && data.amount > 0),
+    { message: 'Either line items or an amount is required for a debit note' },
+);
 
 // Post note schema (transitions DRAFT → POSTED)
 export const PostNoteSchema = z.object({

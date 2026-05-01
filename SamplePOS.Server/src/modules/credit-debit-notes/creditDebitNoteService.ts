@@ -500,9 +500,14 @@ export const supplierCreditDebitNoteService = {
             if (invoice.documentType !== 'SUPPLIER_INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'CANCELLED' || invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
 
+            // Synthesize a single line for PRICE_CORRECTION when no line items are provided (amount-only path)
+            const effectiveCreditLines = (input.lines && input.lines.length > 0)
+                ? input.lines
+                : [{ productName: 'Price Correction', quantity: 1, unitCost: input.amount as number, taxRate: 0 }];
+
             let subtotal = Money.zero();
             let taxTotal = Money.zero();
-            for (const line of input.lines) {
+            for (const line of effectiveCreditLines) {
                 const lineAmount = Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost));
                 const lineTax = Money.multiply(lineAmount, Money.divide(Money.parseDb(line.taxRate ?? 0), Money.parseDb(100)));
                 subtotal = Money.add(subtotal, lineAmount);
@@ -564,10 +569,10 @@ export const supplierCreditDebitNoteService = {
             const lineItems = await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
                 client,
                 note.id,
-                input.lines.map(l => ({
-                    productId: l.productId || '',
+                effectiveCreditLines.map(l => ({
+                    productId: (l as { productId?: string }).productId || '',
                     productName: l.productName,
-                    description: l.description || null,
+                    description: (l as { description?: string }).description || null,
                     quantity: l.quantity,
                     unitCost: l.unitCost,
                     taxRate: l.taxRate ?? 0,
@@ -590,9 +595,14 @@ export const supplierCreditDebitNoteService = {
             if (invoice.documentType !== 'SUPPLIER_INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'CANCELLED' || invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
 
+            // Synthesize a single line when no line items are provided (amount-only path)
+            const effectiveDebitLines = (input.lines && input.lines.length > 0)
+                ? input.lines
+                : [{ productName: 'Additional Charge', quantity: 1, unitCost: input.amount as number, taxRate: 0 }];
+
             let subtotal = Money.zero();
             let taxTotal = Money.zero();
-            for (const line of input.lines) {
+            for (const line of effectiveDebitLines) {
                 const lineAmount = Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost));
                 const lineTax = Money.multiply(lineAmount, Money.divide(Money.parseDb(line.taxRate ?? 0), Money.parseDb(100)));
                 subtotal = Money.add(subtotal, lineAmount);
@@ -623,10 +633,10 @@ export const supplierCreditDebitNoteService = {
             const lineItems = await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
                 client,
                 note.id,
-                input.lines.map(l => ({
-                    productId: l.productId || '',
+                effectiveDebitLines.map(l => ({
+                    productId: (l as { productId?: string }).productId || '',
                     productName: l.productName,
-                    description: l.description || null,
+                    description: (l as { description?: string }).description || null,
                     quantity: l.quantity,
                     unitCost: l.unitCost,
                     taxRate: l.taxRate ?? 0,

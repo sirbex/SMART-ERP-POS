@@ -43,7 +43,6 @@ import {
     type CreateSupplierCreditNoteRequest,
     type CreateSupplierDebitNoteRequest,
     type CreateNoteLineInput,
-    type CreateSupplierNoteLineInput,
 } from '../../services/creditDebitNoteService';
 import { api } from '../../services/api';
 import { formatTimestampDate } from '../../utils/businessDate';
@@ -864,11 +863,8 @@ interface CreateSupplierNoteModalProps {
 function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateSupplierNoteModalProps) {
     const [invoiceId, setInvoiceId] = useState('');
     const [reason, setReason] = useState('');
-    const [cnType, setCnType] = useState<'FULL' | 'PARTIAL' | 'PRICE_CORRECTION'>('PARTIAL');
+    const [amount, setAmount] = useState('');
     const [additionalNotes, setAdditionalNotes] = useState('');
-    const [lines, setLines] = useState<CreateSupplierNoteLineInput[]>([
-        { productName: '', quantity: 1, unitCost: 0, taxRate: 0 },
-    ]);
     const [submitting, setSubmitting] = useState(false);
 
     // Invoice search
@@ -892,31 +888,11 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
         }
     };
 
-    const addLine = () => {
-        setLines([...lines, { productName: '', quantity: 1, unitCost: 0, taxRate: 0 }]);
-    };
-
-    const removeLine = (index: number) => {
-        if (lines.length <= 1) return;
-        setLines(lines.filter((_, i) => i !== index));
-    };
-
-    const updateLine = (index: number, field: keyof CreateSupplierNoteLineInput, value: string | number) => {
-        setLines(lines.map((l, i) => i === index ? { ...l, [field]: value } : l));
-    };
-
-    const lineTotal = (line: CreateSupplierNoteLineInput) => {
-        const sub = line.quantity * line.unitCost;
-        const tax = sub * (line.taxRate / 100);
-        return sub + tax;
-    };
-
-    const grandTotal = lines.reduce((sum, l) => sum + lineTotal(l), 0);
-
     const handleSubmit = async () => {
         if (!invoiceId) { toast.error('Please select a supplier invoice'); return; }
         if (!reason.trim()) { toast.error('Reason is required'); return; }
-        if (lines.some(l => !l.productName.trim())) { toast.error('All line items need a product name'); return; }
+        const parsedAmount = parseFloat(amount);
+        if (!amount || isNaN(parsedAmount) || parsedAmount <= 0) { toast.error('Amount must be a positive number'); return; }
 
         setSubmitting(true);
         try {
@@ -924,8 +900,8 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                 const data: CreateSupplierCreditNoteRequest = {
                     invoiceId,
                     reason,
-                    noteType: cnType,
-                    lines: lines.map(l => ({ ...l, quantity: Number(l.quantity), unitCost: Number(l.unitCost), taxRate: Number(l.taxRate) })),
+                    noteType: 'PRICE_CORRECTION',
+                    amount: parsedAmount,
                     notes: additionalNotes || undefined,
                 };
                 await creditDebitNoteService.createSupplierCreditNote(data);
@@ -934,7 +910,7 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                 const data: CreateSupplierDebitNoteRequest = {
                     invoiceId,
                     reason,
-                    lines: lines.map(l => ({ ...l, quantity: Number(l.quantity), unitCost: Number(l.unitCost), taxRate: Number(l.taxRate) })),
+                    amount: parsedAmount,
                     notes: additionalNotes || undefined,
                 };
                 await creditDebitNoteService.createSupplierDebitNote(data);
@@ -954,8 +930,8 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
     const resetForm = () => {
         setInvoiceId('');
         setReason('');
+        setAmount('');
         setAdditionalNotes('');
-        setLines([{ productName: '', quantity: 1, unitCost: 0, taxRate: 0 }]);
         setInvoiceSearch('');
         setInvoiceResults([]);
         setSelectedInvoice(null);
@@ -963,19 +939,35 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
 
     return (
         <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>
                         Create Supplier {noteType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit' : 'Debit'} Note
                     </DialogTitle>
                     <DialogDescription>
                         {noteType === 'SUPPLIER_CREDIT_NOTE'
-                            ? 'Reduce amount owed to supplier (returns, allowances)'
-                            : 'Increase amount owed to supplier (additional charges)'}
+                            ? 'Price correction or allowance — reduces amount owed to supplier'
+                            : 'Additional charge — increases amount owed to supplier'}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4">
+                    {/* Return Goods Banner (credit notes only) */}
+                    {noteType === 'SUPPLIER_CREDIT_NOTE' && (
+                        <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
+                            <FileMinus className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                            <div>
+                                <span className="font-medium text-amber-800">Returning physical goods?</span>
+                                <span className="text-amber-700 ml-1">
+                                    Use the{' '}
+                                    <a href="/inventory/goods-receipts" className="underline font-medium">Return to Supplier</a>
+                                    {' '}flow from Goods Receipts. That path automatically adjusts stock, cost, and posts accounting.
+                                    This form is for <span className="font-medium">price corrections and allowances only</span> (no stock movement).
+                                </span>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Supplier Invoice Search */}
                     <div>
                         <Label>Original Supplier Invoice *</Label>
@@ -1030,94 +1022,24 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                         <Textarea
                             value={reason}
                             onChange={e => setReason(e.target.value)}
-                            placeholder="Reason for this note..."
+                            placeholder={noteType === 'SUPPLIER_CREDIT_NOTE'
+                                ? 'e.g. Supplier overcharged on invoice, price correction for item X'
+                                : 'e.g. Additional freight charge not in original invoice'}
                             rows={2}
                         />
                     </div>
 
-                    {/* Note Type (credit only) */}
-                    {noteType === 'SUPPLIER_CREDIT_NOTE' && (
-                        <div>
-                            <Label>Credit Note Type</Label>
-                            <Select value={cnType} onValueChange={(v: string) => setCnType(v as 'FULL' | 'PARTIAL' | 'PRICE_CORRECTION')}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="FULL">Full Reversal</SelectItem>
-                                    <SelectItem value="PARTIAL">Partial</SelectItem>
-                                    <SelectItem value="PRICE_CORRECTION">Price Correction</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    )}
-
-                    {/* Line Items */}
+                    {/* Amount */}
                     <div>
-                        <div className="flex items-center justify-between mb-2">
-                            <Label>Line Items</Label>
-                            <Button variant="outline" size="sm" onClick={addLine}>
-                                <Plus className="h-3 w-3 mr-1" /> Add Line
-                            </Button>
-                        </div>
-                        <div className="space-y-2">
-                            {lines.map((line, idx) => (
-                                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                                    <div className="col-span-4">
-                                        {idx === 0 && <Label className="text-xs">Product</Label>}
-                                        <Input
-                                            value={line.productName}
-                                            onChange={e => updateLine(idx, 'productName', e.target.value)}
-                                            placeholder="Product name"
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        {idx === 0 && <Label className="text-xs">Qty</Label>}
-                                        <Input
-                                            type="number"
-                                            min="0.01"
-                                            step="0.01"
-                                            value={String(line.quantity)}
-                                            onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        {idx === 0 && <Label className="text-xs">Unit Cost</Label>}
-                                        <Input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={String(line.unitCost)}
-                                            onChange={e => updateLine(idx, 'unitCost', parseFloat(e.target.value) || 0)}
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        {idx === 0 && <Label className="text-xs">Tax %</Label>}
-                                        <Input
-                                            type="number"
-                                            min="0"
-                                            max="100"
-                                            step="0.01"
-                                            value={String(line.taxRate)}
-                                            onChange={e => updateLine(idx, 'taxRate', parseFloat(e.target.value) || 0)}
-                                        />
-                                    </div>
-                                    <div className="col-span-1 text-right text-sm font-medium pt-1">
-                                        {formatCurrency(lineTotal(line))}
-                                    </div>
-                                    <div className="col-span-1">
-                                        {lines.length > 1 && (
-                                            <Button variant="outline" size="sm" onClick={() => removeLine(idx)} className="text-red-500">
-                                                ×
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="text-right mt-2 font-semibold">
-                            Grand Total: {formatCurrency(grandTotal)}
-                        </div>
+                        <Label>Amount (UGX) *</Label>
+                        <Input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={amount}
+                            onChange={e => setAmount(e.target.value)}
+                            placeholder="0.00"
+                        />
                     </div>
 
                     {/* Additional Notes */}
