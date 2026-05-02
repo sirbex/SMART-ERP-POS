@@ -755,6 +755,25 @@ export const api = {
       apiClient.get<ApiResponse>('enterprise-accounting/aging/payables', { params: asOfDate ? { asOfDate } : undefined }),
   },
 
+  // Supplier Payments (mass payment run + opening balance)
+  supplierPayments: {
+    getUnpaidAll: (params?: { asOfDate?: string; supplierId?: string; search?: string }) =>
+      apiClient.get<ApiResponse>('supplier-payments/invoices/unpaid-all', { params }),
+    massRun: (data: {
+      paymentDate: string;
+      paymentMethod: string;
+      reference?: string;
+      notes?: string;
+      allocations: Array<{ supplierId: string; invoiceId: string; amount: number }>;
+    }) => apiClient.post<ApiResponse>('supplier-payments/payments/mass-run', data),
+    importOpeningBalance: (data: {
+      supplierId: string;
+      amount: number;
+      asOfDate: string;
+      notes?: string;
+    }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance', data),
+  },
+
   // Generic HTTP methods for backward compatibility
   get: <T = ApiResponse>(url: string, config?: AxiosRequestConfig) => apiClient.get<T>(url, config),
   post: <T = ApiResponse>(url: string, data?: unknown, config?: AxiosRequestConfig) =>

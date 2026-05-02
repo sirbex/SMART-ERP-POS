@@ -392,7 +392,11 @@ export const returnGrnService = {
      * Together, the two entries net to: DR AP / CR Inventory — the correct
      * accounting for goods returned to a supplier.
      */
-    async createCreditNoteFromReturn(pool: Pool, rgrnId: string): Promise<{ creditNoteId: string; creditNoteNumber: string }> {
+    async createCreditNoteFromReturn(
+        pool: Pool,
+        rgrnId: string,
+        knownReferenceInvoiceId?: string,
+    ): Promise<{ creditNoteId: string; creditNoteNumber: string }> {
         return UnitOfWork.run(pool, async (client) => {
             // 1. Validate RGRN exists and is POSTED
             const rgrn = await returnGrnRepository.getById(client, rgrnId);
@@ -443,16 +447,25 @@ export const returnGrnService = {
             const supplierName: string = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
 
             // 5. Find the original Supplier Invoice (to reduce its outstanding balance)
-            const siResult = await client.query(
-                `SELECT si."Id" FROM supplier_invoices si
-                 WHERE si."PurchaseOrderId" = (
-                   SELECT purchase_order_id FROM goods_receipts WHERE id = $1
-                 )
-                 AND si.document_type = 'SUPPLIER_INVOICE'
-                 ORDER BY si."CreatedAt" DESC LIMIT 1`,
-                [rgrn.grnId],
-            );
-            const referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
+            let referenceInvoiceId: string | undefined = knownReferenceInvoiceId;
+            if (!referenceInvoiceId) {
+                const siResult = await client.query(
+                    `SELECT si."Id" FROM supplier_invoices si
+                     WHERE si."PurchaseOrderId" = (
+                       SELECT purchase_order_id FROM goods_receipts WHERE id = $1
+                     )
+                     AND si.document_type = 'SUPPLIER_INVOICE'
+                     ORDER BY si."CreatedAt" DESC LIMIT 1`,
+                    [rgrn.grnId],
+                );
+                referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
+            }
+            if (!referenceInvoiceId) {
+                throw new Error(
+                    'Cannot create Supplier Credit Note: no Supplier Invoice found for this Return GRN. ' +
+                    'Ensure the Return GRN is linked to a Purchase Order that has a posted Supplier Invoice.',
+                );
+            }
 
             // 6. Generate SCN number and create header
             const scnNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
@@ -460,7 +473,7 @@ export const returnGrnService = {
             const scn = await supplierCreditDebitNoteRepository.createSupplierNote(client, {
                 invoiceNumber: scnNumber,
                 documentType: 'SUPPLIER_CREDIT_NOTE',
-                referenceInvoiceId: referenceInvoiceId || null,
+                referenceInvoiceId: referenceInvoiceId,
                 supplierId,
                 issueDate: getBusinessDate(),
                 subtotal: returnTotalNum,

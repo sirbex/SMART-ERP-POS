@@ -12,6 +12,7 @@ import * as glEntryService from '../../services/glEntryService.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { AccountingCore } from '../../services/accountingCore.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -418,6 +419,13 @@ export async function getOutstandingInvoices(pool: Pool, supplierId: string) {
     return supplierPaymentRepository.findOutstandingInvoices(pool, supplierId);
 }
 
+export async function getAllUnpaidInvoicesForMassPayment(
+    pool: Pool,
+    options: { asOfDate?: string; supplierId?: string; search?: string } = {}
+) {
+    return supplierPaymentRepository.findAllUnpaidInvoicesForMassPayment(pool, options);
+}
+
 export async function createSupplierInvoice(
     pool: Pool,
     data: CreateSupplierInvoiceInput,
@@ -734,5 +742,317 @@ export async function autoAllocatePayment(pool: Pool, paymentId: string, userId?
         });
 
         return allocations;
+    });
+}
+
+// ============================================================
+// MASS PAYMENT RUN
+// ============================================================
+
+export interface MassPaymentAllocation {
+    supplierId: string;
+    invoiceId: string;
+    amount: number;
+}
+
+export interface MassPaymentRunInput {
+    paymentDate: string;
+    paymentMethod: string;
+    reference?: string;
+    notes?: string;
+    allocations: MassPaymentAllocation[];
+}
+
+export interface MassPaymentRunResult {
+    paymentCount: number;
+    totalAmount: number;
+    payments: Array<{
+        supplierId: string;
+        supplierName: string;
+        paymentNumber: string;
+        amount: number;
+        allocatedInvoices: number;
+    }>;
+}
+
+/**
+ * Mass Payment Run — pay multiple invoices across multiple suppliers in one operation.
+ *
+ * Groups allocations by supplier. For each supplier creates one payment record and
+ * applies exact allocations. All inserts happen in a single transaction.
+ *
+ * GL posting: one DR Accounts Payable (2100) + one CR Cash/Bank per supplier payment.
+ */
+export async function massPaymentRun(
+    pool: Pool,
+    data: MassPaymentRunInput,
+    userId?: string
+): Promise<MassPaymentRunResult> {
+    if (!data.allocations || data.allocations.length === 0) {
+        throw new Error('No allocations provided');
+    }
+
+    // Validate total > 0
+    const grandTotal = data.allocations.reduce(
+        (sum, a) => sum.plus(new Decimal(a.amount)),
+        new Decimal(0)
+    );
+    if (grandTotal.lessThanOrEqualTo(0)) {
+        throw new Error('Total payment amount must be greater than zero');
+    }
+
+    // Group by supplier
+    const bySupplier = new Map<string, MassPaymentAllocation[]>();
+    for (const alloc of data.allocations) {
+        if (!bySupplier.has(alloc.supplierId)) bySupplier.set(alloc.supplierId, []);
+        bySupplier.get(alloc.supplierId)!.push(alloc);
+    }
+
+    const results: MassPaymentRunResult['payments'] = [];
+
+    await UnitOfWork.run(pool, async (client) => {
+        for (const [supplierId, supplierAllocs] of bySupplier) {
+            const supplierTotal = supplierAllocs.reduce(
+                (sum, a) => sum.plus(new Decimal(a.amount)),
+                new Decimal(0)
+            );
+
+            // Create payment record
+            const payment = await supplierPaymentRepository.createPayment(client, {
+                supplierId,
+                paymentDate: data.paymentDate,
+                paymentMethod: data.paymentMethod,
+                amount: supplierTotal.toNumber(),
+                reference: data.reference,
+                notes: data.notes,
+            });
+
+            // Apply each allocation — validate against ledger BEFORE writing
+            for (const alloc of supplierAllocs) {
+                // Lock the invoice row and recompute outstanding entirely from the
+                // ledger (payment allocations + posted credit notes). This prevents:
+                //   - trusting UI totals
+                //   - race conditions from concurrent payments
+                //   - double-payment from stale UI data
+                const ledger = await supplierPaymentRepository.lockAndComputeInvoiceOutstanding(
+                    client,
+                    alloc.invoiceId
+                );
+                if (!ledger) {
+                    throw new Error(`Invoice ${alloc.invoiceId} not found or has been deleted`);
+                }
+                if (['Cancelled', 'CANCELLED'].includes(ledger.status)) {
+                    throw new Error(`Cannot pay a cancelled invoice (${ledger.invoiceNumber})`);
+                }
+                const allocAmount    = new Decimal(alloc.amount);
+                const trueOutstanding = ledger.outstandingBalance;
+
+                if (trueOutstanding.lessThanOrEqualTo(0)) {
+                    throw new Error(
+                        `Invoice ${ledger.invoiceNumber} is already fully paid or credited ` +
+                        `(original: ${ledger.originalAmount.toFixed(2)}, ` +
+                        `paid: ${ledger.paidAmount.toFixed(2)}, ` +
+                        `credits: ${ledger.returnCredits.plus(ledger.creditNotes).toFixed(2)})`
+                    );
+                }
+                // Allow a 1-cent tolerance for rounding differences
+                if (allocAmount.greaterThan(trueOutstanding.plus(new Decimal('0.01')))) {
+                    throw new Error(
+                        `Allocation of ${allocAmount.toFixed(2)} for invoice ${ledger.invoiceNumber} ` +
+                        `exceeds ledger outstanding ${trueOutstanding.toFixed(2)} ` +
+                        `(original: ${ledger.originalAmount.toFixed(2)}, ` +
+                        `paid: ${ledger.paidAmount.toFixed(2)}, ` +
+                        `return credits: ${ledger.returnCredits.toFixed(2)}, ` +
+                        `credit notes: ${ledger.creditNotes.toFixed(2)})`
+                    );
+                }
+
+                await supplierPaymentRepository.createAllocation(client, {
+                    supplierPaymentId: payment.id,
+                    supplierInvoiceId: alloc.invoiceId,
+                    amount: allocAmount.toNumber(),
+                });
+
+                // newPaid is ledger-derived: sum of existing allocations + this new one
+                const newPaid = ledger.paidAmount.plus(allocAmount);
+                await supplierPaymentRepository.updateInvoicePaidAmount(
+                    client,
+                    alloc.invoiceId,
+                    newPaid.toNumber()
+                );
+            }
+
+            // Post to GL
+            const supplierResult = await client.query(
+                'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
+                [supplierId]
+            );
+            const supplierName = supplierResult.rows[0]?.CompanyName ?? 'Unknown';
+
+            await glEntryService.recordSupplierPaymentToGL(
+                {
+                    paymentId: payment.id,
+                    paymentNumber: payment.paymentNumber,
+                    paymentDate: data.paymentDate,
+                    amount: supplierTotal.toNumber(),
+                    paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CHECK',
+                    supplierId,
+                    supplierName,
+                },
+                undefined,
+                client
+            );
+
+            // Recalculate supplier balance
+            await recalcSupplierBalance(client, supplierId);
+
+            results.push({
+                supplierId,
+                supplierName,
+                paymentNumber: payment.paymentNumber,
+                amount: supplierTotal.toNumber(),
+                allocatedInvoices: supplierAllocs.length,
+            });
+        }
+    });
+
+    return {
+        paymentCount: results.length,
+        totalAmount: grandTotal.toNumber(),
+        payments: results,
+    };
+}
+
+// ============================================================
+// SUPPLIER OPENING BALANCE IMPORT
+// ============================================================
+
+export interface ImportSupplierOpeningBalanceInput {
+    supplierId: string;
+    amount: number;
+    asOfDate: string;   // YYYY-MM-DD
+    notes?: string;
+}
+
+/**
+ * Import a supplier's historical opening balance.
+ *
+ * Posts GL: DR Opening Balance Equity (3050) / CR Accounts Payable (2100)
+ * Creates a POSTED supplier invoice record (document_type = 'OPENING_BALANCE') so the
+ * supplier ledger shows the brought-forward balance.
+ *
+ * Idempotent: errors if supplier already has an opening balance record.
+ */
+export async function importSupplierOpeningBalance(
+    pool: Pool,
+    data: ImportSupplierOpeningBalanceInput
+): Promise<{ invoiceNumber: string; amount: number }> {
+    const amount = new Decimal(data.amount);
+    if (amount.lessThanOrEqualTo(0)) {
+        throw new Error('Opening balance amount must be greater than zero');
+    }
+
+    return UnitOfWork.run(pool, async (client) => {
+        // Idempotency: reject if supplier already has an opening balance
+        const existing = await client.query(
+            `SELECT "Id" FROM supplier_invoices
+             WHERE "SupplierId" = $1
+               AND "SupplierInvoiceNumber" LIKE 'OB-%'
+               AND deleted_at IS NULL`,
+            [data.supplierId]
+        );
+        if (existing.rows.length > 0) {
+            throw new Error(
+                'This supplier already has an opening balance record. Void the existing record first.'
+            );
+        }
+
+        // Validate supplier exists
+        const supplierRes = await client.query(
+            'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
+            [data.supplierId]
+        );
+        if (!supplierRes.rows[0]) {
+            throw new Error('Supplier not found');
+        }
+        const supplierName = supplierRes.rows[0].CompanyName as string;
+
+        // Generate opening balance invoice number
+        const seqResult = await client.query(
+            `SELECT COALESCE(MAX(
+               CAST(SUBSTRING("SupplierInvoiceNumber" FROM 'OB-([0-9]+)') AS INTEGER)
+             ), 0) + 1 AS next_num
+             FROM supplier_invoices
+             WHERE "SupplierInvoiceNumber" LIKE 'OB-%'`
+        );
+        const nextNum = seqResult.rows[0].next_num as number;
+        const invoiceNumber = `OB-${String(nextNum).padStart(6, '0')}`;
+
+        // Create supplier invoice record (POSTED, no line items needed)
+        const invoiceResult = await client.query(
+            `INSERT INTO supplier_invoices (
+               "Id", "SupplierInvoiceNumber", "SupplierId",
+               "InvoiceDate", "DueDate",
+               "Subtotal", "TaxAmount", "TotalAmount",
+               "AmountPaid", "OutstandingBalance",
+               "Status", document_type,
+               "Notes", "CreatedAt", "UpdatedAt"
+             ) VALUES (
+               gen_random_uuid(), $1, $2,
+               $3, $3,
+               $4, 0, $4,
+               0, $4,
+               'Pending', 'SUPPLIER_INVOICE',
+               $5, NOW(), NOW()
+             ) RETURNING "Id", "SupplierInvoiceNumber"`,
+            [
+                invoiceNumber,
+                data.supplierId,
+                data.asOfDate,
+                amount.toNumber(),
+                data.notes ?? `Opening balance as of ${data.asOfDate}`,
+            ]
+        );
+        const invoice = invoiceResult.rows[0];
+
+        // Post GL: DR Opening Balance Equity (3050) / CR Accounts Payable (2100)
+        await AccountingCore.createJournalEntry(
+            {
+                entryDate: data.asOfDate,
+                description: `Supplier opening balance — ${supplierName}`,
+                referenceType: 'SUPPLIER_OPENING_BALANCE',
+                referenceId: invoice.Id,
+                referenceNumber: invoiceNumber,
+                lines: [
+                    {
+                        accountCode: glEntryService.AccountCodes.OPENING_BALANCE_EQUITY,
+                        description: `Opening balance equity — ${supplierName}`,
+                        debitAmount: amount.toNumber(),
+                        creditAmount: 0,
+                    },
+                    {
+                        accountCode: glEntryService.AccountCodes.ACCOUNTS_PAYABLE,
+                        description: `Supplier AP — ${supplierName} opening balance`,
+                        debitAmount: 0,
+                        creditAmount: amount.toNumber(),
+                        entityType: 'supplier',
+                        entityId: data.supplierId,
+                    },
+                ],
+                userId: 'SYSTEM',
+                idempotencyKey: `SUPPLIER_OB-${invoice.Id}`,
+                source: 'PURCHASE_BILL',
+            },
+            pool,
+            client
+        );
+
+        // Recalculate supplier balance
+        await recalcSupplierBalance(client, data.supplierId);
+
+        return {
+            invoiceNumber,
+            amount: amount.toNumber(),
+        };
     });
 }

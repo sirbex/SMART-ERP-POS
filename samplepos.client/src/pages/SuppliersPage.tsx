@@ -993,7 +993,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
 
-  // Payment modal state
+  // Permission check for recording payments
+  const canCreatePayment = useCanAccess([], ['suppliers.create']);
+
+  // Single-invoice payment modal state
   const [payingInvoice, setPayingInvoice] = useState<SupplierInvoiceSummary | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('BANK_TRANSFER');
@@ -1002,6 +1005,84 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
+
+  // Multi-invoice inline payment panel state
+  const [multiSelected, setMultiSelected] = useState<Map<string, number>>(new Map()); // invoiceId → payAmount
+  const [multiPayDate, setMultiPayDate] = useState(new Date().toLocaleDateString('en-CA'));
+  const [multiPayMethod, setMultiPayMethod] = useState('BANK_TRANSFER');
+  const [multiPayRef, setMultiPayRef] = useState('');
+  const [multiPayNotes, setMultiPayNotes] = useState('');
+  const [multiPosting, setMultiPosting] = useState(false);
+  const [multiError, setMultiError] = useState<string | null>(null);
+  const [multiSuccess, setMultiSuccess] = useState<string | null>(null);
+
+  const multiRunTotal = useMemo(() => {
+    let t = new Decimal(0);
+    multiSelected.forEach((amt) => { t = t.plus(amt); });
+    return t.toNumber();
+  }, [multiSelected]);
+
+  const isPayableInvoice = (inv: SupplierInvoiceSummary) =>
+    Number(inv.outstandingBalance || 0) > 0 &&
+    !['Cancelled', 'CANCELLED', 'DRAFT', 'Paid', 'PAID', 'VOIDED'].includes(inv.status || '');
+
+  const toggleMultiRow = (inv: SupplierInvoiceSummary) => {
+    if (!isPayableInvoice(inv)) return;
+    setMultiSelected(prev => {
+      const next = new Map(prev);
+      if (next.has(inv.id)) {
+        next.delete(inv.id);
+      } else {
+        next.set(inv.id, Number(inv.outstandingBalance || 0));
+      }
+      return next;
+    });
+  };
+
+  const setMultiAmount = (invoiceId: string, value: string) => {
+    const amt = parseFloat(value) || 0;
+    setMultiSelected(prev => {
+      const next = new Map(prev);
+      if (amt > 0) next.set(invoiceId, amt);
+      else next.delete(invoiceId);
+      return next;
+    });
+  };
+
+  const handlePostMultiRun = async () => {
+    if (multiSelected.size === 0) return;
+    setMultiPosting(true);
+    setMultiError(null);
+    setMultiSuccess(null);
+    try {
+      const allocations = invoices
+        .filter(inv => multiSelected.has(inv.id))
+        .map(inv => ({
+          supplierId: supplier.id,
+          invoiceId: inv.id,
+          amount: multiSelected.get(inv.id)!,
+        }));
+      const { data } = await api.post('/supplier-payments/payments/mass-run', {
+        paymentDate: multiPayDate,
+        paymentMethod: multiPayMethod,
+        reference: multiPayRef || undefined,
+        notes: multiPayNotes || undefined,
+        allocations,
+      });
+      if (!data.success) throw new Error(data.error || 'Payment failed');
+      const count = allocations.length;
+      setMultiSuccess(`✅ Posted ${count} payment${count !== 1 ? 's' : ''} — ${formatCurrency(multiRunTotal)}`);
+      setMultiSelected(new Map());
+      setMultiPayRef('');
+      setMultiPayNotes('');
+      setInvoices([]);
+      loadInvoices();
+    } catch (err: unknown) {
+      setMultiError(err instanceof Error ? err.message : 'Payment run failed');
+    } finally {
+      setMultiPosting(false);
+    }
+  };
 
   // Filtered + paginated invoices
   const filteredInvoices = useMemo(() => {
@@ -1798,15 +1879,28 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       <div className="text-center py-8 text-gray-500 text-sm">No invoices match your search.</div>
                     ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
                       const balance = Number(inv.outstandingBalance || 0);
+                      const payable = isPayableInvoice(inv);
+                      const checked = multiSelected.has(inv.id);
                       const statusColor =
                         inv.status === 'Paid' ? 'bg-green-100 text-green-800'
                           : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
                             : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
                               : 'bg-gray-100 text-gray-800';
                       return (
-                        <div key={inv.id} className="border border-gray-200 rounded-lg p-3">
+                        <div key={inv.id} className={`border rounded-lg p-3 ${checked ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}>
                           <div className="flex items-center justify-between mb-2">
-                            <span className="font-semibold text-blue-600 text-sm">{inv.invoiceNumber}</span>
+                            <div className="flex items-center gap-2">
+                              {canCreatePayment && payable && (
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleMultiRow(inv)}
+                                  className="w-4 h-4 accent-purple-600 cursor-pointer"
+                                  title="Select for payment"
+                                />
+                              )}
+                              <span className="font-semibold text-blue-600 text-sm">{inv.invoiceNumber}</span>
+                            </div>
                             <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
                           </div>
                           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
@@ -1820,10 +1914,30 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                             <span className="text-right text-green-600">{formatCurrency(Number(inv.amountPaid || 0))}</span>
                             {balance > 0 && <><span className="text-gray-500">Balance</span><span className="text-right font-bold text-red-600">{formatCurrency(balance)}</span></>}
                           </div>
+                          {/* Inline pay amount when checked */}
+                          {checked && (
+                            <div className="flex items-center gap-2 mb-2 pt-2 border-t border-purple-200">
+                              <span className="text-xs text-purple-700 font-medium">Pay:</span>
+                              <input
+                                type="number"
+                                value={multiSelected.get(inv.id) ?? ''}
+                                onChange={(e) => setMultiAmount(inv.id, e.target.value)}
+                                className="flex-1 border border-purple-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-purple-500"
+                                min="0.01"
+                                max={balance}
+                                step="0.01"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setMultiAmount(inv.id, balance.toString())}
+                                className="text-xs text-purple-600 hover:text-purple-800 underline whitespace-nowrap"
+                              >Full</button>
+                            </div>
+                          )}
                           <div className="flex gap-2 pt-2 border-t border-gray-100">
                             <button onClick={() => loadInvoiceDetails(inv.id)} className="flex-1 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">👁️ View</button>
                             <button onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)} disabled={downloadingPdf === inv.id} className="flex-1 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50">{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
-                            {balance > 0 && <button onClick={() => openPayModal(inv)} className="flex-1 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-semibold">💰 Pay</button>}
+                            {balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '') && <button onClick={() => openPayModal(inv)} className="flex-1 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-semibold">💰 Pay</button>}
                           </div>
                         </div>
                       );
@@ -1834,6 +1948,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
+                          {canCreatePayment && <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-8">✓</th>}
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
@@ -1842,6 +1957,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                          {canCreatePayment && <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Pay Amount</th>}
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
                         </tr>
                       </thead>
@@ -1852,6 +1968,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           const total = Number(inv.totalAmount || 0);
                           const paid = Number(inv.amountPaid || 0);
                           const balance = Number(inv.outstandingBalance || 0);
+                          const payable = isPayableInvoice(inv);
+                          const checked = multiSelected.has(inv.id);
                           const statusColor =
                             inv.status === 'Paid'
                               ? 'bg-green-100 text-green-800'
@@ -1861,7 +1979,20 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                   ? 'bg-blue-100 text-blue-800'
                                   : 'bg-gray-100 text-gray-800';
                           return (
-                            <tr key={inv.id} className="hover:bg-gray-50">
+                            <tr key={inv.id} className={checked ? 'bg-purple-50' : 'hover:bg-gray-50'}>
+                              {canCreatePayment && (
+                                <td className="px-3 py-3 text-center">
+                                  {payable && (
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleMultiRow(inv)}
+                                      className="w-4 h-4 accent-purple-600 cursor-pointer"
+                                      title="Select for payment"
+                                    />
+                                  )}
+                                </td>
+                              )}
                               <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
                               <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
                               <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
@@ -1874,11 +2005,33 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                               <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
                                 {balance > 0 ? formatCurrency(balance) : balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>}
                               </td>
+                              {canCreatePayment && (
+                                <td className="px-4 py-3 text-right">
+                                  {checked && (
+                                    <div className="flex items-center gap-1 justify-end">
+                                      <input
+                                        type="number"
+                                        value={multiSelected.get(inv.id) ?? ''}
+                                        onChange={(e) => setMultiAmount(inv.id, e.target.value)}
+                                        className="w-28 border border-purple-300 rounded px-2 py-1 text-xs text-right focus:ring-1 focus:ring-purple-500"
+                                        min="0.01"
+                                        max={balance}
+                                        step="0.01"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setMultiAmount(inv.id, balance.toString())}
+                                        className="text-xs text-purple-600 hover:text-purple-800 underline whitespace-nowrap"
+                                      >Full</button>
+                                    </div>
+                                  )}
+                                </td>
+                              )}
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
                                   <button onClick={() => loadInvoiceDetails(inv.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors" title="View Details">👁️ View</button>
                                   <button onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)} disabled={downloadingPdf === inv.id} className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50" title="Download PDF">{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
-                                  {balance > 0 && <button onClick={() => openPayModal(inv)} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold" title="Record Payment">💰 Pay</button>}
+                                  {balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '') && <button onClick={() => openPayModal(inv)} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold" title="Record Payment">💰 Pay</button>}
                                 </div>
                               </td>
                             </tr>
@@ -1933,6 +2086,112 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           Next ›
                         </button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* ── Inline Multi-Invoice Payment Panel ─────────────── */}
+                  {canCreatePayment && multiSelected.size > 0 && (
+                    <div className="mt-4 border-2 border-purple-300 rounded-xl bg-purple-50 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-bold text-purple-900 flex items-center gap-2">
+                          💰 Pay Selected Invoices
+                          <span className="bg-purple-200 text-purple-800 text-xs font-semibold px-2 py-0.5 rounded-full">{multiSelected.size}</span>
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => setMultiSelected(new Map())}
+                          className="text-xs text-purple-500 hover:text-purple-700 underline"
+                          disabled={multiPosting}
+                        >Clear selection</button>
+                      </div>
+
+                      {/* Selected invoice summary */}
+                      <div className="mb-3 text-xs space-y-1">
+                        {invoices.filter(inv => multiSelected.has(inv.id)).map(inv => (
+                          <div key={inv.id} className="flex items-center justify-between text-purple-800">
+                            <span className="font-medium">{inv.invoiceNumber}</span>
+                            <span>{formatCurrency(multiSelected.get(inv.id) ?? 0)}</span>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between font-bold text-purple-900 border-t border-purple-200 pt-1 mt-1">
+                          <span>Total</span>
+                          <span className="text-base">{formatCurrency(multiRunTotal)}</span>
+                        </div>
+                      </div>
+
+                      {/* Payment fields */}
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="block text-xs font-medium text-purple-800 mb-1">Payment Date *</label>
+                          <input
+                            type="date"
+                            value={multiPayDate}
+                            onChange={(e) => setMultiPayDate(e.target.value)}
+                            className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                            disabled={multiPosting}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-purple-800 mb-1">Payment Method *</label>
+                          <select
+                            value={multiPayMethod}
+                            onChange={(e) => setMultiPayMethod(e.target.value)}
+                            className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                            disabled={multiPosting}
+                          >
+                            <option value="BANK_TRANSFER">Bank Transfer</option>
+                            <option value="CASH">Cash</option>
+                            <option value="CHECK">Check</option>
+                            <option value="CARD">Card</option>
+                            <option value="OTHER">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-purple-800 mb-1">Reference</label>
+                          <input
+                            type="text"
+                            value={multiPayRef}
+                            onChange={(e) => setMultiPayRef(e.target.value)}
+                            placeholder="e.g., Cheque #, Transfer ref"
+                            className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                            disabled={multiPosting}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-purple-800 mb-1">Notes</label>
+                          <input
+                            type="text"
+                            value={multiPayNotes}
+                            onChange={(e) => setMultiPayNotes(e.target.value)}
+                            placeholder="Optional notes"
+                            className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                            disabled={multiPosting}
+                          />
+                        </div>
+                      </div>
+
+                      {multiError && (
+                        <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm mb-3">
+                          ❌ {multiError}
+                        </div>
+                      )}
+                      {multiSuccess && (
+                        <div className="bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg text-sm mb-3">
+                          {multiSuccess}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handlePostMultiRun}
+                        disabled={multiPosting || multiRunTotal <= 0 || !multiPayDate}
+                        className="w-full py-2.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {multiPosting
+                          ? <><span className="animate-spin">⏳</span> Posting…</>
+                          : <>💰 Post Payment — {formatCurrency(multiRunTotal)}</>
+                        }
+                      </button>
                     </div>
                   )}
 

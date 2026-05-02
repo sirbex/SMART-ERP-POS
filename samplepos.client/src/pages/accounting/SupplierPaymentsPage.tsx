@@ -12,13 +12,15 @@
  * - Partial payment support
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
-import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet } from 'lucide-react';
+import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
+import { AdjustSupplierInvoiceModal } from '../../components/shared/AdjustSupplierInvoiceModal';
+import { api } from '../../utils/api';
 import {
     Button,
     Input,
@@ -133,6 +135,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const [isBillModalOpen, setIsBillModalOpen] = useState(false);
     const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
     const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+    const [adjustInvoice, setAdjustInvoice] = useState<{ id: string; invoiceNumber: string } | null>(null);
 
     const [selectedPayment, setSelectedPayment] = useState<SupplierPayment | null>(null);
     const [outstandingBills, setOutstandingBills] = useState<SupplierInvoice[]>([]);
@@ -144,6 +147,145 @@ const SupplierPaymentsPage: React.FC = () => {
 
     // Ref for printing
     const receiptRef = useRef<HTMLDivElement>(null);
+
+    // ── Mass Payment Run state ──────────────────────────────────────────────────
+    interface UnpaidInvoiceRow {
+        id: string;
+        invoiceNumber: string;
+        supplierInvoiceNumber: string | null;
+        supplierId: string;
+        supplierName: string;
+        invoiceDate: string;
+        dueDate: string | null;
+        /** Invoice face value */
+        originalAmount: number;
+        /** Paid via payment allocations (ledger-computed) */
+        paidAmount: number;
+        /** Credits from Return-to-Supplier GRNs (ledger-computed) */
+        returnCredits: number;
+        /** Credits from price corrections / allowances (ledger-computed) */
+        creditNotes: number;
+        /** True outstanding = originalAmount − paidAmount − returnCredits − creditNotes */
+        outstandingBalance: number;
+    }
+    const [massInvoices, setMassInvoices] = useState<UnpaidInvoiceRow[]>([]);
+    const [massLoading, setMassLoading] = useState(false);
+    const [massAsOfDate, setMassAsOfDate] = useState('');
+    const [massSupplierFilter, setMassSupplierFilter] = useState('');
+    const [massSearch, setMassSearch] = useState('');
+    const [massSelected, setMassSelected] = useState<Map<string, number>>(new Map()); // invoiceId → payAmount
+    const [massPaymentDate, setMassPaymentDate] = useState(new Date().toLocaleDateString('en-CA'));
+    const [massPaymentMethod, setMassPaymentMethod] = useState('BANK_TRANSFER');
+    const [massReference, setMassReference] = useState('');
+    const [massNotes, setMassNotes] = useState('');
+    const [massPosting, setMassPosting] = useState(false);
+
+    const loadMassInvoices = useCallback(async () => {
+        setMassLoading(true);
+        try {
+            const res = await api.supplierPayments.getUnpaidAll({
+                asOfDate: massAsOfDate || undefined,
+                supplierId: massSupplierFilter || undefined,
+                search: massSearch || undefined,
+            });
+            const rows: UnpaidInvoiceRow[] = (res.data as { data?: UnpaidInvoiceRow[] })?.data ?? [];
+            setMassInvoices(rows);
+        } catch {
+            toast.error('Failed to load unpaid invoices');
+        } finally {
+            setMassLoading(false);
+        }
+    }, [massAsOfDate, massSupplierFilter, massSearch]);
+
+    const massRunTotal = useMemo(() => {
+        let t = new Decimal(0);
+        massSelected.forEach((amt) => { t = t.plus(amt); });
+        return t.toNumber();
+    }, [massSelected]);
+
+    const toggleMassRow = (invoice: UnpaidInvoiceRow) => {
+        setMassSelected(prev => {
+            const next = new Map(prev);
+            if (next.has(invoice.id)) {
+                next.delete(invoice.id);
+            } else {
+                next.set(invoice.id, invoice.outstandingBalance);
+            }
+            return next;
+        });
+    };
+
+    const handleMassAmountChange = (invoiceId: string, value: string) => {
+        const amt = parseFloat(value) || 0;
+        setMassSelected(prev => {
+            const next = new Map(prev);
+            if (amt > 0) next.set(invoiceId, amt);
+            else next.delete(invoiceId);
+            return next;
+        });
+    };
+
+    const handleSelectAllMass = () => {
+        if (massSelected.size === massInvoices.length) {
+            setMassSelected(new Map());
+        } else {
+            const next = new Map<string, number>();
+            massInvoices.forEach(inv => next.set(inv.id, inv.outstandingBalance));
+            setMassSelected(next);
+        }
+    };
+
+    const handlePostMassRun = async () => {
+        if (massSelected.size === 0) { toast.error('No invoices selected'); return; }
+        if (!massPaymentDate) { toast.error('Payment date is required'); return; }
+        const allocations = massInvoices
+            .filter(inv => massSelected.has(inv.id))
+            .map(inv => ({ supplierId: inv.supplierId, invoiceId: inv.id, amount: massSelected.get(inv.id)! }));
+        setMassPosting(true);
+        try {
+            await api.supplierPayments.massRun({
+                paymentDate: massPaymentDate,
+                paymentMethod: massPaymentMethod,
+                reference: massReference || undefined,
+                notes: massNotes || undefined,
+                allocations,
+            });
+            toast.success(`Mass payment run posted — ${allocations.length} invoice(s) paid`);
+            setMassSelected(new Map());
+            await loadMassInvoices();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Mass payment run failed';
+            toast.error(msg);
+        } finally {
+            setMassPosting(false);
+        }
+    };
+
+    // ── Opening Balance state ────────────────────────────────────────────────────
+    const [obSupplierId, setObSupplierId] = useState('');
+    const [obAmount, setObAmount] = useState('');
+    const [obDate, setObDate] = useState('');
+    const [obNotes, setObNotes] = useState('');
+    const [obPosting, setObPosting] = useState(false);
+
+    const handlePostOpeningBalance = async () => {
+        if (!obSupplierId) { toast.error('Select a supplier'); return; }
+        const amt = parseFloat(obAmount);
+        if (!amt || amt <= 0) { toast.error('Enter a positive amount'); return; }
+        if (!obDate) { toast.error('As-of date is required'); return; }
+        setObPosting(true);
+        try {
+            await api.supplierPayments.importOpeningBalance({ supplierId: obSupplierId, amount: amt, asOfDate: obDate, notes: obNotes || undefined });
+            toast.success('Opening balance posted');
+            setObAmount(''); setObNotes(''); setObSupplierId(''); setObDate('');
+        } catch (err) {
+            const axErr = err as AxiosError<{ error?: string }>;
+            toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
+        } finally {
+            setObPosting(false);
+        }
+    };
+    // ────────────────────────────────────────────────────────────────────────────
 
     // Form states
     const [paymentFormData, setPaymentFormData] = useState<CreateSupplierPaymentRequest>({
@@ -1162,9 +1304,10 @@ const SupplierPaymentsPage: React.FC = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-2">
+                <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="payments">Payments</TabsTrigger>
                     <TabsTrigger value="bills">Bills</TabsTrigger>
+                    <TabsTrigger value="mass-payment">Mass Payment Run</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="payments" className="space-y-4">
@@ -1300,38 +1443,50 @@ const SupplierPaymentsPage: React.FC = () => {
                                                 </div>
                                             </div>
 
-                                            {/* Pay Now button for outstanding bills */}
+                                            {/* Pay Now / Adjust buttons — never shown for cancelled invoices */}
                                             <div className="flex items-center gap-2 ml-4">
-                                                {safeParseFloat(bill.outstandingBalance) > 0 ? (
-                                                    canCreatePayment ? (
-                                                        <Button
-                                                            variant="default"
-                                                            size="sm"
-                                                            onClick={() => {
-                                                                // Pre-fill payment form with this bill's supplier and outstanding amount
-                                                                setPaymentFormData(prev => ({
-                                                                    ...prev,
-                                                                    supplierId: bill.supplierId,
-                                                                    amount: safeParseFloat(bill.outstandingBalance).toString(),
-                                                                    notes: `Payment for ${bill.invoiceNumber}`
-                                                                }));
-                                                                loadSupplierOutstanding(bill.supplierId);
-                                                                setIsPaymentModalOpen(true);
-                                                            }}
-                                                            className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white"
-                                                        >
-                                                            <DollarSign className="h-4 w-4" />
-                                                            Pay Now
-                                                        </Button>
+                                                {['Cancelled', 'CANCELLED'].includes(bill.status || '') ? null : (
+                                                    safeParseFloat(bill.outstandingBalance) > 0 ? (
+                                                        canCreatePayment ? (
+                                                            <Button
+                                                                variant="default"
+                                                                size="sm"
+                                                                onClick={() => {
+                                                                    // Pre-fill payment form with this bill's supplier and outstanding amount
+                                                                    setPaymentFormData(prev => ({
+                                                                        ...prev,
+                                                                        supplierId: bill.supplierId,
+                                                                        amount: safeParseFloat(bill.outstandingBalance).toString(),
+                                                                        notes: `Payment for ${bill.invoiceNumber}`
+                                                                    }));
+                                                                    loadSupplierOutstanding(bill.supplierId);
+                                                                    setIsPaymentModalOpen(true);
+                                                                }}
+                                                                className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white"
+                                                            >
+                                                                <DollarSign className="h-4 w-4" />
+                                                                Pay Now
+                                                            </Button>
+                                                        ) : (
+                                                            <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
+                                                                Outstanding
+                                                            </Badge>
+                                                        )
                                                     ) : (
-                                                        <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-800">
-                                                            Outstanding
+                                                        <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
+                                                            Paid
                                                         </Badge>
                                                     )
-                                                ) : (
-                                                    <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
-                                                        Paid
-                                                    </Badge>
+                                                )}
+                                                {/* Adjust button — never shown for cancelled invoices */}
+                                                {canCreatePayment && safeParseFloat(bill.outstandingBalance) > 0 && !['Cancelled', 'CANCELLED'].includes(bill.status || '') && (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => setAdjustInvoice({ id: bill.id, invoiceNumber: bill.invoiceNumber ?? '' })}
+                                                    >
+                                                        Adjust
+                                                    </Button>
                                                 )}
                                             </div>
                                         </div>
@@ -1341,6 +1496,233 @@ const SupplierPaymentsPage: React.FC = () => {
                         )}
                     </div>
                 </TabsContent>
+
+                {/* ── Mass Payment Run Tab ─────────────────────────────────────── */}
+                <TabsContent value="mass-payment" className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+                        <ListChecks className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <p className="font-medium text-blue-800">Mass Payment Run</p>
+                            <p className="text-sm text-blue-700 mt-1">Select invoices across one or more suppliers, set a payment amount per invoice, then post a single payment run. One payment per supplier will be created and posted to the ledger.</p>
+                        </div>
+                    </div>
+
+                    {/* Filters */}
+                    <Card>
+                        <CardContent className="pt-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                                <div>
+                                    <Label className="text-xs text-gray-500 mb-1 block">As-Of Date</Label>
+                                    <DatePicker value={massAsOfDate} onChange={setMassAsOfDate} placeholder="Show all unpaid" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-gray-500 mb-1 block">Supplier</Label>
+                                    <Select value={massSupplierFilter} onValueChange={setMassSupplierFilter}>
+                                        <SelectTrigger><SelectValue placeholder="All suppliers" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="">All suppliers</SelectItem>
+                                            {suppliers.map(s => (
+                                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-gray-500 mb-1 block">Search Invoice</Label>
+                                    <Input value={massSearch} onChange={e => setMassSearch(e.target.value)} placeholder="Invoice number..." />
+                                </div>
+                                <Button onClick={() => void loadMassInvoices()} disabled={massLoading}>
+                                    {massLoading ? 'Loading…' : 'Load Invoices'}
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Invoice Grid */}
+                    {massInvoices.length > 0 && (
+                        <Card>
+                            <CardContent className="p-0">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50 border-b">
+                                            <tr>
+                                                <th className="p-3 w-10">
+                                                    <input type="checkbox"
+                                                        checked={massSelected.size === massInvoices.length && massInvoices.length > 0}
+                                                        onChange={handleSelectAllMass}
+                                                        className="rounded"
+                                                    />
+                                                </th>
+                                                <th className="p-3 text-left font-medium text-gray-700">Supplier</th>
+                                                <th className="p-3 text-left font-medium text-gray-700">Invoice #</th>
+                                                <th className="p-3 text-left font-medium text-gray-700">Invoice Date</th>
+                                                <th className="p-3 text-left font-medium text-gray-700">Due Date</th>
+                                                <th className="p-3 text-right font-medium text-gray-700">Original</th>
+                                                <th className="p-3 text-right font-medium text-gray-700 text-orange-700">−&nbsp;Paid</th>
+                                                <th className="p-3 text-right font-medium text-gray-700 text-purple-700">−&nbsp;Returns</th>
+                                                <th className="p-3 text-right font-medium text-gray-700 text-purple-700">−&nbsp;Credits</th>
+                                                <th className="p-3 text-right font-medium text-gray-900">Outstanding</th>
+                                                <th className="p-3 text-right font-medium text-gray-700 w-36">Pay Amount</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {massInvoices.map(inv => {
+                                                const isSelected = massSelected.has(inv.id);
+                                                const isDue = inv.dueDate && inv.dueDate.slice(0, 10) < new Date().toLocaleDateString('en-CA');
+                                                return (
+                                                    <tr key={inv.id} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
+                                                        <td className="p-3">
+                                                            <input type="checkbox" checked={isSelected} onChange={() => toggleMassRow(inv)} className="rounded" />
+                                                        </td>
+                                                        <td className="p-3 font-medium">{inv.supplierName}</td>
+                                                        <td className="p-3 text-blue-700 font-mono text-xs">{inv.invoiceNumber}{inv.supplierInvoiceNumber ? <span className="text-gray-400 ml-1">({inv.supplierInvoiceNumber})</span> : null}</td>
+                                                        <td className="p-3 text-gray-600">{inv.invoiceDate ? formatTimestampDate(inv.invoiceDate) : '—'}</td>
+                                                        <td className="p-3">
+                                                            <span className={isDue ? 'text-red-600 font-medium' : 'text-gray-600'}>{inv.dueDate ? formatTimestampDate(inv.dueDate) : '—'}</span>
+                                                        </td>
+                                                        <td className="p-3 text-right text-gray-600">{formatCurrency(inv.originalAmount)}</td>
+                                                        <td className="p-3 text-right text-orange-700 text-sm">
+                                                            {inv.paidAmount > 0 ? `(${formatCurrency(inv.paidAmount)})` : '—'}
+                                                        </td>
+                                                        <td className="p-3 text-right text-purple-700 text-sm">
+                                                            {inv.returnCredits > 0 ? `(${formatCurrency(inv.returnCredits)})` : '—'}
+                                                        </td>
+                                                        <td className="p-3 text-right text-purple-700 text-sm">
+                                                            {inv.creditNotes > 0 ? `(${formatCurrency(inv.creditNotes)})` : '—'}
+                                                        </td>
+                                                        <td className="p-3 text-right font-semibold">{formatCurrency(inv.outstandingBalance)}</td>
+                                                        <td className="p-3 text-right">
+                                                            {isSelected ? (
+                                                                <Input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    max={inv.outstandingBalance.toString()}
+                                                                    step="1"
+                                                                    value={massSelected.get(inv.id)?.toString() ?? ''}
+                                                                    onChange={e => handleMassAmountChange(inv.id, e.target.value)}
+                                                                    className="text-right h-7 text-sm w-32 ml-auto"
+                                                                />
+                                                            ) : (
+                                                                <span className="text-gray-400">—</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                        <tfoot className="bg-gray-50 border-t font-semibold">
+                                            <tr>
+                                                <td colSpan={10} className="p-3 text-right text-gray-700">
+                                                    {massSelected.size} invoice(s) selected — Total to Pay:
+                                                </td>
+                                                <td className="p-3 text-right text-blue-700">{formatCurrency(massRunTotal)}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {massInvoices.length === 0 && !massLoading && (
+                        <Card>
+                            <CardContent className="text-center py-8">
+                                <ListChecks className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                                <p className="text-gray-500">Click "Load Invoices" to fetch unpaid supplier invoices.</p>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Payment Details Panel — shown inline when rows selected */}
+                    {massSelected.size > 0 && (
+                        <Card className="border-blue-200 bg-blue-50">
+                            <CardContent className="pt-4">
+                                <h3 className="font-semibold text-blue-800 mb-3">Payment Details</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                    <div>
+                                        <Label className="text-xs text-gray-600 mb-1 block">Payment Date *</Label>
+                                        <DatePicker value={massPaymentDate} onChange={setMassPaymentDate} placeholder="Select date" />
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs text-gray-600 mb-1 block">Payment Method</Label>
+                                        <Select value={massPaymentMethod} onValueChange={setMassPaymentMethod}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {PAYMENT_METHODS.map(m => (
+                                                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs text-gray-600 mb-1 block">Reference</Label>
+                                        <Input value={massReference} onChange={e => setMassReference(e.target.value)} placeholder="Cheque #, transfer ref…" />
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs text-gray-600 mb-1 block">Notes</Label>
+                                        <Input value={massNotes} onChange={e => setMassNotes(e.target.value)} placeholder="Optional notes" />
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between mt-4">
+                                    <p className="text-sm font-medium text-blue-800">
+                                        Posting {massSelected.size} invoice payment(s) — Total: {formatCurrency(massRunTotal)}
+                                    </p>
+                                    <Button
+                                        onClick={() => void handlePostMassRun()}
+                                        disabled={massPosting}
+                                        className="bg-blue-700 hover:bg-blue-800 text-white"
+                                    >
+                                        {massPosting ? 'Posting…' : 'Post Payment Run'}
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Opening Balance Import */}
+                    <Card>
+                        <CardContent className="pt-4">
+                            <h3 className="font-semibold text-gray-800 mb-1 flex items-center gap-2">
+                                <Wallet className="h-4 w-4 text-gray-500" />
+                                Import Supplier Opening Balance
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-4">
+                                Post a historical balance brought forward as a single Opening Balance journal (DR Opening Balance Equity / CR Accounts Payable). Each supplier may only have one opening balance.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+                                <div className="sm:col-span-2">
+                                    <Label className="text-xs text-gray-600 mb-1 block">Supplier *</Label>
+                                    <Select value={obSupplierId} onValueChange={setObSupplierId}>
+                                        <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                                        <SelectContent>
+                                            {suppliers.map(s => (
+                                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-gray-600 mb-1 block">Amount *</Label>
+                                    <Input type="number" min="0" step="1" value={obAmount} onChange={e => setObAmount(e.target.value)} placeholder="0" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-gray-600 mb-1 block">As-Of Date *</Label>
+                                    <DatePicker value={obDate} onChange={setObDate} placeholder="Opening date" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-gray-600 mb-1 block">Notes</Label>
+                                    <Input value={obNotes} onChange={e => setObNotes(e.target.value)} placeholder="Optional" />
+                                </div>
+                            </div>
+                            <div className="flex justify-end mt-3">
+                                <Button onClick={() => void handlePostOpeningBalance()} disabled={obPosting} variant="outline">
+                                    {obPosting ? 'Posting…' : 'Post Opening Balance'}
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
             </Tabs>
 
             {/* Payment Modal */}
@@ -2048,6 +2430,19 @@ const SupplierPaymentsPage: React.FC = () => {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Supplier Invoice Adjustment Modal */}
+            {adjustInvoice && (
+                <AdjustSupplierInvoiceModal
+                    open={!!adjustInvoice}
+                    invoiceId={adjustInvoice.id}
+                    invoiceNumber={adjustInvoice.invoiceNumber}
+                    onClose={() => {
+                        setAdjustInvoice(null);
+                        void loadBills();
+                    }}
+                />
+            )}
         </div>
     );
 };

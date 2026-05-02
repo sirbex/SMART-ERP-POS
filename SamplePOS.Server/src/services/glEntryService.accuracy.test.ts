@@ -75,6 +75,10 @@ const {
     recordGoodsReceiptToGL,
     recordStockAdjustmentToGL,
     recordOpeningStockToGL,
+    recordCustomerCreditNoteToGL,
+    recordCustomerDebitNoteToGL,
+    recordSupplierCreditNoteToGL,
+    recordSupplierDebitNoteToGL,
     AccountCodes,
 } = await import('./glEntryService.js');
 
@@ -776,7 +780,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
     });
 
     // ========================================================================
-    // Large-Scale Precision Tests
+    // large sale amounts — precision
     // ========================================================================
     describe('large sale amounts — precision', () => {
         it('should handle 100M UGX sale without precision loss', async () => {
@@ -796,6 +800,194 @@ describe('glEntryService — GL Posting Accuracy', () => {
             expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(100000000);
             expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(100000000);
             assertBalanced(lines);
+        });
+    });
+
+    // ========================================================================
+    // recordCustomerCreditNoteToGL
+    // ========================================================================
+    describe('recordCustomerCreditNoteToGL', () => {
+        const base = {
+            noteId: 'cn-1',
+            noteNumber: 'CN-2026-0001',
+            noteDate: '2026-05-01',
+            customerId: 'cust-1',
+            customerName: 'Test Customer',
+        };
+
+        it('no-tax: DR Sales Returns / CR AR (balanced)', async () => {
+            // SAP pattern for customer credit note (no tax):
+            //   DR Sales Returns & Allowances (4010)  = subtotal
+            //   CR Accounts Receivable         (1200)  = total
+            await recordCustomerCreditNoteToGL({ ...base, subtotal: 20000, taxAmount: 0, totalAmount: 20000 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.SALES_RETURNS)!.debitAmount).toBe(20000);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(20000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)).toBeUndefined();
+            assertBalanced(lines);
+        });
+
+        it('with tax: DR Sales Returns + DR Tax Payable / CR AR (balanced)', async () => {
+            // Output VAT reversed with the credit note
+            await recordCustomerCreditNoteToGL({ ...base, noteId: 'cn-2', noteNumber: 'CN-2026-0002', subtotal: 18000, taxAmount: 2000, totalAmount: 20000 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.SALES_RETURNS)!.debitAmount).toBe(18000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)!.debitAmount).toBe(2000);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(20000);
+            assertBalanced(lines);
+        });
+
+        it('uses CREDIT_NOTE referenceType and correct idempotency key', async () => {
+            await recordCustomerCreditNoteToGL({ ...base, noteId: 'cn-3', noteNumber: 'CN-2026-0003', subtotal: 5000, taxAmount: 0, totalAmount: 5000 });
+            expect(capturedEntries[0].referenceType).toBe('CREDIT_NOTE');
+            expect(capturedEntries[0].idempotencyKey).toBe('CREDIT_NOTE-cn-3');
+        });
+    });
+
+    // ========================================================================
+    // recordCustomerDebitNoteToGL
+    // ========================================================================
+    describe('recordCustomerDebitNoteToGL', () => {
+        const base = {
+            noteId: 'dn-1',
+            noteNumber: 'DN-2026-0001',
+            noteDate: '2026-05-01',
+            customerId: 'cust-1',
+            customerName: 'Test Customer',
+        };
+
+        it('no-tax: DR AR / CR Sales Revenue (balanced)', async () => {
+            // SAP pattern for customer debit note (no tax):
+            //   DR Accounts Receivable (1200)  = total
+            //   CR Sales Revenue       (4000)  = subtotal
+            await recordCustomerDebitNoteToGL({ ...base, subtotal: 15000, taxAmount: 0, totalAmount: 15000 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.debitAmount).toBe(15000);
+            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(15000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)).toBeUndefined();
+            assertBalanced(lines);
+        });
+
+        it('with tax: DR AR / CR Sales Revenue + CR Tax Payable (balanced)', async () => {
+            await recordCustomerDebitNoteToGL({ ...base, noteId: 'dn-2', noteNumber: 'DN-2026-0002', subtotal: 12000, taxAmount: 1500, totalAmount: 13500 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.debitAmount).toBe(13500);
+            expect(findLine(lines, AccountCodes.SALES_REVENUE)!.creditAmount).toBe(12000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)!.creditAmount).toBe(1500);
+            assertBalanced(lines);
+        });
+
+        it('uses DEBIT_NOTE referenceType and correct idempotency key', async () => {
+            await recordCustomerDebitNoteToGL({ ...base, noteId: 'dn-3', noteNumber: 'DN-2026-0003', subtotal: 8000, taxAmount: 0, totalAmount: 8000 });
+            expect(capturedEntries[0].referenceType).toBe('DEBIT_NOTE');
+            expect(capturedEntries[0].idempotencyKey).toBe('DEBIT_NOTE-dn-3');
+        });
+    });
+
+    // ========================================================================
+    // recordSupplierCreditNoteToGL
+    // ========================================================================
+    describe('recordSupplierCreditNoteToGL', () => {
+        const base = {
+            noteId: 'scn-1',
+            noteNumber: 'SCN-2026-0001',
+            noteDate: '2026-05-01',
+            supplierId: 'sup-1',
+            supplierName: 'Acme Supplies',
+        };
+
+        it('price-adjustment path: DR AP / CR Purchase Returns (balanced)', async () => {
+            // Standard supplier credit note (price concession, overcharge reversal, etc.)
+            //   DR Accounts Payable          (2100) = total
+            //   CR Purchase Returns          (5010) = subtotal
+            await recordSupplierCreditNoteToGL({ ...base, subtotal: 30000, taxAmount: 0, totalAmount: 30000 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.debitAmount).toBe(30000);
+            expect(findLine(lines, AccountCodes.PURCHASE_RETURNS)!.creditAmount).toBe(30000);
+            expect(findLine(lines, AccountCodes.GRIR_CLEARING)).toBeUndefined();
+            assertBalanced(lines);
+        });
+
+        it('price-adjustment with tax: DR AP / CR Purchase Returns + CR Tax Payable (balanced)', async () => {
+            await recordSupplierCreditNoteToGL({ ...base, noteId: 'scn-2', noteNumber: 'SCN-2026-0002', subtotal: 25000, taxAmount: 5000, totalAmount: 30000 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.debitAmount).toBe(30000);
+            expect(findLine(lines, AccountCodes.PURCHASE_RETURNS)!.creditAmount).toBe(25000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)!.creditAmount).toBe(5000);
+            assertBalanced(lines);
+        });
+
+        it('Return-GRN path (clearingAccountCode=GRIR): DR AP / CR GRN Clearing — NOT Purchase Returns', async () => {
+            // When linked to a Return GRN, the credit note clears the GRN/IR account,
+            // NOT Purchase Returns. This is the SAP 3-way match completion:
+            //   Return GRN posted: DR GRIR (2150) / CR Inventory (1300)
+            //   Credit note posts: DR AP   (2100) / CR GRIR     (2150)  ← clears clearing
+            // Net effect:          DR AP   (2100) / CR Inventory (1300)  ← correct for supplier return
+            await recordSupplierCreditNoteToGL(
+                { ...base, noteId: 'scn-3', noteNumber: 'SCN-2026-0003', subtotal: 40000, taxAmount: 0, totalAmount: 40000, clearingAccountCode: AccountCodes.GRIR_CLEARING },
+            );
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.debitAmount).toBe(40000);
+            expect(findLine(lines, AccountCodes.GRIR_CLEARING)!.creditAmount).toBe(40000);
+            // CRITICAL: Purchase Returns must NOT appear on return-GRN-linked credit notes
+            expect(findLine(lines, AccountCodes.PURCHASE_RETURNS)).toBeUndefined();
+            assertBalanced(lines);
+        });
+
+        it('uses SUPPLIER_CREDIT_NOTE referenceType and correct idempotency key', async () => {
+            await recordSupplierCreditNoteToGL({ ...base, noteId: 'scn-4', noteNumber: 'SCN-2026-0004', subtotal: 1000, taxAmount: 0, totalAmount: 1000 });
+            expect(capturedEntries[0].referenceType).toBe('SUPPLIER_CREDIT_NOTE');
+            expect(capturedEntries[0].idempotencyKey).toBe('SUPPLIER_CREDIT_NOTE-scn-4');
+        });
+    });
+
+    // ========================================================================
+    // recordSupplierDebitNoteToGL
+    // ========================================================================
+    describe('recordSupplierDebitNoteToGL', () => {
+        const base = {
+            noteId: 'sdn-1',
+            noteNumber: 'SDN-2026-0001',
+            noteDate: '2026-05-01',
+            supplierId: 'sup-1',
+            supplierName: 'Acme Supplies',
+        };
+
+        it('no-tax: DR COGS / CR AP (balanced)', async () => {
+            // Supplier debit note — we charge the supplier for damaged/short goods.
+            // Cost absorbed by COGS (pending proper batch revaluation feature).
+            //   DR COGS               (5000) = subtotal
+            //   CR Accounts Payable   (2100) = total
+            await recordSupplierDebitNoteToGL({ ...base, subtotal: 10000, taxAmount: 0, totalAmount: 10000 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(10000);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.creditAmount).toBe(10000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)).toBeUndefined();
+            assertBalanced(lines);
+        });
+
+        it('with tax: DR COGS + DR Tax Payable / CR AP (balanced)', async () => {
+            await recordSupplierDebitNoteToGL({ ...base, noteId: 'sdn-2', noteNumber: 'SDN-2026-0002', subtotal: 8000, taxAmount: 1200, totalAmount: 9200 });
+            const lines = capturedEntries[0].lines;
+
+            expect(findLine(lines, AccountCodes.COGS)!.debitAmount).toBe(8000);
+            expect(findLine(lines, AccountCodes.TAX_PAYABLE)!.debitAmount).toBe(1200);
+            expect(findLine(lines, AccountCodes.ACCOUNTS_PAYABLE)!.creditAmount).toBe(9200);
+            assertBalanced(lines);
+        });
+
+        it('uses SUPPLIER_DEBIT_NOTE referenceType and correct idempotency key', async () => {
+            await recordSupplierDebitNoteToGL({ ...base, noteId: 'sdn-3', noteNumber: 'SDN-2026-0003', subtotal: 500, taxAmount: 0, totalAmount: 500 });
+            expect(capturedEntries[0].referenceType).toBe('SUPPLIER_DEBIT_NOTE');
+            expect(capturedEntries[0].idempotencyKey).toBe('SUPPLIER_DEBIT_NOTE-sdn-3');
         });
     });
 });

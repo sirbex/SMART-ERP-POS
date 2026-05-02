@@ -303,7 +303,7 @@ export default function GoodsReceiptsPage() {
   }, [returnableData]);
 
   const existingReturns = useMemo(() => {
-    const raw = (returnGrnData as { data?: { data?: Array<{ id: string; returnGrnNumber: string; return_grn_number?: string; status: string; totalAmount?: number; total_amount?: number }> } })?.data?.data;
+    const raw = (returnGrnData as { data?: { data?: Array<{ id: string; returnGrnNumber: string; return_grn_number?: string; status: string; totalAmount?: number; total_amount?: number; hasCreditNote?: boolean }> } })?.data?.data;
     return Array.isArray(raw) ? raw : [];
   }, [returnGrnData]);
 
@@ -1328,13 +1328,13 @@ export default function GoodsReceiptsPage() {
                             {r.returnGrnNumber || r.return_grn_number} ({r.status})
                           </span>
                         ))}
-                        {existingReturns.filter((r) => r.status === 'POSTED').map((r) => (
+                        {existingReturns.filter((r) => r.status === 'POSTED' && !r.hasCreditNote).map((r) => (
                           <button
                             key={`cn-${r.id}`}
                             onClick={() =>
                               createCreditNoteMutation.mutate(r.id, {
                                 onSuccess: (res) => {
-                                  const num = (res as { data?: { creditNoteNumber?: string } })?.data?.creditNoteNumber;
+                                  const num = (res as { data?: { data?: { creditNoteNumber?: string } } })?.data?.data?.creditNoteNumber;
                                   alert(`Supplier Credit Note ${num ?? ''} created. Supplier payable reduced.`);
                                 },
                                 onError: (err) =>

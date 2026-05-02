@@ -691,6 +691,55 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         })
     );
 
+    // ============================================================
+    // MASS PAYMENT RUN
+    // ============================================================
+
+    // Get all unpaid invoices across all suppliers (for mass payment picker)
+    // Must be registered before /invoices/:id to avoid ambiguous match
+    router.get(
+        '/invoices/unpaid-all',
+        asyncHandler(async (req, res) => {
+            const query = z.object({
+                asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+                supplierId: z.string().uuid().optional(),
+                search: z.string().optional(),
+            }).parse(req.query);
+
+            const items = await supplierPaymentService.getAllUnpaidInvoicesForMassPayment(
+                p(req),
+                query
+            );
+            res.json({ success: true, data: items });
+        })
+    );
+
+    // ============================================================
+    // SUPPLIER OPENING BALANCE IMPORT
+    // ============================================================
+
+    const OpeningBalanceSchema = z.object({
+        supplierId: z.string().uuid(),
+        amount: z.union([z.number().positive(), z.string().transform(Number)]),
+        asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        notes: z.string().optional(),
+    });
+
+    router.post(
+        '/invoices/opening-balance',
+        requirePermission('suppliers.create'),
+        asyncHandler(async (req, res) => {
+            const validated = OpeningBalanceSchema.parse(req.body);
+            const result = await supplierPaymentService.importSupplierOpeningBalance(p(req), {
+                supplierId: validated.supplierId,
+                amount: new Decimal(validated.amount).toNumber(),
+                asOfDate: validated.asOfDate,
+                notes: validated.notes,
+            });
+            res.status(201).json({ success: true, data: result });
+        })
+    );
+
     // Get supplier invoice by ID
     router.get(
         '/invoices/:id',
@@ -803,6 +852,44 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 return res.status(404).json({ success: false, error: 'Allocation not found' });
             }
             res.json({ success: true, message: 'Allocation removed successfully' });
+        })
+    );
+
+    // Post mass payment run (multiple suppliers, multiple invoices in one operation)
+    const MassPaymentRunSchema = z.object({
+        paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        paymentMethod: z.string().min(1),
+        reference: z.string().optional(),
+        notes: z.string().optional(),
+        allocations: z.array(z.object({
+            supplierId: z.string().uuid(),
+            invoiceId: z.string().uuid(),
+            amount: z.union([z.number().positive(), z.string().transform(Number)]),
+        })).min(1, 'At least one allocation is required'),
+    });
+
+    router.post(
+        '/payments/mass-run',
+        requirePermission('suppliers.create'),
+        asyncHandler(async (req, res) => {
+            const validated = MassPaymentRunSchema.parse(req.body);
+            const userId = req.user?.id;
+            const result = await supplierPaymentService.massPaymentRun(
+                p(req),
+                {
+                    paymentDate: validated.paymentDate,
+                    paymentMethod: validated.paymentMethod,
+                    reference: validated.reference,
+                    notes: validated.notes,
+                    allocations: validated.allocations.map((a) => ({
+                        supplierId: a.supplierId,
+                        invoiceId: a.invoiceId,
+                        amount: new Decimal(a.amount).toNumber(),
+                    })),
+                },
+                userId
+            );
+            res.status(201).json({ success: true, data: result });
         })
     );
 

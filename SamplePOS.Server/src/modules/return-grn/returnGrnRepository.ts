@@ -25,6 +25,7 @@ export interface ReturnGrn {
     createdBy: string | null;
     createdAt: string;
     updatedAt: string;
+    hasCreditNote?: boolean;
 }
 
 export interface ReturnGrnLine {
@@ -374,7 +375,13 @@ export const returnGrnRepository = {
          r.reason,
          r.created_by          AS "createdBy",
          r.created_at          AS "createdAt",
-         r.updated_at          AS "updatedAt"
+         r.updated_at          AS "updatedAt",
+         EXISTS (
+           SELECT 1 FROM supplier_invoices si
+           WHERE si.return_grn_id = r.id
+             AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
+             AND si."Status" IN ('POSTED', 'PARTIAL')
+         ) AS "hasCreditNote"
        FROM return_grn r
        JOIN suppliers s ON s."Id" = r.supplier_id
        JOIN goods_receipts g ON g.id = r.grn_id

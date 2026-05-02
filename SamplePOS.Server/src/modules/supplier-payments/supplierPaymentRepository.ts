@@ -1070,3 +1070,235 @@ export async function findUnbilledGRNs(
     }));
 }
 
+// ============================================================
+// MASS PAYMENT RUN
+// ============================================================
+
+export interface UnpaidInvoiceForMassPayment {
+    id: string;
+    invoiceNumber: string;
+    supplierInvoiceNumber: string | null;
+    supplierId: string;
+    supplierName: string;
+    invoiceDate: string;
+    dueDate: string | null;
+    /** Invoice face value — never changes after posting */
+    originalAmount: number;
+    /** Sum of posted payment allocations against this invoice */
+    paidAmount: number;
+    /** Sum of Supplier Credit Notes linked to this invoice that originated from a Return GRN */
+    returnCredits: number;
+    /** Sum of Supplier Credit Notes linked to this invoice that are price corrections (no RGRN) */
+    creditNotes: number;
+    /** Ledger-computed outstanding: originalAmount − paidAmount − returnCredits − creditNotes */
+    outstandingBalance: number;
+}
+
+export interface InvoiceLedgerBreakdown {
+    id: string;
+    invoiceNumber: string;
+    supplierId: string;
+    status: string;
+    originalAmount: Decimal;
+    paidAmount: Decimal;
+    returnCredits: Decimal;
+    creditNotes: Decimal;
+    outstandingBalance: Decimal;
+}
+
+/**
+ * Lock a single invoice row FOR UPDATE and recompute its true outstanding balance
+ * entirely from the ledger (payment allocations + posted credit notes).
+ *
+ * Must be called inside an active transaction (PoolClient).
+ * Returns null if the invoice does not exist or is soft-deleted.
+ */
+export async function lockAndComputeInvoiceOutstanding(
+    client: PoolClient,
+    invoiceId: string
+): Promise<InvoiceLedgerBreakdown | null> {
+    // Lock the invoice row to prevent concurrent payment allocation races
+    const lockResult = await client.query<{
+        Id: string;
+        SupplierInvoiceNumber: string;
+        SupplierId: string;
+        TotalAmount: string;
+        Status: string;
+    }>(
+        `SELECT "Id", "SupplierInvoiceNumber", "SupplierId", "TotalAmount", "Status"
+         FROM supplier_invoices
+         WHERE "Id" = $1 AND deleted_at IS NULL
+         FOR UPDATE`,
+        [invoiceId]
+    );
+    if (!lockResult.rows[0]) return null;
+    const row = lockResult.rows[0];
+    const originalAmount = new Decimal(row.TotalAmount || 0);
+
+    // Ledger: sum of payment allocations (soft-delete-aware, exclude voided payments)
+    const paidRes = await client.query<{ paid: string }>(
+        `SELECT COALESCE(SUM(spa."AmountAllocated"), 0) AS paid
+         FROM supplier_payment_allocations spa
+         JOIN supplier_payments sp ON sp."Id" = spa."PaymentId"
+         WHERE spa."SupplierInvoiceId" = $1
+           AND spa.deleted_at IS NULL
+           AND sp.deleted_at IS NULL
+           AND sp."Status" != 'DELETED'`,
+        [invoiceId]
+    );
+    const paidAmount = new Decimal(paidRes.rows[0].paid || 0);
+
+    // Ledger: sum of posted credit notes split by source
+    const creditRes = await client.query<{ return_credits: string; credit_notes: string }>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN return_grn_id IS NOT NULL THEN "TotalAmount" ELSE 0 END), 0) AS return_credits,
+           COALESCE(SUM(CASE WHEN return_grn_id IS NULL     THEN "TotalAmount" ELSE 0 END), 0) AS credit_notes
+         FROM supplier_invoices
+         WHERE reference_invoice_id = $1
+           AND document_type = 'SUPPLIER_CREDIT_NOTE'
+           AND deleted_at IS NULL
+           AND "Status" = 'POSTED'`,
+        [invoiceId]
+    );
+    const returnCredits = new Decimal(creditRes.rows[0].return_credits || 0);
+    const creditNotes   = new Decimal(creditRes.rows[0].credit_notes   || 0);
+
+    const outstandingBalance = originalAmount
+        .minus(paidAmount)
+        .minus(returnCredits)
+        .minus(creditNotes);
+
+    return {
+        id: row.Id,
+        invoiceNumber: row.SupplierInvoiceNumber,
+        supplierId: row.SupplierId,
+        status: row.Status,
+        originalAmount,
+        paidAmount,
+        returnCredits,
+        creditNotes,
+        outstandingBalance,
+    };
+}
+
+/**
+ * Return all unpaid (PENDING / PARTIALLY_PAID / Pending / PartiallyPaid) supplier invoices
+ * that are is_posted_to_gl = true. Optionally filter by asOfDate, supplierId, or search.
+ * No pagination — returns up to 2000 rows for mass payment picker.
+ *
+ * Outstanding is computed entirely from the ledger (payment allocations + posted credit notes),
+ * NOT from the stored OutstandingBalance column. This ensures the UI shows accurate figures
+ * regardless of any balance drift.
+ */
+export async function findAllUnpaidInvoicesForMassPayment(
+    pool: Pool,
+    options: {
+        asOfDate?: string;
+        supplierId?: string;
+        search?: string;
+    } = {}
+): Promise<UnpaidInvoiceForMassPayment[]> {
+    const conditions: string[] = [
+        "si.deleted_at IS NULL",
+        "si.\"Status\" IN ('Pending', 'POSTED', 'PartiallyPaid', 'PARTIALLY_PAID')",
+        "si.document_type NOT IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')",
+        "si.\"SupplierInvoiceNumber\" NOT LIKE 'OB-%'",
+    ];
+    const params: (string | number)[] = [];
+    let idx = 1;
+
+    if (options.asOfDate) {
+        conditions.push(`si."InvoiceDate" <= $${idx++}`);
+        params.push(options.asOfDate);
+    }
+    if (options.supplierId) {
+        conditions.push(`si."SupplierId" = $${idx++}`);
+        params.push(options.supplierId);
+    }
+    if (options.search) {
+        conditions.push(
+            `(si."SupplierInvoiceNumber" ILIKE $${idx} OR si."InternalReferenceNumber" ILIKE $${idx} OR s."CompanyName" ILIKE $${idx})`
+        );
+        params.push(`%${options.search}%`);
+        idx++;
+    }
+
+    const where = conditions.join(' AND ');
+
+    // CTE computes paid amounts and credits from the ledger, not from stored columns.
+    // This is the single source of truth for what is actually owed.
+    const result = await pool.query(
+        `WITH
+         -- Sum payment allocations per invoice (excluding soft-deleted payments/allocations)
+         inv_paid AS (
+           SELECT
+             spa."SupplierInvoiceId"                  AS invoice_id,
+             COALESCE(SUM(spa."AmountAllocated"), 0)  AS paid_amount
+           FROM supplier_payment_allocations spa
+           JOIN supplier_payments sp ON sp."Id" = spa."PaymentId"
+           WHERE spa.deleted_at IS NULL
+             AND sp.deleted_at IS NULL
+             AND sp."Status" != 'DELETED'
+           GROUP BY spa."SupplierInvoiceId"
+         ),
+         -- Sum posted credit notes per invoice, split by source
+         inv_credits AS (
+           SELECT
+             scn.reference_invoice_id                                                                    AS invoice_id,
+             COALESCE(SUM(CASE WHEN scn.return_grn_id IS NOT NULL THEN scn."TotalAmount" ELSE 0 END), 0) AS return_credits,
+             COALESCE(SUM(CASE WHEN scn.return_grn_id IS NULL     THEN scn."TotalAmount" ELSE 0 END), 0) AS credit_notes
+           FROM supplier_invoices scn
+           WHERE scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+             AND scn.deleted_at IS NULL
+             AND scn."Status" = 'POSTED'
+             AND scn.reference_invoice_id IS NOT NULL
+           GROUP BY scn.reference_invoice_id
+         )
+         SELECT
+           si."Id"                                  AS id,
+           si."SupplierInvoiceNumber"               AS "invoiceNumber",
+           si."InternalReferenceNumber"             AS "supplierInvoiceNumber",
+           si."SupplierId"                          AS "supplierId",
+           s."CompanyName"                          AS "supplierName",
+           si."InvoiceDate"                         AS "invoiceDate",
+           si."DueDate"                             AS "dueDate",
+           si."TotalAmount"                         AS "originalAmount",
+           COALESCE(ip.paid_amount, 0)              AS "paidAmount",
+           COALESCE(ic.return_credits, 0)           AS "returnCredits",
+           COALESCE(ic.credit_notes, 0)             AS "creditNotes",
+           (  si."TotalAmount"
+            - COALESCE(ip.paid_amount, 0)
+            - COALESCE(ic.return_credits, 0)
+            - COALESCE(ic.credit_notes, 0)
+           )                                        AS "outstandingBalance"
+         FROM supplier_invoices si
+         JOIN suppliers s ON s."Id" = si."SupplierId"
+         LEFT JOIN inv_paid   ip ON ip.invoice_id = si."Id"
+         LEFT JOIN inv_credits ic ON ic.invoice_id = si."Id"
+         WHERE ${where}
+           AND (  si."TotalAmount"
+                - COALESCE(ip.paid_amount, 0)
+                - COALESCE(ic.return_credits, 0)
+                - COALESCE(ic.credit_notes, 0)
+               ) > 0.005
+         ORDER BY si."DueDate" ASC NULLS LAST, si."InvoiceDate" ASC
+         LIMIT 2000`,
+        params
+    );
+
+    return result.rows.map((r) => ({
+        id:                    r.id as string,
+        invoiceNumber:         r.invoiceNumber as string,
+        supplierInvoiceNumber: r.supplierInvoiceNumber as string | null,
+        supplierId:            r.supplierId as string,
+        supplierName:          r.supplierName as string,
+        invoiceDate:           r.invoiceDate as string,
+        dueDate:               r.dueDate as string | null,
+        originalAmount:        new Decimal(r.originalAmount  || 0).toNumber(),
+        paidAmount:            new Decimal(r.paidAmount      || 0).toNumber(),
+        returnCredits:         new Decimal(r.returnCredits   || 0).toNumber(),
+        creditNotes:           new Decimal(r.creditNotes     || 0).toNumber(),
+        outstandingBalance:    new Decimal(r.outstandingBalance || 0).toNumber(),
+    }));
+}
+
