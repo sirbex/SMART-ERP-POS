@@ -43,3 +43,15 @@ dist-ssr
 obj/
 bin/
 test_gl.sh
+
+# Temporary diagnostic / investigation scripts (not part of codebase)
+_*.sql
+_*.txt
+fix_drift_*.sql
+SamplePOS.Server/_q.sql
+SamplePOS.Server/do_reversal.mjs
+SamplePOS.Server/drift_*.mjs
+SamplePOS.Server/gl_drift_test.mjs
+SamplePOS.Server/fix_inventory_correction.cjs
+SamplePOS.Server/fix_lexie.cjs
+samplepos.client/_q.sql
