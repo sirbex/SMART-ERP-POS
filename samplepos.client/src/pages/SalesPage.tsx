@@ -2539,6 +2539,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                     const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
 
                     const receiptData: ReceiptData = {
+                      isReprint: true,
                       saleNumber: s.saleNumber,
                       saleDate: s.saleDate || s.createdAt,
                       totalAmount: s.totalAmount,

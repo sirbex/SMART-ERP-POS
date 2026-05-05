@@ -53,6 +53,8 @@ export interface ReceiptData {
     branchOrCode?: string;
   }>;
   customReceiptNote?: string;
+  /** When true, a visible REPRINTED COPY banner is shown on the receipt */
+  isReprint?: boolean;
 }
 
 /**
@@ -267,6 +269,11 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
         </style>
       </head>
       <body>
+        ${data.isReprint ? `
+        <div style="text-align: center; border: 2px solid #000; padding: 4px 0; margin-bottom: 10px; font-weight: bold; font-size: 14px; letter-spacing: 2px;">
+          *** REPRINTED COPY ***
+        </div>
+        ` : ''}
         <div class="header">
           <h1>${data.companyName || 'RECEIPT'}</h1>
           ${data.companyAddress ? `<div style="font-size: 11px; font-weight: bold;">${data.companyAddress}</div>` : ''}
@@ -491,6 +498,11 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
         </style>
       </head>
       <body>
+        ${data.isReprint ? `
+        <div style="text-align: center; border: 2px solid #000; padding: 3px 0; margin-bottom: 8px; font-weight: bold; font-size: 11px; letter-spacing: 2px;">
+          *** REPRINTED COPY ***
+        </div>
+        ` : ''}
         <div class="header">
           <h1>${data.companyName || 'RECEIPT'}</h1>
           ${data.companyAddress ? `<div style="font-size: 10px; font-weight: bold;">${data.companyAddress}</div>` : ''}
